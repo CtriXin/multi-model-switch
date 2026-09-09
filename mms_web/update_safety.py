@@ -59,6 +59,34 @@ def file_manifest(root: Path):
     return entries
 
 
+def close_idle_sessions(service):
+    """Caller holds the mutation lock and has explicit idle-restart consent."""
+    if service is None:
+        return
+    safety = session_safety(service)
+    if safety['blockers']:
+        raise ValueError('session became busy before idle restart')
+    with service._lock:
+        sessions = list(service._sessions.values())
+    # Validate every live session before stopping any of them.
+    for session in sessions:
+        with session.lock:
+            if session.alive() and not session.can_resume():
+                raise ValueError('live session has no recoverable native history')
+    for session in sessions:
+        with session.lock:
+            if not session.alive():
+                continue
+            driver = session.driver
+            session.stop_requested = True
+        if not driver.close_for_update():
+            with session.lock:
+                session.stop_requested = False
+            raise ValueError('idle Pi did not exit; no force kill attempted')
+        with session.lock:
+            session.persist(service._state_dir)
+
+
 def backup_state(state: Path, destination: Path):
     before = file_manifest(state)
     required = sum(item.get('bytes', 0) for item in before.values()) + 16 * 1024 * 1024

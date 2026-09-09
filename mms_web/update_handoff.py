@@ -88,6 +88,16 @@ def ready(spec, process, source, *, probation):
 
 def run(spec_path):
     spec = read_json(spec_path)
+    from .install_lock import acquire_runtime_lease
+    # Keep the original install protected across the old/new server gap.
+    install_lease = acquire_runtime_lease(Path(spec.get('oldSource', '.')))
+    try:
+        _run(spec, spec_path)
+    finally:
+        os.close(install_lease)
+
+
+def _run(spec, spec_path):
     operation = Path(spec['operation'])
     def status(phase, message):
         private_json(operation, {'id':spec['id'], 'target':spec['target'], 'phase':phase, 'message':message, 'cancellable':False})

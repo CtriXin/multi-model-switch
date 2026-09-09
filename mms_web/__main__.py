@@ -22,6 +22,9 @@ def main(argv=None):
     bundled = source / "mms_web_static"
     parser.add_argument("--static-root", type=Path, default=bundled if bundled.is_dir() else source / "apps/mms-web/dist")
     args = parser.parse_args(argv)
+    from .install_lock import acquire_runtime_lease
+    install_lease = acquire_runtime_lease(source)
+    os.environ.setdefault('MMS_WEB_INSTALL_ROOT', str(source))
     from .update_activation import redirect_active, acquire_state_lock
     redirect_active(args, source)
     root = args.state_root.expanduser().resolve()
@@ -52,6 +55,7 @@ def main(argv=None):
             app.close()
         finally:
             os.close(lease)
+            os.close(install_lease)
             if app.pending_handoff:
                 Path(app.pending_handoff["armed"]).touch(mode=0o600)
 

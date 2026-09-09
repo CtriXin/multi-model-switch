@@ -12,7 +12,7 @@ from .errors import WebError
 from .runtime import private_json
 from .updates import read_json
 from .update_stage import stage_release, candidate_environment
-from .update_safety import backup_state, session_safety
+from .update_safety import backup_state, session_safety, close_idle_sessions
 from .update_handoff import session_inventory
 
 
@@ -53,7 +53,8 @@ class UpdateCoordinator:
             if not self.available() or not latest['updateAvailable'] or target != latest['latest'].get('tag'):
                 raise WebError('UPDATE_UNAVAILABLE', '请先检查更新，并选择可用的稳定版本。', 409)
             self._cancel.clear()
-            self._operation = {'id':uuid.uuid4().hex, 'target':target}
+            self._operation = {'id':uuid.uuid4().hex, 'target':target,
+                               'allowIdleRestart':payload.get('allowIdleRestart') is True}
             self._status('preparing', '正在下载并检查新版，当前对话可以继续。', cancellable=True)
             self._thread = threading.Thread(target=self._run, args=(target,), name='pilot-safe-update', daemon=True)
             self._thread.start()
@@ -74,13 +75,16 @@ class UpdateCoordinator:
                     safety = session_safety(self.app.sessions)
                     if safety['blockers']:
                         self._status('waiting', '还有任务执行、等待确认或排队消息，完成后再更新。你可以继续工作或取消更新。', cancellable=True)
-                    elif safety['live']:
-                        # Strict preservation until an explicit idle-process policy is selected.
-                        self._status('waiting', '还有空闲 Pi 进程保持连接，暂不退出任何会话进程。', cancellable=True)
+                    elif safety['live'] and not self._operation['allowIdleRestart']:
+                        self._status('waiting', '还有空闲 Pi 进程保持连接。若希望现在更新，可取消后勾选“允许重启空闲会话”；历史会保留，续聊时恢复。', cancellable=True)
                     else:
                         if self._cancel.is_set():
                             break
                         self.app.maintenance = True
+                        if safety['live']:
+                            self._status('backing-up', '正在备份会话；随后按你的选择重启空闲会话。')
+                            backup_state(self.app.state_root, self.root/'operations'/self._operation['id']/'before-idle-restart')
+                            close_idle_sessions(self.app.sessions)
                         self._status('backing-up', '正在备份会话、恢复目录和附件，即将切换版本。')
                         self._cutover(candidate, target)
                         return

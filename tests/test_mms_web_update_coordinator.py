@@ -106,3 +106,24 @@ def test_guardian_spawn_failure_attempts_original_version(tmp_path):
         run(spec_path)
     assert launch.call_count==2
     assert read_json(tmp_path/'operation.json')['phase']=='rolled-back'
+
+
+def test_opted_in_idle_restart_is_backed_up_and_checked_before_cutover(tmp_path):
+    app,c=setup(tmp_path,Mock(return_value=tmp_path/'candidate'))
+    calls=[]
+    c._cutover=lambda *args: calls.append('cutover')
+    with patch('mms_web.update_coordinator.session_safety',return_value={'blockers':[],'live':1}), patch('mms_web.update_coordinator.backup_state',side_effect=lambda *a: calls.append('backup')), patch('mms_web.update_coordinator.close_idle_sessions',side_effect=lambda *a: calls.append('close-idle')):
+        c.start({'target':'v99.0.0','allowIdleRestart':True});c._thread.join(2)
+    assert calls==['backup','close-idle','cutover']
+
+
+def test_string_opt_in_is_not_treated_as_permission(tmp_path):
+    app,c=setup(tmp_path,Mock(return_value=tmp_path/'candidate'))
+    with patch('mms_web.update_coordinator.session_safety',return_value={'blockers':[],'live':1}), patch('mms_web.update_coordinator.close_idle_sessions') as close:
+        c.start({'target':'v99.0.0','allowIdleRestart':'true'})
+        for _ in range(100):
+            if c.status()['phase']=='waiting':break
+            threading.Event().wait(.01)
+        assert c.status()['phase']=='waiting'
+        c.cancel();c._thread.join(2)
+        close.assert_not_called()

@@ -54,6 +54,11 @@ _PY_COMPILE_TARGETS = [
 ]
 
 _PYTEST_TARGETS = [
+    "tests/test_mms_web_updates.py",
+    "tests/test_mms_web_update_safety.py",
+    "tests/test_mms_web_update_coordinator.py",
+    "tests/test_mms_web_update_transaction.py",
+    "tests/test_mms_web_install_lock.py",
     "tests/test_mms_web_starter_skills.py",
     "tests/test_mms_web_local_files.py",
     "tests/test_mms_web_workspace_search.py",

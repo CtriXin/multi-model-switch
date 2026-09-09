@@ -116,26 +116,26 @@ The main README is Chinese-first. English users can still install with the same 
 ### Stable: recommended for normal users
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash -s -- --channel stable --write-shell-rc
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel stable --write-shell-rc
 ```
 
 ### Dev: recommended for the maintainer's own work machines
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash -s -- --channel dev --write-shell-rc
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel dev --write-shell-rc
 ```
 
 ### Canary: only for test machines or experimental sessions
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash -s -- --channel canary --write-shell-rc
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel canary --write-shell-rc
 ```
 
 Exact pin when needed:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash -s -- --ref v3.4.0
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash -s -- --ref main
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref v3.4.0
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref main
 ```
 
 Channel behavior:
@@ -148,7 +148,7 @@ Channel behavior:
 Fresh-machine install with optional CLI bootstrap:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash -s -- --channel dev --install-cli claude,codex,opencode --write-shell-rc --lang en
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel dev --install-cli claude,codex,opencode --write-shell-rc --lang en
 ```
 
 After install:
@@ -364,13 +364,13 @@ These surfaces are previewed before launch and can be disabled per session when 
 Open a terminal on a new machine and paste one line:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash
 ```
 
-If the machine already has Node.js, this is shorter and does exactly the same thing:
+If Node.js is already installed, the GitHub Release also provides an npx installer package:
 
 ```bash
-npx @ctrixin/mms
+npx --yes https://github.com/CtriXin/multi-model-switch/releases/latest/download/ctrixin-mms.tgz
 ```
 
 Use the `curl` line on a bare machine: it prepares Node.js by itself, while `npx` needs Node.js to already be there.

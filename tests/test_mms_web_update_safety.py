@@ -88,3 +88,39 @@ def test_insufficient_space_stops_before_creating_a_backup(tmp_path,monkeypatch)
         backup_state(root,root/'updates/backup')
     assert (root/'progress').read_text()=='keep'
     assert not (root/'updates/backup').exists()
+
+
+def test_idle_restart_requires_recoverable_history_for_every_live_session():
+    from mms_web.update_safety import close_idle_sessions
+    one, two = fixture_session(), fixture_session()
+    one.persist = two.persist = Mock()
+    two.can_resume = lambda: False
+    service = SimpleNamespace(_lock=threading.RLock(), _sessions={'one':one,'two':two}, _requests={})
+    with pytest.raises(ValueError, match='recoverable'):
+        close_idle_sessions(service)
+    one.driver.close_for_update.assert_not_called()
+    two.driver.close_for_update.assert_not_called()
+
+
+def test_idle_restart_never_touches_busy_session():
+    from mms_web.update_safety import close_idle_sessions
+    session = fixture_session();session.state = 'running'
+    service = SimpleNamespace(_lock=threading.RLock(), _sessions={'one':session}, _requests={})
+    with pytest.raises(ValueError, match='busy'):
+        close_idle_sessions(service)
+    session.driver.close_for_update.assert_not_called()
+
+
+def test_update_shutdown_timeout_preserves_transport_and_never_force_kills():
+    import signal
+    from mms_web.drivers.pi_rpc import PiRpcDriver
+    driver = object.__new__(PiRpcDriver)
+    driver.alive = lambda: True
+    driver.wait = lambda **kw: False
+    driver._terminate_group = Mock()
+    driver._notify_exit = Mock()
+    driver._proc = SimpleNamespace(stdin=io.StringIO())
+    assert not driver.close_for_update(timeout=0)
+    driver._terminate_group.assert_called_once_with(signal.SIGTERM)
+    assert not driver._proc.stdin.closed
+    driver._notify_exit.assert_not_called()

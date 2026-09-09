@@ -16,6 +16,7 @@ export function UpdateCenter({ ready }: { ready: boolean }) {
   const [data, setData] = useState<UpdateStatus>();
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
+  const [allowIdleRestart, setAllowIdleRestart] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const initialVersion = useRef<string | undefined>(undefined);
@@ -63,10 +64,11 @@ export function UpdateCenter({ ready }: { ready: boolean }) {
         {data?.operation.message && <p className="update-progress" role="status">{data.operation.message}</p>}
         {(error || data?.error) && <p className="update-error" role="alert">{error || data?.error}</p>}
         {isPreview && <p className="update-muted">预览模式不检查或安装更新。</p>}
+        {data?.canUpgrade && !activePhases.has(phase) && <label className="update-preference"><input type="checkbox" checked={allowIdleRestart} disabled={pending} onChange={e => setAllowIdleRestart(e.target.checked)} /><span>允许重启空闲会话<small>历史和文件保留，续聊时恢复 Pi。执行中、待确认或有排队消息时仍会等待；不勾选则保留所有活跃进程。</small></span></label>}
       </div>
       <footer>
         <p>更新前检查会话并备份记录。有任务执行、等待确认或排队消息时，会等待完成后再更新。</p>
-        <div>{data && initialVersion.current && data.currentVersion !== initialVersion.current && <button type="button" className="button primary" onClick={() => location.reload()}>刷新使用新版本</button>}{data?.operation.cancellable && <button type="button" className="button" disabled={pending} onClick={() => void act("cancel")}>取消本次更新</button>}{data?.canUpgrade && !activePhases.has(phase) && <button type="button" className="button primary" disabled={busy} onClick={() => void act("start", { target: data.latest.tag })}>更新到 {data.latest.tag}</button>}<button type="button" className="button" onClick={() => setOpen(false)}>关闭</button></div>
+        <div>{data && initialVersion.current && data.currentVersion !== initialVersion.current && <button type="button" className="button primary" onClick={() => location.reload()}>刷新使用新版本</button>}{data?.operation.cancellable && <button type="button" className="button" disabled={pending} onClick={() => void act("cancel")}>取消本次更新</button>}{data?.canUpgrade && !activePhases.has(phase) && <button type="button" className="button primary" disabled={busy} onClick={() => void act("start", { target: data.latest.tag, allowIdleRestart })}>更新到 {data.latest.tag}</button>}<button type="button" className="button" onClick={() => setOpen(false)}>关闭</button></div>
       </footer>
     </dialog>}
   </>;

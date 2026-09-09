@@ -84,13 +84,13 @@ v4.0.0 是 MMS Pilot 的首个大版本，之后 4.x 沿 Dev 继续推进。下�
 在新电脑上打开终端，粘贴这一条：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash
 ```
 
-机器上已经有 Node.js 的话，这条更短，效果完全一样：
+机器上已有 Node.js 时，也可以用 GitHub Release 提供的 npx 安装包：
 
 ```bash
-npx @ctrixin/mms
+npx --yes https://github.com/CtriXin/multi-model-switch/releases/latest/download/ctrixin-mms.tgz
 ```
 
 裸机请用上面那条 `curl`，它会在需要时自己准备 Node.js；`npx` 要求 Node.js 已经存在。
@@ -104,20 +104,20 @@ npx @ctrixin/mms
 
 ```bash
 # 需要最新修复的开发用户
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash -s -- --channel dev
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel dev
 
 # 只给测试机
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash -s -- --channel canary
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel canary
 
 # 固定到某个 release 或分支
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash -s -- --ref v4.2.1
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash -s -- --ref main
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref v4.2.1
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref main
 
 # 不打开 Web 端，也不改 shell 配置（CI、脚本）
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash -s -- --no-launch-web --no-shell-rc
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --no-launch-web --no-shell-rc
 
 # 装完直接打开，不询问
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash -s -- --launch-web
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --launch-web
 ```
 
 </details>
