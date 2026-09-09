@@ -1,20 +1,31 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Archive,
   ArrowDown,
   ArrowRight,
+  ArrowUp,
   ArrowUpRight,
   Check,
   ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  Copy,
+  Download,
+  GitBranch,
   CircleAlert,
   Command,
   FileText,
   FolderOpen,
   Inbox,
   Menu,
+  MessageSquarePlus,
   Moon,
+  MoreHorizontal,
   PanelRight,
+  Pencil,
   Plus,
   Search,
+  Trash2,
   Settings2,
   SlidersHorizontal,
   Sun,
@@ -103,6 +114,34 @@ export function App() {
   const [collapsed, setCollapsed] = useState<string[]>(() =>
     readSetting("mms-web-collapsed", []),
   );
+  const [workspaceSort, setWorkspaceSort] = useState<"recent" | "manual">(() =>
+    readSetting<string>("mms-web-workspace-sort", "recent") === "manual"
+      ? "manual"
+      : "recent",
+  );
+  const [workspaceOrder, setWorkspaceOrder] = useState<string[]>(() => {
+    const value = readSetting<unknown>("mms-web-workspace-order", []);
+    return Array.isArray(value)
+      ? value.filter((v) => typeof v === "string")
+      : [];
+  });
+  const [workspaceNotice, setWorkspaceNotice] = useState("");
+  const [renameSession, setRenameSession] = useState<{
+    id: string;
+    title: string;
+  } | null>(null);
+  const [shownPerWorkspace, setShownPerWorkspace] = useState<
+    Record<string, number>
+  >({});
+  const [renameWorkspace, setRenameWorkspace] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  const [removeWorkspace, setRemoveWorkspace] = useState<{
+    id: string;
+    name: string;
+    sessions: number;
+  } | null>(null);
   const [filesOpen, setFilesOpen] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
   const [panel, setPanel] = useState(false);
@@ -125,6 +164,8 @@ export function App() {
       : [];
   });
   useEffect(() => { saveSetting("mms-web-auto-collapse-process", autoCollapseProcess); }, [autoCollapseProcess]);
+  useEffect(() => { saveSetting("mms-web-workspace-sort", workspaceSort); }, [workspaceSort]);
+  useEffect(() => { saveSetting("mms-web-workspace-order", workspaceOrder); }, [workspaceOrder]);
   const currentSelection = useRef("");
   const mutation = useRef(false);
   const generation = useRef(0);
@@ -341,6 +382,7 @@ export function App() {
     path: string,
     body: Record<string, unknown>,
     create = false,
+    targetId?: string,
   ): Promise<boolean> {
     if (mutation.current) return false;
     generation.current += 1;
@@ -353,7 +395,11 @@ export function App() {
       if (create) {
         openSession(result.session.id);
         setDetail(result);
-      } else if (currentSelection.current === originId) setDetail(result);
+      } else if (
+      currentSelection.current === originId &&
+      (!targetId || targetId === originId)
+    )
+      setDetail(result);
       setData((old) => ({
         ...old,
         sessions: [
@@ -410,6 +456,22 @@ export function App() {
         path: "",
       });
   }
+  const lastEdited = new Map<string, string>();
+  for (const session of data.sessions) {
+    const seen = lastEdited.get(session.workspaceId) || "";
+    if (session.updatedAt > seen)
+      lastEdited.set(session.workspaceId, session.updatedAt);
+  }
+  navWorkspaces.sort((a, b) => {
+    if (workspaceSort === "manual") {
+      // Unordered folders keep their registration order behind ordered ones.
+      const ai = workspaceOrder.indexOf(a.id);
+      const bi = workspaceOrder.indexOf(b.id);
+      if (ai !== bi) return (ai < 0 ? Infinity : ai) - (bi < 0 ? Infinity : bi);
+      return 0;
+    }
+    return (lastEdited.get(b.id) || "").localeCompare(lastEdited.get(a.id) || "");
+  });
   const searchResults = data.sessions.filter((s) =>
     (s.title + " " + s.modelName + " " + s.harness + " " + s.cwd)
       .toLowerCase()
@@ -423,6 +485,84 @@ export function App() {
       saveSetting("mms-web-favorites", next);
       return next;
     });
+  }
+  function setAllCollapsed(next: boolean) {
+    const ids = next ? navWorkspaces.map((w) => w.id) : [];
+    setCollapsed(ids);
+    saveSetting("mms-web-collapsed", ids);
+  }
+  function moveWorkspace(id: string, delta: number) {
+    // Manual order is per-browser, like the collapse state. Seed it from what
+    // is on screen so the first move does not reshuffle everything else.
+    const order = navWorkspaces.map((w) => w.id);
+    const from = order.indexOf(id);
+    const to = from + delta;
+    if (from < 0 || to < 0 || to >= order.length) return;
+    order.splice(to, 0, ...order.splice(from, 1));
+    setWorkspaceOrder(order);
+    setWorkspaceSort("manual");
+  }
+  async function copyWorkspacePath(path: string) {
+    try {
+      await navigator.clipboard.writeText(path);
+      setWorkspaceNotice("已复制路径");
+    } catch {
+      setWorkspaceNotice("浏览器拒绝了复制，请手动选择路径");
+    }
+  }
+  async function copySessionId(id: string) {
+    try {
+      await navigator.clipboard.writeText(id);
+      setWorkspaceNotice("已复制 Session ID");
+    } catch {
+      setWorkspaceNotice("浏览器拒绝了复制，请手动选择 ID");
+    }
+  }
+  async function exportSession(id: string) {
+    // The sidebar only holds summaries; the export needs the full transcript.
+    try {
+      exportConversation(await getSession(id));
+    } catch (error) {
+      setWorkspaceNotice(
+        error instanceof Error ? error.message : "导出失败，请打开会话后重试",
+      );
+    }
+  }
+  async function submitSessionRename() {
+    if (!renameSession) return;
+    const title = renameSession.title.trim();
+    if (!title) return;
+    if (
+      await runAction(
+        `/sessions/${renameSession.id}/manage`,
+        { title },
+        false,
+        renameSession.id,
+      )
+    )
+      setRenameSession(null);
+  }
+  async function submitWorkspaceRename() {
+    if (!renameWorkspace) return;
+    const name = renameWorkspace.name.trim();
+    if (!name) return;
+    try {
+      await mutate("/workspaces/rename", { id: renameWorkspace.id, name });
+      setRenameWorkspace(null);
+      await load();
+    } catch (error) {
+      setWorkspaceNotice(error instanceof Error ? error.message : "重命名失败");
+    }
+  }
+  async function submitWorkspaceRemove() {
+    if (!removeWorkspace) return;
+    try {
+      await mutate("/workspaces/remove", { id: removeWorkspace.id });
+      setRemoveWorkspace(null);
+      await load();
+    } catch (error) {
+      setWorkspaceNotice(error instanceof Error ? error.message : "移除失败");
+    }
   }
   const signals = useSessionAttention(
     data.sessions,
@@ -526,15 +666,83 @@ export function App() {
                 </>
               )}
             </Popover>
-            <button
-              type="button"
-              className="icon-button add-workspace"
-              aria-label="添加工作空间"
-              onClick={() => setAddFolder(true)}
-            >
-              <Plus size={15} />
-            </button>
+            <div className="workspace-tools">
+              <button
+                type="button"
+                className="icon-button"
+                aria-label={
+                  collapsed.length >= navWorkspaces.length
+                    ? "展开全部工作区"
+                    : "收起全部工作区"
+                }
+                title={
+                  collapsed.length >= navWorkspaces.length
+                    ? "展开全部"
+                    : "收起全部"
+                }
+                onClick={() =>
+                  setAllCollapsed(collapsed.length < navWorkspaces.length)
+                }
+              >
+                {collapsed.length >= navWorkspaces.length ? (
+                  <ChevronsUpDown size={14} />
+                ) : (
+                  <ChevronsDownUp size={14} />
+                )}
+              </button>
+              <Popover
+                title="工作区排序"
+                className="icon-button"
+                label={<MoreHorizontal size={15} />}
+              >
+                {(close) => (
+                  <>
+                    <header>
+                      <strong>工作区排序</strong>
+                    </header>
+                    {(
+                      [
+                        ["manual", "手动排序", "在文件夹菜单里用上移下移调整"],
+                        ["recent", "按最后编辑时间", "最近有新消息的排在前面"],
+                      ] as const
+                    ).map(([mode, label, description]) => (
+                      <button
+                        type="button"
+                        key={mode}
+                        className={
+                          "filter-option " +
+                          (workspaceSort === mode ? "selected" : "")
+                        }
+                        onClick={() => {
+                          setWorkspaceSort(mode);
+                          close();
+                        }}
+                      >
+                        <span>
+                          <strong>{label}</strong>
+                          <small>{description}</small>
+                        </span>
+                        {workspaceSort === mode && <Check size={14} />}
+                      </button>
+                    ))}
+                  </>
+                )}
+              </Popover>
+              <button
+                type="button"
+                className="icon-button add-workspace"
+                aria-label="添加工作空间"
+                onClick={() => setAddFolder(true)}
+              >
+                <Plus size={15} />
+              </button>
+            </div>
           </div>
+          {workspaceNotice && (
+            <p className="workspace-notice" role="status">
+              {workspaceNotice}
+            </p>
+          )}
           {loading ? (
             <div className="nav-skeleton">
               <i />
@@ -568,8 +776,120 @@ export function App() {
                     <span>{w.id === "default" ? "启动目录" : w.name}</span>
                     <span>{sessions.length}</span>
                   </button>
+                  <div className="workspace-row-actions">
+                    <Popover
+                      title={`${w.name} 的操作`}
+                      className="icon-button"
+                      label={<MoreHorizontal size={14} />}
+                    >
+                      {(close) => (
+                        <>
+                          <header>
+                            <strong>{w.id === "default" ? "启动目录" : w.name}</strong>
+                          </header>
+                          <button
+                            type="button"
+                            className="filter-option"
+                            disabled={!w.path}
+                            onClick={() => {
+                              copyWorkspacePath(w.path);
+                              close();
+                            }}
+                          >
+                            <Copy size={14} />
+                            <span>
+                              <strong>复制路径</strong>
+                              <small>{w.path || "这些会话的目录已不在记录里"}</small>
+                            </span>
+                          </button>
+                          {workspaceSort === "manual" && (
+                            <>
+                              <button
+                                type="button"
+                                className="filter-option"
+                                onClick={() => {
+                                  moveWorkspace(w.id, -1);
+                                  close();
+                                }}
+                              >
+                                <ArrowUp size={14} />
+                                <span>
+                                  <strong>上移</strong>
+                                </span>
+                              </button>
+                              <button
+                                type="button"
+                                className="filter-option"
+                                onClick={() => {
+                                  moveWorkspace(w.id, 1);
+                                  close();
+                                }}
+                              >
+                                <ArrowDown size={14} />
+                                <span>
+                                  <strong>下移</strong>
+                                </span>
+                              </button>
+                            </>
+                          )}
+                          <button
+                            type="button"
+                            className="filter-option"
+                            disabled={w.id === "default" || !w.path}
+                            onClick={() => {
+                              setRenameWorkspace({ id: w.id, name: w.name });
+                              close();
+                            }}
+                          >
+                            <Pencil size={14} />
+                            <span>
+                              <strong>重命名</strong>
+                              <small>只改这里显示的名称，不动文件夹</small>
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            className="filter-option danger"
+                            disabled={w.id === "default" || !w.path}
+                            onClick={() => {
+                              setRemoveWorkspace({
+                                id: w.id,
+                                name: w.name,
+                                sessions: sessions.length,
+                              });
+                              close();
+                            }}
+                          >
+                            <Trash2 size={14} />
+                            <span>
+                              <strong>移除工作区</strong>
+                              <small>
+                                {w.id === "default"
+                                  ? "启动目录不能移除"
+                                  : "只从侧栏移除，文件和会话都保留"}
+                              </small>
+                            </span>
+                          </button>
+                        </>
+                      )}
+                    </Popover>
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label={`在 ${w.name} 新建会话`}
+                      title="在这个目录新建会话"
+                      disabled={!w.path}
+                      onClick={() => {
+                        setWorkspaceId(w.id);
+                        navigate("new");
+                      }}
+                    >
+                      <MessageSquarePlus size={14} />
+                    </button>
+                  </div>
                   {!collapsed.includes(w.id) &&
-                    sessions.map((s) => (
+                    sessions.slice(0, shownPerWorkspace[w.id] ?? 8).map((s) => (
+                      <div className="session-row" key={s.id}>
                       <button
                         className={
                           "session-link " +
@@ -620,7 +940,130 @@ export function App() {
                           />
                         )}
                       </button>
+                      <Popover
+                        title={`${s.title} 的操作`}
+                        className="icon-button session-row-menu"
+                        label={<MoreHorizontal size={14} />}
+                      >
+                        {(close) => (
+                          <>
+                            <button
+                              type="button"
+                              className="filter-option"
+                              onClick={() => {
+                                void copySessionId(s.id);
+                                close();
+                              }}
+                            >
+                              <Copy size={14} />
+                              <span>
+                                <strong>复制 Session ID</strong>
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              className="filter-option"
+                              onClick={() => {
+                                setRenameSession({ id: s.id, title: s.title });
+                                close();
+                              }}
+                            >
+                              <Pencil size={14} />
+                              <span>
+                                <strong>重命名</strong>
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              className="filter-option"
+                              disabled={
+                                busy ||
+                                ["running", "waiting"].includes(s.state)
+                              }
+                              onClick={() => {
+                                void runAction(
+                                  `/sessions/${s.id}/fork`,
+                                  {},
+                                  true,
+                                );
+                                close();
+                              }}
+                            >
+                              <GitBranch size={14} />
+                              <span>
+                                <strong>分叉会话</strong>
+                                <small>
+                                  {["running", "waiting"].includes(s.state)
+                                    ? "执行中不能分叉"
+                                    : "复制到新会话继续，原会话不变"}
+                                </small>
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              className="filter-option"
+                              onClick={() => {
+                                void exportSession(s.id);
+                                close();
+                              }}
+                            >
+                              <Download size={14} />
+                              <span>
+                                <strong>导出会话</strong>
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              className="filter-option danger"
+                              disabled={
+                                busy ||
+                                ["running", "waiting"].includes(s.state)
+                              }
+                              onClick={() => {
+                                void runAction(
+                                  `/sessions/${s.id}/manage`,
+                                  { archived: !s.archived },
+                                  false,
+                                  s.id,
+                                );
+                                close();
+                              }}
+                            >
+                              <Archive size={14} />
+                              <span>
+                                <strong>
+                                  {s.archived ? "恢复到列表" : "归档"}
+                                </strong>
+                                <small>
+                                  {["running", "waiting"].includes(s.state)
+                                    ? "执行中不能归档"
+                                    : "从列表收起，内容保留"}
+                                </small>
+                              </span>
+                            </button>
+                            <p className="session-row-time">
+                              {new Date(s.updatedAt).toLocaleString()}
+                            </p>
+                          </>
+                        )}
+                      </Popover>
+                      </div>
                     ))}
+                  {!collapsed.includes(w.id) &&
+                    sessions.length > (shownPerWorkspace[w.id] ?? 8) && (
+                      <button
+                        type="button"
+                        className="load-more-sessions"
+                        onClick={() =>
+                          setShownPerWorkspace((old) => ({
+                            ...old,
+                            [w.id]: (old[w.id] ?? 8) + 20,
+                          }))
+                        }
+                      >
+                        加载更多 {sessions.length - (shownPerWorkspace[w.id] ?? 8)} 个对话
+                      </button>
+                    )}
                 </section>
               );
             })
@@ -1218,6 +1661,108 @@ export function App() {
               workspaceId={detail.session.workspaceId}
             />
           )}
+        </Dialog>
+      )}
+      {renameSession && (
+        <Dialog title="重命名会话" close={() => setRenameSession(null)}>
+          <form
+            className="workspace-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void submitSessionRename();
+            }}
+          >
+            <label>
+              会话名称
+              <input
+                autoFocus
+                aria-label="会话名称"
+                value={renameSession.title}
+                maxLength={100}
+                autoComplete="off"
+                onChange={(e) =>
+                  setRenameSession({
+                    ...renameSession,
+                    title: e.target.value,
+                  })
+                }
+              />
+            </label>
+            <button
+              type="submit"
+              className="button primary"
+              disabled={busy || !renameSession.title.trim()}
+            >
+              保存
+            </button>
+          </form>
+        </Dialog>
+      )}
+      {renameWorkspace && (
+        <Dialog title="重命名工作区" close={() => setRenameWorkspace(null)}>
+          <p className="dialog-intro">
+            只改侧栏显示的名称，电脑上的文件夹不变。
+          </p>
+          <form
+            className="workspace-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void submitWorkspaceRename();
+            }}
+          >
+            <label>
+              工作区名称
+              <input
+                autoFocus
+                aria-label="工作区名称"
+                value={renameWorkspace.name}
+                maxLength={120}
+                autoComplete="off"
+                onChange={(e) =>
+                  setRenameWorkspace({
+                    ...renameWorkspace,
+                    name: e.target.value,
+                  })
+                }
+              />
+            </label>
+            <button
+              type="submit"
+              className="button primary"
+              disabled={!renameWorkspace.name.trim()}
+            >
+              保存
+            </button>
+          </form>
+        </Dialog>
+      )}
+      {removeWorkspace && (
+        <Dialog title="移除工作区" close={() => setRemoveWorkspace(null)}>
+          <p className="dialog-intro">
+            把「{removeWorkspace.name}」从侧栏移除。文件夹和里面的文件都不会被删除。
+          </p>
+          {removeWorkspace.sessions > 0 && (
+            <p className="muted">
+              这里的 {removeWorkspace.sessions} 个会话会移到「其他工作空间」分组，
+              仍然可以打开和搜索。
+            </p>
+          )}
+          <div className="workspace-form">
+            <button
+              type="button"
+              className="button primary"
+              onClick={() => void submitWorkspaceRemove()}
+            >
+              移除
+            </button>
+            <button
+              type="button"
+              className="button"
+              onClick={() => setRemoveWorkspace(null)}
+            >
+              取消
+            </button>
+          </div>
         </Dialog>
       )}
       {addFolder && (

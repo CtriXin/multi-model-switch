@@ -144,6 +144,10 @@ class WebApplication:
             if not self.catalog:
                 raise WebError("CAPABILITY_UNAVAILABLE", "本地服务尚未连接。", 409)
             return self.catalog.add_workspace(payload)
+        if len(parts) == 2 and parts[0] == "workspaces" and parts[1] in {"rename", "remove"}:
+            if not self.catalog:
+                raise WebError("CAPABILITY_UNAVAILABLE", "本地服务尚未连接。", 409)
+            return getattr(self.catalog, f"{parts[1]}_workspace")(payload)
         if parts == ["configuration", "preview"]:
             return self._catalog().configuration_preview(payload)
         if parts == ["configuration", "discover"]:

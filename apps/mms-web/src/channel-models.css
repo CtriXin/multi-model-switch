@@ -67,9 +67,25 @@
 .channel-model-table-head,
 .channel-model-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 155px;
+  grid-template-columns: minmax(0, 1fr) 190px 155px;
   align-items: center;
   gap: 18px;
+}
+.channel-model-capability {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.channel-model-capability label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.channel-model-capability input[type="number"] {
+  width: 100px;
+  padding: 2px 6px;
 }
 .channel-model-table-head {
   padding: 10px 12px;
@@ -217,6 +233,17 @@
     grid-template-columns: minmax(0, 1fr) 125px;
     gap: 8px;
     padding-inline: 4px;
+  }
+  /* Capability editing drops to its own line before the columns get too thin
+     to read; it is not a control worth cramping the model name for. */
+  .channel-model-table-head span:nth-child(2),
+  .channel-model-row .channel-model-capability {
+    grid-column: 1 / -1;
+  }
+  .channel-model-capability {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 12px;
   }
   .channel-models-heading {
     align-items: flex-start;

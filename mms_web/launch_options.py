@@ -26,9 +26,16 @@ def public_options(runtime, model):
     # Pi clamps model-incompatible inherited preferences. Expose both, do not
     # pretend a disabled level was applied. Explicit user choices never clamp.
     effective = configured if configured in levels else next((v for v in levels if LEVELS.index(v) >= LEVELS.index(configured if configured in LEVELS else "high")), levels[-1])
+    # Where each capability came from, so the page can say whether a value is
+    # the user's own setting or something MMF supplied.
+    try:
+        sources = pi._pi_model_capabilities(runtime, selected).get("sources") or {}
+    except Exception:
+        sources = {}
     return {"model": {k: info[k] for k in ("id", "name", "input", "contextWindow", "maxTokens", "reasoning") if k in info},
             "protocol": entry["protocol"], "supportedThinkingLevels": levels,
             "configuredThinkingLevel": configured, "defaultThinkingLevel": effective,
+            "capabilitySources": {k: str(sources.get(k) or "") for k in ("supports_vision", "context_window_tokens")},
             "thinkingLevelMap": info.get("thinkingLevelMap", {})}
 
 

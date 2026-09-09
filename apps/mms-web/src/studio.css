@@ -90,6 +90,7 @@
   scrollbar-color: var(--line) transparent;
 }
 .sidebar-section-label {
+  display: flex;
   align-items: center;
   margin: 5px 0 18px;
   padding: 0 5px;
@@ -122,6 +123,109 @@
 }
 .workspace-group + .workspace-group {
   margin-top: 24px;
+}
+.workspace-group {
+  position: relative;
+}
+/* Folder actions sit over the heading row and only appear on hover, so the
+   resting sidebar stays a plain list of names. */
+.workspace-row-actions {
+  position: absolute;
+  top: 0;
+  right: 4px;
+  height: 27px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  pointer-events: none;
+  background: var(--soft);
+  border-radius: 6px;
+  padding: 0 2px;
+}
+.workspace-group:hover .workspace-row-actions,
+.workspace-row-actions:focus-within,
+.workspace-row-actions:has([aria-expanded="true"]) {
+  opacity: 1;
+  pointer-events: auto;
+}
+.workspace-row-actions .icon-button {
+  padding: 3px;
+}
+/* The count would sit under the action buttons; hide it while they show. */
+.workspace-group:hover .workspace-heading > span:last-child,
+.workspace-group:focus-within .workspace-heading > span:last-child {
+  opacity: 0;
+}
+.workspace-tools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+.workspace-tools .icon-button {
+  opacity: 0;
+}
+.session-nav:hover .workspace-tools .icon-button,
+.workspace-tools:focus-within .icon-button,
+.workspace-tools .icon-button[aria-expanded="true"],
+.workspace-tools .add-workspace {
+  opacity: 1;
+}
+/* The row menu overlays the session button so the list keeps one column. */
+.session-row {
+  position: relative;
+}
+.session-row-menu {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  opacity: 0;
+  pointer-events: none;
+  background: var(--soft);
+  border-radius: 6px;
+  padding: 3px;
+}
+.session-row:hover .session-row-menu,
+.session-row-menu:focus,
+.session-row-menu[aria-expanded="true"] {
+  opacity: 1;
+  pointer-events: auto;
+}
+.session-row-time {
+  margin: 4px 11px 2px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-size: 10px;
+  color: var(--muted);
+}
+.load-more-sessions {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: left;
+  padding: 8px 10px 8px 17px;
+  border-radius: 8px;
+}
+.load-more-sessions:hover {
+  background: var(--soft);
+}
+.workspace-notice {
+  margin: 0 5px 10px;
+  padding: 6px 8px;
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--soft);
+  border-radius: 6px;
+}
+.filter-option.danger strong {
+  color: var(--danger);
+}
+.filter-option:disabled {
+  opacity: 0.45;
 }
 .session-link {
   padding: 10px 10px 10px 17px;
