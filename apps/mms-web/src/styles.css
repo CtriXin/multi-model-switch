@@ -2732,10 +2732,13 @@ dialog:has(.model-explorer) {
     0 28px 90px #0d292b35,
     0 3px 12px #0d292b15;
 }
-dialog:has(.model-explorer) .dialog-body {
+/* Direct child only. A plain dialog opened from inside the explorer is still
+   a descendant of it, and the unscoped rule stripped that dialog's padding
+   too, leaving its text flush against the frame. */
+dialog:has(> .dialog-body .model-explorer) > .dialog-body {
   padding: 0;
 }
-dialog:has(.model-explorer) .dialog-body > header {
+dialog:has(> .dialog-body .model-explorer) > .dialog-body > header {
   padding: 18px 24px;
   margin: 0;
   border-bottom: 1px solid var(--line);

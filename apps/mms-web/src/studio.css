@@ -964,6 +964,41 @@
   max-height: none;
   min-height: 0;
   overflow-y: auto;
+  /* The last row otherwise stops flush against the frame and reads as cut
+     off rather than as the end of the list. */
+  padding-bottom: 22px;
+  scroll-padding-bottom: 22px;
+}
+/* One type scale across both panes. The models pane still carried the sizes
+   it had as a full page, so its headings ran four points larger than the
+   appearance pane sitting one tab away. */
+.settings-shell .settings-page h2 {
+  font-size: 15px;
+  font-weight: 600;
+}
+.settings-shell .settings-page .page-heading p {
+  font-size: 11px;
+  line-height: 1.5;
+}
+.settings-shell .model-detail-heading h3 {
+  font-size: 17px;
+}
+.settings-shell .channel-list strong {
+  font-weight: 600;
+}
+/* Inside the sheet the search band is a filter, not a headline; its page
+   proportions were pushing the model list and its settings down. */
+.settings-shell .explorer-search {
+  padding: 10px 14px;
+}
+.settings-shell .explorer-search .picker-search {
+  padding: 6px 10px;
+}
+.settings-shell .model-library .page-heading {
+  margin-bottom: 8px;
+}
+.settings-shell .model-library-count {
+  margin: 0 0 10px;
 }
 .general-settings {
   overflow-y: auto;
