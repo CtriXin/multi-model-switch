@@ -56,6 +56,7 @@ PYTHON_CMD="${MMS_INSTALL_PYTHON:-${MMS_PYTHON:-}}"
 INSTALL_LANG="zh"
 INSTALL_LANG_EXPLICIT=0
 WRITE_SHELL_RC=0
+INSTALL_CODING_FONTS=1
 RUN_SETUP=0
 ENSURE_NODE22=0
 LAUNCH_AFTER_INSTALL=0
@@ -493,6 +494,7 @@ $(t "说明:" "Notes:")
   - $(t "--install-agent-packs 等同于同时安装 ECC 和 OMC；可用 --ecc-ref / --omc-ref 固定版本" "--install-agent-packs installs both ECC and OMC; use --ecc-ref / --omc-ref to pin refs")
   - $(t "Caveman、Web automation bundle（weber router + web-access 登录态 Chrome + agent-browser headless）、TOON、token-saver 作为 MMS 内建 session assets 随安装一起提供；NSR 工具随 channel 内建，/nsr 命令会自动安装，自动 hook 已退休；offduty/onduty（handover continuity）也会自动安装到 Claude/Codex/OpenCode 全局 skill 目录，并清理旧 command symlink" "Caveman, the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless), TOON, and token-saver ship as bundled MMS session assets; NSR tools ship with each channel and /nsr commands are auto-installed; automatic hooks are retired; offduty/onduty (handover continuity) are also auto-installed into Claude/Codex/OpenCode global skill dirs, and legacy command symlinks are cleaned")
   - $(t "--install-cli 可选安装 claude/codex/opencode/pi（支持逗号分隔）；能用 npm 的 CLI 均走 npm package" "--install-cli optionally installs claude/codex/opencode/pi (comma-separated); CLIs with npm packages are installed through npm")
+  - $(t "默认安装 Fira Code 与 JetBrains Mono 到用户字体目录，供 Web 字体选择使用；已装则跳过，--no-coding-fonts 可关闭" "Fira Code and JetBrains Mono are installed into the user font directory for the Web font picker; already-installed families are skipped, and --no-coding-fonts turns this off")
   - $(t "--write-shell-rc 支持 bash/zsh/fish；Ghostty/iTerm/Terminal 重开 tab 后即可直接输入 mms" "--write-shell-rc supports bash/zsh/fish; reopen Ghostty/iTerm/Terminal tabs to type mms directly")
   - $(t "同一条命令可重复执行，用于升级" "The same command can be re-run later for upgrades")
 EOF
@@ -1513,6 +1515,68 @@ install_named_cli() {
 
     echo "⚠ $(t "$label 安装未完成；MMS 仍可安装，之后可重新运行 --install-cli $cli_name。" "$label install did not complete; MMS is still installed, rerun --install-cli $cli_name later.")"
     return 1
+}
+
+# Coding faces the Web UI offers in its font picker. Both are SIL OFL, so they
+# can be redistributed; the picker only lists families that are actually
+# installed, so without these the options simply never appear.
+CODING_FONT_SPECS=(
+    "Fira Code|FiraCode-Regular|https://github.com/tonsky/FiraCode/releases/download/6.2/Fira_Code_v6.2.zip|ttf/FiraCode-*.ttf"
+    "JetBrains Mono|JetBrainsMono-Regular|https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip|fonts/ttf/JetBrainsMono-*.ttf"
+)
+
+user_font_dir() {
+    if [ "$(uname -s)" = "Darwin" ]; then
+        printf "%s/Library/Fonts" "$HOME"
+    else
+        printf "%s/.local/share/fonts" "$HOME"
+    fi
+}
+
+install_coding_fonts() {
+    local font_dir="" spec="" label="" probe="" url="" glob="" tmp="" archive=""
+    local installed=0 failed=0
+
+    if [ "$INSTALL_CODING_FONTS" != "1" ]; then
+        return 0
+    fi
+    font_dir="$(user_font_dir)"
+
+    for spec in "${CODING_FONT_SPECS[@]}"; do
+        IFS='|' read -r label probe url glob <<< "$spec"
+        # Already present, from this installer or from anywhere else.
+        if compgen -G "$font_dir/$probe*.ttf" > /dev/null 2>&1; then
+            continue
+        fi
+        if [ "$DRY_RUN" = "1" ]; then
+            echo "• $(t "将安装编程字体" "would install coding font"): $label -> $font_dir"
+            continue
+        fi
+        tmp="$(mktemp -d)" || { failed=$((failed + 1)); continue; }
+        archive="$tmp/font.zip"
+        if curl -fsSL --max-time 120 "$url" -o "$archive" \
+            && unzip -qo "$archive" -d "$tmp" > /dev/null 2>&1; then
+            mkdir -p "$font_dir"
+            # shellcheck disable=SC2086
+            if cp $tmp/$glob "$font_dir/" 2>/dev/null; then
+                installed=$((installed + 1))
+            else
+                failed=$((failed + 1))
+            fi
+        else
+            failed=$((failed + 1))
+        fi
+        rm -rf "$tmp"
+    done
+
+    if [ "$installed" -gt 0 ]; then
+        command -v fc-cache > /dev/null 2>&1 && fc-cache -f > /dev/null 2>&1
+        echo "✓ $(t "已安装 $installed 组编程字体到 $font_dir" "installed $installed coding font families into $font_dir")"
+    fi
+    if [ "$failed" -gt 0 ]; then
+        echo "⚠ $(t "$failed 组编程字体未安装完成；不影响 MMS，可稍后重试或手动安装。" "$failed coding font families did not install; MMS is unaffected, retry or install them by hand later.")"
+    fi
+    return 0
 }
 
 install_requested_clis() {
@@ -3548,6 +3612,9 @@ print_dry_run_plan() {
     [ "$INSTALL_RTK" -eq 1 ] && echo "• $(t "会安装 RTK rewrite hook" "would install RTK rewrite hook")"
     echo "• $(t "会安装/修复 offduty/onduty（handover continuity）到 Claude/Codex/OpenCode 全局 skill 目录，并清理旧 command symlink" "would install/repair offduty/onduty (handover continuity) into Claude/Codex/OpenCode global skill dirs and clean legacy command symlinks")"
     echo "• $(t "会安装/修复 /nsr 命令到 Claude/Codex/OpenCode（不写全局 hooks/config）" "would install/repair /nsr commands for Claude/Codex/OpenCode without global hooks/config writes")"
+    if [ "$INSTALL_CODING_FONTS" = "1" ]; then
+        echo "• $(t "会把 Fira Code 与 JetBrains Mono 安装到 $(user_font_dir)（已装则跳过，--no-coding-fonts 关闭）" "would install Fira Code and JetBrains Mono into $(user_font_dir); already-installed families are skipped, --no-coding-fonts turns this off")"
+    fi
     [ "$INSTALL_BRAINKEEPER_CONTEXT" -eq 1 ] && echo "• $(t "会安装 BrainKeeper context pack" "would install BrainKeeper context pack"): ${BRAINKEEPER_INSTALL_REF:-$BRAINKEEPER_DEFAULT_REF}"
     [ "$INSTALL_MAP" -eq 1 ] && echo "• $(t "会安装 Map CLI" "would install Map CLI"): ${MAP_INSTALL_REF:-$MAP_DEFAULT_REF}"
     [ "$INSTALL_CODEGRAPH" -eq 1 ] && echo "• $(t "会安装 CodeGraph CLI" "would install CodeGraph CLI"): $CODEGRAPH_PACKAGE_SPEC"
@@ -3751,6 +3818,9 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --write-shell-rc)
             WRITE_SHELL_RC=1
+            ;;
+        --no-coding-fonts)
+            INSTALL_CODING_FONTS=0
             ;;
         --run-setup)
             RUN_SETUP=1
@@ -4120,6 +4190,7 @@ rewrite_shebang "$MMS_HOME/mms" "$PYTHON_PATH"
 [ -f "$MMS_HOME/mmslogs" ] && rewrite_shebang "$MMS_HOME/mmslogs" "$PYTHON_PATH"
 
 # ── 4.5 可选安装：CLI / RTK ──
+install_coding_fonts
 install_requested_clis
 if [ "$INSTALL_RTK" -eq 1 ]; then
     install_optional_rtk || true

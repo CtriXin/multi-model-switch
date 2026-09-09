@@ -883,9 +883,11 @@
 .model-group.selected {
   box-shadow: none;
 }
+/* The pane used to be centred inside a full page; inside the sheet it must
+   share the same edges as the tab row and the models pane. */
 .general-settings {
-  max-width: 1050px;
-  margin: auto;
+  max-width: none;
+  margin: 0;
 }
 .preference-row {
   display: flex;
