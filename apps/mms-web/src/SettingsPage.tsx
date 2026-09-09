@@ -1,15 +1,16 @@
 import { useState } from "react";
-import { Sun, Moon, SlidersHorizontal, Palette, ArrowLeft } from "lucide-react";
+import { Sun, Moon, Monitor, Minus, Plus, SlidersHorizontal, Palette } from "lucide-react";
 import type { Bootstrap } from "./types";
 import { Models } from "./Models";
+import { Dialog } from "./components";
 
 export function SettingsPage({
   data,
   favorites,
   toggleFavorite,
   refresh,
-  theme,
-  setTheme,
+  themeChoice,
+  setThemeChoice,
   accent,
   setAccent,
   back,
@@ -19,7 +20,9 @@ export function SettingsPage({
   effortChanged,
   autoCollapseProcess, setAutoCollapseProcess,
   fontFamily, setFontFamily,
+  monoFont, setMonoFont,
   cjkFont, setCjkFont,
+  installedFonts,
   fontSize, setFontSize,
   boldText, setBoldText,
   selectToCopy, setSelectToCopy,
@@ -29,8 +32,8 @@ export function SettingsPage({
   favorites: string[];
   toggleFavorite: (id: string) => void;
   refresh: () => void;
-  theme: "light" | "dark";
-  setTheme: (value: "light" | "dark") => void;
+  themeChoice: "light" | "dark" | "system";
+  setThemeChoice: (value: "light" | "dark" | "system") => void;
   accent: string;
   setAccent: (value: string) => void;
   back: () => void;
@@ -44,8 +47,11 @@ export function SettingsPage({
   setAutoCollapseProcess: (on: boolean) => void;
   fontFamily: string;
   setFontFamily: (value: string) => void;
+  monoFont: string;
+  setMonoFont: (value: string) => void;
   cjkFont: string;
   setCjkFont: (value: string) => void;
+  installedFonts: Record<string, boolean>;
   fontSize: number;
   setFontSize: (value: number) => void;
   boldText: boolean;
@@ -55,20 +61,8 @@ export function SettingsPage({
 }) {
   const [tab, setTab] = useState("models");
   return (
+    <Dialog title="设置" wide close={() => requestNavigation(back)}>
     <div className="settings-shell">
-      <header className="settings-heading">
-        <button
-          className="icon-button"
-          aria-label="返回工作空间"
-          onClick={back}
-        >
-          <ArrowLeft size={18} />
-        </button>
-        <div>
-          <h1>设置</h1>
-          <p>常用偏好，放在一起。</p>
-        </div>
-      </header>
       <nav className="settings-tabs" aria-label="设置分类">
         <button
           className={tab === "models" ? "active" : ""}
@@ -109,20 +103,22 @@ export function SettingsPage({
               <p>保存在当前浏览器，随时可以更换。</p>
             </div>
             <div className="appearance-options">
-              <button
-                aria-pressed={theme === "light"}
-                onClick={() => setTheme("light")}
-              >
-                <Sun size={16} />
-                浅色
-              </button>
-              <button
-                aria-pressed={theme === "dark"}
-                onClick={() => setTheme("dark")}
-              >
-                <Moon size={16} />
-                深色
-              </button>
+              {(
+                [
+                  ["system", "跟随系统", Monitor],
+                  ["light", "浅色", Sun],
+                  ["dark", "深色", Moon],
+                ] as const
+              ).map(([id, label, Icon]) => (
+                <button
+                  key={id}
+                  aria-pressed={themeChoice === id}
+                  onClick={() => setThemeChoice(id)}
+                >
+                  <Icon size={15} />
+                  {label}
+                </button>
+              ))}
             </div>
           </div>
           <label className="preference-row">
@@ -140,61 +136,100 @@ export function SettingsPage({
           </label>
           <div className="preference-row">
             <div>
-              <h2>字体</h2>
-              <p>影响整个页面，保存在当前浏览器。</p>
+              <h2>界面字体</h2>
+              <p>影响整个页面。只列出这台电脑装了的字体。</p>
             </div>
-            <div className="font-options">
-              <label>
-                <span>字体</span>
-                <select
-                  aria-label="界面字体"
-                  value={fontFamily}
-                  onChange={(e) => setFontFamily(e.target.value)}
-                >
-                  <option value="system">跟随系统</option>
-                  <option value="sans">无衬线</option>
-                  <option value="serif">衬线</option>
-                  <option value="mono">等宽</option>
-                </select>
-              </label>
-              <label>
-                <span>中文字体兜底</span>
-                <select
-                  aria-label="中文字体兜底"
-                  value={cjkFont}
-                  onChange={(e) => setCjkFont(e.target.value)}
-                >
-                  <option value="system">跟随系统</option>
-                  <option value="pingfang">苹方</option>
-                  <option value="noto">思源黑体</option>
-                  <option value="yahei">微软雅黑</option>
-                </select>
-              </label>
-              <label>
-                <span>字体大小</span>
-                <input
-                  type="range"
-                  min={12}
-                  max={20}
-                  step={1}
-                  aria-label="字体大小"
-                  value={fontSize}
-                  onChange={(e) => setFontSize(Number(e.target.value))}
-                />
-                <output>{fontSize} px</output>
-              </label>
-              <label>
-                <span>加粗正文</span>
-                <input
-                  type="checkbox"
-                  role="switch"
-                  aria-label="加粗正文"
-                  checked={boldText}
-                  onChange={(e) => setBoldText(e.target.checked)}
-                />
-              </label>
-            </div>
+            <select
+              aria-label="界面字体"
+              value={fontFamily}
+              onChange={(e) => setFontFamily(e.target.value)}
+            >
+              <option value="system">跟随系统</option>
+              <option value="system_ui">System UI</option>
+              {installedFonts.inter && <option value="inter">Inter</option>}
+              {installedFonts.helvetica && (
+                <option value="helvetica">Helvetica Neue</option>
+              )}
+            </select>
           </div>
+          <div className="preference-row">
+            <div>
+              <h2>等宽字体</h2>
+              <p>代码块与运行详情使用。</p>
+            </div>
+            <select
+              aria-label="等宽字体"
+              value={monoFont}
+              onChange={(e) => setMonoFont(e.target.value)}
+            >
+              <option value="system">SF Mono</option>
+              {installedFonts.jetbrains && (
+                <option value="jetbrains">JetBrains Mono</option>
+              )}
+              {installedFonts.fira && <option value="fira">Fira Code</option>}
+              {installedFonts.plex && <option value="plex">IBM Plex Mono</option>}
+              {installedFonts.menlo && <option value="menlo">Menlo</option>}
+              {installedFonts.monaco && <option value="monaco">Monaco</option>}
+            </select>
+          </div>
+          <div className="preference-row">
+            <div>
+              <h2>中文字体兜底</h2>
+              <p>主字体缺中日韩字形时使用。</p>
+            </div>
+            <select
+              aria-label="中文字体兜底"
+              value={cjkFont}
+              onChange={(e) => setCjkFont(e.target.value)}
+            >
+              <option value="system">跟随系统</option>
+              {installedFonts.pingfang && <option value="pingfang">苹方</option>}
+              {installedFonts.hiragino && (
+                <option value="hiragino">冬青黑体</option>
+              )}
+              {installedFonts.hansans && <option value="hansans">思源黑体</option>}
+              {installedFonts.heiti && <option value="heiti">黑体</option>}
+              {installedFonts.yahei && <option value="yahei">微软雅黑</option>}
+            </select>
+          </div>
+          <div className="preference-row font-size-row">
+            <div>
+              <h2>字号</h2>
+              <p>{fontSize} px，改动立即生效。</p>
+            </div>
+            <span className="stepper">
+              <button
+                type="button"
+                aria-label="减小字号"
+                disabled={fontSize <= 12}
+                onClick={() => setFontSize(fontSize - 1)}
+              >
+                <Minus size={13} />
+              </button>
+              <output aria-live="polite">{fontSize}</output>
+              <button
+                type="button"
+                aria-label="增大字号"
+                disabled={fontSize >= 20}
+                onClick={() => setFontSize(fontSize + 1)}
+              >
+                <Plus size={13} />
+              </button>
+            </span>
+          </div>
+          <label className="preference-row">
+            <div>
+              <h2>加粗正文</h2>
+              <p>所有正文用字体的加粗切片渲染。</p>
+            </div>
+            <input
+              type="checkbox"
+              role="switch"
+              aria-label="加粗正文"
+              checked={boldText}
+              onChange={(e) => setBoldText(e.target.checked)}
+            />
+          </label>
           <div className="preference-row">
             <div>
               <h2>强调色</h2>
@@ -203,9 +238,10 @@ export function SettingsPage({
             <div className="accent-options" role="group" aria-label="强调色">
               {[
                 ["indigo", "靛蓝"],
-                ["blue", "海蓝"],
-                ["rose", "玫瑰"],
+                ["cyan", "青蓝"],
+                ["pink", "品红"],
                 ["orange", "琥珀"],
+                ["green", "翠绿"],
               ].map(([id, name]) => (
                 <button
                   key={id}
@@ -249,5 +285,6 @@ export function SettingsPage({
         </section>
       )}
     </div>
+    </Dialog>
   );
 }

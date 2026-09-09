@@ -28,12 +28,16 @@
   --success: #83d9a4;
   --float-shadow: 0 10px 28px #0005;
 }
-:root[data-accent="blue"] { --accent: #2565ad; --accent-hover: #1e528f; }
-:root[data-accent="rose"] { --accent: #b23d66; --accent-hover: #913253; }
+:root[data-accent="indigo"] { --accent: #5e5ce6; --accent-hover: #4a48c4; }
+:root[data-accent="cyan"] { --accent: #0a7ea4; --accent-hover: #086684; }
+:root[data-accent="pink"] { --accent: #c7365a; --accent-hover: #a52c4a; }
 :root[data-accent="orange"] { --accent: #a95116; --accent-hover: #8b4110; }
-:root[data-theme="dark"][data-accent="blue"] { --accent: #87baff; --accent-hover: #afd0ff; }
-:root[data-theme="dark"][data-accent="rose"] { --accent: #f3a0bd; --accent-hover: #ffc0d4; }
-:root[data-theme="dark"][data-accent="orange"] { --accent: #f6b77c; --accent-hover: #ffd0a5; }
+:root[data-accent="green"] { --accent: #17803d; --accent-hover: #126532; }
+:root[data-theme="dark"][data-accent="indigo"] { --accent: #8c8cff; --accent-hover: #a9a9ff; }
+:root[data-theme="dark"][data-accent="cyan"] { --accent: #64d2ff; --accent-hover: #92e0ff; }
+:root[data-theme="dark"][data-accent="pink"] { --accent: #ff6482; --accent-hover: #ff90a5; }
+:root[data-theme="dark"][data-accent="orange"] { --accent: #ff9f0a; --accent-hover: #ffbb52; }
+:root[data-theme="dark"][data-accent="green"] { --accent: #30d158; --accent-hover: #6ade8b; }
 .sidebar {
   width: 264px;
   border-right: 1px solid var(--line);
@@ -169,7 +173,7 @@
   opacity: 0.7;
 }
 .workspace-group + .workspace-group {
-  margin-top: 24px;
+  margin-top: 16px;
 }
 .workspace-group {
   position: relative;
@@ -394,7 +398,7 @@
   background: transparent;
 }
 .session-link {
-  padding: 10px 10px 10px 17px;
+  padding: 8px 10px 8px 17px;
   gap: 9px;
   border-radius: 8px;
 }
@@ -405,14 +409,15 @@
 }
 .session-link-copy small {
   font-size: 10px;
-  margin-top: 3px;
+  margin-top: 2px;
   color: var(--muted);
 }
 .session-link.selected {
   box-shadow: none;
-  background: var(--selected);
-  outline: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
-  outline-offset: -1px;
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface));
+  outline: none;
+  border-left: 2.5px solid var(--accent);
+  padding-left: 14.5px;
 }
 .sidebar-footer {
   padding: 12px 19px;
@@ -785,9 +790,11 @@
 }
 /* Settings have one navigation level and no service badge wall. */
 .settings-shell {
-  padding: 24px 36px 48px;
   width: 100%;
-  overflow: auto;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 .settings-heading {
   display: flex;
@@ -806,19 +813,20 @@
 }
 .settings-tabs {
   display: flex;
-  gap: 22px;
+  gap: 18px;
   border-bottom: 1px solid var(--line);
-  margin: 28px auto 0;
-  max-width: 1050px;
+  margin: 0;
+  max-width: none;
+  flex: none;
 }
 .settings-tabs button {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   font-size: 12px;
   background: transparent;
   border: 0;
-  padding: 13px 3px;
+  padding: 9px 3px;
   color: var(--muted);
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
@@ -828,8 +836,8 @@
   border-bottom-color: var(--accent);
 }
 .settings-shell .settings-page {
-  padding: 28px 0 0;
-  max-width: 1050px;
+  padding: 16px 0 0;
+  max-width: none;
   width: 100%;
   margin: auto;
   overflow: visible;
@@ -887,18 +895,70 @@
 .preference-row {
   display: flex;
   justify-content: space-between;
-  gap: 25px;
-  padding: 27px 0;
+  align-items: center;
+  gap: 20px;
+  padding: 11px 0;
   border-bottom: 1px solid var(--line);
 }
 .preference-row h2 {
-  font-size: 14px;
+  font-size: 13px;
+  font-weight: 550;
 }
 .preference-row p {
   color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+  margin-top: 2px;
+  max-width: 52ch;
+}
+.general-settings {
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+  padding-right: 4px;
+}
+/* A numeric stepper reads better than a slider for a value with nine steps. */
+.font-size-row .stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 2px;
+  flex: none;
+}
+.font-size-row .stepper button {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  transition: background var(--duration-fast) var(--ease-out);
+}
+.font-size-row .stepper button:hover:not(:disabled) {
+  background: var(--soft);
+  color: var(--ink);
+}
+.font-size-row .stepper button:disabled {
+  opacity: 0.35;
+}
+.font-size-row .stepper output {
+  min-width: 26px;
+  text-align: center;
   font-size: 12px;
-  line-height: 1.9;
-  margin-top: 7px;
+  font-variant-numeric: tabular-nums;
+}
+.general-settings select {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 5px 8px;
+  font-size: 12px;
+  background: var(--surface);
+  min-width: 150px;
+  flex: none;
 }
 .appearance-options {
   display: flex;
@@ -908,10 +968,11 @@
 .appearance-options button {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 10px 14px;
+  border-radius: 7px;
+  padding: 6px 10px;
+  font-size: 12px;
   background: var(--surface);
   font-size: 12px;
   white-space: nowrap;

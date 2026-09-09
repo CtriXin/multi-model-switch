@@ -1,14 +1,14 @@
 :root {
-  /* Overridden from the appearance settings; the literal stack is the default. */
-  font-family: var(
-    --app-font,
-    -apple-system,
-    BlinkMacSystemFont,
-    "SF Pro Text",
-    "PingFang SC",
-    "Microsoft YaHei",
-    sans-serif
-  );
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-mono:
+    "SF Mono", "JetBrains Mono", Menlo, Monaco, Consolas, monospace;
+  /* Overridden from the appearance settings; --font-sans is the default. */
+  font-family: var(--app-font, var(--font-sans));
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  text-rendering: optimizeLegibility;
+  -moz-osx-font-smoothing: grayscale;
   color-scheme: light;
   --bg: oklch(98.3% 0.003 154);
   --surface: oklch(100% 0 0);
@@ -68,6 +68,36 @@ textarea,
 select {
   font: inherit;
   color: inherit;
+}
+code,
+kbd,
+pre,
+samp {
+  font-family: var(--font-mono);
+  font-feature-settings: "calt" 1;
+}
+code {
+  font-size: 0.88em;
+  padding: 1.5px 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--ink) 5%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--ink) 7%, var(--line));
+}
+kbd {
+  font-size: 0.82em;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+/* Tabular figures belong where numbers are compared, not in prose. */
+.session-row-time,
+.usage-meter,
+.runtime-strip,
+.channel-model-capability,
+.font-options output,
+time {
+  font-variant-numeric: tabular-nums;
 }
 button {
   cursor: pointer;
@@ -343,6 +373,7 @@ kbd {
 }
 .session-link-copy strong {
   display: block;
+  line-height: 1.35;
   font-size: 12px;
   font-weight: 450;
   overflow: hidden;
@@ -379,9 +410,11 @@ kbd {
   background: var(--danger);
 }
 .attention-dot {
-  height: 5px;
-  width: 5px;
+  height: 6px;
+  width: 6px;
   border-radius: 50%;
+  /* A static ring reads as clearly as a pulse and survives reduced motion. */
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber) 22%, transparent);
 }
 .sidebar-empty {
   font-size: 12px;
@@ -1361,11 +1394,29 @@ dialog {
   background: var(--surface);
   color: var(--ink);
 }
+dialog:has(.dialog-body.wide) {
+  width: min(960px, calc(100% - 32px));
+}
 dialog::backdrop {
   background: oklch(10% 0.01 154 / 0.35);
 }
 .dialog-body {
   padding: 24px;
+}
+/* Settings holds a channel table, so it gets a workspace-sized sheet with its
+   own scrolling body instead of the page it used to occupy. */
+.dialog-body.wide {
+  /* The dialog element owns the width; matching it here would overflow by
+     the border box. */
+  width: 100%;
+  height: min(680px, 84vh);
+  padding: 20px 24px 18px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.dialog-body.wide > header {
+  margin-bottom: 12px;
 }
 .dialog-body header {
   display: flex;

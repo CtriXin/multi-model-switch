@@ -101,11 +101,14 @@ export function Dialog({
   children,
   close,
   dismissible = true,
+  wide = false,
 }: {
   title: string;
   children: ReactNode;
   close: () => void;
   dismissible?: boolean;
+  /** Settings needs room for the channel table; ordinary dialogs do not. */
+  wide?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -123,7 +126,7 @@ export function Dialog({
         if (dismissible && e.target === ref.current) close();
       }}
     >
-      <section className="dialog-body">
+      <section className={"dialog-body" + (wide ? " wide" : "")}>
         <header>
           <h2>{title}</h2>
           <button

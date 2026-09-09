@@ -84,23 +84,80 @@ function saveSetting(key: string, value: unknown) {
     /* Storage may be unavailable in private browsing. */
   }
 }
-// Appearance fonts. The CJK choice is appended ahead of the generic family so
-// it only fills glyphs the main face is missing, which is what a fallback is.
-const FONT_STACKS: Record<string, string[]> = {
+// Appearance fonts. Families mirror Glint's catalogue so the two products
+// offer the same names. The CJK choice is appended ahead of the generic
+// family, so it only fills glyphs the main face is missing.
+const SANS_STACKS: Record<string, string[]> = {
   system: ['-apple-system', 'BlinkMacSystemFont', '"SF Pro Text"', 'sans-serif'],
-  sans: ['"Inter"', '"Helvetica Neue"', 'Arial', 'sans-serif'],
-  serif: ['"Iowan Old Style"', 'Georgia', '"Songti SC"', 'serif'],
-  mono: ['"SF Mono"', '"JetBrains Mono"', 'Menlo', 'Consolas', 'monospace'],
+  inter: ['"Inter"', '-apple-system', 'sans-serif'],
+  helvetica: ['"Helvetica Neue"', 'Helvetica', 'Arial', 'sans-serif'],
+  system_ui: ['system-ui', 'sans-serif'],
+};
+const MONO_STACKS: Record<string, string[]> = {
+  system: ['"SF Mono"', 'Menlo', 'monospace'],
+  jetbrains: ['"JetBrains Mono"', '"SF Mono"', 'monospace'],
+  fira: ['"Fira Code"', '"SF Mono"', 'monospace'],
+  plex: ['"IBM Plex Mono"', '"SF Mono"', 'monospace'],
+  menlo: ['Menlo', 'monospace'],
+  monaco: ['Monaco', 'monospace'],
 };
 const CJK_FALLBACKS: Record<string, string[]> = {
   system: [],
   pingfang: ['"PingFang SC"'],
-  noto: ['"Noto Sans SC"', '"Source Han Sans SC"'],
+  hiragino: ['"Hiragino Sans GB"'],
+  hansans: ['"Source Han Sans CN"', '"Noto Sans CJK SC"'],
+  heiti: ['"Heiti SC"'],
   yahei: ['"Microsoft YaHei"'],
 };
 
-export function fontStack(family: string, cjk: string) {
-  const base = FONT_STACKS[family] || FONT_STACKS.system;
+/** Family names to probe, so the picker never offers a face that is absent. */
+export const FONT_PROBES: Record<string, string> = {
+  inter: "Inter",
+  helvetica: "Helvetica Neue",
+  jetbrains: "JetBrains Mono",
+  fira: "Fira Code",
+  plex: "IBM Plex Mono",
+  menlo: "Menlo",
+  monaco: "Monaco",
+  pingfang: "PingFang SC",
+  hiragino: "Hiragino Sans GB",
+  hansans: "Source Han Sans CN",
+  heiti: "Heiti SC",
+  yahei: "Microsoft YaHei",
+};
+
+/** Width-probe font detection: a missing family falls back and measures the
+ *  same as the generic it was paired with. Glint filters its list the same
+ *  way, because a silently substituted font looks like a broken setting. */
+export function detectInstalledFonts(): Record<string, boolean> {
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  const found: Record<string, boolean> = {};
+  if (!context) return found;
+  const sample = "MMS 多模型 0123 mmmiiilll";
+  const baselines: Record<string, number> = {};
+  for (const generic of ["monospace", "sans-serif", "serif"]) {
+    context.font = `72px ${generic}`;
+    baselines[generic] = context.measureText(sample).width;
+  }
+  for (const [key, family] of Object.entries(FONT_PROBES)) {
+    found[key] = Object.entries(baselines).some(([generic, width]) => {
+      context.font = `72px "${family}", ${generic}`;
+      return Math.abs(context.measureText(sample).width - width) > 0.5;
+    });
+  }
+  return found;
+}
+
+export function fontStack(family: string, mono: string, cjk: string) {
+  void mono;
+  const base = SANS_STACKS[family] || SANS_STACKS.system;
+  const fallback = CJK_FALLBACKS[cjk] || [];
+  return [...base.slice(0, -1), ...fallback, base[base.length - 1]].join(", ");
+}
+
+export function monoStack(mono: string, cjk: string) {
+  const base = MONO_STACKS[mono] || MONO_STACKS.system;
   const fallback = CJK_FALLBACKS[cjk] || [];
   return [...base.slice(0, -1), ...fallback, base[base.length - 1]].join(", ");
 }
@@ -108,6 +165,12 @@ export function fontStack(family: string, cjk: string) {
 export function clampFontSize(value: unknown) {
   const size = Math.round(Number(value));
   return Number.isFinite(size) ? Math.min(20, Math.max(12, size)) : 14;
+}
+
+/** Resolve the "follow system" theme choice against the OS setting. */
+export function resolveTheme(choice: string): "light" | "dark" {
+  if (choice === "light" || choice === "dark") return choice;
+  return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
 export function App() {
@@ -188,15 +251,27 @@ export function App() {
   const [accent, setAccent] = useState(() =>
     readSetting("mms-web-accent", "indigo"),
   );
-  const [theme, setTheme] = useState<"light" | "dark">(() =>
-    readSetting("mms-web-theme", "light"),
+  const [themeChoice, setThemeChoice] = useState<"light" | "dark" | "system">(
+    () => {
+      const stored = readSetting<string>("mms-web-theme", "light");
+      return stored === "dark" || stored === "system" ? stored : "light";
+    },
   );
+  const [systemDark, setSystemDark] = useState(
+    () => matchMedia("(prefers-color-scheme: dark)").matches,
+  );
+  const theme =
+    themeChoice === "system" ? (systemDark ? "dark" : "light") : themeChoice;
   const [fontFamily, setFontFamily] = useState(() =>
     readSetting("mms-web-font-family", "system"),
+  );
+  const [monoFont, setMonoFont] = useState(() =>
+    readSetting("mms-web-mono-font", "system"),
   );
   const [cjkFont, setCjkFont] = useState(() =>
     readSetting("mms-web-cjk-font", "system"),
   );
+  const [installedFonts] = useState(detectInstalledFonts);
   const [fontSize, setFontSize] = useState(() =>
     readSetting("mms-web-font-size", 14),
   );
@@ -293,23 +368,31 @@ export function App() {
     setProcessTurns({});
   }, [selectedId]);
   useEffect(() => {
+    const media = matchMedia("(prefers-color-scheme: dark)");
+    const follow = () => setSystemDark(media.matches);
+    media.addEventListener("change", follow);
+    return () => media.removeEventListener("change", follow);
+  }, []);
+  useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    saveSetting("mms-web-theme", theme);
-  }, [theme]);
+    saveSetting("mms-web-theme", themeChoice);
+  }, [theme, themeChoice]);
   useEffect(() => {
     document.documentElement.dataset.accent = accent;
     saveSetting("mms-web-accent", accent);
   }, [accent]);
   useEffect(() => {
     const root = document.documentElement;
-    root.style.setProperty("--app-font", fontStack(fontFamily, cjkFont));
+    root.style.setProperty("--app-font", fontStack(fontFamily, monoFont, cjkFont));
+    root.style.setProperty("--font-mono", monoStack(monoFont, cjkFont));
     root.style.setProperty("--app-font-size", `${clampFontSize(fontSize)}px`);
     root.style.setProperty("--app-font-weight", boldText ? "600" : "400");
     saveSetting("mms-web-font-family", fontFamily);
+    saveSetting("mms-web-mono-font", monoFont);
     saveSetting("mms-web-cjk-font", cjkFont);
     saveSetting("mms-web-font-size", clampFontSize(fontSize));
     saveSetting("mms-web-bold-text", boldText);
-  }, [fontFamily, cjkFont, fontSize, boldText]);
+  }, [fontFamily, monoFont, cjkFont, fontSize, boldText]);
   useEffect(() => {
     const media = matchMedia("(max-width: 1200px)");
     const collapse = () => {
@@ -1429,8 +1512,11 @@ export function App() {
             setAutoCollapseProcess={setAutoCollapseProcess}
             fontFamily={fontFamily}
             setFontFamily={setFontFamily}
+            monoFont={monoFont}
+            setMonoFont={setMonoFont}
             cjkFont={cjkFont}
             setCjkFont={setCjkFont}
+            installedFonts={installedFonts}
             fontSize={clampFontSize(fontSize)}
             setFontSize={setFontSize}
             boldText={boldText}
@@ -1443,8 +1529,8 @@ export function App() {
             effortChanged={(id) => {
               if (id === presetId) setEffortChoice({ id: "", level: "" });
             }}
-            theme={theme}
-            setTheme={setTheme}
+            themeChoice={themeChoice}
+            setThemeChoice={setThemeChoice}
             accent={accent}
             setAccent={setAccent}
             back={() => navigate("new")}
