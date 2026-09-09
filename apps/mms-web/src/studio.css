@@ -337,6 +337,10 @@
 /* Vendor marks sit inside the existing monogram badge; the inline tint comes
    from the family so a long model list is scannable by colour. */
 .vendor-mark {
+  display: grid;
+  place-items: center;
+}
+.vendor-mark svg {
   display: block;
 }
 .model-monogram-text {
