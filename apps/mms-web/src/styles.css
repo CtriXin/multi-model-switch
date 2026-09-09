@@ -2952,11 +2952,39 @@ dialog:has(.model-explorer) .dialog-body > header {
   font-size: 11px;
 }
 .quick-config summary {
+  display: block;
+  cursor: pointer;
+  color: var(--muted);
+  list-style: none;
+  border-radius: 8px;
+}
+.quick-config summary::-webkit-details-marker {
+  display: none;
+}
+/* The card describes the settings inside, so it opens them. Hover on the
+   whole summary is what tells you it is not a read-only slab. */
+.quick-config summary:hover .route-summary {
+  background: color-mix(in srgb, var(--muted) 10%, var(--surface));
+}
+.quick-config summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.quick-config-more {
   display: flex;
   gap: 8px;
   align-items: center;
-  cursor: pointer;
-  color: var(--muted);
+  padding-top: 12px;
+}
+.quick-config-more svg:last-child {
+  margin-left: auto;
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+.quick-config[open] .quick-config-more svg:last-child {
+  transform: rotate(180deg);
+}
+.quick-config .route-summary {
+  transition: background var(--duration-fast) var(--ease-out);
 }
 .quick-config label {
   display: flex;
