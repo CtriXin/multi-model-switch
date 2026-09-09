@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { request } from "./api";
 import { shareRecipe } from "./Recipe";
+import { ContextEvidence } from "./ContextEvidence";
 import type { SessionDetail } from "./types";
 
 type Action = (
@@ -234,6 +235,7 @@ export function RuntimePanel({
           </div>
         ))}
       </dl>
+      <ContextEvidence key={detail.session.id} detail={detail} />
       <h3>运行参数</h3>
       <p className="section-note">
         只改变当前会话，由 Pi 验证参数。MMS 的路由和账号配置保持原值。

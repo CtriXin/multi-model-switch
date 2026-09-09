@@ -76,3 +76,11 @@
 .setup-tour-layer .tour-spotlight { box-shadow: 0 0 0 9999px rgb(15 18 25 / .18); }
 
 .guide-connection-entry { display: flex; align-items: center; gap: 8px; margin-top: 16px; min-height: 40px; }
+
+.context-evidence { margin: 24px 0; border-top: 1px solid var(--border); padding-top: 4px; }
+.context-evidence select { width: 100%; margin: 8px 0; }
+.context-evidence details { padding: 12px 0; border-bottom: 1px solid var(--border); }
+.context-evidence summary { cursor: pointer; line-height: 1.7; }
+.context-evidence summary small { display: block; color: var(--muted); }
+.context-evidence p, .context-evidence small { overflow-wrap: anywhere; }
+.context-source-state { color: var(--accent); font-size: .9286rem; }

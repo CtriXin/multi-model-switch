@@ -26,6 +26,7 @@ from typing import Any, Callable, Iterator
 from .drivers import PiRpcDriver, PipedProcessLauncher, probe_mms_pi_seam
 from .drivers.base import DriverClosedError, DriverWriteUnconfirmedError, LaunchSeamUnavailable, RpcTimeoutError
 from .errors import WebError
+from .context_evidence import consume_prompt, observe_read, prompt_hash
 from .session_actions import SessionActions, backfill_history, redact
 
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -398,6 +399,7 @@ class SessionService(SessionActions):
             suffix += material_text
             from .project_materials import usage_record
             context = usage_record(session.meta.get("cwd"), selected_skills, attachments, payload.get("references", []), selected, materials)
+            context["promptSha256"] = prompt_hash(text + suffix)
             self._check_images(session, images)
             with session.lock:
                 previous_state = session.state
@@ -662,6 +664,7 @@ class SessionService(SessionActions):
         suffix += material_text
         from .project_materials import usage_record
         context = usage_record(cwd, selected_skills, attachments, payload.get("references", []), [], materials)
+        context["promptSha256"] = prompt_hash(prompt + suffix)
         if not title:
             title = _clip(str(prompt or "").strip() or "Pi 会话", 60)
 
@@ -765,10 +768,14 @@ class SessionService(SessionActions):
         if not isinstance(fields, dict):
             return
         with session.lock:
+            if isinstance(fields.get("nativeContext"), dict):
+                session.meta["contextEvidence"] = redact(fields["nativeContext"], session.secrets)
+                session.persist(self._state_dir)
+                return
             if isinstance(fields.get("consumedPrompt"), str):
                 prompt = fields["consumedPrompt"]
-                event_id = next((eid for eid, text in session.pending_prompts.items() if text == prompt), None)
-                if event_id:
+                event_id = consume_prompt(session, prompt)
+                if event_id in session.pending_prompts:
                     session.pending_prompts.pop(event_id, None)
                     event = session.event_index[event_id]
                     event.pop("status", None)
@@ -776,7 +783,7 @@ class SessionService(SessionActions):
                     session.last_sequence += 1
                     event["sequence"] = session.last_sequence
                     session.events.append(event)
-                    session.persist(self._state_dir)
+                session.persist(self._state_dir)
                 return
             fields = copy.deepcopy(fields)
             event_id = str(fields.get("id") or "")
@@ -814,6 +821,7 @@ class SessionService(SessionActions):
             if isinstance(fields.get("queue"), list):
                 session.meta["queue"] = fields["queue"]
             event = session.upsert_event(fields, self._now)
+            observe_read(session, event)
             if session.artifact_history:
                 session.artifact_history.secrets = session.secrets
                 session.artifact_history.observe(event, self._now())

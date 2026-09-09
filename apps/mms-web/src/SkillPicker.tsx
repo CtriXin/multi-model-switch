@@ -47,7 +47,7 @@ export function SkillPicker({ skills, selected, toggle, close, error, example }:
             onClick={() => toggle(s.id)} aria-pressed={selected.includes(s.id)}
             disabled={selected.length >= 20 && !selected.includes(s.id)}>
             <span className="skill-icon">{selected.includes(s.id) ? <Check size={18} /> : <BookOpen size={18} />}</span>
-            <span><strong>{s.title || s.name}<small>{s.source}{s.starter ? " · 无需安装" : s.manualOnly ? " · 手动调用" : ""}</small></strong>
+            <span><strong>{s.title || s.name}<small>{selected.includes(s.id) ? "已选中" : "可用"} · {s.source}{s.starter ? " · 无需安装" : s.manualOnly ? " · 手动调用" : ""}</small></strong>
               <p>{s.description}</p></span>
           </button>
           {s.example && <button type="button" className="text-button skill-example"
@@ -62,7 +62,7 @@ export function SkillPicker({ skills, selected, toggle, close, error, example }:
         <p>外部 skill 通常是一个包含 SKILL.md 的文件夹。先检查来源和内容，再放到工作文件夹的 .agents/skills 下，刷新页面即可读取。它只对这个项目生效；带有脚本的 skill 可能需要额外工具。</p>
       </details>
       <div className="skill-footer">
-        <small>选择后随这条消息使用 · 最多 20 个</small>
+        <small>选择后随这条消息提交，实际加载见运行详情 · 最多 20 个</small>
         <button type="button" className="button primary" onClick={close}>返回对话{selected.length ? ` · 已选 ${selected.length} 个` : ""}</button>
       </div>
     </Dialog>
