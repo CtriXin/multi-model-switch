@@ -18,6 +18,7 @@ export function ProjectMaterials({ workspaceId }: { workspaceId: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [deleteId, setDeleteId] = useState("");
   useEffect(() => {
     const controller = new AbortController();
     request<Snapshot>("/project-materials", { workspaceId }, controller.signal).then(setData).catch(e => {
@@ -38,7 +39,7 @@ export function ProjectMaterials({ workspaceId }: { workspaceId: string }) {
       const saved = await request<Snapshot>("/project-materials/change", {
         workspaceId, revision: data.revision, action, confirmed: true, ...value,
       });
-      setData(saved);
+      setData(saved); setDeleteId("");
       if (action === "delete" || !value.id || value.id === draft.id) setEditing(false);
       setNotice(action === "delete" ? "资料已删除，后续消息不会再次加入。" : "已保存，从下一条消息开始使用当前启用的资料。");
     } catch (e) { setError((e as Error).message); }
@@ -71,8 +72,13 @@ export function ProjectMaterials({ workspaceId }: { workspaceId: string }) {
               <div>
                 <button type="button" disabled={busy} aria-label={`编辑资料 ${item.title}`} onClick={() => { setDraft({ id: item.id, title: item.title, content: item.content, enabled: item.enabled }); setEditing(true); setNotice(""); }}>编辑</button>
                 <button type="button" disabled={busy} aria-label={`${item.enabled ? "停用" : "启用"}资料 ${item.title}`} onClick={() => void change("save", { id: item.id, title: item.title, content: item.content, enabled: !item.enabled })}>{item.enabled ? "停用" : "启用"}</button>
-                <button type="button" disabled={busy} aria-label={`删除资料 ${item.title}`} onClick={() => { if (window.confirm(`删除「${item.title}」？已发送的内容仍保留在会话历史中。`)) void change("delete", { id: item.id }); }}>删除</button>
+                <button type="button" disabled={busy} aria-label={`删除资料 ${item.title}`} onClick={() => setDeleteId(item.id)}>删除</button>
               </div>
+              {deleteId === item.id && <div className="material-delete-confirm" role="group" aria-label={`确认删除资料 ${item.title}`}>
+                <p>删除后不再加入新消息，已发送内容仍保留在会话历史中。</p>
+                <button type="button" disabled={busy} onClick={() => setDeleteId("")}>保留资料</button>
+                <button type="button" disabled={busy} onClick={() => void change("delete", { id: item.id })}>确认删除</button>
+              </div>}
             </article>)}
           </div>
           {editing && <form className="material-editor" onSubmit={event => { event.preventDefault(); void change("save", { ...draft, ...(draft.id ? {} : { id: undefined }) }); }}>

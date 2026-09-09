@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator
 
 from .drivers import PiRpcDriver, PipedProcessLauncher, probe_mms_pi_seam
-from .drivers.base import DriverClosedError, LaunchSeamUnavailable, RpcTimeoutError
+from .drivers.base import DriverClosedError, DriverWriteUnconfirmedError, LaunchSeamUnavailable, RpcTimeoutError
 from .errors import WebError
 from .session_actions import SessionActions, backfill_history, redact
 
@@ -414,7 +414,7 @@ class SessionService(SessionActions):
                 context["state"] = "submitted" if session.driver else "prepared"
             except WebError as exc:
                 with session.lock:
-                    context["state"] = "uncertain" if exc.code == "RPC_TIMEOUT" else "failed"
+                    context["state"] = "uncertain" if exc.code in {"RPC_TIMEOUT", "RPC_UNCONFIRMED"} else "failed"
                     session.pending_prompts.pop(event["id"], None)
                     event["status"] = "error"
                     if session.last_sequence == event.get("sequence") and session.state == "running":
@@ -725,7 +725,7 @@ class SessionService(SessionActions):
                 self._send_prompt(live, prompt + suffix, images=images)
                 context["state"] = "submitted" if live.driver else "prepared"
             except WebError as exc:
-                context["state"] = "uncertain" if exc.code == "RPC_TIMEOUT" else "failed"
+                context["state"] = "uncertain" if exc.code in {"RPC_TIMEOUT", "RPC_UNCONFIRMED"} else "failed"
                 event["status"] = "error"
                 live.append_event({"kind": "notice", "text": exc.message, "status": "error"}, self._now)
         with live.lock:
@@ -748,10 +748,14 @@ class SessionService(SessionActions):
             return
         try:
             response = driver.send_prompt(text, images=images) if images else driver.send_prompt(text)
+        except DriverWriteUnconfirmedError as exc:
+            raise WebError("RPC_UNCONFIRMED", "Pi 连接在写入过程中断开，发送结果待确认。请先查看会话记录。", status=502) from exc
         except DriverClosedError as exc:
             raise WebError("SESSION_NOT_ACTIVE", "会话进程已退出，消息未发送", status=409) from exc
         except RpcTimeoutError as exc:
             raise WebError("RPC_TIMEOUT", "Pi 未在超时内确认消息", status=504) from exc
+        if response.get("deliveryUnconfirmed") is True:
+            raise WebError("RPC_UNCONFIRMED", "Pi 在确认前断开，发送结果待确认。请先查看会话记录。", status=502)
         if response.get("success") is False:
             raise WebError("SEND_FAILED", "Pi 未接受该消息，请检查所选服务连接后重试。", status=502)
 

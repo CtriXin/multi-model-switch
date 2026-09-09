@@ -1,4 +1,4 @@
-# MMS 4.0：安装、配置与日常使用
+# MMS 4.2：安装、配置与日常使用
 
 MMS Web 把 MMF 日常使用的模型、通道、effort、工作文件夹和 Pi 会话放进浏览器。AI 仍通过 MMS 原有启动器在本机执行；浏览器是交互入口。v4 首版的实际 Web harness 是 Pi，Claude、Codex、OpenCode 的 CLI 启动能力仍在 MMS 中，暂未成为 Web 会话。
 
@@ -11,8 +11,8 @@ MMS Web 把 MMF 日常使用的模型、通道、effort、工作文件夹和 Pi 
 安装指定版本：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.1.0/install.sh -o /tmp/mms-install-v4.sh
-bash /tmp/mms-install-v4.sh --ref v4.1.0 --install-cli pi --write-shell-rc
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.2.0/install.sh -o /tmp/mms-install-v4.sh
+bash /tmp/mms-install-v4.sh --ref v4.2.0 --install-cli pi --write-shell-rc
 ```
 
 关闭终端后重新打开，运行：
@@ -113,3 +113,12 @@ mms web --config-root "$HOME/.config/mms-next" --open
 修改完成后可选择新旧版本查看差异。这里保存的是成果版本，不会自动回滚工作目录；对话分支也不等于文件回滚。旧会话没有历史快照时只能展示当前文件，首次使用本功能后的成果才开始记录版本。
 
 HTML 是静态预览，脚本、外部资源和跳转均停用；需要原文件时使用下载。CSV 表格最多显示 200 行和 50 列，原文和下载不裁剪。每会话最多记录 40 个成果、每文件 20 个版本、共 64 MB；达到上限会提示并保留旧版本。PDF/Office 暂不提供内嵌预览，可通过工作文件路径使用本机应用打开。
+
+
+### 保存项目资料、检查本次来源
+
+在新会话或当前会话的「项目资料」里，保存项目背景、写作要求和常用约定。资料只属于当前工作文件夹；可以编辑、停用或删除。只有明确保存且启用的内容会加入这个项目之后的新消息。每个项目最多 20 条，单条最多 20 KB，总正文最多 80 KB；大文件直接引用原路径。
+
+自己的消息下方可展开「本次使用」，检查本次加入的项目资料版本、Skills 来源与同名覆盖、附件、文件引用和成果选段。已提交表示 Pi 已接收请求，文件引用不代表模型已经读取。排队、取消、发送失败或结果待确认会单独显示；旧消息没有来源记录时不会补造。
+
+停用或删除资料不会从已发送的会话历史撤回内容。编辑后的新版本只在后续消息生效，历史记录仍显示当时版本。保存遇到冲突时保留当前草稿，刷新列表核对后再保存。资料随 Web 数据目录保存和恢复。

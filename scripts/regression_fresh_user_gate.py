@@ -54,6 +54,8 @@ _PY_COMPILE_TARGETS = [
 ]
 
 _PYTEST_TARGETS = [
+    "tests/test_mms_web_project_materials.py",
+    "tests/test_mms_web_context_flow.py",
     "tests/test_mms_web_artifact_history.py",
     "tests/test_mms_web_artifact_flow.py",
     "tests/test_mms_web_standalone_settings.py",

@@ -33,6 +33,10 @@ class DriverClosedError(RuntimeError):
     """The harness child is no longer connected."""
 
 
+class DriverWriteUnconfirmedError(DriverClosedError):
+    """A started write failed; delivery cannot be determined from the pipe."""
+
+
 class RpcTimeoutError(RuntimeError):
     """A JSONL command did not get its response in time."""
 
