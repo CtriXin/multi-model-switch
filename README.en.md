@@ -367,14 +367,6 @@ Open a terminal on a new machine and paste one line:
 curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash
 ```
 
-If Node.js is already installed, the GitHub Release also provides an npx installer package:
-
-```bash
-npx --yes https://github.com/CtriXin/multi-model-switch/releases/latest/download/ctrixin-mms.tgz
-```
-
-Use the `curl` line on a bare machine: it prepares Node.js by itself, while `npx` needs Node.js to already be there.
-
 No question in the install changes what gets installed: no UI language prompt, no optional packs. It defaults to the stable channel and adds `~/.local/bin` to your shell PATH. The one question comes at the very end and only offers to open MMS Web. Accept it and the browser opens, the server keeps running in the background, and the installer exits. Add a provider and an API key on that page and you can start a conversation.
 
 Use `--launch-web` to open it without asking, `--no-launch-web` to skip it, and `--no-shell-rc` to leave your shell config alone.

@@ -106,14 +106,6 @@ scripts/cleanup_merged_worktree.sh <branch-or-pr>
 curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash
 ```
 
-机器上已有 Node.js 时，也可以用 GitHub Release 提供的 npx 安装包：
-
-```bash
-npx --yes https://github.com/CtriXin/multi-model-switch/releases/latest/download/ctrixin-mms.tgz
-```
-
-裸机请用上面那条 `curl`，它会在需要时自己准备 Node.js；`npx` 要求 Node.js 已经存在。
-
 装完会问一句要不要打开 MMS Web。回车即可，浏览器自动弹出，服务在后台运行，安装进程随即退出。在页面里添加 provider 和 API Key 就能开始对话。
 
 安装过程不问任何会影响安装内容的问题，默认走 stable 通道并把 `~/.local/bin` 写进 shell PATH。默认 UI 语言是中文，要英文加 `--lang en`。

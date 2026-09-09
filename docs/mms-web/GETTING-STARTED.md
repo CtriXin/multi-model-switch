@@ -16,8 +16,6 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 
 上面的命令获取最新 stable Release，无需随版本修改。正在使用 Pilot 时，优先通过页面 ? 旁的「更新」入口升级；手动安装检测到目录正被 Pilot 使用时会停止，保留进程和会话。安装过程默认中文，自动设置命令 PATH；完成后只问一次是否打开 MMS Web，同意后在后台启动。没有交互终端时打印打开命令；`--launch-web` 可直接打开，`--no-launch-web` 可禁止打开。已有相同安装、版本和配置空间的 Web 会被复用，其他实例保留并使用新端口。
 
-已有 Node.js 时，也可以用 `npx --yes https://github.com/CtriXin/multi-model-switch/releases/latest/download/ctrixin-mms.tgz` 安装；不需要 npm 账号。
-
 之后随时运行 `mms web --open`；当前终端找不到命令时用 `~/.local/bin/mms web --open`。Web 默认使用自己的配置空间，直接在设置里连接服务即可。高级用户仍可显式指定已有 MMF 配置目录。
 
 字体安装提供 Fira Code 和 JetBrains Mono，失败不会影响 MMS，`--no-coding-fonts` 可关闭。退休可选包不再安装；可确认 MMS 来源的旧入口会备份移走，自定义同名内容、全局 hooks/MCP 设置与真实配置保留。
