@@ -69,7 +69,7 @@ export function TaskSettings({
               toggleFavorite={toggleFavorite}
             />
           </div>
-          <div className="task-setting-row">
+          <div className="task-setting-row" data-guide="effort">
             <span>思考强度</span>
             {facts ? (
               <EffortSelect facts={facts} value={effort} change={setEffort} />
@@ -161,7 +161,7 @@ export function SessionSettings({
               disabled={busy || ["running", "waiting"].includes(detail.session.state) || !detail.session.capabilities.send}
             />
           </div>
-          <label className="task-setting-row">
+          <label className="task-setting-row" data-guide="effort">
             <span>思考强度</span>
             <select
               aria-label="Thinking 等级"

@@ -1,0 +1,89 @@
+export type GuideAction = "settings" | "workspace" | "model" | "compose" | "materials" | "artifacts" | "runtime";
+export interface GuideTopic {
+  id: string;
+  title: string;
+  summary: string;
+  sections: { title: string; body: string }[];
+  action: GuideAction;
+  actionLabel: string;
+  needsSession?: boolean;
+}
+
+export const guideTopics: GuideTopic[] = [
+  {
+    id: "models", title: "模型、通道与 effort", summary: "决定由谁处理、从哪里连接，以及投入多少思考。",
+    sections: [
+      { title: "选择模型与通道", body: "点击输入框底部的模型名称，打开任务设置，再选择模型与通道。模型负责生成回答，通道是你连接它的服务。同一个模型可以有多个通道，地址、可用性和计费由对应服务决定。" },
+      { title: "调整 effort（思考强度）", body: "在同一设置中调整思考强度。较低档位适合简单问答，较高档位可用于复杂分析，通常需要更多时间和用量；更高不保证回答更好。只显示当前模型支持的档位，不能调整时先看旁边的状态说明。" },
+      { title: "当前会话与长期默认值", body: "输入框中的选择用于本次任务或当前会话。想让之后的新会话沿用某个 effort，到设置中的通道模型管理保存默认值。已有会话不会因此自动改变。" },
+      { title: "在对话中换模型", body: "当前会话可以切换模型和通道，保留已有上下文，并采用新模型的默认思考强度。执行或待确认时，先完成本轮或手动停止。用输入框和运行详情中的实际选择确认模型；模型在正文里自报的身份可能沿用旧对话。" },
+      { title: "只读规划与执行任务", body: "任务设置中的只读规划适合先分析、阅读和列计划；执行任务允许工具修改工作文件和运行命令。先选择符合当前目的的工作方式，再发送。" },
+    ], action: "model", actionLabel: "找到模型与 effort 入口",
+  },
+  {
+    id: "workspace", title: "工作文件夹与会话", summary: "把对话放到正确的项目里，之后随时接着做。",
+    sections: [
+      { title: "选择或更换工作路径", body: "在新建任务顶部选择工作文件夹，可以选已添加的目录，也可以添加电脑上的其他文件夹。AI 的文件操作以这里为工作目录，发送前确认路径。" },
+      { title: "已有对话换项目怎么办", body: "已有会话继续使用原工作文件夹。要在另一个目录工作，先新建任务，再选那个目录；换模型不会替你切换工作路径。" },
+      { title: "查找与继续会话", body: "左侧按工作文件夹组织会话。点击会话继续阅读和提问，搜索可按标题、模型等查找；筛选可查看待回答、错误或归档会话。窄屏先点左上角菜单展开导航。" },
+      { title: "重命名、归档、导出与分支", body: "当前会话工作栏的更多菜单提供这些操作。归档后内容仍保留，可在归档列表找回；导出会下载对话。创建分支会保留已有上下文，但不会自动复制或回滚工作目录中的文件。" },
+    ], action: "workspace", actionLabel: "去选择工作文件夹",
+  },
+  {
+    id: "messages", title: "对话、附件与 Skills", summary: "说清目标，把需要的材料一起交给模型。",
+    sections: [
+      { title: "发送第一条消息", body: "可以按“我要做什么、已有材料、希望得到什么”描述任务。Enter 发送，Shift + Enter 换行。模型回复后，继续补充要求即可；运行中发送的补充消息可能排队，留意消息旁的状态。" },
+      { title: "文件与图片", body: "通过输入框的 + 选择本地文件，或粘贴完整路径来引用原文件；无本地路径的剪贴板截图可以作为附件。@ 用于查找工作文件。图片是否能直接发送由当前模型通道的能力决定。" },
+      { title: "选择 Skills", body: "Skills 是可复用的工作说明。点输入框旁的 Skills，选择本轮需要的能力；选择会把对应说明加入请求。不要把列表中的“可用”理解为模型已经执行过。" },
+      { title: "斜杠命令", body: "输入 / 查看当前可用命令，例如查看帮助、浏览文件、调整思考强度、压缩上下文、清空队列或导出。命令支持范围以当前页面实际显示为准。" },
+      { title: "草稿与任务模板", body: "尚未发送的文字、所选材料会按会话保存为浏览器草稿。任务模板用于复用任务说明；导入后先检查草稿、模型和目录，再发送。模板不会自动搬运账号或文件。" },
+    ], action: "compose", actionLabel: "回到输入框",
+  },
+  {
+    id: "process", title: "过程、工具与确认", summary: "看懂当前进度，需要你决定时再介入。",
+    sections: [
+      { title: "过程和最终回答", body: "思考、中间说明和工具调用归入每轮过程，可以收起或展开。最终回答、工具失败和待确认信息保持可见；设置中可以调整完成后自动收起过程的偏好。" },
+      { title: "工具正在做什么", body: "展开工具记录，查看真实工具名、命令或文件路径及结果。“已完成”表示这轮执行结束，重要成果仍需要你检查。" },
+      { title: "回答确认问题", body: "出现待确认卡片时，阅读具体问题并在卡片中选择或填写。停止按钮用于结束本轮执行，已经发生的文件修改不会自动撤销。" },
+      { title: "上下文、用量与恢复", body: "运行详情展示当前模型、上下文和用量，以及可用的压缩、重试等控制。压缩适合对话变长时整理上下文。断连时保留的状态可能不是最新值；先恢复连接，结果待确认时先核对记录再重发。" },
+    ], action: "runtime", actionLabel: "打开当前运行详情", needsSession: true,
+  },
+  {
+    id: "artifacts", title: "成果、版本与选段修改", summary: "直接看生成的文件，指出具体要改的部分。",
+    sections: [
+      { title: "打开成果侧栏", body: "在会话右上角打开成果，可预览 Markdown、文本、CSV、图片和静态 HTML。没有成果时，先让模型完成一个明确任务，或从工作文件入口查看已有文件。" },
+      { title: "查看版本与差异", body: "选择已记录的版本、比较新旧内容，或下载文件。旧会话未记录的历史不能补造；版本查看和对话分支都不会自动回滚你的工作目录。" },
+      { title: "引用文字或图片区域", body: "在原文中选中文字并点引用选段，或在图片上框选区域并点引用选区。它会加入草稿，补充修改要求后发送。原文件已经变化时，需要重新选择。" },
+      { title: "预览范围", body: "HTML 采用静态隔离预览，不运行脚本和外部资源。CSV 表格预览有行列上限，下载保留原文件。PDF、Office 等未支持的格式可在本机应用中打开。" },
+    ], action: "artifacts", actionLabel: "打开当前成果", needsSession: true,
+  },
+  {
+    id: "materials", title: "项目资料与本次使用", summary: "复用长期要求，也能追溯每一轮提交的内容。",
+    sections: [
+      { title: "保存项目资料", body: "点工作文件夹旁的项目资料，保存项目背景、写作要求和常用约定。明确保存并启用后，这些内容会加入该项目后续的新消息，不需要每轮重复粘贴。" },
+      { title: "编辑、停用与删除", body: "资料按工作文件夹隔离。修改只影响后续消息，停用或删除不会从已发送的会话历史中撤回内容。大文件通过原路径引用更合适。" },
+      { title: "展开本次使用", body: "自己的消息下方可以查看实际提交的资料版本、Skills 来源、文件引用、附件和成果选段。“已提交”表示 Pi 已接收，不代表模型已经读完每个文件。旧消息没有记录时不会补造来源。" },
+    ], action: "materials", actionLabel: "找到项目资料入口",
+  },
+  {
+    id: "settings", title: "设置、连接与常见问题", summary: "连接自己的模型服务，调整偏好，确认当前版本。",
+    sections: [
+      { title: "连接模型服务", body: "在设置的模型与通道中连接自己的服务，填写服务地址、API Key 和模型。按页面流程检查并保存。能获取模型列表不代表已经完成真实对话，保存后可以用一条简单消息验证。" },
+      { title: "外观与使用", body: "调整页面提供的主题、强调色和过程折叠等偏好。Logo 旁和设置页顶部显示当前服务版本，便于核对升级是否生效。" },
+      { title: "发送按钮不能用", body: "先确认本地服务已连接、已选择可用模型和工作文件夹，再查看输入框下方的原因。模型或通道不可用时，检查设置中的连接情况，不必反复发送同一条任务。" },
+      { title: "这台电脑与其他电脑", body: "Web 连接的是运行 MMS 的这台电脑。localhost 地址不能直接给别人使用；其他人需要在自己的电脑安装并连接自己的服务。" },
+      { title: "重新查看引导", body: "首次进入会展示入门引导，可以跳过。之后点击页面右上角的 ? 随时重开，查找功能或再走一次入门流程。" },
+    ], action: "settings", actionLabel: "打开设置",
+  },
+];
+
+export const starterPrompt = "请用两句话介绍你能怎样协助我完成当前项目，再给出一个最小的下一步建议。先不要读取或修改文件，也不要执行命令。";
+
+export function appendGuidePrompt(current: string, example: string): string {
+  return current.trim() ? `${current}\n\n${example}` : example;
+}
+
+export function matchingTopics(query: string): GuideTopic[] {
+  const term = query.trim().toLocaleLowerCase();
+  return guideTopics.filter(topic => !term || [topic.title, topic.summary, ...topic.sections.flatMap(s => [s.title, s.body])].join(" ").toLocaleLowerCase().includes(term));
+}

@@ -32,6 +32,10 @@ import {
   WorkspacePicker,
   harnessNames,
 } from "./components";
+import { HelpGuide } from "./HelpGuide";
+import { GuidedTour } from "./GuidedTour";
+import type { TourStep } from "./GuidedTour";
+import type { GuideAction } from "./guide-content";
 import { ArtifactView } from "./ArtifactView";
 import { ProjectMaterials } from "./ProjectMaterials";
 import { Transcript } from "./Transcript";
@@ -83,6 +87,10 @@ export function App() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [page, setPage] = useState<Page>("new");
+  const [guideOpen, setGuideOpen] = useState(false);
+  const [guideStep, setGuideStep] = useState<TourStep | null>(null);
+  const [guideSettingsKey, setGuideSettingsKey] = useState(0);
+  const [guideRequest, setGuideRequest] = useState<{ nonce: string; text: string }>();
   const [selectedId, setSelectedId] = useState("");
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [sessionError, setSessionError] = useState("");
@@ -311,8 +319,9 @@ export function App() {
     }
     action();
   }
-  function navigate(next: Page) {
+  function navigate(next: Page, after?: () => void) {
     requestNavigation(() => {
+    setGuideStep(null);
     setPage(next);
     if (next !== "session")
       history.replaceState(null, "", location.pathname + location.search);
@@ -322,10 +331,41 @@ export function App() {
       setDetail(null);
       currentSelection.current = "";
     }
+    after?.();
     });
   }
+  function beginGuideStep(step: TourStep) {
+    const apply = () => { setGuideOpen(false); setGuideStep(step); };
+    if (step !== "artifacts" && step !== "runtime") setPanel(false);
+    if (step !== "model" && step !== "effort") {
+      document.querySelectorAll<HTMLElement>('.studio-popover:popover-open').forEach(el => el.hidePopover());
+    }
+    if (step === "connection" || step === "settings") {
+      navigate("models", () => { setGuideSettingsKey(old => old + 1); apply(); });
+    } else if (step === "workspace" || step === "compose" || (page === "models" && !["finish", "sessions"].includes(step))) {
+      navigate("new", apply);
+    } else {
+      if (step === "artifacts" || step === "runtime") { setPanel(true); setPanelTab(step === "artifacts" ? "artifacts" : "runtime"); }
+      setNavOpen(step === "sessions");
+      apply();
+    }
+  }
+  function guideNavigate(action: GuideAction) {
+    const steps: Record<GuideAction, TourStep> = { settings: "settings", workspace: "workspace", model: "model", compose: "compose", materials: "materials", artifacts: "artifacts", runtime: "runtime" };
+    beginGuideStep(steps[action]);
+  }
+  function guideExample(text: string) {
+    navigate("new", () => {
+      setGuideRequest({ nonce: crypto.randomUUID(), text });
+      setGuideStep("compose");
+    });
+  }
+  useEffect(() => {
+    if (guideStep === "send" && page === "session" && detail) setGuideStep("reply");
+  }, [guideStep, page, detail?.session.id]);
   function openSession(id: string) {
     requestNavigation(() => {
+    setGuideStep(null);
     history.replaceState(null, "", "#session=" + encodeURIComponent(id));
     followOutput.current = true;
     holdPosition.current = false;
@@ -355,6 +395,7 @@ export function App() {
       const result = await mutate<SessionDetail>(path, body);
       if (create) {
         openSession(result.session.id);
+        if (guideStep === "send") setGuideStep("reply");
         setDetail(result);
       } else if (currentSelection.current === originId) setDetail(result);
       setData((old) => ({
@@ -688,6 +729,7 @@ export function App() {
             </strong>
           </div>
           <div className="topbar-actions">
+            <HelpGuide ready={!loading} open={guideOpen} setOpen={(open) => { if (open) setGuideStep(null); setGuideOpen(open); }} hasSession={page === "session" && !!detail} navigate={guideNavigate} startTour={() => beginGuideStep("welcome")} />
             {detail && (
               <Status
                 session={detail.session}
@@ -706,6 +748,7 @@ export function App() {
             )}
           </div>
         </header>
+        {guideStep && <GuidedTour step={guideStep} move={beginGuideStep} close={() => setGuideStep(null)} help={() => { setGuideStep(null); setGuideOpen(true); }} example={guideExample} modelReady={data.presets.some(p => p.available)} configure={!!data.capabilities.configure} hasSession={page === "session" && !!detail} />}
         {isPreview && (
           <div className="preview-banner">
             <span>
@@ -773,6 +816,8 @@ export function App() {
                 key={`new:${workspaceId}:${recipe?.key || ""}`}
                 draftKey={`new:${workspaceId}:${recipe?.key || ""}`}
                 initialText={recipe?.prompt}
+                guideRequest={guideRequest}
+                guideHandled={() => setGuideRequest(undefined)}
                 workspaceId={workspaceId}
                 disabled={
                   !connected ||
@@ -896,6 +941,7 @@ export function App() {
         )}
         {page === "models" && (
           <SettingsPage
+            key={guideSettingsKey}
             requestNavigation={requestNavigation}
             editStateChanged={setSettingsEdit}
             autoCollapseProcess={autoCollapseProcess}

@@ -62,7 +62,7 @@ export function Models({
               管理通道模型
             </button>
           )}
-          <button className="button" onClick={() => setAdd(true)}>
+          <button data-guide="connect" className="button" onClick={() => setAdd(true)}>
             {data.capabilities.configure ? (
               <Plus size={16} />
             ) : (
