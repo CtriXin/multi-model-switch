@@ -11,8 +11,8 @@ MMS Web 把 MMF 日常使用的模型、通道、effort、工作文件夹和 Pi 
 安装指定版本：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.0.0/install.sh -o /tmp/mms-install-v4.sh
-bash /tmp/mms-install-v4.sh --ref v4.0.0 --install-cli pi --write-shell-rc
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.0.1/install.sh -o /tmp/mms-install-v4.sh
+bash /tmp/mms-install-v4.sh --ref v4.0.1 --install-cli pi --write-shell-rc
 ```
 
 关闭终端后重新打开，运行：
@@ -40,7 +40,7 @@ macOS 也可以在 Finder 打开 `~/.mms/MMS Web.command`。如果从 Finder 启
 
 模型名相同时，先选模型，再比较通道。收藏、通道备注和首选通道用于快速选择。实际运行参数以 MMS 发布的模型能力和所选通道为准，不能单凭模型名字判断图片、上下文或 reasoning 能力。
 
-连接了已批准 MMF Registry 的配置源时，模型管理中可维护可见模型与默认 effort。纯 Web 独立配置可先添加通道/模型并选择本次 effort；v4 的长期默认 effort 管理入口尚未与该简易配置合一。对 Registry 管理的配置，页面会显示差异并要求明确确认。模型默认值可能由多条通道共用，保存前会列出受影响通道。新会话及切换模型时采用这些默认值；当前会话的 effort 也可单独调整。
+独立 Web 配置和已批准的 MMF Registry 都可在模型管理中维护可见模型与长期默认 effort。保存前会显示具体差异；独立配置保存在自己的 Web 数据目录，使用相同的 Registry 校验与发布流程。旧独立配置首次保存时会保留其全部通道，之后以已批准目录作为模型与连接来源。模型默认值可能由多条通道共用，保存前会列出受影响通道。新会话及切换模型时采用这些默认值；当前会话的 effort 也可单独调整。
 
 普通 `mms web` 默认在独立 Web 数据目录中配置，不需要先做 CLI 配置。高级 `mms config web` 仍保留，负责 Web 尚未覆盖的 Registry、账号、协议等完整配置。
 

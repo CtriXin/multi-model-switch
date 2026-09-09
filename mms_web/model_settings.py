@@ -1,6 +1,8 @@
 """Human-reviewed model configuration, backed by MMF's existing audited writer."""
 from __future__ import annotations
 import hashlib
+from contextlib import contextmanager
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -34,7 +36,23 @@ class ModelSettings:
         # must not become writable merely because the worker uses preview mode.
         if self.catalog._is_protected_real_root() and self.root != (self.catalog._real_home() / ".config/mms-next").resolve():
             return False
-        return (self.root / "generated/model-registry.latest-approved.json").is_file()
+        return ((self.root / "generated/model-registry.latest-approved.json").is_file()
+                or (self.catalog._local_setup() and self.catalog.capabilities()["configure"]
+                    and (self.root / "config.toml").is_file()))
+
+    @contextmanager
+    def serialized(self):
+        # Share the connection editor's lock, including across server processes.
+        with self.lock:
+            with (self.catalog._state_root / "apply.lock").open("a+") as handle:
+                fcntl.flock(handle, fcntl.LOCK_EX)
+                try:
+                    yield
+                finally:
+                    fcntl.flock(handle, fcntl.LOCK_UN)
+
+    def confirmation(self):
+        return "保存设置" if self.catalog._local_setup() else "写入预览DB"
 
     def fingerprint(self):
         h = hashlib.sha256()
@@ -49,14 +67,17 @@ class ModelSettings:
         if not self.available():
             raise WebError("CONFIG_UNAVAILABLE", "该配置来源没有已批准的 MMF 模型目录。", 409)
         self.state.mkdir(parents=True, exist_ok=True, mode=0o700)
-        snapshot = None if write else snapshot_config(self.root, self.state)
+        snapshot = None if write else snapshot_config(self.root, self.state,
+            published_credentials_only=self.catalog._local_setup())
         root = self.root if write else snapshot
         env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(self.state / "home"),
-               "MMS_CONFIG_ROOT": str(root), "MMS_PREVIEW_MODE": "1", "MMS_COMMAND_NAME": "mmf"}
+               "MMS_CONFIG_ROOT": str(root), "MMS_PREVIEW_MODE": "1", "MMS_COMMAND_NAME": "mmf",
+               "MMS_WEB_STANDALONE": "1" if self.catalog._local_setup() else "0"}
         Path(env["HOME"]).mkdir(mode=0o700, exist_ok=True)
         try:
             process = subprocess.run([sys.executable, str(Path(__file__).with_name("model_settings_worker.py"))],
-                input=json.dumps({**payload, "root": str(root)}), capture_output=True, text=True, env=env, timeout=90)
+                input=json.dumps({**payload, "root": str(root), "standalone": self.catalog._local_setup()}),
+                capture_output=True, text=True, env=env, timeout=90)
             try:
                 result = json.loads(process.stdout)
             except ValueError:
@@ -76,7 +97,8 @@ class ModelSettings:
             result = self.worker({"action": "read"})
             if before != self.fingerprint():
                 raise WebError("CONFIG_STALE", "配置刚刚发生变化，请重新加载。", 409)
-            return {**result, "fingerprint": before, "configRoot": str(self.root)}
+            return {**result, "fingerprint": before, "configRoot": str(self.root),
+                    "configScope": "standalone" if self.catalog._local_setup() else "mmf"}
 
     def _check(self, payload):
         if payload.get("fingerprint") != self.fingerprint():
@@ -116,14 +138,14 @@ class ModelSettings:
             record = {"needsKey": bool(key), "draft": draft, "createdAt": time.time(), "changes": result["changes"]}
             private_json(self.state / f"{token}.json", record)
             return {"previewId": token, "changes": result["changes"], "configRoot": str(self.root),
-                    "confirmPhrase": "写入预览DB",
+                    "confirmPhrase": self.confirmation(),
                     "writeSummary": "更新列出的通道连接、模型目录或默认值；新 Key 由 MMF 保存到本机凭据库，不会在页面回显。由 MMF 创建备份，发布后校验，失败时回滚。新会话读取新配置。"}
 
     def apply(self, payload):
         token = str(payload.get("previewId", ""))
-        if not re.fullmatch(r"[a-f0-9]{32}", token) or payload.get("confirmPhrase") != "写入预览DB":
+        if not re.fullmatch(r"[a-f0-9]{32}", token) or payload.get("confirmPhrase") != self.confirmation():
             raise WebError("CONFIRM_REQUIRED", "请检查具体变更并输入确认文字后保存。", 409)
-        with self.lock:
+        with self.serialized():
             path = self.state / f"{token}.json"
             if not path.is_file():
                 raise WebError("PREVIEW_MISSING", "变更预览已失效，请重新检查。", 409)
@@ -143,7 +165,7 @@ class ModelSettings:
                 draft["connection"] = {**draft.get("connection", {}), "apiKey": secret[1]}
             record["started"] = True
             private_json(path, record)
-            result = self.worker({**draft, "action": "apply", "confirmPhrase": payload["confirmPhrase"]}, write=True)
+            result = self.worker({**draft, "action": "apply", "confirmPhrase": "写入预览DB"}, write=True)
             self.secret_drafts.pop(token, None)
             record["result"] = result
             private_json(path, record)

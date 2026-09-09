@@ -78,7 +78,7 @@ def _read_bytes(path: Path) -> bytes:
 
 def _revision_of(config_root: Path) -> str:
     digest = hashlib.sha256()
-    for name in ("config.toml", "credentials.sh"):
+    for name in ("config.toml", "credentials.sh", "generated/model-registry.latest-approved.json"):
         digest.update(name.encode("utf-8"))
         digest.update(b"\0")
         digest.update(_read_bytes(config_root / name))
@@ -242,6 +242,11 @@ def _cmd_apply_config(stream, payload):
             # CAS re-verified inside the writer critical section.
             if expected_revision and _revision_of(config_root) != expected_revision:
                 _fail(stream, "CONFIG_STALE", "配置在应用时被其他进程修改，已中止")
+                return
+
+            if payload.get("standalone") is True:
+                from mms_web.standalone_config import apply_connection
+                _emit(stream, apply_connection(config_root, payload))
                 return
 
             if config_path.exists():

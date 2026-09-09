@@ -15,10 +15,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from mms_web.errors import WebError
 
 
-def load(root):
+def load(root, *, standalone=False):
     import mms_config_web as web
     from mms_registry_cli import verify_approved_bundle
-    verified = verify_approved_bundle(config_dir=str(root))
+    if standalone and not (root / "generated/model-registry.latest-approved.json").exists():
+        from mms_web.standalone_config import unpublished_settings
+        return unpublished_settings(root)
+    try:
+        verified = verify_approved_bundle(config_dir=str(root))
+    except Exception as exc:
+        raise WebError("INVALID_BUNDLE", "MMF 模型目录校验失败，请先修复配置来源。", 409) from exc
     if not verified.get("verified"):
         raise WebError("INVALID_BUNDLE", "MMF 模型目录校验失败，请先修复配置来源。", 409)
     path = root / "config.toml"
@@ -57,23 +63,37 @@ def public_rows(rows):
     import mms_core
     from mms_web.launch_options import public_options
     cfg = mms_core._load_preview_runtime_config_from_latest_bundle()
+    if not cfg and not (Path(os.environ["MMS_CONFIG_ROOT"]) / "generated/model-registry.latest-approved.json").exists():
+        from mms_web.standalone_config import unpublished_config
+        cfg = unpublished_config(Path(os.environ["MMS_CONFIG_ROOT"]))
     cfg = mms_core.apply_local_overrides(mms_core._merge_preview_local_launch_preferences(cfg))
     result = []
     for p in rows:
         models = []
         runtime = None
-        if "pi" in p.get("supported_clis", []):
-            try:
-                runtime = mms_core._runtime_with_launch_preferences(cfg, mms_core.resolve_provider_context(cfg, p["id"]), "pi")
-            except (Exception, SystemExit):
-                pass
+        try:
+            import mms_launchers
+            candidate = mms_core.resolve_provider_context(cfg, p["id"])
+            if os.environ.get("MMS_WEB_STANDALONE") == "1":
+                approved = next((v for v in cfg.get("providers", []) if v.get("id") == p["id"] and v.get("_mms_bundle_runtime")), None)
+                if approved:
+                    for field in ("api_key", "openai_api_key", "base_url", "openai_base_url", "anthropic_base_url"):
+                        candidate[field] = approved.get(field, "")
+            mms_launchers.validate_provider_for_cli("pi", candidate)
+            runtime = mms_core._runtime_with_launch_preferences(cfg, candidate, "pi")
+        except (Exception, SystemExit):
+            pass
         for m in p["models"]:
             caps = m.get("capabilities") or {}
             effort = m.get("policyEffort", "")
             options = {}
             if runtime:
                 try:
-                    options = public_options(runtime, m["id"])
+                    if (Path(os.environ["MMS_CONFIG_ROOT"]) / "generated/model-registry.latest-approved.json").exists():
+                        options = public_options(runtime, m["id"])
+                    else:
+                        from mms_web.standalone_config import unpublished_options
+                        options = unpublished_options(runtime, m["id"])
                 except (Exception, SystemExit):
                     pass
             # MMF policy cannot represent Pi's off/minimal as distinct defaults.
@@ -146,13 +166,17 @@ def draft_for(rows, request, revision):
     payload = {"draft": {"providers": rows}, "expected_bundle_revision": revision, "route_scope_provider_ids": [provider_id]}
     if changed_routes:
         payload.update(route_scope_provider_ids=[provider_id], route_refresh_provider_ids=[provider_id])
+    if not revision:
+        # No published baseline exists yet: import every legacy channel once.
+        ids = [p["id"] for p in rows]
+        payload.update(route_scope_provider_ids=ids, route_refresh_provider_ids=ids)
     return payload, changes
 
 
 def run(request):
     import mms_config_web as web
     root = Path(request["root"])
-    cfg, rows, revision = load(root)
+    cfg, rows, revision = load(root, standalone=request.get("standalone") is True)
     action = request["action"]
     if action == "read":
         return {"revision": revision, "providers": public_rows(rows)}
