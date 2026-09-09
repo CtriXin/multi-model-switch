@@ -207,3 +207,16 @@ Session 增加 `presetId`，assistant event 增加 `modelName`。已有回答保
 `POST /api/v1/workspaces/rename` 接收 `{id, name}`；`POST /api/v1/workspaces/remove` 接收 `{id}`。移除仅标记 Web 工作空间 `hidden: true`，bootstrap 不再列出，但会话、文件引用、Skills 和项目资料仍使用原 ID 解析。重新添加同一路径会恢复相同 ID。启动目录 default 不允许移除。
 
 HTTP HEAD 遵循 GET 的 Host/Origin 校验，仅返回响应头。`X-MMS-Web-Identity` 是安装目录、配置目录和版本的摘要，用于安装器识别可复用实例，不作为认证凭据。
+
+
+## 版本检查与安全更新（本分支）
+
+- `GET /update` 返回 currentVersion、latest、updateAvailable、enabled、checking、checkedAt、operation 和 canUpgrade。
+- `POST /update/check {}` 发起后台检查；手动请求有60秒间隔，自动成功检查间隔6小时、网络失败后30分钟再试。
+- `POST /update/preferences {enabled: boolean}` 只保存 Web 更新偏好。
+- `POST /update/start {target: "vX.Y.Z"}` 只接受已检查、比当前更新的稳定版本；重复请求复用正在进行的更新。
+- `POST /update/cancel {}` 取消准备/等待阶段。提交切换后不能取消。
+- `GET /update/identity` 用于更新守护进程核对服务来源及会话清单；不能用HTTP200替代身份和历史检查。
+- 更新准备期间可继续操作；切换与候选验证期间普通POST返回409 UPDATE_IN_PROGRESS。原服务的CSRF、Host及Origin保护继续适用。
+
+当前策略保留全部Pi原进程，因此空闲但保持连接的会话也会使更新等待。更改这一策略前必须明确正常退出与原进程连续性的边界。见 UPGRADE-SAFETY.md。

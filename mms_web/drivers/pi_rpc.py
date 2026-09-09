@@ -136,6 +136,19 @@ class PiRpcDriver:
         except (OSError, AttributeError):
             pass
 
+    def close_for_update(self, *, timeout: float = 10.0) -> bool:
+        """Request an explicitly approved idle restart; never escalate to SIGKILL.
+
+        Keep stdin open if the child ignores termination, so a failed update
+        does not itself break the original RPC transport.
+        """
+        if self.alive():
+            self._terminate_group(signal.SIGTERM)
+        if not self.wait(timeout=timeout):
+            return False
+        self._notify_exit()
+        return True
+
     def close(self, *, graceful_timeout: float = 5.0) -> None:
         """Stop the child: stdin EOF first, then terminate, then kill.
 
