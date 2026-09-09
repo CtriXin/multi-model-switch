@@ -5,9 +5,10 @@ import type { GuideAction } from "./guide-content";
 import "./guide.css";
 
 const seenKey = "mms-web-tour-seen-v1";
-export function HelpGuide({ ready, modelReady, open, setOpen, hasSession, navigate, startTour }: {
+export function HelpGuide({ ready, modelReady, open, setOpen, hasSession, navigate, startTour, startConnection }: {
   ready: boolean; modelReady: boolean; open: boolean; setOpen: (open: boolean) => void;
   hasSession: boolean; navigate: (action: GuideAction) => void; startTour: () => void;
+  startConnection?: () => void;
 }) {
   const [section, setSection] = useState("start");
   const [query, setQuery] = useState("");
@@ -58,6 +59,7 @@ export function HelpGuide({ ready, modelReady, open, setOpen, hasSession, naviga
             <h3>让我们一起开始第一条对话</h3>
             <p className="guide-lead">不用先读完说明书。悬浮引导会圈亮真实按钮和输入框，一步步带你选择文件夹、模型与思考强度，再写下并发送第一条消息。</p>
             <button type="button" className="button primary" onClick={() => { close(); startTour(); }}>{modelReady ? "带我一步步操作" : "先配置模型服务"} <ArrowRight size={15} /></button>
+            {modelReady && startConnection && <button type="button" className="text-button guide-connection-entry" onClick={() => { close(); startConnection(); }}>引导我连接新通道<ArrowRight size={15} /></button>}
             <p className="guide-footnote">可以直接操作亮起的功能，随时跳过。已有草稿和会话会保留；引导不会替你发送消息。</p>
             <div className="guide-article"><section><h4>暂时没有模型服务？</h4><p>你需要服务商提供的 API 地址和 API Key（连接密钥）。我们会先带你填写连接信息并读取模型预设，成功后再介绍聊天功能。没有服务信息也可以稍后配置。</p></section><section><h4>只想了解某个功能？</h4><p>从目录选择，或搜索「effort」「路径」「成果」。每篇说明都可以带你找到实际入口。</p></section></div>
           </> : topic && <>

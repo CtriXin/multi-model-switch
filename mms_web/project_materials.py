@@ -138,9 +138,14 @@ class ProjectMaterials:
         return suffix, records
 
 
-def usage_record(cwd, skills, attachments, references, selections, materials):
+def usage_record(cwd, skills, attachments, references, selections, materials, invocation=None):
     """Only record material actually assembled for this request; no load claims."""
     items = [{"kind": "skill", **skill} for skill in skills]
+    if invocation is not None:
+        match = next((item for item in items if item.get("id") == invocation), None)
+        if match is None:
+            raise WebError("INVALID_SKILL", "请重新选择要调用的 Skill。", 409)
+        match["invocationRequested"] = True
     items.extend({"kind": "attachment", **item, "path": item.get("localPath"),
                   "referenceOnly": item.get("source") == "local"} for item in attachments)
     items.extend({"kind": "reference", "path": path} for path in references)

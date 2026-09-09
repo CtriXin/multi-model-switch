@@ -77,7 +77,7 @@ class SessionActions:
             return self._runtime_view_locked(session)
 
     def _runtime_view_locked(self, session):
-        cached = session.meta.get("runtimeView", {})
+        cached = {**session.meta.get("runtimeView", {}), "contextEvidence": session.meta.get("contextEvidence")}
         if not session.alive() or time.monotonic() - getattr(session, "runtime_checked", 0) < 4:
             return {**cached, "alive": session.alive(), "cwd": session.meta.get("cwd"), "cached": not session.alive(), "planning": session.meta.get("planning", False)}
         session.runtime_checked = time.monotonic()
@@ -90,6 +90,7 @@ class SessionActions:
                 view["autoRetryEnabled"] = session.meta["controlSettings"]["autoRetry"]
             from .launch_options import supported_levels
             view["supportedThinkingLevels"] = supported_levels(model)
+            view["contextEvidence"] = session.meta.get("contextEvidence")
             view["planning"] = session.meta.get("planning", False)
             view["queue"] = session.meta.get("queue", [])
             view.update({"model": {key: model[key] for key in ("id", "name", "provider", "api", "reasoning", "input", "contextWindow", "maxTokens") if key in model},
