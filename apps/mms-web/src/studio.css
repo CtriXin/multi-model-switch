@@ -912,40 +912,45 @@
   margin-top: 2px;
   max-width: 52ch;
 }
-/* Inside the sheet the pane itself scrolls. Nested scrollers left the parts
-   that actually need room, the model list and the channel table, moving
-   inside a few hundred pixels while the sheet stayed still. */
+/* Two shapes of content, two rules.
+   A single column, the channel table, scrolls with the pane: nesting a
+   scroller there left the rows that need the most room inside a strip.
+   Master-detail is the opposite. Sharing one scrollbar between a long model
+   list and a short detail means neither reaches its own end, so each column
+   fills the sheet and scrolls on its own. */
 .settings-shell .settings-page {
+  /* Must be a flex child of the sheet, or "fill the sheet" below resolves
+     against content height and both columns grow past the frame. */
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  min-height: 0;
 }
-.settings-shell .model-groups,
-.settings-shell .model-detail,
 .settings-shell .channel-model-rows {
   max-height: none;
   min-height: 0;
   overflow: visible;
 }
-.settings-shell .model-explorer {
+.settings-shell .settings-page.model-library {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.settings-shell .model-library > .model-explorer {
+  flex: 1;
   min-height: 0;
-  /* Any clipped ancestor between a sticky element and its scrollport cancels
-     the stickiness, so the frame stops clipping and the panes round instead. */
-  overflow: visible;
+  overflow: hidden;
 }
-.settings-shell .model-groups {
-  border-radius: 14px 0 0 14px;
+/* The grid between the frame and the columns carries its own min-height and
+   was growing past the frame, which clipped both columns short of their end. */
+.settings-shell .model-library .explorer-columns {
+  height: 100%;
+  min-height: 0;
 }
-.settings-shell .model-detail {
-  border-radius: 0 14px 14px 0;
-}
-/* With one scroller the detail column would slide away while the model list
-   keeps going, leaving the pane you are reading off screen. Pin it instead. */
-.settings-shell .model-detail {
-  position: sticky;
-  top: 0;
-  align-self: start;
-  max-height: 100%;
+.settings-shell .model-library .model-groups,
+.settings-shell .model-library .model-detail {
+  max-height: none;
+  min-height: 0;
   overflow-y: auto;
 }
 .general-settings {
