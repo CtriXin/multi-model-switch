@@ -131,7 +131,7 @@
 }
 .capability-review-row {
   display: grid;
-  grid-template-columns: auto minmax(0, 1.4fr) minmax(0, 1.1fr) auto;
+  grid-template-columns: auto minmax(0, 1.4fr) minmax(8rem, 1.1fr) minmax(0, 1fr);
   align-items: center;
   gap: 10px;
   padding: 9px 12px;
@@ -161,7 +161,7 @@
   align-items: center;
   gap: 7px;
   min-width: 0;
-  font-size: 12px;
+  font-size: max(11px, .857143rem);
 }
 .capability-review-change > span {
   overflow: hidden;
@@ -175,7 +175,7 @@
   gap: 6px;
 }
 .source-chip {
-  font-size: 11px;
+  font-size: max(11px, .785714rem);
   padding: 2px 8px;
   border-radius: 999px;
   background: var(--soft);
@@ -212,10 +212,11 @@
   margin: 0;
   padding-left: 18px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: max(11px, .857143rem);
 }
 .capability-review footer {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
 }
@@ -377,6 +378,12 @@
   margin-top: 20px;
 }
 @media (max-width: 650px) {
+  .capability-review-row { grid-template-columns: 20px minmax(0, 1fr); gap: 8px 10px; }
+  .capability-review-row > input { grid-column: 1; grid-row: 1; align-self: start; }
+  .capability-review-model { grid-column: 2; grid-row: 1; }
+  .capability-review-model strong { white-space: normal; overflow-wrap: anywhere; }
+  .capability-review-change { grid-column: 2; grid-row: 2; flex-wrap: wrap; }
+  .capability-review-source { grid-column: 2; grid-row: 3; justify-content: flex-start; }
   .channel-model-table-head,
   .channel-model-row {
     grid-template-columns: minmax(0, 1fr) 125px;
