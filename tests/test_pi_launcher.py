@@ -1,5 +1,115 @@
 import json
+import os
 from pathlib import Path
+import subprocess
+import textwrap
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def isolate_pi_capability_bundle(monkeypatch):
+    import mms_launchers
+
+    real_resolve = mms_launchers._pi_support.resolve_model_capabilities
+
+    def resolve_without_default_bundle(*args, **kwargs):
+        kwargs.setdefault("approved_facts", {})
+        kwargs.setdefault("model_policy", {})
+        return real_resolve(*args, **kwargs)
+
+    monkeypatch.setattr(mms_launchers._pi_support, "resolve_model_capabilities", resolve_without_default_bundle)
+
+
+def test_pi_global_executable_uses_path_binary(monkeypatch, tmp_path):
+    import mms_pi_support
+
+    binary = tmp_path / "pi"
+    binary.write_text("#!/bin/sh\n", encoding="utf-8")
+    binary.chmod(0o755)
+    monkeypatch.setattr(mms_pi_support.shutil, "which", lambda name: str(binary) if name == "pi" else None)
+
+    assert mms_pi_support._pi_global_executable() == str(binary)
+
+
+def test_glint_pi_bridge_requires_glint_pane_and_managed_extension(monkeypatch, tmp_path):
+    import mms_pi_support
+
+    real_home = tmp_path / "real-home"
+    bridge = real_home / ".pi" / "agent" / "extensions" / "glint-agent-bridge.ts"
+    monkeypatch.setattr(
+        mms_pi_support,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+    pane_env = {
+        "GLINT_PANE_ID": "workspace:pane",
+        "GLINT_AGENT_SOCK": "/tmp/glint.sock",
+    }
+
+    assert mms_pi_support._glint_pi_bridge_path(pane_env) == ""
+    bridge.parent.mkdir(parents=True)
+    bridge.write_text("export default function () {}\n", encoding="utf-8")
+    assert mms_pi_support._glint_pi_bridge_path(pane_env) == ""
+
+    bridge.write_text("// Glint pi extension\n", encoding="utf-8")
+    assert mms_pi_support._glint_pi_bridge_path(pane_env) == str(bridge)
+    assert mms_pi_support._glint_pi_bridge_path({"GLINT_PANE_ID": "workspace:pane"}) == ""
+
+
+def test_launch_pi_adds_glint_bridge_as_explicit_extension(monkeypatch):
+    import mms_pi_support
+
+    captured = {}
+    bridge = "/tmp/glint-agent-bridge.ts"
+    env = {
+        "MMS_PI_PROVIDER": "mms-relay-a",
+        "MMS_PI_SELECTED_MODEL": "gpt-5.4",
+    }
+    monkeypatch.setattr(mms_pi_support, "_pi_gateway_env", lambda *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_pi_support, "_pi_effective_selected_model", lambda *_args: "gpt-5.4")
+    monkeypatch.setattr(mms_pi_support, "_glint_pi_bridge_path", lambda _env: bridge)
+    monkeypatch.setattr(
+        mms_pi_support,
+        "_exec_or_run",
+        lambda cmd, launch_env, once: captured.update(cmd=cmd, env=launch_env, once=once),
+    )
+
+    mms_pi_support.launch_pi(
+        {"model": "gpt-5.4"},
+        {"id": "relay-a", "auth_mode": "api_key"},
+        once=True,
+    )
+
+    assert captured["cmd"] == [
+        "pi",
+        "--provider",
+        "mms-relay-a",
+        "--model",
+        "gpt-5.4",
+        "--extension",
+        bridge,
+    ]
+    assert captured["env"] == env
+    assert captured["once"] is True
+
+
+def test_pi_policy_context_override_beats_provider_profile_default():
+    import mms_pi_support
+
+    result = mms_pi_support._pi_apply_profile_capability_overlay(
+        {
+            "context_window_tokens": 1_048_576,
+            "sources": {"context_window_tokens": "model_policy"},
+        },
+        {
+            "context_window_tokens": 262_144,
+            "sources": {"context_window_tokens": "provider_profile"},
+        },
+    )
+
+    assert result["context_window_tokens"] == 1_048_576
+    assert result["sources"]["context_window_tokens"] == "model_policy"
 
 
 def test_core_pi_cli_is_visible_and_provider_compat_is_implied():
@@ -35,6 +145,192 @@ def test_runtime_resolver_uses_repo_pi_wrapper(monkeypatch, tmp_path):
     assert resolved == str(wrapper)
 
 
+def test_pi_skill_overlay_keeps_project_skill_over_global_duplicate(monkeypatch, tmp_path):
+    import mms_pi_support
+
+    real_home = tmp_path / "real-home"
+    global_skill = real_home / ".agents" / "skills" / "duplicate"
+    project_skill = tmp_path / "project" / ".agents" / "skills" / "duplicate"
+    global_only_skill = real_home / ".agents" / "skills" / "global-only"
+    for skill_dir in (global_skill, project_skill, global_only_skill):
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("---\nname: test\ndescription: test\n---\n", encoding="utf-8")
+    (tmp_path / "project" / ".git").mkdir()
+    monkeypatch.setattr(mms_pi_support, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+
+    overlay = Path(mms_pi_support._pi_materialize_skill_overlay(tmp_path / "session", tmp_path / "project"))
+
+    assert (overlay / "duplicate").is_symlink()
+    assert (overlay / "duplicate").resolve() == project_skill
+    assert (overlay / "global-only").resolve() == global_only_skill
+
+
+def test_pi_wrapper_prefers_a_cached_pi_binary(tmp_path):
+    wrapper = Path(__file__).resolve().parents[1] / "scripts" / "pi-cli-wrapper.sh"
+    cache_dir = tmp_path / "pi-npx"
+    cached_pi = cache_dir / "_npx" / "cached" / "node_modules" / ".bin" / "pi"
+    cached_pi.parent.mkdir(parents=True)
+    (cached_pi.parent.parent / "@earendil-works" / "pi-coding-agent").mkdir(parents=True)
+    (cached_pi.parent.parent / "@earendil-works" / "pi-coding-agent" / "package.json").write_text(
+        '{"name":"@earendil-works/pi-coding-agent"}\n', encoding="utf-8"
+    )
+    cached_pi.write_text("#!/bin/sh\nprintf 'cached-pi:%s\\n' \"$*\"\n", encoding="utf-8")
+    cached_pi.chmod(0o755)
+
+    result = subprocess.run(
+        [str(wrapper), "--version"],
+        check=True,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "MMS_PI_NPX_CACHE": str(cache_dir)},
+    )
+
+    assert result.stdout == "cached-pi:--version\n"
+
+
+def test_pi_wrapper_warms_a_missing_cache_before_running(tmp_path):
+    wrapper = Path(__file__).resolve().parents[1] / "scripts" / "pi-cli-wrapper.sh"
+    cache_dir = tmp_path / "pi-npx"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_npx = fake_bin / "npx"
+    fake_npx.write_text(
+        textwrap.dedent(
+            """\
+            #!/bin/sh
+            set -eu
+            mkdir -p "$MMS_PI_NPX_CACHE/_npx/hash/node_modules/.bin"
+            mkdir -p "$MMS_PI_NPX_CACHE/_npx/hash/node_modules/@earendil-works/pi-coding-agent"
+            printf '#!/bin/sh\\nprintf "warmed-pi:%%s\\\\n" "$*"\\n' > "$MMS_PI_NPX_CACHE/_npx/hash/node_modules/.bin/pi"
+            printf '{"name":"@earendil-works/pi-coding-agent"}\\n' > "$MMS_PI_NPX_CACHE/_npx/hash/node_modules/@earendil-works/pi-coding-agent/package.json"
+            chmod +x "$MMS_PI_NPX_CACHE/_npx/hash/node_modules/.bin/pi"
+            """
+        ),
+        encoding="utf-8",
+    )
+    fake_npx.chmod(0o755)
+
+    result = subprocess.run(
+        [str(wrapper), "--version"],
+        check=True,
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "MMS_PI_NPX_CACHE": str(cache_dir),
+            "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+        },
+    )
+
+    assert result.stdout == "warmed-pi:--version\n"
+
+
+def test_pi_gateway_root_and_sessions_honor_explicit_mms_config_root(monkeypatch, tmp_path):
+    import mms_launchers
+    import mms_pi_support
+
+    preview_root = tmp_path / "mms-next"
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+    monkeypatch.setattr(
+        mms_launchers,
+        "_selected_mms_config_root",
+        lambda _env: str(preview_root),
+    )
+
+    assert mms_pi_support._pi_gateway_root() == str(preview_root / "pi-gateway")
+    assert mms_pi_support._pi_session_dir() == str(preview_root / "pi-gateway" / "sessions")
+    assert mms_pi_support._pi_shared_agent_bin() == str(preview_root / "pi-gateway" / "agent-bin")
+
+
+def test_pi_shared_agent_bin_link_is_reused_across_sessions(monkeypatch, tmp_path):
+    import mms_launchers
+    import mms_pi_support
+
+    preview_root = tmp_path / "mms-next"
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+    monkeypatch.setattr(
+        mms_launchers,
+        "_selected_mms_config_root",
+        lambda _env: str(preview_root),
+    )
+
+    shared_bin = mms_pi_support._pi_shared_agent_bin()
+
+    sessions_dir = preview_root / "pi-gateway" / "s"
+    sessions_dir.mkdir(parents=True)
+
+    first_agent = sessions_dir / "111" / ".pi" / "agent"
+    mms_pi_support._pi_link_shared_agent_bin(str(first_agent))
+    assert os.path.islink(str(first_agent / "bin"))
+    assert os.readlink(str(first_agent / "bin")) == shared_bin
+
+    tool_marker = first_agent / "bin" / "rg"
+    tool_marker.write_text("binary")
+
+    second_agent = sessions_dir / "222" / ".pi" / "agent"
+    mms_pi_support._pi_link_shared_agent_bin(str(second_agent))
+    assert os.path.islink(str(second_agent / "bin"))
+    assert os.readlink(str(second_agent / "bin")) == shared_bin
+    assert (second_agent / "bin" / "rg").read_text() == "binary"
+
+    import shutil
+    shutil.rmtree(str(sessions_dir / "111"))
+    assert (Path(shared_bin) / "rg").exists(), "shared bin must survive per-PID cleanup"
+
+
+def test_pi_wrapper_serializes_cold_npx_prewarm(tmp_path):
+    wrapper = Path(__file__).resolve().parents[1] / "scripts" / "pi-cli-wrapper.sh"
+    bin_dir = tmp_path / "bin"
+    cache_dir = tmp_path / "pi-npx"
+    log_path = tmp_path / "npx.log"
+    bin_dir.mkdir()
+    fake_npx = bin_dir / "npx"
+    fake_npx.write_text(
+        textwrap.dedent(
+            """\
+            #!/bin/sh
+            set -eu
+            printf '%s\\n' "$*" >> "$FAKE_NPX_LOG"
+            case " $* " in
+              *" --version "*)
+                mkdir -p "$FAKE_PI_CACHE/_npx/hash/node_modules/.bin"
+                mkdir -p "$FAKE_PI_CACHE/_npx/hash/node_modules/@earendil-works/pi-coding-agent"
+                printf '#!/bin/sh\\nexit 0\\n' > "$FAKE_PI_CACHE/_npx/hash/node_modules/.bin/pi"
+                printf '{"name":"@earendil-works/pi-coding-agent"}\\n' > "$FAKE_PI_CACHE/_npx/hash/node_modules/@earendil-works/pi-coding-agent/package.json"
+                chmod +x "$FAKE_PI_CACHE/_npx/hash/node_modules/.bin/pi"
+                exit 0
+                ;;
+            esac
+            exit 0
+            """
+        ),
+        encoding="utf-8",
+    )
+    fake_npx.chmod(0o755)
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{bin_dir}{os.pathsep}{env.get('PATH', '')}",
+            "MMS_PI_NPX_CACHE": str(cache_dir),
+            "MMS_PI_NPX_INSTALL_LOCK_TIMEOUT": "10",
+            "FAKE_NPX_LOG": str(log_path),
+            "FAKE_PI_CACHE": str(cache_dir),
+        }
+    )
+
+    processes = [
+        subprocess.Popen([str(wrapper), "--probe", str(index)], env=env)
+        for index in range(4)
+    ]
+    for process in processes:
+        assert process.wait(timeout=15) == 0
+
+    calls = log_path.read_text(encoding="utf-8").splitlines()
+    assert sum("--version" in call for call in calls) == 1
+    # Once prewarmed, the wrapper executes the cached binary directly.
+    assert sum("--probe" in call for call in calls) == 0
+
+
 def test_launch_pi_writes_openai_models_config_and_uses_wrapper(monkeypatch, tmp_path):
     import mms_launchers
 
@@ -47,7 +343,10 @@ def test_launch_pi_writes_openai_models_config_and_uses_wrapper(monkeypatch, tmp
         "_real_user_path",
         lambda *parts: str(real_home.joinpath(*parts)),
     )
+    preview_root = tmp_path / "mms-next"
+    monkeypatch.setattr(mms_launchers, "_selected_mms_config_root", lambda _env: str(preview_root))
     monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers._pi_support, "_pi_materialize_skill_overlay", lambda *_args: "/tmp/pi-skills")
     monkeypatch.setattr(mms_launchers, "_scrub_inherited_runtime_env", lambda env, **_kwargs: env)
     monkeypatch.setattr(mms_launchers, "_inject_real_home_hints", lambda env, include_xdg=False: env)
     monkeypatch.setattr(mms_launchers, "_inject_host_capability_hints", lambda env: env)
@@ -60,7 +359,6 @@ def test_launch_pi_writes_openai_models_config_and_uses_wrapper(monkeypatch, tmp
     monkeypatch.setattr(mms_launchers, "_resolve_weber_root", lambda: "")
     monkeypatch.setattr(mms_launchers, "_resolve_toon_root", lambda: "")
     monkeypatch.setattr(mms_launchers, "_resolve_token_saver_root", lambda: "")
-    monkeypatch.setattr(mms_launchers, "_resolve_xmem_root", lambda: "")
     monkeypatch.setattr(mms_launchers, "_pi_wrapper_path", lambda: "/tmp/pi-wrapper")
     monkeypatch.setattr(mms_launchers, "_probe_models", lambda runtime, emit_output=False: {"models": ["gpt-5.4", "gpt-5.5"]})
     monkeypatch.setattr(mms_launchers.os, "getpid", lambda: 4242)
@@ -86,27 +384,43 @@ def test_launch_pi_writes_openai_models_config_and_uses_wrapper(monkeypatch, tmp
 
     mms_launchers.launch_pi({"model": "gpt-5.4"}, runtime, once=True)
 
-    assert captured["cmd"] == ["pi", "--provider", "mms-relay-a", "--model", "gpt-5.4", "--thinking", "off"]
+    assert captured["cmd"] == [
+        "pi",
+        "--provider",
+        "mms-relay-a",
+        "--model",
+        "gpt-5.4",
+        "--no-skills",
+        "--skill",
+        "/tmp/pi-skills",
+        "--thinking",
+        "off",
+    ]
     assert captured["once"] is True
     assert captured["env"]["MMS_PI_BIN"] == "/tmp/pi-wrapper"
     assert captured["env"]["MMS_PI_NPX_CACHE"].endswith(".ai/cache/pi-npx")
     assert captured["env"]["MMS_PI_SETTINGS_JSON"].endswith("settings.json")
+    assert captured["env"]["PI_CODING_AGENT_SESSION_DIR"] == str(
+        preview_root / "pi-gateway" / "sessions"
+    )
 
-    models_path = real_home / ".config" / "mms" / "pi-gateway" / "s" / "4242" / ".pi" / "agent" / "models.json"
+    models_path = preview_root / "pi-gateway" / "s" / "4242" / ".pi" / "agent" / "models.json"
     payload = json.loads(models_path.read_text(encoding="utf-8"))
     provider = payload["providers"]["mms-relay-a"]
-    assert provider["api"] == "openai-responses"
+    assert provider["api"] == "openai-completions"
     assert provider["baseUrl"] == "https://relay.example.com/v1"
     assert provider["apiKey"] == "sk-openai"
     assert provider["models"][0]["id"] == "gpt-5.4"
     assert provider["models"][1]["id"] == "gpt-5.5"
     settings_payload = json.loads(
-        (real_home / ".config" / "mms" / "pi-gateway" / "s" / "4242" / ".pi" / "agent" / "settings.json").read_text(
+        (preview_root / "pi-gateway" / "s" / "4242" / ".pi" / "agent" / "settings.json").read_text(
             encoding="utf-8"
         )
     )
     assert settings_payload["retry"] == {"enabled": True, "maxRetries": 8, "baseDelayMs": 1000}
+    assert settings_payload["quietStartup"] is True
     assert settings_payload["extensions"][0].endswith("scripts/pi-retry-extension.mjs")
+    assert not (real_home / ".config" / "mms" / "pi-gateway").exists()
 
 
 def test_launch_pi_rewrites_deprecated_antigravity_gemini_alias_to_live_replacement(monkeypatch, tmp_path):
@@ -122,6 +436,7 @@ def test_launch_pi_rewrites_deprecated_antigravity_gemini_alias_to_live_replacem
         lambda *parts: str(real_home.joinpath(*parts)),
     )
     monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers._pi_support, "_pi_materialize_skill_overlay", lambda *_args: "")
     monkeypatch.setattr(mms_launchers, "_scrub_inherited_runtime_env", lambda env, **_kwargs: env)
     monkeypatch.setattr(mms_launchers, "_inject_real_home_hints", lambda env, include_xdg=False: env)
     monkeypatch.setattr(mms_launchers, "_inject_host_capability_hints", lambda env: env)
@@ -134,7 +449,6 @@ def test_launch_pi_rewrites_deprecated_antigravity_gemini_alias_to_live_replacem
     monkeypatch.setattr(mms_launchers, "_resolve_weber_root", lambda: "")
     monkeypatch.setattr(mms_launchers, "_resolve_toon_root", lambda: "")
     monkeypatch.setattr(mms_launchers, "_resolve_token_saver_root", lambda: "")
-    monkeypatch.setattr(mms_launchers, "_resolve_xmem_root", lambda: "")
     monkeypatch.setattr(mms_launchers, "_pi_wrapper_path", lambda: "/tmp/pi-wrapper")
     monkeypatch.setattr(
         mms_launchers,
@@ -222,7 +536,9 @@ def test_get_export_env_for_pi_writes_anthropic_models_config(monkeypatch, tmp_p
     assert provider["models"][0]["input"] == ["text", "image"]
     assert provider["models"][0]["reasoning"] is True
     assert provider["models"][0]["contextWindow"] == 1_000_000
-    assert provider["models"][0]["maxTokens"] == 64_000
+    # Sonnet 4.6 official model page lists 128K max output (verified 2026-09-09).
+    # https://platform.claude.com/docs/en/models/sonnet-4-6/overview
+    assert provider["models"][0]["maxTokens"] == 128_000
     assert provider["models"][0]["compat"] == {"forceAdaptiveThinking": True}
     assert provider["models"][1]["compat"] == {"forceAdaptiveThinking": True}
     settings_payload = json.loads(Path(exports["MMS_PI_SETTINGS_JSON"]).read_text(encoding="utf-8"))
@@ -264,7 +580,7 @@ def test_get_export_env_for_pi_accepts_model_info_when_runtime_has_no_model(monk
     models_path = Path(exports["MMS_PI_MODELS_JSON"])
     payload = json.loads(models_path.read_text(encoding="utf-8"))
     provider = payload["providers"]["mms-relay-c"]
-    assert provider["api"] == "openai-responses"
+    assert provider["api"] == "openai-completions"
     assert provider["models"][0]["id"] == "gpt-5.4"
     assert provider["models"][1]["id"] == "gpt-5.5"
     settings_payload = json.loads(Path(exports["MMS_PI_SETTINGS_JSON"]).read_text(encoding="utf-8"))
@@ -309,11 +625,11 @@ def test_pi_dual_protocol_payload_splits_models_by_preferred_protocol(monkeypatc
     payload = json.loads(Path(exports["MMS_PI_MODELS_JSON"]).read_text(encoding="utf-8"))
     assert set(payload["providers"]) == {
         "mms-newapi-personal-tokyo-anthropic",
-        "mms-newapi-personal-tokyo-responses",
+        "mms-newapi-personal-tokyo-openai",
     }
     assert exports["MMS_PI_PROVIDER"] == "mms-newapi-personal-tokyo-anthropic"
     anthropic_models = payload["providers"]["mms-newapi-personal-tokyo-anthropic"]["models"]
-    openai_models = payload["providers"]["mms-newapi-personal-tokyo-responses"]["models"]
+    openai_models = payload["providers"]["mms-newapi-personal-tokyo-openai"]["models"]
     assert [item["id"] for item in anthropic_models] == ["qwen3.6-plus"]
     assert [item["id"] for item in openai_models] == ["gpt-5.4"]
     assert anthropic_models[0]["reasoning"] is True
@@ -321,6 +637,126 @@ def test_pi_dual_protocol_payload_splits_models_by_preferred_protocol(monkeypatc
     assert anthropic_models[0]["maxTokens"] == 65_536
     assert openai_models[0]["input"] == ["text", "image"]
     assert openai_models[0]["maxTokens"] == 128_000
+
+
+def test_pi_gpt_without_declared_responses_uses_openai_chat(monkeypatch):
+    import mms_launchers
+
+    runtime = {
+        "id": "relay-a",
+        "openai_base_url": "https://relay.example.com/v1",
+        "anthropic_base_url": "https://relay.example.com/anthropic",
+        "protocols": ["anthropic_messages", "openai_chat_completions"],
+    }
+    monkeypatch.setattr(mms_launchers, "_probe_models", lambda *_args, **_kwargs: {"models": ["gpt-5.6-luna"]})
+
+    variants = mms_launchers._pi_protocol_variants(runtime)
+    selected, _caps = mms_launchers._pi_pick_protocol(runtime, "gpt-5.6-luna")
+    payload, provider_ref = mms_launchers._pi_build_models_payload(runtime, "gpt-5.6-luna")
+
+    assert [variant["protocol"] for variant in variants] == [
+        "anthropic_messages",
+        "openai_chat_completions",
+    ]
+    assert selected["protocol"] == "openai_chat_completions"
+    assert payload["providers"][provider_ref]["api"] == "openai-completions"
+    assert payload["providers"][provider_ref]["models"][0]["input"] == ["text", "image"]
+
+
+def test_pi_explicit_responses_alias_preserves_responses_transport():
+    import mms_launchers
+
+    runtime = {
+        "id": "responses-relay",
+        "openai_base_url": "https://relay.example.com/v1",
+        "protocols": ["openai-responses"],
+    }
+
+    variants = mms_launchers._pi_protocol_variants(runtime)
+    selected, _caps = mms_launchers._pi_pick_protocol(runtime, "gpt-5.6-luna")
+
+    assert [variant["protocol"] for variant in variants] == ["responses"]
+    assert selected["api"] == "openai-responses"
+
+
+def test_pi_qwen38_dual_protocol_prefers_openai(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    monkeypatch.setattr(
+        mms_launchers,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+    monkeypatch.setattr(mms_launchers, "_pi_wrapper_path", lambda: "/tmp/pi-wrapper")
+    monkeypatch.setattr(
+        mms_launchers,
+        "_probe_models",
+        lambda runtime, emit_output=False: {"models": ["qwen3.8-max-preview"]},
+    )
+
+    exports = mms_launchers.get_export_env(
+        "pi",
+        {
+            "id": "newapi-personal-tokyo",
+            "name": "NewAPI Tokyo",
+            "enabled": True,
+            "auth_mode": "api_key",
+            "api_key": "sk-relay",
+            "openai_base_url": "https://relay.example.com/v1",
+            "anthropic_base_url": "https://relay.example.com/anthropic",
+            "protocols": ["anthropic_messages", "openai_chat_completions"],
+            "supported_clis": ["pi"],
+        },
+        model_info={"model": "qwen3.8-max-preview"},
+    )
+
+    payload = json.loads(Path(exports["MMS_PI_MODELS_JSON"]).read_text(encoding="utf-8"))
+    provider = payload["providers"][exports["MMS_PI_PROVIDER"]]
+    assert provider["api"] == "openai-completions"
+    assert provider["baseUrl"] == "https://relay.example.com/v1"
+    assert [item["id"] for item in provider["models"]] == ["qwen3.8-max-preview"]
+
+
+def test_pi_glm_dual_protocol_prefers_openai(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    monkeypatch.setattr(
+        mms_launchers,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+    monkeypatch.setattr(mms_launchers, "_pi_wrapper_path", lambda: "/tmp/pi-wrapper")
+    monkeypatch.setattr(
+        mms_launchers,
+        "_probe_models",
+        lambda runtime, emit_output=False: {"models": ["glm-5.2"]},
+    )
+
+    exports = mms_launchers.get_export_env(
+        "pi",
+        {
+            "id": "newapi-personal-tokyo",
+            "name": "NewAPI Tokyo",
+            "enabled": True,
+            "auth_mode": "api_key",
+            "api_key": "sk-relay",
+            "openai_base_url": "https://relay.example.com/v1",
+            "anthropic_base_url": "https://relay.example.com/anthropic",
+            "protocols": ["anthropic_messages", "openai_chat_completions"],
+            "supported_clis": ["pi"],
+        },
+        model_info={"model": "glm-5.2"},
+    )
+
+    payload = json.loads(Path(exports["MMS_PI_MODELS_JSON"]).read_text(encoding="utf-8"))
+    provider = payload["providers"][exports["MMS_PI_PROVIDER"]]
+    assert provider["api"] == "openai-completions"
+    assert provider["baseUrl"] == "https://relay.example.com/v1"
+    assert [item["id"] for item in provider["models"]] == ["glm-5.2"]
 
 
 def test_pi_openai_provider_compat_uses_profile_specific_flags(monkeypatch, tmp_path):
@@ -360,6 +796,7 @@ def test_pi_openai_provider_compat_uses_profile_specific_flags(monkeypatch, tmp_
     provider = payload["providers"]["mms-deepseek-direct"]
     assert provider["compat"] == {
         "requiresReasoningContentOnAssistantMessages": True,
+        "supportsDeveloperRole": False,
         "thinkingFormat": "deepseek",
     }
     assert provider["models"][0]["maxTokens"] == 384_000
@@ -370,6 +807,113 @@ def test_pi_openai_provider_compat_uses_profile_specific_flags(monkeypatch, tmp_
         "high": "high",
         "xhigh": "max",
     }
+
+
+def test_pi_profile_derived_effort_maps_expose_only_truthful_levels():
+    import mms_launchers
+
+    gpt_map = mms_launchers._pi_model_thinking_level_map(
+        {
+            "id": "uscrsopenai",
+            "openai_base_url": "https://relay.example.com/v1",
+        },
+        "openai",
+        "responses",
+        "gpt-5.6-terra",
+        {"supports_thinking": True},
+    )
+    assert gpt_map == {
+        "minimal": "minimal",
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": "max",
+    }
+
+    kimi_map = mms_launchers._pi_model_thinking_level_map(
+        {
+            "id": "openrouter",
+            "openai_base_url": "https://openrouter.ai/api/v1",
+        },
+        "openrouter-moonshot-kimi-k3",
+        "openai_chat_completions",
+        "kimi-k3",
+        {"supports_thinking": True},
+    )
+    assert kimi_map == {
+        "minimal": None,
+        "low": None,
+        "medium": None,
+        "high": None,
+        "xhigh": None,
+        "max": "max",
+        "off": None,
+    }
+
+    kimi_anthropic_map = mms_launchers._pi_model_thinking_level_map(
+        {
+            "id": "newapi-personal-tokyo",
+            "anthropic_base_url": "https://gateway.example.com",
+        },
+        "",
+        "anthropic_messages",
+        "k3",
+        {"supports_thinking": True},
+    )
+    assert kimi_anthropic_map == kimi_map
+
+    qwen_map = mms_launchers._pi_model_thinking_level_map(
+        {
+            "id": "direct-qwen",
+            "openai_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        },
+        "dashscope-openai",
+        "openai_chat_completions",
+        "qwen3.6-plus",
+        {"supports_thinking": True},
+    )
+    assert qwen_map == {
+        "minimal": None,
+        "low": None,
+        "medium": None,
+        "high": "high",
+        "xhigh": None,
+        "max": None,
+    }
+
+
+def test_pi_export_enables_gpt_xhigh_when_the_profile_supports_it(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+    monkeypatch.setattr(mms_launchers, "_pi_wrapper_path", lambda: "/tmp/pi-wrapper")
+    monkeypatch.setattr(
+        mms_launchers,
+        "_probe_models",
+        lambda runtime, emit_output=False: {"models": ["gpt-5.6-terra"]},
+    )
+
+    exports = mms_launchers.get_export_env(
+        "pi",
+        {
+            "id": "uscrsopenai",
+            "name": "US CRS OpenAI",
+            "enabled": True,
+            "auth_mode": "api_key",
+            "api_key": "sk-test",
+            "openai_base_url": "https://relay.example.com/v1",
+            "protocols": ["responses"],
+            "supported_clis": ["pi"],
+        },
+        model_info={"model": "gpt-5.6-terra"},
+    )
+
+    payload = json.loads(Path(exports["MMS_PI_MODELS_JSON"]).read_text(encoding="utf-8"))
+    model = payload["providers"]["mms-uscrsopenai"]["models"][0]
+    assert model["thinkingLevelMap"]["xhigh"] == "xhigh"
 
 
 def test_pi_shared_root_openai_base_url_is_normalized_to_v1(monkeypatch, tmp_path):
@@ -452,6 +996,87 @@ def test_pi_mimo_openai_provider_disables_developer_role(monkeypatch, tmp_path):
     assert provider["compat"]["supportsDeveloperRole"] is False
 
 
+def test_pi_dashscope_openai_provider_disables_developer_role(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    monkeypatch.setattr(
+        mms_launchers,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+    monkeypatch.setattr(mms_launchers, "_pi_wrapper_path", lambda: "/tmp/pi-wrapper")
+    monkeypatch.setattr(
+        mms_launchers,
+        "_probe_models",
+        lambda runtime, emit_output=False: {"models": ["qwen3.8-max-preview"]},
+    )
+
+    exports = mms_launchers.get_export_env(
+        "pi",
+        {
+            "id": "newapi-qwen-relay",
+            "name": "NewAPI Qwen Relay",
+            "enabled": True,
+            "auth_mode": "api_key",
+            "api_key": "sk-relay",
+            "openai_base_url": "https://relay.example.com",
+            "anthropic_base_url": "https://relay.example.com",
+            "protocols": ["anthropic_messages", "openai_chat_completions"],
+            "supported_clis": ["pi"],
+        },
+        model_info={"model": "qwen3.8-max-preview"},
+    )
+
+    payload = json.loads(Path(exports["MMS_PI_MODELS_JSON"]).read_text(encoding="utf-8"))
+    provider = payload["providers"][exports["MMS_PI_PROVIDER"]]
+    assert provider["api"] == "openai-completions"
+    assert provider["baseUrl"] == "https://relay.example.com/v1"
+    assert provider["compat"]["supportsDeveloperRole"] is False
+    assert provider["compat"]["thinkingFormat"] == "qwen"
+
+
+def test_pi_deepseek_openai_provider_disables_developer_role(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    monkeypatch.setattr(
+        mms_launchers,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+    monkeypatch.setattr(mms_launchers, "_pi_wrapper_path", lambda: "/tmp/pi-wrapper")
+    monkeypatch.setattr(
+        mms_launchers,
+        "_probe_models",
+        lambda runtime, emit_output=False: {"models": ["deepseek-reasoner"]},
+    )
+
+    exports = mms_launchers.get_export_env(
+        "pi",
+        {
+            "id": "newapi-deepseek-relay",
+            "name": "NewAPI DeepSeek Relay",
+            "enabled": True,
+            "auth_mode": "api_key",
+            "api_key": "sk-relay",
+            "openai_base_url": "https://relay.example.com",
+            "anthropic_base_url": "https://relay.example.com",
+            "protocols": ["anthropic_messages", "openai_chat_completions"],
+            "supported_clis": ["pi"],
+        },
+        model_info={"model": "deepseek-reasoner"},
+    )
+
+    payload = json.loads(Path(exports["MMS_PI_MODELS_JSON"]).read_text(encoding="utf-8"))
+    provider = payload["providers"][exports["MMS_PI_PROVIDER"]]
+    assert provider["api"] == "openai-completions"
+    assert provider["baseUrl"] == "https://relay.example.com/v1"
+    assert provider["compat"]["supportsDeveloperRole"] is False
+
+
 def test_pi_kimi_family_uses_builtin_max_token_hint(monkeypatch, tmp_path):
     import mms_launchers
 
@@ -491,6 +1116,147 @@ def test_pi_kimi_family_uses_builtin_max_token_hint(monkeypatch, tmp_path):
     assert provider["models"][0]["input"] == ["text", "image"]
     assert provider["models"][0]["contextWindow"] == 262_144
     assert provider["models"][0]["maxTokens"] == 32_768
+
+
+def test_pi_kimi_k3_exports_1m_context_and_openai_protocol(monkeypatch, tmp_path):
+    import mms_capability_resolver
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    monkeypatch.delenv("MMS_PREVIEW_MODE", raising=False)
+    monkeypatch.setattr(mms_capability_resolver, "_load_default_approved_facts_shared", lambda: {})
+    monkeypatch.setattr(
+        mms_capability_resolver,
+        "load_default_model_policy",
+        lambda: {
+            "models": {
+                "k3": {
+                    "capabilities": {
+                        "context_window_tokens": 1_000_000,
+                        "supports_thinking": True,
+                        "thinking_control": {
+                            "path": "thinking.type",
+                            "supported": True,
+                        },
+                    }
+                }
+            }
+        },
+    )
+    monkeypatch.setattr(
+        mms_launchers,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+    monkeypatch.setattr(mms_launchers, "_pi_wrapper_path", lambda: "/tmp/pi-wrapper")
+    monkeypatch.setattr(
+        mms_launchers,
+        "_probe_models",
+        lambda runtime, emit_output=False: {
+            "models": ["k3[1m]", "k3", "kimi-k3", "kimi-for-coding-highspeed"]
+        },
+    )
+
+    exports = mms_launchers.get_export_env(
+        "pi",
+        {
+            "id": "kimi-direct",
+            "name": "Kimi Direct",
+            "enabled": True,
+            "auth_mode": "api_key",
+            "api_key": "sk-kimi",
+            "openai_base_url": "https://api.kimi.com/coding/v1",
+            "anthropic_base_url": "https://api.kimi.com/coding",
+            "protocols": ["anthropic_messages", "openai_chat_completions"],
+            "supported_clis": ["pi"],
+        },
+        model_info={"model": "kimi-k3"},
+    )
+
+    payload = json.loads(Path(exports["MMS_PI_MODELS_JSON"]).read_text(encoding="utf-8"))
+    provider = payload["providers"][exports["MMS_PI_PROVIDER"]]
+    model_by_id = {
+        item["id"]: item
+        for payload_provider in payload["providers"].values()
+        for item in payload_provider["models"]
+    }
+    assert provider["api"] == "openai-completions"
+    assert provider["baseUrl"] == "https://api.kimi.com/coding/v1"
+    assert model_by_id["kimi-k3"]["input"] == ["text", "image"]
+    assert model_by_id["kimi-k3"]["contextWindow"] == 1_048_576
+    assert model_by_id["kimi-k3"]["maxTokens"] == 1_048_576
+    assert model_by_id["kimi-k3"]["reasoning"] is True
+    assert model_by_id["k3[1m]"]["input"] == ["text", "image"]
+    assert model_by_id["k3[1m]"]["contextWindow"] == 1_048_576
+    assert model_by_id["k3[1m]"]["maxTokens"] == 1_048_576
+    assert model_by_id["k3[1m]"]["reasoning"] is True
+    assert model_by_id["k3"]["input"] == ["text", "image"]
+    assert model_by_id["k3"]["contextWindow"] == 262_144
+    assert model_by_id["k3"]["maxTokens"] == 131_072
+    assert model_by_id["k3"]["reasoning"] is True
+    assert model_by_id["kimi-for-coding-highspeed"]["contextWindow"] == 262_144
+    assert model_by_id["kimi-for-coding-highspeed"]["maxTokens"] == 32_768
+    anthropic_provider = next(
+        item for item in payload["providers"].values() if item["api"] == "anthropic-messages"
+    )
+    assert [item["id"] for item in anthropic_provider["models"]] == ["kimi-for-coding-highspeed"]
+
+
+def test_pi_tokyo_k3_anthropic_export_exposes_only_max(monkeypatch, tmp_path):
+    import mms_capability_resolver
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    monkeypatch.delenv("MMS_PREVIEW_MODE", raising=False)
+    monkeypatch.setattr(mms_capability_resolver, "_load_default_approved_facts_shared", lambda: {})
+    monkeypatch.setattr(
+        mms_capability_resolver,
+        "load_default_model_policy",
+        lambda: {"models": {"k3": {"capabilities": {"supports_thinking": True}}}},
+    )
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+    monkeypatch.setattr(mms_launchers, "_pi_wrapper_path", lambda: "/tmp/pi-wrapper")
+    monkeypatch.setattr(
+        mms_launchers,
+        "_probe_models",
+        lambda runtime, emit_output=False: {"models": ["k3"]},
+    )
+
+    exports = mms_launchers.get_export_env(
+        "pi",
+        {
+            "id": "newapi-personal-tokyo",
+            "name": "NewAPI Personal Tokyo",
+            "enabled": True,
+            "auth_mode": "api_key",
+            "api_key": "sk-test",
+            "anthropic_base_url": "https://gateway.example.com",
+            "protocols": ["anthropic_messages"],
+            "supported_clis": ["pi"],
+        },
+        model_info={"model": "k3"},
+    )
+
+    payload = json.loads(Path(exports["MMS_PI_MODELS_JSON"]).read_text(encoding="utf-8"))
+    provider = payload["providers"][exports["MMS_PI_PROVIDER"]]
+    assert provider["api"] == "anthropic-messages"
+    assert provider["models"][0]["thinkingLevelMap"] == {
+        "off": None,
+        "minimal": None,
+        "low": None,
+        "medium": None,
+        "high": None,
+        "xhigh": None,
+        "max": "max",
+    }
 
 
 def test_pi_normalizes_anthropic_base_url_before_export(monkeypatch, tmp_path):
@@ -758,6 +1524,43 @@ def test_pi_reopens_deprecated_antigravity_gemini_alias_when_replacement_availab
     assert [item["id"] for item in provider["models"]] == ["gemini-3.1-pro-low", "gemini-3-pro-high"]
 
 
+def test_pi_trust_store_scopes_trust_to_launch_project(monkeypatch, tmp_path):
+    import mms_pi_support
+
+    real_home = tmp_path / "real-home"
+    project = real_home / "project"
+    agent_dir = tmp_path / "session" / ".pi" / "agent"
+    project.mkdir(parents=True)
+    monkeypatch.setattr(
+        mms_pi_support,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+
+    mms_pi_support._seed_pi_trust_store(str(agent_dir), str(project))
+
+    payload = json.loads((agent_dir / "trust.json").read_text(encoding="utf-8"))
+    assert payload == {str(project.resolve()): True}
+    assert str(real_home.resolve()) not in payload
+
+
+def test_pi_trust_store_does_not_auto_trust_real_home(monkeypatch, tmp_path):
+    import mms_pi_support
+
+    real_home = tmp_path / "real-home"
+    agent_dir = tmp_path / "session" / ".pi" / "agent"
+    real_home.mkdir()
+    monkeypatch.setattr(
+        mms_pi_support,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+
+    mms_pi_support._seed_pi_trust_store(str(agent_dir), str(real_home))
+
+    assert not (agent_dir / "trust.json").exists()
+
+
 def test_pi_exposed_model_names_recover_antigravity_opus_after_retry_hardening(monkeypatch):
     import mms_launchers
 
@@ -825,7 +1628,16 @@ def test_pi_blocks_20260530_live_failures():
         assert mms_launchers._pi_model_available_for_runtime(runtime, model_name) is False
 
 
-def test_pi_builtin_hints_cover_new_qwen_flash_and_max_models(monkeypatch, tmp_path):
+def test_pi_tokyo_gemini_high_is_unblocked_after_live_smoke():
+    import mms_launchers
+
+    runtime = {"id": "newapi-personal-tokyo", "protocols": ["anthropic_messages"]}
+
+    assert mms_launchers._pi_model_block_reason(runtime, "gemini-3-flash-agent(high)") == ""
+    assert "upstream 500" in mms_launchers._pi_model_block_reason(runtime, "gemini-3.1-pro-low")
+
+
+def test_pi_hints_and_profile_cover_new_qwen_flash_and_max_models(monkeypatch, tmp_path):
     import mms_launchers
 
     real_home = tmp_path / "real-home"
@@ -868,7 +1680,8 @@ def test_pi_builtin_hints_cover_new_qwen_flash_and_max_models(monkeypatch, tmp_p
     assert model_by_id["qwen3.6-flash"]["maxTokens"] == 65_536
     assert model_by_id["qwen3.6-flash"]["input"] == ["text", "image"]
     assert model_by_id["qwen3.7-max"]["contextWindow"] == 1_000_000
-    assert model_by_id["qwen3.7-max"]["maxTokens"] == 65_536
+    # The checked-in Qwen 3.7 provider profile now overrides the older builtin hint.
+    assert model_by_id["qwen3.7-max"]["maxTokens"] == 131_072
     assert model_by_id["qwen3.7-max"]["input"] == ["text"]
 
 
@@ -908,3 +1721,133 @@ def test_preset_export_runtime_passes_pi_model_info(monkeypatch):
     assert captured["cli"] == "pi"
     assert captured["runtime"]["id"] == "relay-c"
     assert captured["model_info"] == {"model": "gpt-5.4"}
+
+
+@pytest.fixture
+def isolated_policy_gateway(monkeypatch, tmp_path):
+    """Exercise the real Pi gateway boundary without credentials or a model call."""
+    import mms_pi_support as pi
+
+    real_home = tmp_path / 'real-home'
+    real_home.mkdir()
+    gateway = tmp_path / 'isolated-gateway'
+    project = tmp_path / 'project-outside-home'
+    project.mkdir()
+    (project / 'AGENTS.md').write_text('Project scope: preserve this local contract.\n')
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(pi, '_real_user_path', lambda *parts: str(real_home.joinpath(*parts)))
+    monkeypatch.setattr(pi, '_pi_gateway_root', lambda: str(gateway))
+    monkeypatch.setattr(pi, '_pi_effective_selected_model', lambda runtime, model: model)
+    for name in (
+        '_cleanup_stale_sessions', '_inject_real_home_hints', '_inject_host_capability_hints',
+        '_inject_selected_model_name', '_set_session_home_hint',
+        '_apply_runtime_network_profile', '_apply_runtime_locale_profile',
+        '_apply_runtime_ip_stack_profile', '_install_session_command_wrappers',
+        '_install_session_packet_env', 'apply_pi_capture_proxy',
+    ):
+        monkeypatch.setattr(pi, name, lambda *args, **kwargs: None)
+    monkeypatch.setattr(pi, '_write_pi_models_config', lambda agent_dir, runtime, model: (
+        str(Path(agent_dir) / 'models.json'), 'synthetic-provider'))
+    monkeypatch.setattr(pi, '_write_pi_settings_config', lambda agent_dir: str(Path(agent_dir) / 'settings.json'))
+    monkeypatch.setattr(pi._launchers_module(), '_pi_wrapper_path', lambda: '/synthetic/pi')
+    return pi, real_home, project
+
+
+def _installed_pi_context_loader():
+    """Discover only an existing installation; never npx/install or start Pi."""
+    import shutil
+
+    override = os.environ.get('MMS_TEST_PI_RESOURCE_LOADER')
+    if override:
+        assert Path(override).is_file(), 'Explicit Pi resource-loader path is missing'
+        return Path(override)
+    binary = shutil.which('pi')
+    if binary:
+        for parent in Path(binary).resolve().parents:
+            loader = parent / 'dist/core/resource-loader.js'
+            if loader.is_file():
+                return loader
+    pytest.skip('Native Pi context loader not installed; no download attempted')
+
+
+def _read_native_pi_context(project, agent_dir):
+    import shutil
+
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('Node is not installed; native Pi context probe not run')
+    loader = _installed_pi_context_loader()
+    script = f"""
+        import {{ loadProjectContextFiles }} from {json.dumps(loader.as_uri())};
+        const rows = loadProjectContextFiles({{
+            cwd: process.argv[1], agentDir: process.argv[2]
+        }});
+        process.stdout.write(JSON.stringify(rows));
+    """
+    result = subprocess.run([node, '--input-type=module', '-e', script, str(project), str(agent_dir)],
+                            text=True, capture_output=True, timeout=20, check=True)
+    return json.loads(result.stdout)
+
+
+def test_pi_isolated_gateway_loads_global_policy_and_project_context(isolated_policy_gateway):
+    pi, real_home, project = isolated_policy_gateway
+    global_dir = real_home / '.pi/agent'
+    global_dir.mkdir(parents=True)
+    policy_path = os.environ.get('MMS_TEST_GLOBAL_POLICY')
+    policy = (Path(policy_path).read_text() if policy_path else
+              'Global policy: preserve unrelated work; complete only the requested delivery boundary.\n')
+    (global_dir / 'AGENTS.md').write_text(policy)
+    # Deliberately adjacent auth/config must not be inherited by the policy loader.
+    (global_dir / 'auth.json').write_text('{"synthetic_secret":"never-copy"}')
+    (global_dir / 'settings.json').write_text('{"synthetic_setting":"never-copy"}')
+
+    env = pi._pi_gateway_env({'model': 'synthetic-model'})
+    isolated = Path(env['PI_CODING_AGENT_DIR'])
+    assert isolated != global_dir
+    rows = _read_native_pi_context(project, isolated)
+    assert [(Path(row['path']).name, row['content']) for row in rows] == [
+        ('AGENTS.md', policy), ('AGENTS.md', (project / 'AGENTS.md').read_text())]
+    assert not (isolated / 'auth.json').exists()
+    assert not (isolated / 'settings.json').exists()
+    assert not (isolated / 'AGENTS.md').is_symlink()
+    (isolated / 'AGENTS.md').write_text('Session-local edit\n')
+    assert (global_dir / 'AGENTS.md').read_text() == policy
+    pi._pi_gateway_env({'model': 'synthetic-model'})
+    assert (isolated / 'AGENTS.md').read_text() == 'Session-local edit\n'
+
+
+def test_pi_policy_missing_is_optional_and_global_override_wins(isolated_policy_gateway):
+    pi, real_home, project = isolated_policy_gateway
+    first = pi._pi_gateway_env({'model': 'synthetic-model'})
+    assert not (Path(first['PI_CODING_AGENT_DIR']) / 'AGENTS.md').exists()
+    global_dir = real_home / '.pi/agent'
+    global_dir.mkdir(parents=True)
+    (global_dir / 'AGENTS.md').write_text('Superseded global default\n')
+    (global_dir / 'AGENTS.override.md').write_text('Explicit global override\n')
+    second = pi._pi_gateway_env({'model': 'synthetic-model'})
+    isolated = Path(second['PI_CODING_AGENT_DIR'])
+    rows = _read_native_pi_context(project, isolated)
+    assert rows[0]['content'] == 'Explicit global override\n'
+    assert len(rows) == 2
+    assert not (isolated / 'AGENTS.md').exists()
+
+
+def test_pi_policy_copy_fails_explicitly_and_cannot_target_global(isolated_policy_gateway, monkeypatch):
+    pi, real_home, project = isolated_policy_gateway
+    global_dir = real_home / '.pi/agent'
+    global_dir.mkdir(parents=True)
+    source = global_dir / 'AGENTS.md'
+    source.write_text('Keep this source unchanged\n')
+    with pytest.raises(ValueError, match='isolated agent directory'):
+        pi._pi_seed_agent_policy(global_dir)
+    assert source.read_text() == 'Keep this source unchanged\n'
+    original_read = Path.read_text
+
+    def deny_policy(path, *args, **kwargs):
+        if path == source:
+            raise PermissionError('synthetic unreadable policy')
+        return original_read(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, 'read_text', deny_policy)
+    with pytest.raises(RuntimeError, match='Cannot load Pi agent policy'):
+        pi._pi_gateway_env({'model': 'synthetic-model'})

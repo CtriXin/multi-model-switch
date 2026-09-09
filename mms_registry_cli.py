@@ -526,14 +526,23 @@ def _model_source_readiness(
         status = "needs_init"
         headline = "Preview root needs registry DB initialization."
         next_action = {"label": "Initialize preview root", "command": "./mmf preview init --json"}
-    elif route_count <= 0:
-        status = "needs_import"
-        headline = "Preview DB has no route candidates yet."
-        next_action = {"label": "Import legacy config into preview DB", "command": "./mmf preview import-legacy --from ~/.config/mms --apply --json"}
+    elif bundle.get("verified") and bundle.get("runtime_ready") is True:
+        status = "ready"
+        watchdog_root = shlex.quote(str(root))
+        headline = "Preview root is ready: DB candidates, latest-approved bundle, and runtime routes verify."
+        next_action = {
+            "label": "Optional: run read-only watchdog check",
+            "command": f"scripts/mms_health_watchdog.py --config-dir {watchdog_root} --require-bundle --dry-run --print-json",
+        }
     elif not bundle.get("verified"):
-        status = "needs_publish"
-        headline = "Latest-approved bundle is missing or failed manifest verification."
-        next_action = {"label": "Publish and verify preview bundle", "command": "./mmf preview publish --json && ./mmf preview verify --json"}
+        if route_count <= 0:
+            status = "needs_import"
+            headline = "Preview DB has no route candidates yet."
+            next_action = {"label": "Import legacy config into preview DB", "command": "./mmf preview import-legacy --from ~/.config/mms --apply --json"}
+        else:
+            status = "needs_publish"
+            headline = "Latest-approved bundle is missing or failed manifest verification."
+            next_action = {"label": "Publish and verify preview bundle", "command": "./mmf preview publish --json && ./mmf preview verify --json"}
     elif bundle.get("runtime_ready") is not True:
         status = "verified_not_runtime_ready"
         if missing_urls > 0:
@@ -834,6 +843,8 @@ def preview_doctor(
     candidates = legacy.get("candidates") if isinstance(legacy.get("candidates"), dict) else {}
     bundle = source.get("generated_bundle") if isinstance(source.get("generated_bundle"), dict) else {}
     secrets = _preview_secret_backend_summary(root)
+    legacy_candidate_count = int(candidates.get("provider_route_count") or 0)
+    bundle_runtime_ready = bundle.get("verified") and bundle.get("runtime_ready") is True
 
     checks = [
         {
@@ -848,8 +859,8 @@ def preview_doctor(
         },
         {
             "id": "legacy_candidates",
-            "ok": int(candidates.get("provider_route_count") or 0) > 0,
-            "detail": f"provider_routes={int(candidates.get('provider_route_count') or 0)}",
+            "ok": legacy_candidate_count > 0 or bundle_runtime_ready,
+            "detail": f"provider_routes={legacy_candidate_count}",
         },
         {
             "id": "latest_bundle",
@@ -870,12 +881,20 @@ def preview_doctor(
     elif registry_db.get("status") != "ok":
         overall = "needs_init"
         next_actions.append({"label": "Initialize preview root", "command": "./mmf preview init --json"})
-    elif int(candidates.get("provider_route_count") or 0) <= 0:
-        overall = "needs_import"
-        next_actions.append({"label": "Import legacy config into preview DB", "command": "./mmf preview import-legacy --from ~/.config/mms --apply --json"})
+    elif bundle.get("verified") and bundle.get("runtime_ready") is True:
+        overall = "ready"
+        watchdog_root = shlex.quote(str(root))
+        next_actions.append({
+            "label": "Optional: run read-only watchdog check",
+            "command": f"scripts/mms_health_watchdog.py --config-dir {watchdog_root} --require-bundle --dry-run --print-json",
+        })
     elif not bundle.get("verified"):
-        overall = "needs_publish"
-        next_actions.append({"label": "Publish and verify preview bundle", "command": "./mmf preview publish --json && ./mmf preview verify --json"})
+        if int(candidates.get("provider_route_count") or 0) <= 0:
+            overall = "needs_import"
+            next_actions.append({"label": "Import legacy config into preview DB", "command": "./mmf preview import-legacy --from ~/.config/mms --apply --json"})
+        else:
+            overall = "needs_publish"
+            next_actions.append({"label": "Publish and verify preview bundle", "command": "./mmf preview publish --json && ./mmf preview verify --json"})
     elif bundle.get("runtime_ready") is not True:
         overall = "verified_not_runtime_ready"
         if int(bundle.get("router_missing_base_url_count") or 0) > 0:
@@ -1769,18 +1788,132 @@ def _provider_route_models(provider: Mapping[str, Any], *, ignore_fallback_model
     return result
 
 
+def _is_redacted_secret_token(value: Any) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    return text in {"<redacted>", "[redacted]", "***", "****"} or "***" in text or "****" in text
+
+
 def _provider_route_secret_ref(provider: Mapping[str, Any], credential_provider_ids: set[str]) -> tuple[str, str]:
     provider_id = str(provider.get("id") or provider.get("provider_id") or "default").strip() or "default"
-    explicit_ref = str(provider.get("secret_ref") or "").strip()
-    if explicit_ref:
-        return explicit_ref, "provider.secret_ref"
     if provider_id in credential_provider_ids:
         return f"pending-webui:{_secret_ref_part(provider_id)}:api_key", "credential_update"
+    explicit_ref = str(provider.get("secret_ref") or "").strip()
+    if explicit_ref and not _is_redacted_secret_token(explicit_ref):
+        return explicit_ref, "provider.secret_ref"
     for field in ("api_key", "openai_api_key", "anthropic_api_key"):
         value = str(provider.get(field) or "").strip()
-        if value:
+        if value and not _is_redacted_secret_token(value):
             return f"legacy-config:{_secret_ref_part(provider_id)}:{field}", f"config.{field}"
     return "", ""
+
+
+def _registry_v2_opencode_agent_models_payload(value: Any) -> dict[str, dict[str, str]]:
+    raw = value if isinstance(value, Mapping) else {}
+    result: dict[str, dict[str, str]] = {}
+    for raw_agent, raw_entry in raw.items():
+        agent_id = str(raw_agent or "").strip()
+        if not agent_id:
+            continue
+        entry = raw_entry if isinstance(raw_entry, Mapping) else {}
+        model = str(entry.get("model") or entry.get("model_id") or (raw_entry if not isinstance(raw_entry, Mapping) else "")).strip()
+        provider_id = str(entry.get("provider_id") or entry.get("provider") or "").strip()
+        if not model:
+            continue
+        payload = {"model": model}
+        if provider_id:
+            payload["provider_id"] = provider_id
+        result[agent_id] = payload
+    return result
+
+
+def _registry_v2_opencode_agent_roster_payload(value: Any) -> dict[str, dict[str, Any]]:
+    raw = value if isinstance(value, Mapping) else {}
+    result: dict[str, dict[str, Any]] = {}
+    for raw_agent, raw_entry in raw.items():
+        agent_id = str(raw_agent or "").strip()
+        entry = raw_entry if isinstance(raw_entry, Mapping) else {}
+        if not agent_id or not entry:
+            continue
+        payload: dict[str, Any] = {}
+        for key in ("preset", "category", "label", "provider_id", "provider", "model", "model_id"):
+            text = str(entry.get(key) or "").strip()
+            if text:
+                payload[key] = text
+        for key in ("enabled", "custom"):
+            if key in entry:
+                payload[key] = entry.get(key) is not False
+        if "priority" in entry:
+            try:
+                payload["priority"] = int(entry.get("priority") or 0)
+            except (TypeError, ValueError):
+                pass
+        if payload:
+            result[agent_id] = payload
+    return result
+
+
+def _registry_v2_runtime_opencode_payload(value: Any) -> dict[str, Any]:
+    opencode = value if isinstance(value, Mapping) else {}
+    payload: dict[str, Any] = {}
+    for key in ("default_profile", "profile"):
+        text = str(opencode.get(key) or "").strip()
+        if text:
+            payload[key] = text
+
+    review = opencode.get("review") if isinstance(opencode.get("review"), Mapping) else {}
+    review_host = review.get("host") if isinstance(review.get("host"), Mapping) else {}
+    if not review_host and isinstance(opencode.get("review_host"), Mapping):
+        review_host = opencode.get("review_host")
+    review_payload: dict[str, Any] = {}
+    review_model_value = []
+    if isinstance(review, Mapping):
+        review_model_value = review.get("models") or review.get("model_tokens") or review.get("selected_models")
+    review_models = _as_string_list(review_model_value)
+    if review_models:
+        review_payload["models"] = review_models
+    host_payload = {
+        key: models
+        for key in ("primary_models", "fallback_models")
+        if (models := _as_string_list(review_host.get(key) if isinstance(review_host, Mapping) else []))
+    }
+    if host_payload:
+        review_payload["host"] = host_payload
+    if review_payload:
+        payload["review"] = review_payload
+
+    committee = opencode.get("committee") if isinstance(opencode.get("committee"), Mapping) else {}
+    committee_model_value = []
+    committee_payload: dict[str, Any] = {}
+    if isinstance(committee, Mapping):
+        committee_model_value = committee.get("models") or committee.get("model_tokens") or committee.get("selected_models")
+        committee_host = committee.get("host") if isinstance(committee.get("host"), Mapping) else {}
+        for value in (
+            committee_host.get("model") if isinstance(committee_host, Mapping) else "",
+            committee_host.get("primary_model") if isinstance(committee_host, Mapping) else "",
+            committee.get("host_model"),
+        ):
+            host_model = str(value or "").strip()
+            if host_model:
+                host_payload = {"model": host_model}
+                provider_id = str(committee_host.get("provider_id") or committee.get("host_provider_id") or "").strip() if isinstance(committee_host, Mapping) else ""
+                if provider_id:
+                    host_payload["provider_id"] = provider_id
+                committee_payload["host"] = host_payload
+                break
+    if committee_models := _as_string_list(committee_model_value or opencode.get("committee_models")):
+        committee_payload["models"] = committee_models
+    if committee_payload:
+        payload["committee"] = committee_payload
+
+    agent_models = _registry_v2_opencode_agent_models_payload(opencode.get("agent_models") or opencode.get("agent_model_overrides"))
+    if agent_models:
+        payload["agent_models"] = agent_models
+    agent_roster = _registry_v2_opencode_agent_roster_payload(opencode.get("agent_roster"))
+    if agent_roster:
+        payload["agent_roster"] = agent_roster
+    return payload
 
 
 def _registry_v2_profile_payload(config_payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -1808,6 +1941,9 @@ def _registry_v2_profile_payload(config_payload: Mapping[str, Any]) -> dict[str,
         "provider": {"default": provider_default} if provider_default else {},
         "profiles": profiles,
     }
+    opencode_payload = _registry_v2_runtime_opencode_payload(config_payload.get("opencode"))
+    if opencode_payload:
+        payload["runtime_config"] = {"opencode": opencode_payload}
     mms_registry.validate_non_secret_payload(payload, context="registry_v2_profile_candidate")
     return payload
 
@@ -1978,6 +2114,11 @@ def _route_scoped_candidate_payload(
     root = root.expanduser()
     profiles_payload = candidate_payload.get("profile") if isinstance(candidate_payload.get("profile"), Mapping) else {}
     profiles = profiles_payload.get("profiles") if isinstance(profiles_payload.get("profiles"), Mapping) else {}
+    candidate_provider_ids = {
+        str(provider_id or "").strip()
+        for provider_id in profiles.keys()
+        if str(provider_id or "").strip()
+    }
     scoped_hidden: dict[str, set[str]] = {}
     scoped_enabled: dict[str, bool] = {}
     for provider_id in scope:
@@ -1994,8 +2135,12 @@ def _route_scoped_candidate_payload(
         if route_id
     }
     preserved_entries: list[dict[str, Any]] = []
+    removed_provider_ids: set[str] = set()
     for entry in _latest_approved_route_entries(root):
         provider_id = str(entry.get("provider_id") or "").strip()
+        if provider_id and provider_id not in candidate_provider_ids:
+            removed_provider_ids.add(provider_id)
+            continue
         if provider_id in scope:
             model = str(entry.get("model") or "").strip()
             route_id = _provider_route_identity(model, provider_id)
@@ -2023,6 +2168,7 @@ def _route_scoped_candidate_payload(
             "refreshed_provider_ids": sorted(refresh_scope),
             "scoped_route_count": len(scoped_entries),
             "preserved_route_count": len(preserved_entries),
+            "removed_provider_ids": sorted(removed_provider_ids),
         }
     )
     payload["skipped"] = skipped

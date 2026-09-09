@@ -121,6 +121,38 @@ def test_record_usage_preserves_per_model_last_used_at(monkeypatch):
     }
 
 
+def test_record_usage_persists_opencode_profile_for_tui(monkeypatch):
+    import mms_core
+
+    saved = {}
+
+    def _fake_update_usage_stats(mutator):
+        stats = {"sources": {}, "last_by_cli": {}}
+        mutator(stats)
+        saved.update(stats)
+
+    monkeypatch.setattr(mms_core, "_update_usage_stats", _fake_update_usage_stats)
+    monkeypatch.setattr(mms_core, "_iso_now", lambda: "2026-04-15T18:00:00Z")
+
+    runtime = {
+        "id": "review-host",
+        "name": "OpenCode Review",
+        "runtime_kind": "provider",
+        "auth_mode": "api_key",
+        "opencode_profile": "review_hub",
+        "opencode_profile_label": "Review",
+    }
+
+    mms_core._record_usage(runtime, "opencode", {"model": "glm-5-turbo", "profile": "review_hub"})
+
+    last = saved["last_by_cli"]["opencode"]
+    assert last["opencode_profile"] == "review_hub"
+    assert last["profile"] == "review_hub"
+    assert last["opencode_profile_label"] == "Review"
+    assert last["runtime_hint"]["opencode_profile"] == "review_hub"
+    assert saved["sources"]["provider:opencode:review-host"]["opencode_profile"] == "review_hub"
+
+
 def test_get_scene_usage_backfills_runtime_hint_from_sources(monkeypatch):
     import mms_core
 

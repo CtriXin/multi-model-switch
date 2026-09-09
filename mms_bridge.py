@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 import copy
@@ -155,8 +156,26 @@ _MIMO_1M_CONTEXT_SELECTORS = {
 }
 
 
+def _coerce_context_window(value):
+    try:
+        window = int(value)
+    except Exception:
+        return None
+    return window if window > 0 else None
+
+
 def _requests_mimo_1m_context(model_name):
     return _normalize_model_name(model_name) in _MIMO_1M_CONTEXT_SELECTORS
+
+
+def _model_requests_mimo_1m_context(model_name, context_window=None):
+    if _requests_mimo_1m_context(model_name):
+        return True
+    normalized = _selector_base_model_name(model_name)
+    if normalized not in {"mimo-v2.5-pro", "mimo-v2.5"}:
+        return False
+    window = _coerce_context_window(context_window)
+    return bool(window and window >= 1_000_000)
 
 
 def _merge_header_token(headers, header_name, token):
@@ -423,26 +442,48 @@ def _gateway_route_payload(route, *, gateway_url, gateway_key, server):
         "openai_url": str(route.get("openai_url") or getattr(server, "openai_url", "") or "").strip(),
         "proxy_url": str(route.get("proxy_url") or getattr(server, "proxy_url", "") or "").strip(),
         "no_proxy": str(route.get("no_proxy") or getattr(server, "no_proxy", "") or "").strip(),
+        "model": str(route.get("model") or "").strip(),
+        "allow_model_switch": bool(route.get("allow_model_switch")),
+        "protocol": str(route.get("protocol") or "").strip(),
         "fallback_reason": str(route.get("fallback_reason") or "primary"),
         "try_next_on": list(route.get("try_next_on") or []),
     }
 
 
+def _normalized_bridge_protocol(route):
+    protocol = str((route or {}).get("protocol") or "").strip()
+    aliases = {
+        "responses": "openai_responses",
+        "openai": "openai_responses",
+        "openai_responses": "openai_responses",
+        "chat": "openai_chat_completions",
+        "chat_completions": "openai_chat_completions",
+        "openai_chat": "openai_chat_completions",
+        "openai_chat_completions": "openai_chat_completions",
+        "anthropic": "anthropic_messages",
+        "messages": "anthropic_messages",
+        "anthropic_messages": "anthropic_messages",
+    }
+    return aliases.get(protocol, protocol or "anthropic_messages")
+
+
 _OPENAI_MODEL_PREFIXES = ("gpt-", "o1-", "o3-", "o4-", "codex-")
-_DOMESTIC_MODEL_PREFIXES = ("glm", "kimi", "k2.6", "mimo", "qwen", "minimax", "deepseek")
+_DOMESTIC_MODEL_PREFIXES = ("glm", "kimi", "k3", "k2.6", "mimo", "qwen", "minimax", "deepseek")
 _DOMESTIC_THINKING_BLOCK_TYPES = {"thinking", "redacted_thinking"}
-_DOMESTIC_THINKING_ALLOW_PREFIXES = ("glm", "kimi", "k2.5", "k2.6", "minimax", "deepseek")
+_DOMESTIC_THINKING_ALLOW_PREFIXES = ("glm", "kimi", "k3", "k2.5", "k2.6", "minimax", "deepseek")
 _DOMESTIC_THINKING_BLOCK_PREFIXES = ("mimo",)
 _QWEN_THINKING_ALLOW_PREFIXES = ("qwen-plus", "qwen3.5-plus", "qwen3.6-plus", "qwen3-max")
 _QWEN_THINKING_BLOCK_PREFIXES = ("qwen-coder", "qwen3-coder")
 _DOMESTIC_EFFORT_ALLOW_PREFIXES = ("deepseek",)
-_DOMESTIC_ANTHROPIC_HISTORY_COALESCE_PREFIXES = ("kimi", "k2.", "mimo")
-_DOMESTIC_REASONING_CONTENT_ROUNDTRIP_PREFIXES = ("deepseek", "mimo", "kimi", "k2.")
+_DOMESTIC_ANTHROPIC_HISTORY_COALESCE_PREFIXES = ("kimi", "k3", "k2.", "mimo")
+_DOMESTIC_REASONING_CONTENT_ROUNDTRIP_PREFIXES = ("deepseek", "mimo", "kimi", "k3", "k2.")
 _ANTHROPIC_CACHE_CONTROL_ALLOW_PREFIXES = ("qwen-plus", "qwen3.5-plus", "qwen3.6-plus", "qwen3-max")
 _KNOWN_IMAGE_INPUT_SUPPORTED_MODEL_NAMES = {
     "gpt-5.3-codex",
     "gpt-5.4",
     "gpt-5.5",
+    "k3",
+    "kimi-k3",
     "k2.6",
     "k2.6-code-preview",
     "kimi-k2.5",
@@ -512,6 +553,28 @@ def _selector_base_model_name(model_name):
     return normalized
 
 
+def _model_capability_entry(model_capabilities, model_name):
+    if not isinstance(model_capabilities, dict):
+        return {}
+    target = _selector_base_model_name(model_name)
+    if not target:
+        return {}
+    for key, value in model_capabilities.items():
+        if _selector_base_model_name(key) == target and isinstance(value, dict):
+            return value
+    return {}
+
+
+def _model_image_input_override(model_name, model_capabilities):
+    caps = _model_capability_entry(model_capabilities, model_name)
+    nested = caps.get("capabilities") if isinstance(caps.get("capabilities"), dict) else {}
+    for source in (caps, nested):
+        for key in ("vision", "supports_vision"):
+            if isinstance(source.get(key), bool):
+                return bool(source[key])
+    return None
+
+
 def _is_image_content_block(value):
     if not isinstance(value, dict):
         return False
@@ -533,10 +596,13 @@ def _payload_has_image_input(value):
     return _count_image_blocks_recursive(value) > 0
 
 
-def _model_rejects_image_input(model_name):
+def _model_rejects_image_input(model_name, model_capabilities=None):
     normalized = _selector_base_model_name(model_name)
     if not normalized:
         return True
+    image_override = _model_image_input_override(normalized, model_capabilities or {})
+    if image_override is not None:
+        return not image_override
     if normalized in _KNOWN_IMAGE_INPUT_SUPPORTED_MODEL_NAMES:
         return False
     if normalized.startswith(_KNOWN_IMAGE_INPUT_SUPPORTED_PREFIXES):
@@ -669,7 +735,7 @@ def _strip_image_blocks(value, *, parent_key=""):
         if changed and parent_key == "content" and not cleaned:
             cleaned.append({
                 "type": "text",
-                "text": "[MMS removed image input; see vision sidecar summary appended to this request.]",
+                "text": _VISION_SIDECAR_REMOVED_IMAGE_TEXT,
             })
         return cleaned, changed
     return value, False
@@ -682,6 +748,111 @@ def _messages_without_images(messages):
             continue
         next_message, _ = _strip_image_blocks(copy.deepcopy(message))
         cleaned.append(next_message)
+    return cleaned
+
+
+_VISION_SIDECAR_REMOVED_IMAGE_TEXT = "[MMS removed image input; see vision sidecar summary appended to this request.]"
+_VISION_SIDECAR_NOTE_PREFIX = "[MMS vision sidecar by "
+
+
+def _strip_vision_sidecar_text(text):
+    if not isinstance(text, str):
+        return text, False
+    cleaned = text
+    changed = False
+    if _VISION_SIDECAR_REMOVED_IMAGE_TEXT in cleaned:
+        cleaned = cleaned.replace(_VISION_SIDECAR_REMOVED_IMAGE_TEXT, "")
+        changed = True
+    marker = cleaned.find(_VISION_SIDECAR_NOTE_PREFIX)
+    if marker != -1:
+        cleaned = cleaned[:marker]
+        changed = True
+    if changed:
+        cleaned = cleaned.rstrip()
+    return cleaned, changed
+
+
+def _strip_vision_sidecar_artifacts(value, *, parent_key=""):
+    if isinstance(value, dict):
+        if value.get("type") == "text":
+            cleaned_text, changed = _strip_vision_sidecar_text(str(value.get("text") or ""))
+            if changed and not cleaned_text.strip():
+                return None, True
+            if changed:
+                updated = copy.deepcopy(value)
+                updated["text"] = cleaned_text
+                return updated, True
+            return copy.deepcopy(value), False
+        changed = False
+        cleaned = {}
+        for key, child in value.items():
+            next_child, child_changed = _strip_vision_sidecar_artifacts(child, parent_key=str(key))
+            changed = changed or child_changed
+            if child_changed and next_child is None:
+                continue
+            cleaned[key] = next_child
+        if value.get("type") == "tool_result" and "content" not in cleaned:
+            return None, True
+        return cleaned, changed
+    if isinstance(value, list):
+        changed = False
+        cleaned = []
+        for item in value:
+            next_item, item_changed = _strip_vision_sidecar_artifacts(item, parent_key=parent_key)
+            changed = changed or item_changed
+            if item_changed and next_item is None:
+                continue
+            cleaned.append(next_item)
+        if parent_key == "content" and not cleaned:
+            return None, True
+        return cleaned, changed
+    cleaned_text, changed = _strip_vision_sidecar_text(value)
+    if changed and isinstance(cleaned_text, str) and not cleaned_text.strip():
+        return None, True
+    return cleaned_text, changed
+
+
+def _messages_without_vision_sidecar_artifacts(messages):
+    cleaned = []
+    for message in messages or []:
+        if not isinstance(message, dict):
+            continue
+        next_message, changed = _strip_vision_sidecar_artifacts(copy.deepcopy(message))
+        if changed and next_message is None:
+            continue
+        cleaned.append(next_message)
+    return cleaned
+
+
+def _sanitize_historical_multimodal_message(message):
+    next_message, _ = _strip_image_blocks(copy.deepcopy(message))
+    next_message, changed = _strip_vision_sidecar_artifacts(next_message)
+    if changed and next_message is None:
+        return None
+    if isinstance(next_message, dict):
+        role = str(next_message.get("role") or "").strip().lower()
+        if role in {"user", "assistant"} and "content" not in next_message:
+            return None
+    return next_message
+
+
+def _sanitize_historical_multimodal_messages(messages):
+    if not isinstance(messages, list):
+        return messages
+    last_assistant_index = -1
+    for idx, message in enumerate(messages):
+        if isinstance(message, dict) and str(message.get("role") or "").strip().lower() == "assistant":
+            last_assistant_index = idx
+    if last_assistant_index < 0:
+        return copy.deepcopy(messages)
+    cleaned = []
+    for message in messages[: last_assistant_index + 1]:
+        next_message = _sanitize_historical_multimodal_message(message)
+        if next_message is None:
+            continue
+        cleaned.append(next_message)
+    for message in messages[last_assistant_index + 1 :]:
+        cleaned.append(copy.deepcopy(message))
     return cleaned
 
 
@@ -815,7 +986,31 @@ def _apply_vision_sidecar(payload, sidecar_config, handler):
     return rewritten, ""
 
 
+def _model_policy_capability_bool(model_name, *capability_keys):
+    try:
+        from mms_capability_resolver import load_default_model_policy
+
+        policy = load_default_model_policy()
+    except Exception:
+        return None
+    models = policy.get("models") if isinstance(policy, dict) else {}
+    if not isinstance(models, dict):
+        return None
+    normalized = _normalize_model_name(model_name)
+    for key, entry in models.items():
+        if _normalize_model_name(key) != normalized or not isinstance(entry, dict):
+            continue
+        caps = entry.get("capabilities") if isinstance(entry.get("capabilities"), dict) else {}
+        for cap_key in capability_keys:
+            if isinstance(caps.get(cap_key), bool):
+                return bool(caps[cap_key])
+    return None
+
+
 def _domestic_model_supports_thinking(model_name):
+    policy_override = _model_policy_capability_bool(model_name, "thinking", "supports_thinking")
+    if policy_override is not None:
+        return policy_override
     normalized = _normalize_model_name(model_name)
     if not normalized.startswith(_DOMESTIC_MODEL_PREFIXES):
         return False
@@ -1906,11 +2101,28 @@ def _should_try_chatcompletions_fallback(status_code, body_text):
     unsupported_markers = (
         "messages array is required",
         "field messages is required",
+        "request body must be valid json",
         "unsupported path",
         "route /",
         "not found",
     )
     return any(marker in lower for marker in unsupported_markers)
+
+
+def _should_cache_chatcompletions_fallback(status_code, body_text):
+    """Cache only proven endpoint incompatibility, never a malformed-request 400."""
+    if status_code in (404, 405, 410, 501):
+        return True
+    if status_code != 400:
+        return False
+    lower = (body_text or "").lower()
+    return any(marker in lower for marker in (
+        "messages array is required",
+        "field messages is required",
+        "unsupported path",
+        "route /",
+        "not found",
+    ))
 
 
 def _chatcompletions_error_requests_messages(body_text):
@@ -1996,6 +2208,65 @@ def _append_incident_log(
         pass
 
 
+def _chat_fallback_wire_summary(payload):
+    """Create a prompt-free fingerprint for an outbound Chat fallback body."""
+    try:
+        encoded = json.dumps(
+            payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+        json.loads(encoded.decode("utf-8"))
+    except (TypeError, ValueError, UnicodeError) as exc:
+        return {"json_valid": False, "serialization_error": type(exc).__name__}
+
+    messages = payload.get("messages") if isinstance(payload, dict) else []
+    tools = payload.get("tools") if isinstance(payload, dict) else []
+    return {
+        "json_valid": True,
+        "body_bytes": len(encoded),
+        "body_sha256": hashlib.sha256(encoded).hexdigest(),
+        "message_count": len(messages) if isinstance(messages, list) else 0,
+        "tool_count": len(tools) if isinstance(tools, list) else 0,
+    }
+
+
+def _append_chat_fallback_wire_evidence(*, event, model_name, provider_id, target_url, payload, status_code=None, response_body=""):
+    """Write opt-in, secret-free fallback evidence outside MMS config roots."""
+    evidence_path = str(os.environ.get("MMS_BRIDGE_WIRE_LOG_PATH") or "").strip()
+    if not evidence_path:
+        return
+    try:
+        response_bytes = str(response_body or "").encode("utf-8", errors="replace")
+        try:
+            json.loads(response_bytes.decode("utf-8"))
+            response_json_valid = True
+        except (TypeError, ValueError, UnicodeError):
+            response_json_valid = False
+        entry = {
+            "ts": int(time.time()),
+            "event": str(event or ""),
+            "model": str(model_name or ""),
+            "provider_id": str(provider_id or ""),
+            "request_path": urlsplit(str(target_url or "")).path or "/",
+            "status_code": status_code,
+            "request": _chat_fallback_wire_summary(payload),
+            "response": {
+                "body_bytes": len(response_bytes),
+                "body_sha256": hashlib.sha256(response_bytes).hexdigest() if response_bytes else "",
+                "json_valid": response_json_valid,
+            },
+        }
+        parent = os.path.dirname(os.path.abspath(evidence_path))
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(evidence_path, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n")
+    except OSError:
+        pass
+
+
 def _now_ms():
     return time.monotonic() * 1000.0
 
@@ -2027,6 +2298,97 @@ def _extract_usage(payload):
             if isinstance(v, (int, float)) and v > 0:
                 inp = max(inp, inp)  # cache tokens 已包含在 input_tokens 中
     return inp, out
+
+
+def _extract_usage_detail(payload):
+    """Extract a paste-safe token usage snapshot from common provider payloads."""
+    detail = {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cached_tokens": 0,
+    }
+    if not isinstance(payload, dict):
+        return detail
+    usage_candidates = []
+    for container in (payload, payload.get("response", {}), payload.get("message", {})):
+        if isinstance(container, dict):
+            usage = container.get("usage")
+            if isinstance(usage, dict):
+                usage_candidates.append(usage)
+    for usage in usage_candidates:
+        for target, keys in {
+            "input_tokens": ("input_tokens", "prompt_tokens"),
+            "output_tokens": ("output_tokens", "completion_tokens"),
+            "cache_read_input_tokens": ("cache_read_input_tokens",),
+            "cache_creation_input_tokens": ("cache_creation_input_tokens",),
+            "cached_tokens": ("cached_tokens", "cache_read_tokens", "cache_tokens"),
+        }.items():
+            for key in keys:
+                value = usage.get(key)
+                if isinstance(value, (int, float)):
+                    detail[target] = max(detail[target], int(value))
+        prompt_details = usage.get("prompt_tokens_details")
+        if isinstance(prompt_details, dict):
+            cached = prompt_details.get("cached_tokens")
+            if isinstance(cached, (int, float)):
+                detail["cached_tokens"] = max(detail["cached_tokens"], int(cached))
+    return detail
+
+
+def _extract_response_model(payload):
+    if not isinstance(payload, dict):
+        return ""
+    for container in (payload, payload.get("message", {}), payload.get("response", {})):
+        if isinstance(container, dict):
+            model = str(container.get("model") or "").strip()
+            if model:
+                return model
+    return ""
+
+
+def _merge_wire_usage(server, detail):
+    if not server or not isinstance(detail, dict):
+        return
+    current = getattr(server, "wire_usage", None)
+    if not isinstance(current, dict):
+        current = _extract_usage_detail({})
+    for key in current:
+        value = detail.get(key)
+        if isinstance(value, (int, float)):
+            current[key] = max(int(current.get(key) or 0), int(value))
+    server.wire_usage = current
+
+
+def _record_wire_response(
+    server,
+    payload,
+    *,
+    request_model="",
+    provider_id="",
+    protocol="",
+    request_path="",
+    fallback_used=False,
+    fallback_reason="",
+):
+    if not server:
+        return
+    model = _extract_response_model(payload)
+    if model:
+        server.last_response_model = model
+    if request_model:
+        server.last_requested_model = request_model
+    if provider_id:
+        server.last_provider_id = provider_id
+    if protocol:
+        server.last_protocol = protocol
+    if request_path:
+        server.last_request_path = request_path
+    server.last_fallback_used = bool(fallback_used)
+    if fallback_reason:
+        server.last_fallback_reason = fallback_reason
+    _merge_wire_usage(server, _extract_usage_detail(payload))
 
 
 def _accumulate_usage(server, payload):
@@ -2072,6 +2434,7 @@ def _record_bridge_speed(model_name, *, started_ms, first_byte_ms, output_tokens
         server.session_request_count += 1
         server.session_output_tokens += (output_tokens or 0)
         server.session_input_tokens += (input_tokens or 0)
+        server.last_requested_model = str(model_name or "")
     if first_byte_ms is None:
         return
     total_ms = max(0.0, _now_ms() - started_ms)
@@ -2103,10 +2466,14 @@ def _dedupe_status_paths(paths):
     return normalized
 
 
-def _write_route_status(tier, model, reason, *, status_paths=None):
+def _write_route_status(tier, model, reason, *, status_paths=None, context_window_tokens=None):
     """写路由状态供 statusline 读取，非阻塞，失败静默。"""
     try:
-        data = json.dumps({"tier": tier, "model": model, "reason": reason, "ts": time.time()})
+        payload = {"tier": tier, "model": model, "reason": reason, "ts": time.time()}
+        context_window = _coerce_context_window(context_window_tokens)
+        if context_window:
+            payload["context_window_tokens"] = context_window
+        data = json.dumps(payload)
         targets = _dedupe_status_paths(status_paths or [_current_route_status_path()])
         for path in targets:
             try:
@@ -2119,6 +2486,34 @@ def _write_route_status(tier, model, reason, *, status_paths=None):
                 pass
     except Exception:
         pass
+
+
+def _server_model_context_window(server, model_name, *, prefer_session=True):
+    if prefer_session:
+        session_window = _coerce_context_window(getattr(server, "session_context_window", None))
+        if session_window:
+            return session_window
+    windows = getattr(server, "context_windows", {}) or {}
+    if not isinstance(windows, dict):
+        return None
+    candidates = []
+    normalized = _normalize_model_name(model_name)
+    base = _selector_base_model_name(model_name)
+    raw = str(model_name or "").strip()
+    candidates.extend([raw, normalized, base])
+    for key, value in windows.items():
+        key_text = str(key or "").strip()
+        key_norm = _normalize_model_name(key_text)
+        if key_text in candidates or key_norm in candidates or _selector_base_model_name(key_text) in candidates:
+            window = _coerce_context_window(value)
+            if window:
+                return window
+    return None
+
+
+def _route_status_context_kwargs(server, model_name):
+    window = _server_model_context_window(server, model_name, prefer_session=True)
+    return {"context_window_tokens": window} if window else {}
 
 
 def _wait_local_server_ready(port, attempts=50, delay=0.1):
@@ -3246,6 +3641,11 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
         # Translate /v1/responses → /v1/messages so gateway only sees Messages API
         if path_bare == "/v1/responses":
             path = "/v1/messages" + path[len("/v1/responses"):]
+            path_bare = path.split("?")[0]
+
+        if path_bare == "/v1/messages/count_tokens":
+            self._json(200, {"input_tokens": _count_tokens_approx(payload)})
+            return
 
         # ── debug: 记录每次 bridge 收到的请求 ──
         _lb_debug_paths = [os.path.join(resolve_mms_config_dir(), "lb_debug.log")]
@@ -3335,10 +3735,15 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
         incoming_model = payload.get("model") if isinstance(payload, dict) else ""
         if heavy_model and "model" in payload:
             heavy_base_model = str(heavy_model or "").replace(_ONE_M_CONTEXT_SUFFIX, "").strip()
-            if _is_claude_shell_model(incoming_model):
+            if getattr(self.server, "force_heavy_model", False):
+                payload["model"] = heavy_model
+            elif _is_claude_shell_model(incoming_model):
                 payload["model"] = heavy_model
             elif (
-                _requests_mimo_1m_context(heavy_model)
+                _model_requests_mimo_1m_context(
+                    heavy_model,
+                    _server_model_context_window(self.server, heavy_model, prefer_session=False),
+                )
                 and _normalize_model_name(incoming_model) == _normalize_model_name(heavy_base_model)
             ):
                 payload["model"] = heavy_model
@@ -3421,6 +3826,7 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                     payload.get("model", ""),
                     reason,
                     status_paths=getattr(self.server, "route_status_paths", None),
+                    **_route_status_context_kwargs(self.server, payload.get("model", "")),
                 )
                 _emit_event("started", payload.get("model", ""), note=f"tier={level} reason={reason}")
                 # 保存 level 供后续使用
@@ -3437,6 +3843,7 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                     payload.get("model", ""),
                     "tool_continue",
                     status_paths=getattr(self.server, "route_status_paths", None),
+                    **_route_status_context_kwargs(self.server, payload.get("model", "")),
                 )
                 _emit_event("streaming", payload.get("model", ""), note="tool_continue")
                 from mms_router import log_route
@@ -3449,6 +3856,7 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                     payload.get("model", ""),
                     "no_user_msg",
                     status_paths=getattr(self.server, "route_status_paths", None),
+                    **_route_status_context_kwargs(self.server, payload.get("model", "")),
                 )
                 _emit_event("streaming", payload.get("model", ""), note="no_user_msg")
                 self.server._last_level = prev_level
@@ -3460,6 +3868,7 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                 payload.get("model", ""),
                 "direct",
                 status_paths=getattr(self.server, "route_status_paths", None),
+                **_route_status_context_kwargs(self.server, payload.get("model", "")),
             )
             _emit_event("started", payload.get("model", ""), note="direct")
 
@@ -3471,10 +3880,20 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
             self._json(404, {"type": "error", "error": {"type": "not_found_error", "message": "not found"}})
             return
 
-        _strip_anthropic_billing_system_header(payload)
-
         resolved_model_for_guard = str(payload.get("model") or "")
-        if _payload_has_image_input(payload.get("messages")) and _model_rejects_image_input(resolved_model_for_guard):
+        _strip_anthropic_billing_system_header(payload)
+        if isinstance(payload.get("messages"), list):
+            payload["messages"] = _messages_without_vision_sidecar_artifacts(payload.get("messages"))
+            if _model_rejects_image_input(
+                resolved_model_for_guard,
+                getattr(self.server, "model_capabilities", {}) or {},
+            ):
+                payload["messages"] = _sanitize_historical_multimodal_messages(payload.get("messages"))
+
+        if _payload_has_image_input(payload.get("messages")) and _model_rejects_image_input(
+            resolved_model_for_guard,
+            getattr(self.server, "model_capabilities", {}) or {},
+        ):
             sidecar_payload, sidecar_error = _apply_vision_sidecar(
                 payload,
                 getattr(self.server, "vision_sidecar", {}) or {},
@@ -3546,7 +3965,10 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                 route_provider_id = route.get("provider_id") or getattr(self.server, "provider_id", "")
                 route_provider_profile = route.get("provider_profile") or getattr(self.server, "provider_profile", "")
                 resolved_model = str(route_payload.get("model") or "")
-                enable_mimo_1m_context = _requests_mimo_1m_context(resolved_model)
+                enable_mimo_1m_context = _model_requests_mimo_1m_context(
+                    resolved_model,
+                    _server_model_context_window(self.server, resolved_model, prefer_session=False),
+                )
                 wire_model = profile_model_alias(
                     resolved_model,
                     protocol="anthropic_messages",
@@ -3597,6 +4019,14 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                 else:
                     path_suffix = path
                 target_url = _gw + path_suffix
+                metrics_model = str(route_payload.get("model") or "")
+                request_path = _fallback_safe_url(target_url)
+                self.server.last_requested_model = metrics_model
+                self.server.last_provider_id = str(route_provider_id or "")
+                self.server.last_protocol = "anthropic_messages"
+                self.server.last_request_path = request_path
+                self.server.last_fallback_used = route_index > 0
+                self.server.last_fallback_reason = str(route.get("fallback_reason") or "") if route_index > 0 else ""
 
                 fwd_headers = {
                     "Content-Type": "application/json",
@@ -3632,7 +4062,6 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                 if has_routing:
                     stream = False
                     route_payload["stream"] = False
-                metrics_model = str(route_payload.get("model") or "")
                 route_started_ms = _now_ms()
                 first_byte_ms = None
                 output_tokens = None
@@ -3668,6 +4097,7 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                                     metrics_model,
                                     reason,
                                     status_paths=getattr(self.server, "route_status_paths", None),
+                                    **_route_status_context_kwargs(self.server, metrics_model),
                                 )
                                 continue
                             if response.status_code in (401, 403):
@@ -3729,6 +4159,16 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                                         except json.JSONDecodeError:
                                             event_payload = None
                                         if event_payload:
+                                            _record_wire_response(
+                                                self.server,
+                                                event_payload,
+                                                request_model=metrics_model,
+                                                provider_id=route_provider_id,
+                                                protocol="anthropic_messages",
+                                                request_path=request_path,
+                                                fallback_used=route_index > 0,
+                                                fallback_reason=str(route.get("fallback_reason") or "") if route_index > 0 else "",
+                                            )
                                             extracted = _extract_output_tokens(event_payload)
                                             if extracted is not None:
                                                 output_tokens = extracted
@@ -3777,6 +4217,7 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                             metrics_model,
                             reason,
                             status_paths=getattr(self.server, "route_status_paths", None),
+                            **_route_status_context_kwargs(self.server, metrics_model),
                         )
                         continue
                     if response.status_code in (401, 403):
@@ -3830,6 +4271,7 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                                 metrics_model,
                                 failure,
                                 status_paths=getattr(self.server, "route_status_paths", None),
+                                **_route_status_context_kwargs(self.server, metrics_model),
                             )
                             continue
                     if response.status_code == 200:
@@ -3837,6 +4279,16 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                             response_payload = json.loads(body_out.decode("utf-8"))
                         except Exception:
                             response_payload = None
+                        _record_wire_response(
+                            self.server,
+                            response_payload,
+                            request_model=metrics_model,
+                            provider_id=route_provider_id,
+                            protocol="anthropic_messages",
+                            request_path=request_path,
+                            fallback_used=route_index > 0,
+                            fallback_reason=str(route.get("fallback_reason") or "") if route_index > 0 else "",
+                        )
                         self.server._last_reasoning_content = _anthropic_response_reasoning_content(response_payload)
                     if body_out:
                         try:
@@ -3884,6 +4336,7 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                             str(route_payload.get("model") or ""),
                             token,
                             status_paths=getattr(self.server, "route_status_paths", None),
+                            **_route_status_context_kwargs(self.server, str(route_payload.get("model") or "")),
                         )
                         continue
                     if response_started:
@@ -4140,47 +4593,138 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
 ########################################################################
 
 
-def _responses_input_to_messages(instructions, input_items):
+def _responses_reasoning_item_text(item):
+    if not isinstance(item, dict):
+        return ""
+
+    parts = []
+
+    def _append_text(value):
+        if isinstance(value, str):
+            text = value.strip()
+            if text:
+                parts.append(text)
+
+    def _append_part_list(values):
+        if isinstance(values, str):
+            _append_text(values)
+            return
+        if not isinstance(values, list):
+            return
+        for value in values:
+            if isinstance(value, str):
+                _append_text(value)
+                continue
+            if not isinstance(value, dict):
+                continue
+            _append_text(value.get("text"))
+            summary_text = value.get("summary_text")
+            if isinstance(summary_text, dict):
+                _append_text(summary_text.get("text"))
+            else:
+                _append_text(summary_text)
+
+    _append_text(item.get("text"))
+    _append_text(item.get("summary_text"))
+    _append_part_list(item.get("summary"))
+    _append_part_list(item.get("content"))
+    return "\n\n".join(parts).strip()
+
+
+def _responses_tool_output_text(output):
+    """Normalize Responses function/custom tool outputs for Chat history."""
+    if isinstance(output, str):
+        return output
+    if isinstance(output, list):
+        parts = []
+        for part in output:
+            if isinstance(part, str):
+                parts.append(part)
+            elif isinstance(part, dict) and part.get("type") in {"input_text", "output_text", "text"}:
+                parts.append(str(part.get("text") or ""))
+        if parts:
+            return "\n".join(parts)
+    if isinstance(output, dict):
+        text = output.get("text")
+        if isinstance(text, str):
+            return text
+    return json.dumps(output, ensure_ascii=False)
+
+
+def _responses_input_to_messages(instructions, input_items, model_name="", *, session_reasoning_content=""):
     """Convert Responses API 'input' array to Chat Completions 'messages'."""
     messages = []
     if instructions:
         messages.append({"role": "system", "content": instructions})
 
     pending_tool_calls = []
+    pending_reasoning_content = ""
+    requires_roundtrip = _domestic_model_requires_reasoning_content_roundtrip(model_name)
+
+    def _assistant_message(message):
+        if (
+            requires_roundtrip
+            and pending_reasoning_content
+            and isinstance(message, dict)
+            and str(message.get("role") or "") == "assistant"
+        ):
+            message["reasoning_content"] = pending_reasoning_content
+        return message
 
     for item in input_items or []:
         if not isinstance(item, dict):
             continue
         item_type = item.get("type")
         role = item.get("role")
+        item_reasoning_content = ""
+        if requires_roundtrip:
+            value = item.get("reasoning_content")
+            if isinstance(value, str) and value.strip():
+                item_reasoning_content = value.strip()
 
-        if item_type == "function_call":
+        if item_type == "reasoning":
+            reasoning_text = _responses_reasoning_item_text(item)
+            if reasoning_text:
+                pending_reasoning_content = (
+                    f"{pending_reasoning_content}\n\n{reasoning_text}".strip()
+                    if pending_reasoning_content
+                    else reasoning_text
+                )
+            continue
+
+        if item_type in {"function_call", "custom_tool_call"}:
+            if item_reasoning_content:
+                pending_reasoning_content = item_reasoning_content
+            arguments = item.get("arguments", "{}")
+            if item_type == "custom_tool_call":
+                arguments = json.dumps({"input": str(item.get("input") or "")})
             pending_tool_calls.append({
                 "id": item.get("call_id", item.get("id", "")),
                 "type": "function",
                 "function": {
                     "name": item.get("name", ""),
-                    "arguments": item.get("arguments", "{}"),
+                    "arguments": arguments,
                 },
             })
             continue
 
-        if item_type == "function_call_output":
+        if item_type in {"function_call_output", "custom_tool_call_output"}:
             # Flush any pending tool_calls first
             if pending_tool_calls:
-                messages.append({"role": "assistant", "tool_calls": list(pending_tool_calls)})
+                messages.append(_assistant_message({"role": "assistant", "tool_calls": list(pending_tool_calls)}))
                 pending_tool_calls = []
             messages.append({
                 "role": "tool",
                 "tool_call_id": item.get("call_id", ""),
-                "content": str(item.get("output", "")),
+                "content": _responses_tool_output_text(item.get("output", "")),
             })
+            pending_reasoning_content = ""
             continue
 
         if role in ("user", "assistant", "system"):
             # Flush pending tool_calls before a new message
             if pending_tool_calls:
-                messages.append({"role": "assistant", "tool_calls": list(pending_tool_calls)})
+                messages.append(_assistant_message({"role": "assistant", "tool_calls": list(pending_tool_calls)}))
                 pending_tool_calls = []
 
             content_parts = item.get("content")
@@ -4204,15 +4748,34 @@ def _responses_input_to_messages(instructions, input_items):
                 content = ""
 
             if role == "assistant" and item_type == "message":
+                if item_reasoning_content:
+                    pending_reasoning_content = item_reasoning_content
                 # Check if this message also has tool_calls embedded
-                messages.append({"role": "assistant", "content": content})
+                messages.append(_assistant_message({"role": "assistant", "content": content}))
             else:
                 messages.append({"role": role, "content": content})
+                if role != "assistant":
+                    pending_reasoning_content = ""
             continue
 
     # Flush remaining pending tool_calls
     if pending_tool_calls:
-        messages.append({"role": "assistant", "tool_calls": list(pending_tool_calls)})
+        messages.append(_assistant_message({"role": "assistant", "tool_calls": list(pending_tool_calls)}))
+
+    if requires_roundtrip:
+        last_reasoning_content = str(session_reasoning_content or "").strip()
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+            role = str(message.get("role") or "")
+            reasoning_content = str(message.get("reasoning_content") or "").strip()
+            if role == "assistant":
+                if reasoning_content:
+                    last_reasoning_content = reasoning_content
+                    continue
+                if last_reasoning_content and isinstance(message.get("tool_calls"), list) and message["tool_calls"]:
+                    message["reasoning_content"] = last_reasoning_content
+                    continue
 
     return messages
 
@@ -4233,6 +4796,74 @@ def _responses_tools_to_chat(tools):
                 },
             })
     return converted
+
+
+def _responses_additional_tools_to_chat(input_items):
+    """Project Codex's nested tool envelope onto Chat Completions functions.
+
+    Codex sends its local tools inside an ``additional_tools`` input item rather
+    than the top-level Responses ``tools`` array. Native Responses providers
+    understand that envelope, but a Chat Completions fallback otherwise loses
+    every local shell/filesystem tool before it reaches the model.
+    """
+    converted = []
+    custom_tool_names = set()
+    seen_names = set()
+
+    def add_function(name, description, parameters):
+        name = str(name or "").strip()
+        if not name or name in seen_names:
+            return
+        seen_names.add(name)
+        converted.append({
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": str(description or ""),
+                "parameters": parameters if isinstance(parameters, dict) else {"type": "object", "properties": {}},
+            },
+        })
+
+    for item in input_items or []:
+        if not isinstance(item, dict) or item.get("type") != "additional_tools":
+            continue
+        for tool in item.get("tools") or []:
+            if not isinstance(tool, dict):
+                continue
+            tool_type = str(tool.get("type") or "")
+            if tool_type == "function":
+                add_function(tool.get("name"), tool.get("description"), tool.get("parameters"))
+            elif tool_type == "custom":
+                name = str(tool.get("name") or "").strip()
+                if not name:
+                    continue
+                custom_tool_names.add(name)
+                add_function(
+                    name,
+                    f"{str(tool.get('description') or '').strip()}\n\nPass the raw custom-tool input in the `input` field.",
+                    {
+                        "type": "object",
+                        "properties": {"input": {"type": "string"}},
+                        "required": ["input"],
+                        "additionalProperties": False,
+                    },
+                )
+    return converted, custom_tool_names
+
+
+def _merge_chat_tools(*tool_sets):
+    """Keep the first declaration for each tool name across transport forms."""
+    merged = []
+    names = set()
+    for tool_set in tool_sets:
+        for tool in tool_set or []:
+            function = tool.get("function") if isinstance(tool, dict) else None
+            name = str(function.get("name") or "").strip() if isinstance(function, dict) else ""
+            if not name or name in names:
+                continue
+            names.add(name)
+            merged.append(tool)
+    return merged
 
 
 def _chat_messages_to_anthropic_payload(chat_messages, model_name, *, stream=True, max_tokens=None):
@@ -4258,6 +4889,11 @@ def _chat_messages_to_anthropic_payload(chat_messages, model_name, *, stream=Tru
             })
             continue
         blocks = []
+        reasoning_content = ""
+        if role == "assistant":
+            reasoning_content = str(message.get("reasoning_content") or "").strip()
+        if reasoning_content:
+            blocks.append({"type": "thinking", "thinking": reasoning_content})
         if content:
             blocks.append({"type": "text", "text": str(content)})
         for tool_call in message.get("tool_calls") or []:
@@ -4305,7 +4941,11 @@ def _responses_tools_to_anthropic(tools):
 
 
 def _responses_payload_to_anthropic_messages_payload(payload, model_name):
-    chat_messages = _responses_input_to_messages(payload.get("instructions", ""), payload.get("input", []))
+    chat_messages = _responses_input_to_messages(
+        payload.get("instructions", ""),
+        payload.get("input", []),
+        model_name,
+    )
     anthropic_payload = _chat_messages_to_anthropic_payload(
         chat_messages,
         model_name,
@@ -4318,15 +4958,80 @@ def _responses_payload_to_anthropic_messages_payload(payload, model_name):
     return anthropic_payload
 
 
+def _chat_delta_reasoning_content(delta):
+    if not isinstance(delta, dict):
+        return ""
+    value = delta.get("reasoning_content")
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        text = value.get("text")
+        return text if isinstance(text, str) else ""
+    if not isinstance(value, list):
+        return ""
+    parts = []
+    for item in value:
+        if isinstance(item, str):
+            parts.append(item)
+            continue
+        if not isinstance(item, dict):
+            continue
+        text = item.get("text")
+        if isinstance(text, str):
+            parts.append(text)
+    return "".join(parts)
+
+
+def _custom_tool_input_prefix(arguments):
+    """Return the safely decoded prefix of the Chat function's ``input`` string."""
+    match = re.search(r'"input"\s*:\s*"', str(arguments or ""))
+    if not match:
+        return ""
+
+    encoded = str(arguments)[match.end():]
+    decoded = []
+    index = 0
+    escapes = {
+        '"': '"', "\\": "\\", "/": "/", "b": "\b", "f": "\f",
+        "n": "\n", "r": "\r", "t": "\t",
+    }
+    while index < len(encoded):
+        character = encoded[index]
+        if character == '"':
+            break
+        if character != "\\":
+            decoded.append(character)
+            index += 1
+            continue
+        if index + 1 >= len(encoded):
+            break
+        escape = encoded[index + 1]
+        if escape == "u":
+            sequence = encoded[index + 2:index + 6]
+            if len(sequence) != 4 or not re.fullmatch(r"[0-9a-fA-F]{4}", sequence):
+                break
+            decoded.append(chr(int(sequence, 16)))
+            index += 6
+            continue
+        if escape not in escapes:
+            break
+        decoded.append(escapes[escape])
+        index += 2
+    return "".join(decoded)
+
+
 class _ChatCompletionsToResponsesTranslator:
     """Translate Chat Completions streaming chunks to Responses API SSE events.
     Matches the real OpenAI Responses API format that Codex expects."""
 
-    def __init__(self, model_name, response_id=None):
+    def __init__(self, model_name, response_id=None, custom_tool_names=None):
         self.model_name = model_name
+        self.custom_tool_names = set(custom_tool_names or ())
         self.response_id = response_id or f"resp_{uuid.uuid4().hex[:24]}"
         self.msg_item_id = f"msg_{uuid.uuid4().hex[:24]}"
+        self.reasoning_item_id = f"rs_{uuid.uuid4().hex[:24]}"
         self.text_content = ""
+        self.reasoning_content = ""
         self.tool_calls = {}  # index -> {id, name, arguments}
         self.started = False
         self.text_part_added = False
@@ -4350,6 +5055,61 @@ class _ChatCompletionsToResponsesTranslator:
                 "total_tokens": max(1, len(self.text_content) // 4),
             },
         }
+
+    def _normalized_reasoning_content(self):
+        return self.reasoning_content.strip()
+
+    def _reasoning_output_item(self):
+        reasoning_content = self._normalized_reasoning_content()
+        if not reasoning_content:
+            return None
+        return {
+            "type": "reasoning",
+            "id": self.reasoning_item_id,
+            "summary": [{"type": "summary_text", "text": reasoning_content}],
+            "status": "completed",
+        }
+
+    def _message_output_item(self, *, status="completed"):
+        item = {
+            "type": "message",
+            "id": self.msg_item_id,
+            "role": "assistant",
+            "status": status,
+            "content": [{"type": "output_text", "annotations": [], "text": self.text_content}],
+        }
+        reasoning_content = self._normalized_reasoning_content()
+        if reasoning_content:
+            item["reasoning_content"] = reasoning_content
+        return item
+
+    def _tool_call_output_item(self, tc_info, *, status="completed"):
+        if tc_info["name"] in self.custom_tool_names:
+            try:
+                input_text = str(json.loads(tc_info["arguments"]).get("input") or "")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                input_text = tc_info["arguments"]
+            item = {
+                "type": "custom_tool_call",
+                "id": tc_info["item_id"],
+                "call_id": tc_info["id"],
+                "name": tc_info["name"],
+                "input": input_text,
+                "status": status,
+            }
+        else:
+            item = {
+                "type": "function_call",
+                "id": tc_info["item_id"],
+                "call_id": tc_info["id"],
+                "name": tc_info["name"],
+                "arguments": tc_info["arguments"],
+                "status": status,
+            }
+        reasoning_content = self._normalized_reasoning_content()
+        if reasoning_content:
+            item["reasoning_content"] = reasoning_content
+        return item
 
     def process_chunk(self, chunk):
         """Process a single Chat Completions chunk and yield Responses SSE events."""
@@ -4385,6 +5145,9 @@ class _ChatCompletionsToResponsesTranslator:
         choice = choices[0]
         delta = choice.get("delta", {})
         finish_reason = choice.get("finish_reason")
+        reasoning_delta = _chat_delta_reasoning_content(delta)
+        if reasoning_delta:
+            self.reasoning_content += reasoning_delta
 
         # Text content delta
         content = delta.get("content")
@@ -4417,11 +5180,13 @@ class _ChatCompletionsToResponsesTranslator:
                 if idx not in self.tool_calls:
                     tc_id = tc.get("id", f"call_{uuid.uuid4().hex[:24]}")
                     tc_name = tc.get("function", {}).get("name", "")
+                    item_id_prefix = "ctc" if tc_name in self.custom_tool_names else "fc"
                     self.tool_calls[idx] = {
                         "id": tc_id,
-                        "item_id": f"fc_{uuid.uuid4().hex[:24]}",
+                        "item_id": f"{item_id_prefix}_{uuid.uuid4().hex[:24]}",
                         "name": tc_name,
                         "arguments": "",
+                        "custom_input_emitted": "",
                     }
                     # Close text part if open
                     if self.text_part_added:
@@ -4429,30 +5194,39 @@ class _ChatCompletionsToResponsesTranslator:
                         self.output_index += 1
                         self.text_part_added = False
 
+                    item = self._tool_call_output_item(self.tool_calls[idx], status="in_progress")
                     outgoing.append(("response.output_item.added", {
                         "type": "response.output_item.added",
                         "output_index": self.output_index + idx,
-                        "item": {
-                            "type": "function_call",
-                            "id": self.tool_calls[idx]["item_id"],
-                            "call_id": tc_id,
-                            "name": tc_name,
-                            "arguments": "",
-                            "status": "in_progress",
-                        },
+                        "item": item,
                         "sequence_number": self._seq_num(),
                     }))
 
                 args_delta = tc.get("function", {}).get("arguments", "")
                 if args_delta:
-                    self.tool_calls[idx]["arguments"] += args_delta
-                    outgoing.append(("response.function_call_arguments.delta", {
-                        "type": "response.function_call_arguments.delta",
-                        "item_id": self.tool_calls[idx]["item_id"],
-                        "output_index": self.output_index + idx,
-                        "delta": args_delta,
-                        "sequence_number": self._seq_num(),
-                    }))
+                    tc_info = self.tool_calls[idx]
+                    tc_info["arguments"] += args_delta
+                    if tc_info["name"] in self.custom_tool_names:
+                        input_prefix = _custom_tool_input_prefix(tc_info["arguments"])
+                        emitted = tc_info["custom_input_emitted"]
+                        if input_prefix.startswith(emitted) and input_prefix != emitted:
+                            input_delta = input_prefix[len(emitted):]
+                            tc_info["custom_input_emitted"] = input_prefix
+                            outgoing.append(("response.custom_tool_call_input.delta", {
+                                "type": "response.custom_tool_call_input.delta",
+                                "item_id": tc_info["item_id"],
+                                "output_index": self.output_index + idx,
+                                "delta": input_delta,
+                                "sequence_number": self._seq_num(),
+                            }))
+                    else:
+                        outgoing.append(("response.function_call_arguments.delta", {
+                            "type": "response.function_call_arguments.delta",
+                            "item_id": tc_info["item_id"],
+                            "output_index": self.output_index + idx,
+                            "delta": args_delta,
+                            "sequence_number": self._seq_num(),
+                        }))
 
         # Finish
         if finish_reason is not None:
@@ -4461,46 +5235,41 @@ class _ChatCompletionsToResponsesTranslator:
 
             # Close open tool calls
             for idx, tc_info in sorted(self.tool_calls.items()):
-                outgoing.append(("response.function_call_arguments.done", {
-                    "type": "response.function_call_arguments.done",
+                if tc_info["name"] in self.custom_tool_names:
+                    try:
+                        input_text = str(json.loads(tc_info["arguments"]).get("input") or "")
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        input_text = tc_info["arguments"]
+                    event_name = "response.custom_tool_call_input.done"
+                    value_key = "input"
+                    value = input_text
+                else:
+                    event_name = "response.function_call_arguments.done"
+                    value_key = "arguments"
+                    value = tc_info["arguments"]
+                outgoing.append((event_name, {
+                    "type": event_name,
                     "item_id": tc_info["item_id"],
                     "output_index": self.output_index + idx,
-                    "arguments": tc_info["arguments"],
+                    value_key: value,
                     "sequence_number": self._seq_num(),
                 }))
                 outgoing.append(("response.output_item.done", {
                     "type": "response.output_item.done",
                     "output_index": self.output_index + idx,
-                    "item": {
-                        "type": "function_call",
-                        "id": tc_info["item_id"],
-                        "call_id": tc_info["id"],
-                        "name": tc_info["name"],
-                        "arguments": tc_info["arguments"],
-                        "status": "completed",
-                    },
+                    "item": self._tool_call_output_item(tc_info),
                     "sequence_number": self._seq_num(),
                 }))
 
             # Build output for completed response
             output_items = []
+            reasoning_item = self._reasoning_output_item()
+            if reasoning_item:
+                output_items.append(reasoning_item)
             if self.text_content or not self.tool_calls:
-                output_items.append({
-                    "type": "message",
-                    "id": self.msg_item_id,
-                    "role": "assistant",
-                    "status": "completed",
-                    "content": [{"type": "output_text", "annotations": [], "text": self.text_content}],
-                })
+                output_items.append(self._message_output_item())
             for idx, tc_info in sorted(self.tool_calls.items()):
-                output_items.append({
-                    "type": "function_call",
-                    "id": tc_info["item_id"],
-                    "call_id": tc_info["id"],
-                    "name": tc_info["name"],
-                    "arguments": tc_info["arguments"],
-                    "status": "completed",
-                })
+                output_items.append(self._tool_call_output_item(tc_info))
 
             outgoing.append(("response.completed", {
                 "type": "response.completed",
@@ -4531,13 +5300,7 @@ class _ChatCompletionsToResponsesTranslator:
         events.append(("response.output_item.done", {
             "type": "response.output_item.done",
             "output_index": self.output_index,
-            "item": {
-                "type": "message",
-                "id": self.msg_item_id,
-                "role": "assistant",
-                "status": "completed",
-                "content": [{"type": "output_text", "annotations": [], "text": self.text_content}],
-            },
+            "item": self._message_output_item(),
             "sequence_number": self._seq_num(),
         }))
         return events
@@ -5024,11 +5787,12 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                                 model_name,
                                 reason,
                                 status_paths=getattr(self.server, "route_status_paths", None),
+                                **_route_status_context_kwargs(self.server, model_name),
                             )
                             continue
                         if _should_try_chatcompletions_fallback(response.status_code, body_text):
                             response.close()
-                            if provider_id:
+                            if provider_id and _should_cache_chatcompletions_fallback(response.status_code, body_text):
                                 _record_bridge_fallback(provider_id, model_name, route_gateway_url)
                             self._do_chatcompletions_fallback(
                                 payload,
@@ -5175,7 +5939,7 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
             _bridge_error_logger.error("do_POST responses proxy error: %s", exc, exc_info=True)
             self._json(502, {"error": {"message": str(exc)}})
 
-    def _do_chatcompletions_fallback(self, payload, model_name, gateway_url, gateway_key, started_ms, route=None):
+    def _do_chatcompletions_fallback(self, payload, model_name, gateway_url, gateway_key, started_ms, route=None, return_result=False):
         """Responses API 不可用时，内部翻译为 Chat Completions 请求并转发。"""
         route = route if isinstance(route, dict) else {}
         provider_id = route.get("provider_id") or getattr(self.server, "provider_id", "")
@@ -5185,6 +5949,8 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
         chat_messages = _responses_input_to_messages(
             payload.get("instructions", ""),
             payload.get("input", []),
+            model_name,
+            session_reasoning_content=getattr(self.server, "_last_reasoning_content", ""),
         )
         chat_payload = {
             "model": model_name,
@@ -5194,7 +5960,11 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
         max_output_tokens = _responses_max_output_tokens(payload)
         if max_output_tokens is not None:
             chat_payload["max_tokens"] = max_output_tokens
-        chat_tools = _responses_tools_to_chat(payload.get("tools"))
+        additional_tools, custom_tool_names = _responses_additional_tools_to_chat(payload.get("input"))
+        chat_tools = _merge_chat_tools(
+            _responses_tools_to_chat(payload.get("tools")),
+            additional_tools,
+        )
         if chat_tools:
             chat_payload["tools"] = chat_tools
         apply_profile_body_patches(
@@ -5223,7 +5993,10 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
         )
         fwd_headers.update(_copy_passthrough_headers(self.headers))
 
-        translator = _ChatCompletionsToResponsesTranslator(model_name)
+        translator = _ChatCompletionsToResponsesTranslator(
+            model_name,
+            custom_tool_names=custom_tool_names,
+        )
         first_byte_ms = None
         output_tokens = None
         try:
@@ -5232,6 +6005,13 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
             for target_url in _build_gateway_candidate_urls(gateway_url, "/chat/completions"):
                 _bridge_error_logger.info(
                     "FALLBACK to chatcompletions: model=%s url=%s", model_name, target_url
+                )
+                _append_chat_fallback_wire_evidence(
+                    event="chat_fallback_request",
+                    model_name=model_name,
+                    provider_id=provider_id,
+                    target_url=target_url,
+                    payload=chat_payload,
                 )
                 retry_remaining = 1
                 while True:
@@ -5258,6 +6038,13 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                                 )
                                 time.sleep(delay)
                                 continue
+                            if return_result:
+                                return {
+                                    "sent": False,
+                                    "status": response.status_code,
+                                    "body": last_body or "chat completions fallback rate limited",
+                                    "url": target_url,
+                                }
                             _record_bridge_blocking_failure(
                                 self.server,
                                 model_name=model_name,
@@ -5276,6 +6063,15 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                         if response.status_code >= 400:
                             last_status = response.status_code
                             last_body = response.read().decode("utf-8", errors="replace")
+                            _append_chat_fallback_wire_evidence(
+                                event="chat_fallback_response",
+                                model_name=model_name,
+                                provider_id=provider_id,
+                                target_url=target_url,
+                                payload=chat_payload,
+                                status_code=last_status,
+                                response_body=last_body,
+                            )
                             break
 
                         self.send_response(200)
@@ -5299,6 +6095,9 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                                 except json.JSONDecodeError:
                                     continue
                                 for event_name, event_payload in translator.process_chunk(chunk):
+                                    current_reasoning = translator._normalized_reasoning_content()
+                                    if current_reasoning:
+                                        self.server._last_reasoning_content = current_reasoning
                                     extracted = _extract_output_tokens(event_payload)
                                     if extracted is not None:
                                         output_tokens = extracted
@@ -5312,9 +6111,17 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                             provider_scope=getattr(self.server, "speed_scope", None),
                             server=self.server,
                         )
-                        return
+                        return {"sent": True, "status": 200, "url": target_url}
                     break
             if _chatcompletions_error_requests_messages(last_body) and gateway_url and gateway_key:
+                if return_result:
+                    return {
+                        "sent": False,
+                        "status": last_status,
+                        "body": last_body or "",
+                        "url": target_url if "target_url" in locals() else "",
+                        "failure_token": "invalid_text",
+                    }
                 messages_route = dict(route)
                 messages_route["protocol"] = "anthropic_messages"
                 messages_route["fallback_reason"] = "cache_sensitive_messages_retry"
@@ -5341,6 +6148,13 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                     route=messages_route,
                 )
                 return
+            if return_result:
+                return {
+                    "sent": False,
+                    "status": last_status,
+                    "body": last_body or "chat completions fallback failed",
+                    "url": target_url if "target_url" in locals() else "",
+                }
             _record_bridge_blocking_failure(
                 self.server,
                 model_name=model_name,
@@ -5353,20 +6167,29 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
             self._json(last_status, {"error": {"message": last_body or "chat completions fallback failed"}})
         except Exception as exc:
             _bridge_error_logger.error("fallback chatcompletions error: %s", exc, exc_info=True)
+            if return_result:
+                return {
+                    "sent": False,
+                    "status": 502,
+                    "body": str(exc),
+                    "url": target_url if "target_url" in locals() else "",
+                    "failure_token": _native_fallback_error_token(exc),
+                }
             # fallback 也失败，返回 502
             self._json(502, {"error": {"message": str(exc)}})
 
-    def _do_anthropic_messages_fallback(self, payload, model_name, gateway_url, gateway_key, started_ms, route=None):
-        """Codex Responses hot fallback through Anthropic Messages transport."""
+    def _do_openai_responses_fallback_route(self, payload, model_name, gateway_url, gateway_key, started_ms, route=None):
+        """Forward one mixed-protocol fallback route through OpenAI Responses."""
         route = route if isinstance(route, dict) else {}
         provider_id = route.get("provider_id") or getattr(self.server, "provider_id", "")
         provider_profile = route.get("provider_profile") or getattr(self.server, "provider_profile", "")
         reasoning_enabled = bool(getattr(self.server, "reasoning_enabled", True))
         reasoning_effort = getattr(self.server, "reasoning_effort", "high")
-        anthropic_payload = _responses_payload_to_anthropic_messages_payload(payload, model_name)
+        route_payload = copy.deepcopy(payload)
+        route_payload["model"] = model_name
         profile_id = apply_profile_body_patches(
-            anthropic_payload,
-            protocol="anthropic_messages",
+            route_payload,
+            protocol="responses",
             provider_id=provider_id,
             profile_id=provider_profile,
             base_url=gateway_url,
@@ -5374,128 +6197,384 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
             thinking_enabled=reasoning_enabled,
             reasoning_effort=reasoning_effort,
         )
-        if profile_id:
-            _canonicalize_domestic_anthropic_history(anthropic_payload, model_name)
-        if not profile_id and _is_domestic_model(model_name):
-            _apply_domestic_reasoning_controls(
-                anthropic_payload,
-                model_name,
-                thinking_enabled=reasoning_enabled,
-                reasoning_effort=reasoning_effort,
-            )
-        if not _normalize_model_name(model_name).startswith("claude-") and not _model_supports_anthropic_cache_control(model_name):
-            _strip_cache_control(anthropic_payload)
+        if not profile_id and reasoning_enabled:
+            reasoning_payload = route_payload.get("reasoning")
+            next_reasoning = dict(reasoning_payload) if isinstance(reasoning_payload, dict) else {}
+            next_reasoning["effort"] = reasoning_effort
+            route_payload["reasoning"] = next_reasoning
+        elif not profile_id:
+            route_payload.pop("reasoning", None)
 
+        target_url = _build_gateway_url(gateway_url, "/responses")
         fwd_headers = {
             "Content-Type": "application/json",
-            "x-api-key": gateway_key,
-            "anthropic-version": "2023-06-01",
+            "Authorization": f"Bearer {gateway_key}",
         }
         apply_profile_auth_headers(
             fwd_headers,
-            protocol="anthropic_messages",
+            protocol="responses",
             api_key=gateway_key,
             provider_id=provider_id,
             profile_id=provider_profile,
             base_url=gateway_url,
             model_name=model_name,
         )
-        claude_passthrough, claude_passthrough_prefixes = _claude_passthrough_rules(self.server, model_name)
-        fwd_headers.update(
-            _copy_passthrough_headers(
-                self.headers,
-                names=claude_passthrough,
-                prefixes=claude_passthrough_prefixes,
-            )
-        )
+        fwd_headers.update(_copy_passthrough_headers(self.headers))
 
-        translator = _AnthropicMessagesToResponsesTranslator(model_name)
         first_byte_ms = None
         output_tokens = None
         try:
-            last_body = None
-            last_status = 404
-            for target_url in _build_gateway_candidate_urls(gateway_url, "/messages"):
-                _bridge_error_logger.info(
-                    "FALLBACK to anthropic messages: model=%s url=%s", model_name, target_url
-                )
-                retry_remaining = 1
-                while True:
-                    with httpx.stream(
-                        "POST",
-                        target_url,
-                        headers=fwd_headers,
-                        json=anthropic_payload,
-                        timeout=300,
-                        **_route_httpx_kwargs(self.server, route, target_url),
-                    ) as response:
-                        if response.status_code == 429:
-                            last_status = response.status_code
-                            last_body = response.read().decode("utf-8", errors="replace")
-                            retry_after = response.headers.get("Retry-After")
-                            delay = _retry_after_delay_seconds(retry_after)
-                            if retry_remaining > 0 and delay > 0:
-                                retry_remaining -= 1
-                                _bridge_error_logger.warning(
-                                    "anthropic messages fallback rate limited: model=%s url=%s retry_after=%s",
-                                    model_name,
-                                    target_url,
-                                    retry_after,
-                                )
-                                time.sleep(delay)
-                                continue
-                            _record_bridge_blocking_failure(
-                                self.server,
-                                model_name=model_name,
-                                provider_id=provider_id,
-                                status_code=response.status_code,
-                                body_text=last_body,
-                                request_url=target_url,
-                                bridge_surface="codex_anthropic_messages_fallback",
-                            )
-                            self._json_with_headers(
-                                429,
-                                {"error": {"message": last_body or "anthropic messages fallback rate limited"}},
-                                extra_headers={"Retry-After": retry_after} if retry_after else None,
-                            )
-                            return
-                        if response.status_code >= 400:
-                            last_status = response.status_code
-                            last_body = response.read().decode("utf-8", errors="replace")
-                            break
+            with httpx.stream(
+                "POST",
+                target_url,
+                headers=fwd_headers,
+                json=route_payload,
+                timeout=300,
+                **_route_httpx_kwargs(self.server, route, target_url),
+            ) as response:
+                content_type = response.headers.get("content-type", "application/json")
+                if response.status_code >= 400:
+                    body_text = response.read().decode("utf-8", errors="replace")
+                    return {
+                        "sent": False,
+                        "status": response.status_code,
+                        "body": body_text,
+                        "url": target_url,
+                    }
 
-                        self.send_response(200)
-                        self.send_header("Content-Type", "text/event-stream")
-                        self.send_header("Cache-Control", "no-cache")
-                        self.send_header("Connection", "close")
-                        self.end_headers()
-
-                        for event_type, event_payload in _iter_sse_lines(response):
-                            if first_byte_ms is None:
-                                first_byte_ms = _now_ms()
-                            for event_name, response_payload in translator.process(event_type, event_payload):
-                                extracted = _extract_output_tokens(response_payload)
+                if "text/event-stream" in content_type.lower():
+                    self.send_response(response.status_code)
+                    self.send_header("Content-Type", content_type)
+                    self.send_header("Cache-Control", "no-cache")
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                    for raw_line in response.iter_lines():
+                        if first_byte_ms is None:
+                            first_byte_ms = _now_ms()
+                        stripped = raw_line.strip()
+                        if stripped.startswith("data:"):
+                            data_str = stripped[5:].strip()
+                            if data_str and data_str != "[DONE]":
+                                try:
+                                    event_payload = json.loads(data_str)
+                                except json.JSONDecodeError:
+                                    event_payload = None
+                                extracted = _extract_output_tokens(event_payload)
                                 if extracted is not None:
                                     output_tokens = extracted
-                                self._sse(event_name, response_payload)
-                        self.close_connection = True
-                        _record_bridge_speed(
-                            model_name,
-                            started_ms=started_ms,
-                            first_byte_ms=first_byte_ms,
-                            output_tokens=output_tokens,
-                            provider_scope=getattr(self.server, "speed_scope", None),
-                            server=self.server,
+                        self.wfile.write(raw_line.encode("utf-8") + b"\n")
+                        if raw_line == "":
+                            self.wfile.flush()
+                    self.close_connection = True
+                else:
+                    body_out = response.read()
+                    if not body_out:
+                        return {
+                            "sent": False,
+                            "status": 502,
+                            "body": "empty responses fallback body",
+                            "url": target_url,
+                            "failure_token": "invalid_text",
+                        }
+                    first_byte_ms = _now_ms()
+                    try:
+                        output_tokens = _extract_output_tokens(json.loads(body_out.decode("utf-8")))
+                    except Exception:
+                        output_tokens = None
+                    self.send_response(response.status_code)
+                    self.send_header("Content-Type", content_type)
+                    self.send_header("Content-Length", str(len(body_out)))
+                    self.end_headers()
+                    self.wfile.write(body_out)
+
+                _record_bridge_speed(
+                    model_name,
+                    started_ms=started_ms,
+                    first_byte_ms=first_byte_ms,
+                    output_tokens=output_tokens,
+                    provider_scope=getattr(self.server, "speed_scope", None),
+                    server=self.server,
+                )
+                return {"sent": True, "status": response.status_code, "url": target_url}
+        except Exception as exc:
+            token = _native_fallback_error_token(exc)
+            return {
+                "sent": False,
+                "status": 502,
+                "body": str(exc),
+                "url": target_url,
+                "failure_token": token,
+            }
+
+    def _do_anthropic_messages_fallback(self, payload, model_name, gateway_url, gateway_key, started_ms, route=None):
+        """Codex Responses hot fallback through Anthropic Messages transport."""
+        route = route if isinstance(route, dict) else {}
+        reasoning_enabled = bool(getattr(self.server, "reasoning_enabled", True))
+        reasoning_effort = getattr(self.server, "reasoning_effort", "high")
+
+        def _forward_routes():
+            primary = _gateway_route_payload(route, gateway_url=gateway_url, gateway_key=gateway_key, server=self.server)
+            routes = [primary]
+            if route.get("include_native_fallbacks"):
+                requested_model = _normalize_model_name(model_name)
+                for item in getattr(self.server, "native_fallback_routes", []) or []:
+                    if not isinstance(item, dict):
+                        continue
+                    item_model = str(item.get("model") or "").strip()
+                    allow_model_switch = bool(item.get("allow_model_switch"))
+                    if item_model and not allow_model_switch and _normalize_model_name(item_model) != requested_model:
+                        continue
+                    next_route = _gateway_route_payload(item, gateway_url="", gateway_key="", server=self.server)
+                    if not next_route.get("gateway_url") or not next_route.get("gateway_key"):
+                        continue
+                    routes.append(next_route)
+            return routes
+
+        forward_routes = _forward_routes()
+        last_body = None
+        last_status = 404
+        last_target_url = ""
+        try:
+            for route_index, active_route in enumerate(forward_routes):
+                active_model = str(active_route.get("model") or model_name or "").strip()
+                active_gateway_url = active_route.get("gateway_url") or gateway_url
+                active_gateway_key = active_route.get("gateway_key") or gateway_key
+                provider_id = active_route.get("provider_id") or getattr(self.server, "provider_id", "")
+                provider_profile = active_route.get("provider_profile") or getattr(self.server, "provider_profile", "")
+                is_last_route = route_index >= len(forward_routes) - 1
+                retry_statuses, _retry_tokens = _native_fallback_retry_sets(active_route)
+                active_protocol = _normalized_bridge_protocol(active_route)
+
+                if active_protocol == "openai_responses":
+                    result = self._do_openai_responses_fallback_route(
+                        payload,
+                        active_model,
+                        active_gateway_url,
+                        active_gateway_key,
+                        started_ms,
+                        route=active_route,
+                    )
+                    if result.get("sent"):
+                        return
+                    last_status = int(result.get("status") or 502)
+                    last_body = str(result.get("body") or "")
+                    last_target_url = str(result.get("url") or "")
+                    failure_token = str(result.get("failure_token") or "").strip()
+                    can_try_next = (
+                        (last_status in retry_statuses)
+                        or (failure_token and failure_token in _retry_tokens)
+                    )
+                    if not is_last_route and can_try_next:
+                        next_route = forward_routes[route_index + 1]
+                        _log_native_fallback(
+                            from_route=active_route,
+                            to_route=next_route,
+                            model_name=active_model,
+                            reason=failure_token or f"http_{last_status}",
+                            request_url=last_target_url,
+                        )
+                        continue
+                    break
+
+                if active_protocol == "openai_chat_completions":
+                    if is_last_route:
+                        self._do_chatcompletions_fallback(
+                            payload,
+                            active_model,
+                            active_gateway_url,
+                            active_gateway_key,
+                            started_ms,
+                            route=active_route,
                         )
                         return
+                    result = self._do_chatcompletions_fallback(
+                        payload,
+                        active_model,
+                        active_gateway_url,
+                        active_gateway_key,
+                        started_ms,
+                        route=active_route,
+                        return_result=True,
+                    )
+                    if result and result.get("sent"):
+                        return
+                    last_status = int((result or {}).get("status") or 502)
+                    last_body = str((result or {}).get("body") or "")
+                    last_target_url = str((result or {}).get("url") or "")
+                    failure_token = str((result or {}).get("failure_token") or "").strip()
+                    can_try_next = (
+                        (last_status in retry_statuses)
+                        or (failure_token and failure_token in _retry_tokens)
+                    )
+                    if not is_last_route and can_try_next:
+                        next_route = forward_routes[route_index + 1]
+                        _log_native_fallback(
+                            from_route=active_route,
+                            to_route=next_route,
+                            model_name=active_model,
+                            reason=failure_token or f"http_{last_status}",
+                            request_url=last_target_url,
+                        )
+                        continue
                     break
+
+                anthropic_payload = _responses_payload_to_anthropic_messages_payload(payload, active_model)
+                profile_id = apply_profile_body_patches(
+                    anthropic_payload,
+                    protocol="anthropic_messages",
+                    provider_id=provider_id,
+                    profile_id=provider_profile,
+                    base_url=active_gateway_url,
+                    model_name=active_model,
+                    thinking_enabled=reasoning_enabled,
+                    reasoning_effort=reasoning_effort,
+                )
+                if profile_id:
+                    _canonicalize_domestic_anthropic_history(anthropic_payload, active_model)
+                if not profile_id and _is_domestic_model(active_model):
+                    _apply_domestic_reasoning_controls(
+                        anthropic_payload,
+                        active_model,
+                        thinking_enabled=reasoning_enabled,
+                        reasoning_effort=reasoning_effort,
+                    )
+                if not _normalize_model_name(active_model).startswith("claude-") and not _model_supports_anthropic_cache_control(active_model):
+                    _strip_cache_control(anthropic_payload)
+
+                fwd_headers = {
+                    "Content-Type": "application/json",
+                    "x-api-key": active_gateway_key,
+                    "anthropic-version": "2023-06-01",
+                }
+                apply_profile_auth_headers(
+                    fwd_headers,
+                    protocol="anthropic_messages",
+                    api_key=active_gateway_key,
+                    provider_id=provider_id,
+                    profile_id=provider_profile,
+                    base_url=active_gateway_url,
+                    model_name=active_model,
+                )
+                claude_passthrough, claude_passthrough_prefixes = _claude_passthrough_rules(self.server, active_model)
+                fwd_headers.update(
+                    _copy_passthrough_headers(
+                        self.headers,
+                        names=claude_passthrough,
+                        prefixes=claude_passthrough_prefixes,
+                    )
+                )
+
+                translator = _AnthropicMessagesToResponsesTranslator(active_model)
+                first_byte_ms = None
+                output_tokens = None
+                route_exhausted = False
+                for target_url in _build_gateway_candidate_urls(active_gateway_url, "/messages"):
+                    last_target_url = target_url
+                    _bridge_error_logger.info(
+                        "FALLBACK to anthropic messages: model=%s url=%s", active_model, target_url
+                    )
+                    retry_remaining = 1
+                    while True:
+                        with httpx.stream(
+                            "POST",
+                            target_url,
+                            headers=fwd_headers,
+                            json=anthropic_payload,
+                            timeout=300,
+                            **_route_httpx_kwargs(self.server, active_route, target_url),
+                        ) as response:
+                            if response.status_code == 429:
+                                last_status = response.status_code
+                                last_body = response.read().decode("utf-8", errors="replace")
+                                retry_after = response.headers.get("Retry-After")
+                                delay = _retry_after_delay_seconds(retry_after)
+                                if retry_remaining > 0 and delay > 0:
+                                    retry_remaining -= 1
+                                    _bridge_error_logger.warning(
+                                        "anthropic messages fallback rate limited: model=%s url=%s retry_after=%s",
+                                        active_model,
+                                        target_url,
+                                        retry_after,
+                                    )
+                                    time.sleep(delay)
+                                    continue
+                                if not is_last_route and response.status_code in retry_statuses:
+                                    next_route = forward_routes[route_index + 1]
+                                    _log_native_fallback(
+                                        from_route=active_route,
+                                        to_route=next_route,
+                                        model_name=active_model,
+                                        reason="http_429",
+                                        request_url=target_url,
+                                    )
+                                    route_exhausted = True
+                                    break
+                                _record_bridge_blocking_failure(
+                                    self.server,
+                                    model_name=active_model,
+                                    provider_id=provider_id,
+                                    status_code=response.status_code,
+                                    body_text=last_body,
+                                    request_url=target_url,
+                                    bridge_surface="codex_anthropic_messages_fallback",
+                                )
+                                self._json_with_headers(
+                                    429,
+                                    {"error": {"message": last_body or "anthropic messages fallback rate limited"}},
+                                    extra_headers={"Retry-After": retry_after} if retry_after else None,
+                                )
+                                return
+                            if response.status_code >= 400:
+                                last_status = response.status_code
+                                last_body = response.read().decode("utf-8", errors="replace")
+                                if not is_last_route and response.status_code in retry_statuses:
+                                    next_route = forward_routes[route_index + 1]
+                                    _log_native_fallback(
+                                        from_route=active_route,
+                                        to_route=next_route,
+                                        model_name=active_model,
+                                        reason=f"http_{response.status_code}",
+                                        request_url=target_url,
+                                    )
+                                    route_exhausted = True
+                                break
+
+                            self.send_response(200)
+                            self.send_header("Content-Type", "text/event-stream")
+                            self.send_header("Cache-Control", "no-cache")
+                            self.send_header("Connection", "close")
+                            self.end_headers()
+
+                            for event_type, event_payload in _iter_sse_lines(response):
+                                if first_byte_ms is None:
+                                    first_byte_ms = _now_ms()
+                                for event_name, response_payload in translator.process(event_type, event_payload):
+                                    extracted = _extract_output_tokens(response_payload)
+                                    if extracted is not None:
+                                        output_tokens = extracted
+                                    self._sse(event_name, response_payload)
+                            self.close_connection = True
+                            _record_bridge_speed(
+                                active_model,
+                                started_ms=started_ms,
+                                first_byte_ms=first_byte_ms,
+                                output_tokens=output_tokens,
+                                provider_scope=getattr(self.server, "speed_scope", None),
+                                server=self.server,
+                            )
+                            return
+                    if route_exhausted:
+                        break
+                if route_exhausted:
+                    continue
+                break
             _record_bridge_blocking_failure(
                 self.server,
                 model_name=model_name,
-                provider_id=provider_id,
+                provider_id=str((forward_routes[-1] if forward_routes else route).get("provider_id") or getattr(self.server, "provider_id", "")),
                 status_code=last_status,
                 body_text=last_body or "",
-                request_url=target_url if "target_url" in locals() else "",
+                request_url=last_target_url,
                 bridge_surface="codex_anthropic_messages_fallback",
             )
             self._json(last_status, {"error": {"message": last_body or "anthropic messages fallback failed"}})
@@ -5506,7 +6585,7 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
 
 class _ResponsesToChatHandler(_ResponsesProxyHandler):
     """Local bridge: accepts Codex's /v1/responses requests,
-    translates to /v1/chat/completions, forwards to gateway."""
+    translates to the configured upstream transport, and forwards to gateway."""
 
     server_version = "MMSCodexChatBridge/0.1"
 
@@ -5585,11 +6664,33 @@ class _ResponsesToChatHandler(_ResponsesProxyHandler):
         provider_profile = getattr(self.server, "provider_profile", "")
         reasoning_enabled = bool(getattr(self.server, "reasoning_enabled", True))
         reasoning_effort = getattr(self.server, "reasoning_effort", "high")
+        started_ms = _now_ms()
+        primary_protocol = str(getattr(self.server, "primary_protocol", "openai_chat_completions") or "openai_chat_completions")
+
+        if primary_protocol == "anthropic_messages":
+            messages_route = {
+                "provider_id": provider_id,
+                "provider_profile": provider_profile,
+                "protocol": "anthropic_messages",
+                "fallback_reason": "",
+                "include_native_fallbacks": True,
+            }
+            self._do_anthropic_messages_fallback(
+                payload,
+                model_name,
+                gateway_url,
+                gateway_key,
+                started_ms,
+                route=messages_route,
+            )
+            return
 
         # Translate Responses → Chat Completions request
         chat_messages = _responses_input_to_messages(
             payload.get("instructions", ""),
             payload.get("input", []),
+            model_name,
+            session_reasoning_content=getattr(self.server, "_last_reasoning_content", ""),
         )
         chat_payload = {
             "model": model_name,
@@ -5599,7 +6700,11 @@ class _ResponsesToChatHandler(_ResponsesProxyHandler):
         max_output_tokens = _responses_max_output_tokens(payload)
         if max_output_tokens is not None:
             chat_payload["max_tokens"] = max_output_tokens
-        chat_tools = _responses_tools_to_chat(payload.get("tools"))
+        additional_tools, custom_tool_names = _responses_additional_tools_to_chat(payload.get("input"))
+        chat_tools = _merge_chat_tools(
+            _responses_tools_to_chat(payload.get("tools")),
+            additional_tools,
+        )
         if chat_tools:
             chat_payload["tools"] = chat_tools
         apply_profile_body_patches(
@@ -5630,8 +6735,10 @@ class _ResponsesToChatHandler(_ResponsesProxyHandler):
         )
         fwd_headers.update(_copy_passthrough_headers(self.headers))
 
-        translator = _ChatCompletionsToResponsesTranslator(model_name)
-        started_ms = _now_ms()
+        translator = _ChatCompletionsToResponsesTranslator(
+            model_name,
+            custom_tool_names=custom_tool_names,
+        )
         first_byte_ms = None
         output_tokens = None
         try:
@@ -5708,6 +6815,9 @@ class _ResponsesToChatHandler(_ResponsesProxyHandler):
                         except json.JSONDecodeError:
                             continue
                         for event_name, event_payload in translator.process_chunk(chunk):
+                            current_reasoning = translator._normalized_reasoning_content()
+                            if current_reasoning:
+                                self.server._last_reasoning_content = current_reasoning
                             extracted = _extract_output_tokens(event_payload)
                             if extracted is not None:
                                 output_tokens = extracted
@@ -5740,14 +6850,17 @@ def codex_chatcompletions_bridge(
     reasoning_effort="high",
     proxy_url="",
     no_proxy="",
+    primary_protocol="openai_chat_completions",
+    native_fallback_routes=None,
     rescue_fallback_model="",
     rescue_fallback_cli="",
     rescue_hot_fallback_enabled=None,
 ):
-    """Local bridge for Codex: translates /v1/responses → /v1/chat/completions.
+    """Local bridge for Codex: translates /v1/responses to chat or messages.
 
     Use this when the gateway only supports Chat Completions for non-GPT models
-    but Codex requires Responses API.
+    or when a cache-sensitive route must use Anthropic Messages while Codex
+    still requires Responses API.
     """
     _ensure_httpx()
     if httpx is None:
@@ -5766,8 +6879,15 @@ def codex_chatcompletions_bridge(
     server.provider_profile = str(provider_profile or "")
     server.reasoning_enabled = bool(reasoning_enabled)
     server.reasoning_effort = reasoning_effort
+    server._last_reasoning_content = ""
     server.proxy_url = str(proxy_url or "").strip()
     server.no_proxy = str(no_proxy or "").strip()
+    server.primary_protocol = (
+        "anthropic_messages"
+        if str(primary_protocol or "").strip() == "anthropic_messages"
+        else "openai_chat_completions"
+    )
+    server.native_fallback_routes = list(native_fallback_routes or [])
     _configure_bridge_rescue(server)
     if rescue_fallback_model:
         server.rescue_fallback_model = str(rescue_fallback_model or "").strip()
@@ -5779,6 +6899,7 @@ def codex_chatcompletions_bridge(
     server.session_output_tokens = 0
     server.session_request_count = 0
     server.session_start_time = time.time()
+    server.wire_usage = _extract_usage_detail({})
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -5787,6 +6908,7 @@ def codex_chatcompletions_bridge(
         yield {
             "base_url": f"http://127.0.0.1:{port}",
             "api_key": bridge_token,
+            "_server": server,
         }
     finally:
         try:
@@ -5833,6 +6955,7 @@ def codex_responses_bridge(
     server.provider_profile = str(provider_profile or "")
     server.reasoning_enabled = bool(reasoning_enabled)
     server.reasoning_effort = reasoning_effort
+    server._last_reasoning_content = ""
     server.proxy_url = str(proxy_url or "").strip()
     server.no_proxy = str(no_proxy or "").strip()
     server.native_fallback_routes = list(native_fallback_routes or [])
@@ -5843,6 +6966,11 @@ def codex_responses_bridge(
         server.rescue_fallback_cli = str(rescue_fallback_cli or "").strip()
     if rescue_hot_fallback_enabled is not None:
         server.rescue_hot_fallback_enabled = bool(rescue_hot_fallback_enabled)
+    server.session_input_tokens = 0
+    server.session_output_tokens = 0
+    server.session_request_count = 0
+    server.session_start_time = time.time()
+    server.wire_usage = _extract_usage_detail({})
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -5851,6 +6979,7 @@ def codex_responses_bridge(
         yield {
             "base_url": f"http://127.0.0.1:{port}",
             "api_key": bridge_token,
+            "_server": server,
         }
     finally:
         try:
@@ -5883,9 +7012,13 @@ def gateway_claude_bridge(
     no_proxy="",
     native_fallback_routes=None,
     vision_sidecar=None,
+    model_capabilities=None,
+    force_heavy_model=False,
     rescue_fallback_model="",
     rescue_fallback_cli="",
     rescue_hot_fallback_enabled=None,
+    context_windows=None,
+    session_context_window=None,
 ):
     """Local proxy for gateway mode: translates /v1/responses → /v1/messages,
     then forwards to the real gateway so gateways that only support Messages API work correctly.
@@ -5913,6 +7046,8 @@ def gateway_claude_bridge(
     server.advertised_models = list(advertised_models or [])
     server.speed_scope = dict(speed_scope or {})
     server.route_status_paths = list(route_status_paths or [])
+    server.context_windows = dict(context_windows or {})
+    server.session_context_window = _coerce_context_window(session_context_window)
     # 止血：暂时禁用 bridge 层跨 provider slot 切换，避免实际 provider/account 漂移。
     server.slot_configs = {}
     server.provider_id = str(provider_id or "")
@@ -5926,6 +7061,8 @@ def gateway_claude_bridge(
     server.no_proxy = str(no_proxy or "").strip()
     server.native_fallback_routes = list(native_fallback_routes or [])
     server.vision_sidecar = dict(vision_sidecar or {})
+    server.model_capabilities = dict(model_capabilities or {})
+    server.force_heavy_model = bool(force_heavy_model)
     _configure_bridge_rescue(server)
     if rescue_fallback_model:
         server.rescue_fallback_model = str(rescue_fallback_model or "").strip()
@@ -5942,6 +7079,7 @@ def gateway_claude_bridge(
     server.session_output_tokens = 0
     server.session_request_count = 0
     server.session_start_time = time.time()
+    server.wire_usage = _extract_usage_detail({})
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:

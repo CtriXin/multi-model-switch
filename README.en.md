@@ -1,5 +1,8 @@
 # Multi-Model Switch (MMS)
 
+> **MMS Pilot is the local Web client for MMS, bundled with the release since v4.** Run `mms web --open` after installing. Sessions still run through the original MMS launch chain into Pi on your own machine; the browser is only the interaction surface. [Install and use](docs/mms-web/GETTING-STARTED.md) · [Features and limits](docs/mms-web/FEATURES.md) · [First release](docs/mms-web/RELEASE-v4.0.0.md) · [Product direction](docs/mms-web/NEXT-PHASE.md). Every existing CLI launcher remains available.
+
+
 [简体中文 README](./README.md)
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
@@ -12,7 +15,7 @@
 
 MMS is not another chat client. It is the local control plane in front of tools such as `claude`, `codex`, `opencode`, and `agy`; Qwen/Kimi/Gemini remain provider models, not standalone CLI launchers.
 
-Scope note: MMS is intentionally launcher-first. Legacy or helper surfaces such as `chat`, `discuss`, and high-context review helpers are maintenance-only unless they directly support launcher/session validation. Long-running planning, execution, compaction policy, and run authority should live in Moebius, Pilot, Ant, or addons instead of expanding MMS.
+Scope note: MMS is intentionally launcher-first. MMS Pilot is its visual entry point. Legacy or helper surfaces such as `chat`, `discuss`, and high-context review helpers are maintenance-only unless they directly support launcher/session validation. Long-running planning, execution, compaction policy, and run authority should live in Moebius, Pilot, Ant, or addons instead of expanding MMS.
 
 It helps you:
 
@@ -23,13 +26,58 @@ It helps you:
 - inject session-scoped skills and hooks without editing global config
 - diagnose provider, route, cache, and exposed runtime state before blaming a model
 
+## MMS Pilot
+
+**The Web client is named MMS Pilot.** The commands are unchanged: `mms web`, the standalone `mms-web`, and on macOS `~/.mms/MMS Pilot.command`. The older `MMS Web.command` is removed on upgrade so `~/.mms` does not end up with two identical launchers.
+
+MMS Pilot and `mmf config web` are different pages:
+
+| | How to open | What it is for |
+|---|---|---|
+| MMS Pilot | `mms web --open` | Daily work: sessions, model and channel selection, working folders, execution and output |
+| Config Web UI | `mmf config web` | Configuration: add channels, fetch model lists, hide noisy models, preview and publish a save plan |
+
+Pilot's harness is Pi. Claude, Codex, OpenCode and agy still launch from the MMS CLI and are not yet Pilot sessions.
+
+What 4.x has accumulated:
+
+- **Sessions**: continuous conversation, resume, stop, fork, archive, export, and model/channel switching that keeps context.
+- **Model capabilities**: per-model default effort, context length and image support, each labelled with where the current value came from, with a one-click fill-back to the MMF catalogue value when the two disagree.
+- **Workspaces**: reorder, rename and remove working folders from the sidebar; per-session copy id, rename, fork, export and archive.
+- **Artifacts and materials**: preview and compare recorded output, manage project materials, and record the context sources actually submitted each turn.
+- **Appearance**: settings as a dialog; theme can follow the system; accent, interface/mono/CJK fonts and font size apply live, and only fonts actually installed on the machine are offered.
+
+Limits: it listens on the loopback address only, there is no remote multi-user authentication, and config isolation is not a filesystem sandbox. To give someone else access, have them install on their own machine with their own model services.
+
 ## Current Version
 
-Current stable release: `v3.3.1`
+Current branch release tracks:
+
+- Stable / `main`: `3.4.z` (current stable branch tag: `v3.4.0`)
+- Dev / `mmf`: `3.5.z`
+- Canary / `mmg`: `3.6.z`
+
+Patch `z` is channel-local. A single-commit release increments `z` once; a composite release covering multiple validated commits also increments `z` once.
 
 Stable target branch: `main` after the current catch-up window.
 
 Daily development branch: `dev`.
+
+## Maintainer Development Entry
+
+Maintainers should enter MMS from the repository root, and that root checkout should be on `dev`, clean, and current. `.worktrees/*` is reserved for isolated issue/PR work; `.worktrees/dev` must not be used as the shared default development entry.
+
+Standard loop:
+
+1. Enter the repository root and confirm the branch is `dev`.
+2. Run `git pull --ff-only` so `dev` is current and clean.
+3. Open an issue first, and record the plan in the issue or a linked plan document.
+4. Create an isolated worktree/branch from current `dev`, for example `.worktrees/issue-14-redline-gate`.
+5. Develop, validate, commit, and push inside that isolated worktree.
+6. Open a PR targeting `dev` for committee review.
+7. Merge only after committee/human approval, then fast-forward the root `dev` checkout before the next task.
+
+Unless the human explicitly asks for direct edits in the shared `dev` entry, agents must not stack substantive work or leave untracked files there. Docs-only plan/report changes may be committed by default when the user asks to record, submit, or produce the document, but the commit must stage only the target document and no unrelated dirty files.
 
 Key changes in this generation:
 
@@ -39,7 +87,7 @@ Key changes in this generation:
 - Claude resume persistence through `.claude/projects`
 - Claude-on-MMS vision sidecar: text-only domestic models fail closed or delegate screenshots/images to a configured Kimi/MiMo/Qwen-compatible sidecar instead of stalling
 - Codex resume write-back across isolated MMS-managed launches
-- OpenCode modes: `Agent`, `OMO`, and `Raw` with repo-local health feedback
+- OpenCode modes: `Agent`, `Review`, `OMO`, and `Raw` with repo-local health feedback
 - OpenCode Agent contract lane: `mobius-spec-writer` writes an OpenSpec/SpecBridge-style task contract, and `mobius-spec-compliance-reviewer` checks diff + validation against it before release-gate review
 - OpenCode Agent work split: GPT handles coordination, specs, implementation/fix work, and final review; DeepSeek/MiMo/Qwen/GLM/Kimi default to lightweight read-only exploration, bug-hunt, vision, and context checks
 - OpenCode Agent mixed routes: GPT via OpenAI-compatible Responses/Chat, direct MiMo via OpenAI-compatible `/v1`, other domestic models via Anthropic `/v1/messages`
@@ -48,15 +96,14 @@ Key changes in this generation:
 - runtime discovery across PATH, Homebrew, and all NVM Node versions without changing default Node
 - real-home compatibility wrappers for Keychain/Chrome/global CLIs inside isolated sessions
 - installer-managed Python virtualenv plus MMS-managed Python fallback when system Python is missing or too old
-- bundled lightweight session assets for `Caveman`, `token-saver`, `TOON`, `xmem`, and the Web automation bundle (`weber` router + `web-access` logged-in Chrome + `agent-browser` headless); Claude/Codex/OpenCode/Antigravity injection stays session-local
+- bundled lightweight session assets for `Caveman`, `token-saver`, `TOON`, and the Web automation bundle (`weber` router + `web-access` logged-in Chrome + `agent-browser` headless); Claude/Codex/OpenCode/Antigravity injection stays session-local
 - Caveman now defaults to `lite`, keeping full sentences while still removing filler; `/caveman full` remains available for stronger compression
 - quiet hook policy: MMS-managed Claude/Codex sessions avoid default SessionStart/UserPrompt probes; remaining hooks are guard, closeout, or explicitly enabled pack hooks
 - session MCP hardening resolves inherited Claude MCP commands to real-HOME absolute CLIs or drops missing ones, and also surfaces URL-based MCP servers from installed Claude plugins (for example Figma); for Codex, app-backed integrations already enabled in real `~/.codex/config.toml` win over duplicate inherited URL MCP entries so MMS does not create a second broken OAuth path; Codex Caveman preserves trusted hook order where possible
 - optional BrainKeeper context pack installs MCP, Claude commands/hooks, and `bk` / `brainkeeper` wrappers without requiring Xcode/git
-- optional xmem installer pack: `--install-xmem` installs the generic xmem CLI/skill, `--xmem-ref` can pin the source ref, and `--dry-run` previews the install/setup plan without writing files
 - optional MMS-managed ECC/OMC Claude agent-pack installer flow
 
-MMS also bundles the generic `xmem` skill plus a quiet session closeout hook. It no longer adds default `xmem` SessionStart sync or UserPrompt gateway probes; agents can call the `xmem` skill/CLI explicitly when a task needs recall. The closeout hook only runs when an `xmem` CLI is configured; if the CLI is absent it fails open. Durable summaries stay in the user's configured xmem sources, not in MMS itself. Public xmem onboarding stays low-touch: the optional installer creates `~/.xmem`, registers shallow HOME git roots, and does not write repo-local `.xmem` files until a user or agent runs `xmem setup` inside a project.
+xmem is global-only: MMS / MMF no longer bundles, installs, or injects xmem skills, hooks, or OpenCode plugins. If a global agent skill or hook provides xmem, that global version wins so dev-channel copies cannot shadow it with an older bundled copy.
 
 ## Install Or Upgrade
 
@@ -69,26 +116,26 @@ The main README is Chinese-first. English users can still install with the same 
 ### Stable: recommended for normal users
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel stable --write-shell-rc
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash -s -- --channel stable --write-shell-rc
 ```
 
 ### Dev: recommended for the maintainer's own work machines
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel dev --write-shell-rc
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash -s -- --channel dev --write-shell-rc
 ```
 
 ### Canary: only for test machines or experimental sessions
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel canary --write-shell-rc
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash -s -- --channel canary --write-shell-rc
 ```
 
 Exact pin when needed:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref v3.3.1
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref main
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash -s -- --ref v3.4.0
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash -s -- --ref main
 ```
 
 Channel behavior:
@@ -96,12 +143,12 @@ Channel behavior:
 - `stable` is the pure stable channel; after the catch-up window, `main` is Stable/default.
 - `dev` follows the `dev` branch for daily work and should remain development-stable.
 - `canary` follows the `canary` branch for daily experiments; use frequent small commits so rollback stays easy.
-- Maintainer-local commands are generated by `scripts/link_local_channel_commands.sh`: `mms` is the public installed copy for public-version repro only; `mmd` points to the stable worktree; `mmf` points to the dev worktree; `mmg` points to the canary worktree; `mmm` points to the main worktree. `mmf` and `mmg` both force the `~/.config/mms-next` preview DB root.
+- Maintainer-local commands are generated by `scripts/link_local_channel_commands.sh`: `mms` is the public installed copy for public-version repro only; `mmd` points to the stable worktree; `mmf` points to the dev worktree; `mmg` points to the canary worktree; `mmm` points to the main worktree. `mmf` and `mmg` both force the `~/.config/mms-next` preview DB root. Update reminders are notify-first: `mmg` checks every launch, `mmf` / `mmm` daily, `mmd` weekly, and `mms` only reminds about the public installed copy; manual `update` only allows clean fast-forward worktrees.
 
 Fresh-machine install with optional CLI bootstrap:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel dev --install-cli claude,codex,opencode --write-shell-rc --lang en
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash -s -- --channel dev --install-cli claude,codex,opencode --write-shell-rc --lang en
 ```
 
 After install:
@@ -114,7 +161,7 @@ mmf config web
 
 Note: `mmf` and `mmg` are preview DB entrypoints. Use `mmf config web` or `mmg config web` for `Write preview DB + publish`; `mms config web` intentionally shows the public installed stable/current legacy save path.
 
-See also: [Release channels](docs/RELEASE_CHANNELS.md) and [Web UI quickstart](docs/WEB_UI_QUICKSTART.md).
+See also: [MMS Pilot getting started](docs/mms-web/GETTING-STARTED.md), [Release channels](docs/RELEASE_CHANNELS.md) and [Config Web UI quickstart](docs/WEB_UI_QUICKSTART.md).
 
 ## Config V2 Preview Root
 
@@ -164,6 +211,12 @@ smoke are done.
 
 ## Quick Start
 
+Open MMS Pilot:
+
+```bash
+mms web --open
+```
+
 Interactive launch:
 
 ```bash
@@ -177,12 +230,15 @@ mms claude
 mms codex
 mms opencode
 mms opencode --profile agent
+mms opencode --profile review
 mms opencode --profile omo
 mms opencode --profile raw
 mms --provider <provider-id> codex
 mms --provider <provider-id> opencode
 mms --account <account-id> claude
 ```
+
+For OpenCode Review, prefer the `mms` TUI: choose `OpenCode` -> `Review`, Space-select reviewer models, then Enter to launch and remember the selection under `[opencode.review].models`. `--review-models` remains available for scripts and advanced users.
 
 Export environment variables instead of launching:
 
@@ -283,7 +339,7 @@ Use `~/.config/mms/preferences.toml` for install-safe daily launch preferences:
 - `thinking_mode` / `reasoning_effort`
 - `bypass`, `caveman_mode`, `nsr_mode`, `agent_pack`
 - disabled session `skills` / `mcp` / `hooks`
-- custom bundled asset roots such as `web_access`, `token_saver`, `xmem`, `nsr`, `ecc`, `omc`
+- custom bundled asset roots such as `web_access`, `token_saver`, `nsr`, `ecc`, `omc`
 
 LLMs can discover the safe schema with `mms config preferences.help` or `mms config preferences.example`. This file is still real MMS config: agents may inspect and propose edits, but must not auto-write `~/.config/mms/**` without human confirmation.
 
@@ -294,61 +350,38 @@ MMS can expose capabilities per session without writing global hooks/config.
 | Pack | Install state | Purpose |
 | --- | --- | --- |
 | `token-saver` / `TOON` | bundled in `~/.mms/vendor` | compact long outputs and structured handoffs |
-| `xmem` | bundled in `~/.mms/vendor` | generic cross-project memory / truth-index skill; only active when an `xmem` CLI/source is configured |
 | Web automation bundle | bundled in `~/.mms/vendor` | `weber` routes the task, `web-access` connects logged-in Chrome, and `agent-browser` handles lightweight headless flows |
 | `Caveman` | bundled in `~/.mms/vendor` | compact communication mode; only active when enabled by preference or launch confirmation |
-| `NSR` | built-in hooks, default on | session-local continuation hooks for active NSR goals; no default startup or prompt hook |
-| `ECC` | optional MMS-managed pack | Claude engineering workflow / rules / quality hooks |
-| `OMC` | optional MMS-managed pack | Claude orchestration runtime / team / verify loop |
-| `Pilot` / `auto-github-contributor` | detected when installed | planning and contribution surfaces |
+| `NSR` | built-in channel payload, default hook injection | session-local Stop hook for Claude/Codex; installer also adds `/nsr` commands; `/nsr` enables the loop |
+| `ECC` | MMS-managed pack, no longer installed by the installer | Claude engineering workflow / rules / quality hooks |
+| `OMC` | MMS-managed pack, no longer installed by the installer | Claude orchestration runtime / team / verify loop |
+| `Pilot` / `Figma` / `auto-github-contributor` | detected when installed | optional MCP/contribution surfaces; Pilot and Figma MCP stay disabled unless explicitly enabled with `MMS_ENABLE_MCP_PILOT=1` or `MMS_ENABLE_MCP_FIGMA=1` |
 
-These surfaces are previewed before launch and can be disabled per session when supported by the confirmation UI. Passive skills (`CodeGraph`, `token-saver`, `TOON`, `xmem`, `web-access`, `weber`, `agent-browser`) are available naturally in MMS-launched sessions. `NSR` is enabled by default for MMS-managed Claude/Codex sessions, but its default hook surface is limited to tool/compact/closeout events and can be disabled from the launch confirmation screen or with `nsr_mode = "disable"` in `preferences.toml`. Heavier active behavior packs (`ECC`, `OMC`) still require explicit selection. OpenCode receives session-local Caveman / CodeGraph / token-saver / TOON / xmem / web-access / weber skills, and RTK is added through the session-local plugin directory when `rtk` exists.
+These surfaces are previewed before launch and can be disabled per session when supported by the confirmation UI. Figma and Pilot MCP servers are default-off even when detected; opt in with `MMS_ENABLE_MCP_FIGMA=1`, `MMS_ENABLE_FIGMA_MCP=1`, `MMS_ENABLE_MCP_PILOT=1`, or `MMS_ENABLE_PILOT_MCP=1`. Passive skills (`CodeGraph`, `token-saver`, `TOON`, `web-access`, `weber`, `agent-browser`) are available naturally in MMS-launched sessions. `NSR` is copied with the selected install channel into `~/.mms/hooks/`; MMS injects its lightweight Stop-hook wrapper by default, and `/nsr` opts the current repo into the rewritten loop. It can be disabled from the launch confirmation screen or with `nsr_mode = "disable"` in `preferences.toml`. Heavier active behavior packs (`ECC`, `OMC`) still require explicit selection. OpenCode receives session-local Caveman / CodeGraph / token-saver / TOON / web-access / weber skills plus the manual `/nsr` command, and RTK is added through the session-local plugin directory when `rtk` exists.
 
-## Optional Installer Packs
+## Installer Scope
 
-Install global optional packs only when you want them available outside MMS-managed sessions:
-
-```bash
-bash install.sh --install-rtk
-bash install.sh --install-brainkeeper-context
-bash install.sh --install-map
-bash install.sh --install-codegraph
-bash install.sh --install-read-once
-bash install.sh --install-token-saver
-bash install.sh --install-toon
-bash install.sh --install-xmem
-bash install.sh --install-ops-env-safe
-```
-
-Add `--dry-run` to preview the install plan without writing files, for example `bash install.sh --install-xmem --dry-run`.
-
-`--install-brainkeeper-context` installs/updates the full BrainKeeper context pack: BrainKeeper MCP, Claude `/distill` / `/cz` / `/cr`, token hooks, and `~/.local/bin/bk` plus `~/.local/bin/brainkeeper`. The installed runtime lives at `~/.local/share/brainkeeper`; when a sibling BrainKeeper repo exists, the installer reuses its `install.sh`, but the active install still syncs into that directory. If Node/npm is missing, the installer prepares an nvm Node 22 runtime for this install without changing the user's default Node. If Xcode/git is unavailable, it falls back to a GitHub archive download.
-
-`--install-map` installs the project-structure Map and enables the Claude SessionStart auto-index hook. It helps Claude orient in a repo faster by refreshing a lightweight directory/file map. This is a global Claude hook; use `--map-ref` to pin the version.
-
-`--install-codegraph` installs the CodeGraph CLI/MCP via npm for symbol search, callers/callees, and code-context retrieval. MMS also injects a passive CodeGraph-first skill so agents prefer graph discovery before broad file reads. MMS no longer adds a default SessionStart auto-register hook for CodeGraph; run indexing explicitly when a repo needs it. Use `--codegraph-package` to override the npm package spec. To initialize everything immediately, ask an LLM: “Find every git repo under this workspace, run `codegraph init -i` when `.codegraph` is missing and `codegraph sync` when it exists, skip `node_modules/vendor/build`, and report failures.”
-
-`--install-read-once` installs Claude Read token-saving hooks. Within one session it warns on repeated reads of unchanged files and prefers diffs after edits. It works automatically; users do not need to remember a command.
-
-`--install-token-saver` installs the shared Codex/Claude token-saver skill plus local commands for long logs, test output, broad `rg`, `git diff/show`, and noisy diagnostics as refs plus snippets. `token-gain` / `mms-gain` / `token-saver gain` show estimated saved chars and gain percentage for stored refs, and a normal shell falls back to the most recent non-empty MMS session store when the current repo store is empty. Agents use the low-level commands automatically; users can just say `/token-saver` or ask to save context.
-
-`--install-toon` installs the shared Codex/Claude TOON skill plus the local `mms-toon` command for structured JSON/status/handoff compression in export-only sessions outside MMS. MMS-launched sessions still bundle TOON by default. Do not use TOON for prose, code, raw logs, secrets, or exact CLI/API JSON.
-
-`--install-xmem` installs the generic xmem CLI plus the shared Codex/Claude xmem skill for export-only sessions outside MMS, then runs a lightweight `xmem setup`: it creates `~/.xmem` and registers shallow git roots under HOME without writing repo-local `.xmem` files. Use `--xmem-ref` to pin a tag or branch. MMS-launched sessions still bundle the xmem session asset by default.
-
-`--install-ops-env-safe` is an advanced-only path hint pack: it writes a Codex skill, Claude `/ops-env-safe`, and `~/.config/mms/ops-env-safe.toml` so export-only or special isolated sessions can inspect known host paths. Normal MMS sessions already receive real-HOME path hints and session host context, so most users do not need it. It does not set real `HOME`/`XDG_*` and does not export auth secrets.
-
-Legacy `--install-mindkeeper-context` and `--mindkeeper-ref` still work as deprecated aliases for BrainKeeper installs.
-
-Install MMS-managed Claude agent packs without touching global Claude config:
+Open a terminal on a new machine and paste one line:
 
 ```bash
-bash install.sh --install-ecc
-bash install.sh --install-omc
-bash install.sh --install-agent-packs
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash
 ```
 
-Most day-to-day MMS sessions do not need global hook installation; the launcher can inject bundled or MMS-managed session assets directly.
+No question in the install changes what gets installed: no UI language prompt, no optional packs. It defaults to the stable channel and adds `~/.local/bin` to your shell PATH. The one question comes at the very end and only offers to open MMS Web. Accept it and the browser opens, the server keeps running in the background, and the installer exits. Add a provider and an API key on that page and you can start a conversation.
+
+Use `--launch-web` to open it without asking, `--no-launch-web` to skip it, and `--no-shell-rc` to leave your shell config alone.
+
+`pi` is mandatory because the pilot web app depends on it. It is installed globally from a pinned npm spec, and its runtime cache under `~/.mms/.ai/cache/pi-npx` is warmed during the install so the first pilot launch does not wait on a download. Missing `claude` / `codex` / `opencode` are installed automatically; already-installed CLIs are left untouched. Pass `--install-cli claude,codex` to control that list explicitly, and add `--dry-run` to preview the plan without writing files.
+
+The optional global packs are gone. RTK, BrainKeeper, Map, CodeGraph, global token-saver, global TOON, ops-env-safe, ECC, and OMC no longer have installer paths. Their `--install-*` and `--*-ref` flags print a notice and are ignored, so older scripts keep working.
+
+Upgrades archive only wrappers/commands with MMS-specific markers, Skill links pointing into this MMS install, and its retired agent packs under `~/.mms/retired-backup.*`. Originals remain recoverable. Same-name custom Skills, global hook/MCP settings and real config files are preserved; third-party programs are not uninstalled. Review global registrations separately using the read-only retirement plan above. To archive MMS entries without reinstalling:
+
+```bash
+bash install.sh --cleanup-retired-packs
+```
+
+`token-saver`, `TOON`, `web-access`, `weber`, `agent-browser`, `Caveman`, and the NSR payload still ship as bundled session assets and remain available in MMS-launched sessions without any global installation.
 
 ## Cleanup And Reset
 

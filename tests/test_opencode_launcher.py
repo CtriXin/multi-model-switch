@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
+import re
+import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+import pytest
 
 
 def _runtime(**overrides):
@@ -23,6 +28,183 @@ def _write_skill(root: Path, name: str) -> Path:
     skill_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
     return skill_dir
+
+
+def _write_opencode_session_db(
+    path: Path,
+    *,
+    sessions: list[dict],
+    messages: list[dict] | None = None,
+    parts: list[dict] | None = None,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("DROP TABLE IF EXISTS part")
+        conn.execute("DROP TABLE IF EXISTS message")
+        conn.execute("DROP TABLE IF EXISTS session")
+        conn.execute("DROP TABLE IF EXISTS project")
+        conn.execute(
+            "CREATE TABLE project (id TEXT PRIMARY KEY, worktree TEXT NOT NULL, vcs TEXT, name TEXT, icon_url TEXT, icon_color TEXT, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, time_initialized INTEGER, sandboxes TEXT NOT NULL, commands TEXT, icon_url_override TEXT)"
+        )
+        conn.execute("DROP TABLE IF EXISTS session")
+        conn.execute(
+            "CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT, slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT NOT NULL, version TEXT NOT NULL, share_url TEXT, summary_additions INTEGER, summary_deletions INTEGER, summary_files INTEGER, summary_diffs TEXT, revert TEXT, permission TEXT, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, time_compacting INTEGER, time_archived INTEGER, workspace_id TEXT, path TEXT, agent TEXT, model TEXT, cost REAL DEFAULT 0 NOT NULL, tokens_input INTEGER DEFAULT 0 NOT NULL, tokens_output INTEGER DEFAULT 0 NOT NULL, tokens_reasoning INTEGER DEFAULT 0 NOT NULL, tokens_cache_read INTEGER DEFAULT 0 NOT NULL, tokens_cache_write INTEGER DEFAULT 0 NOT NULL, metadata TEXT, FOREIGN KEY (project_id) REFERENCES project(id) ON DELETE CASCADE)"
+        )
+        conn.execute(
+            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL, FOREIGN KEY (session_id) REFERENCES session(id) ON DELETE CASCADE)"
+        )
+        conn.execute(
+            "CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL, FOREIGN KEY (message_id) REFERENCES message(id) ON DELETE CASCADE)"
+        )
+        project_rows = {}
+        for row in sessions:
+            project_id = row.get("project_id", "project-1")
+            project_rows[project_id] = {
+                "id": project_id,
+                "worktree": row.get("worktree", "/tmp/worktree"),
+                "vcs": row.get("vcs"),
+                "name": row.get("project_name", "Test Project"),
+                "time_created": row.get("project_time_created", row["time_created"]),
+                "time_updated": row.get("project_time_updated", row["time_updated"]),
+            }
+        for project in project_rows.values():
+            conn.execute(
+                "INSERT INTO project (id, worktree, vcs, name, icon_url, icon_color, time_created, time_updated, time_initialized, sandboxes, commands, icon_url_override) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    project["id"],
+                    project["worktree"],
+                    project["vcs"],
+                    project["name"],
+                    None,
+                    None,
+                    project["time_created"],
+                    project["time_updated"],
+                    None,
+                    json.dumps([]),
+                    None,
+                    None,
+                ),
+            )
+        for row in sessions:
+            conn.execute(
+                "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, share_url, summary_additions, summary_deletions, summary_files, summary_diffs, revert, permission, time_created, time_updated, time_compacting, time_archived, workspace_id, path, agent, model, cost, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    row["id"],
+                    row.get("project_id", "project-1"),
+                    row.get("parent_id"),
+                    row.get("slug", row["id"]),
+                    row["directory"],
+                    row["title"],
+                    row.get("version", "1"),
+                    row.get("share_url"),
+                    row.get("summary_additions"),
+                    row.get("summary_deletions"),
+                    row.get("summary_files"),
+                    row.get("summary_diffs"),
+                    row.get("revert"),
+                    row.get("permission"),
+                    row["time_created"],
+                    row["time_updated"],
+                    row.get("time_compacting"),
+                    row.get("time_archived"),
+                    row.get("workspace_id"),
+                    row.get("path"),
+                    row.get("agent"),
+                    json.dumps(row["model"]),
+                    row.get("cost", 0),
+                    row.get("tokens_input", 0),
+                    row.get("tokens_output", 0),
+                    row.get("tokens_reasoning", 0),
+                    row.get("tokens_cache_read", 0),
+                    row.get("tokens_cache_write", 0),
+                    json.dumps(row.get("metadata", {})),
+                ),
+            )
+        for row in messages or []:
+            conn.execute(
+                "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?)",
+                (
+                    row["id"],
+                    row["session_id"],
+                    row["time_created"],
+                    row["time_updated"],
+                    json.dumps(row["data"]),
+                ),
+            )
+        for row in parts or []:
+            conn.execute(
+                "INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    row["id"],
+                    row["message_id"],
+                    row["session_id"],
+                    row["time_created"],
+                    row["time_updated"],
+                    json.dumps(row["data"]),
+                ),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _read_opencode_session_db(path: Path) -> dict[str, dict]:
+    conn = sqlite3.connect(path)
+    try:
+        def _table_exists(name: str) -> bool:
+            return conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+                (name,),
+            ).fetchone() is not None
+
+        def _session_rows() -> dict[str, dict]:
+            if not _table_exists("session"):
+                return {}
+            columns = [row[1] for row in conn.execute("PRAGMA table_info(session)").fetchall()]
+            return {
+                row_dict["id"]: {
+                    "id": row_dict.get("id"),
+                    "title": row_dict.get("title"),
+                    "directory": row_dict.get("directory"),
+                    "time_created": row_dict.get("time_created"),
+                    "time_updated": row_dict.get("time_updated"),
+                    "model": json.loads(row_dict["model"]) if row_dict.get("model") else None,
+                    "metadata": json.loads(row_dict["metadata"]) if row_dict.get("metadata") else {},
+                }
+                for row_dict in (
+                    dict(zip(columns, row))
+                    for row in conn.execute("SELECT * FROM session ORDER BY id").fetchall()
+                )
+            }
+
+        return {
+            "sessions": _session_rows(),
+            "messages": {
+                row[0]: {
+                    "id": row[0],
+                    "session_id": row[1],
+                    "time_created": row[2],
+                    "time_updated": row[3],
+                    "data": json.loads(row[4]),
+                }
+                for row in (conn.execute("SELECT * FROM message ORDER BY id").fetchall() if _table_exists("message") else [])
+            },
+            "parts": {
+                row[0]: {
+                    "id": row[0],
+                    "message_id": row[1],
+                    "session_id": row[2],
+                    "time_created": row[3],
+                    "time_updated": row[4],
+                    "data": json.loads(row[5]),
+                }
+                for row in (conn.execute("SELECT * FROM part ORDER BY id").fetchall() if _table_exists("part") else [])
+            },
+        }
+    finally:
+        conn.close()
 
 
 def test_opencode_config_uses_openai_compatible_provider():
@@ -63,7 +245,11 @@ def test_opencode_config_uses_openai_compatible_provider():
     reasoner = provider["models"]["deepseek-reasoner"]
     if "limit" in reasoner:
         assert isinstance(reasoner["limit"]["context"], int)
-        assert reasoner["limit"]["output"] == mms_launchers.OPENCODE_DEFAULT_OUTPUT_LIMIT
+        expected_output_limit = (
+            mms_launchers._capability_max_output_tokens("deepseek-reasoner", provider_id="deepseek")
+            or mms_launchers.OPENCODE_DEFAULT_OUTPUT_LIMIT
+        )
+        assert reasoner["limit"]["output"] == expected_output_limit
 
 
 def test_opencode_config_keeps_local_rtk_plugin_out_of_json(monkeypatch):
@@ -122,24 +308,529 @@ def test_opencode_model_limit_includes_required_output_value():
     assert config["limit"]["output"] == 16384
 
 
-def test_opencode_model_config_marks_official_vision_models_only():
+def test_opencode_model_config_maps_profile_thinking_and_effort(monkeypatch):
+    import mms_provider_profiles
     import mms_launchers
 
-    for model in ("mimo-v2.5", "K2.6", "kimi-k2.5", "qwen3.6-plus", "gpt-5.3-codex"):
-        config = mms_launchers._opencode_model_config(_runtime(), model)
-        assert config["attachment"] is True
-        assert config["modalities"] == {"input": ["text", "image"], "output": ["text"]}
-        if model == "mimo-v2.5":
-            assert config["reasoning"] is False
-            assert config["limit"] == {"context": 1048576, "output": 131072}
+    monkeypatch.setattr(
+        mms_provider_profiles,
+        "load_provider_profiles",
+        lambda: {
+            "profiles": {
+                "unit-opencode": {
+                    "match": {"profile_only": True},
+                    "thinking": {"supported": True, "default_enabled": True},
+                    "body_patches": {
+                        "openai_chat": {
+                            "thinking_on": {"thinking.type": "enabled"},
+                            "thinking_off": {"thinking.type": "disabled"},
+                        }
+                    },
+                    "effort": {
+                        "openai_chat": {
+                            "path": "reasoning_effort",
+                            "default": "high",
+                            "allowed": ["high", "max"],
+                            "map": {"xhigh": "max", "medium": "high"},
+                        }
+                    },
+                }
+            }
+        },
+    )
 
-    for model in ("mimo-v2.5-pro", "qwen3-coder-plus", "glm-5.1", "deepseek-v4-pro", "MiniMax-M2.7"):
+    payload = mms_launchers._build_opencode_config_payload(
+        _runtime(
+            id="unit",
+            provider_profile="unit-opencode",
+            models=["unit-model"],
+            reasoning_effort="xhigh",
+            thinking_mode="enable",
+            opencode_lite_agents=False,
+        ),
+        "unit-model",
+    )
+    model_config = payload["provider"]["mms"]["models"]["unit-model"]
+
+    assert model_config["options"] == {
+        "thinking": {"type": "enabled"},
+        "reasoningEffort": "max",
+    }
+    assert model_config["variants"]["high"]["reasoningEffort"] == "high"
+    assert model_config["variants"]["xhigh"]["reasoningEffort"] == "max"
+
+
+def test_opencode_kimi_k3_uses_profile_effort_not_stale_generic_thinking(monkeypatch):
+    import mms_capability_resolver
+    import mms_launchers
+
+    monkeypatch.setattr(mms_capability_resolver, "_load_default_approved_facts_shared", lambda: {})
+    monkeypatch.setattr(
+        mms_capability_resolver,
+        "load_default_model_policy",
+        lambda: {
+            "models": {
+                "k3": {
+                    "capabilities": {
+                        "context_window_tokens": 1_000_000,
+                        "supports_thinking": True,
+                        "thinking_control": {
+                            "path": "thinking.type",
+                            "supported": True,
+                        },
+                    }
+                }
+            }
+        },
+    )
+
+    payload = mms_launchers._build_opencode_config_payload(
+        _runtime(
+            id="kimi",
+            name="Kimi Code",
+            provider_profile="kimi-code",
+            models=["k3"],
+            openai_base_url="https://api.kimi.com/coding/v1",
+            anthropic_base_url="https://api.kimi.com/coding/",
+            protocols=["anthropic_messages", "openai_chat_completions"],
+            reasoning_effort="low",
+            thinking_mode="disable",
+            opencode_lite_agents=False,
+        ),
+        "k3",
+    )
+    model_config = payload["provider"]["mms"]["models"]["k3"]
+
+    assert model_config["limit"]["context"] == 262_144
+    assert model_config["options"] == {"reasoningEffort": "max"}
+    assert "thinking" not in json.dumps(model_config)
+
+
+def test_opencode_stepfun_openai_effort_does_not_emit_output_config():
+    import mms_launchers
+
+    payload = mms_launchers._build_opencode_config_payload(
+        _runtime(
+            id="stepfun",
+            name="StepFun",
+            openai_base_url="https://api.stepfun.com/v1",
+            models=["step-3.7-flash"],
+            reasoning_effort="xhigh",
+            thinking_mode="enable",
+            opencode_lite_agents=False,
+        ),
+        "step-3.7-flash",
+    )
+    model_config = payload["provider"]["mms"]["models"]["step-3.7-flash"]
+
+    assert model_config["options"] == {"reasoningEffort": "high"}
+    assert "output_config" not in model_config["options"]
+    assert model_config["variants"]["low"] == {"reasoningEffort": "low"}
+    assert model_config["variants"]["medium"] == {"reasoningEffort": "medium"}
+    assert model_config["variants"]["high"] == {"reasoningEffort": "high"}
+    assert model_config["variants"]["xhigh"] == {"reasoningEffort": "high"}
+    for options in model_config["variants"].values():
+        assert "output_config" not in options
+
+
+def test_opencode_model_config_does_not_turn_non_request_effort_into_variant(monkeypatch):
+    import mms_provider_profiles
+    import mms_launchers
+
+    monkeypatch.setattr(
+        mms_provider_profiles,
+        "load_provider_profiles",
+        lambda: {
+            "profiles": {
+                "unit-env-only": {
+                    "match": {"profile_only": True},
+                    "thinking": {"supported": True, "default_enabled": True},
+                    "body_patches": {
+                        "openai_chat": {
+                            "thinking_on": {"thinking.type": "enabled"},
+                        }
+                    },
+                    "effort": {
+                        "claude_code_env": {
+                            "path": "CLAUDE_CODE_EFFORT_LEVEL",
+                            "default": "max",
+                            "allowed": ["high", "max"],
+                            "map": {"xhigh": "max"},
+                        }
+                    },
+                }
+            }
+        },
+    )
+
+    payload = mms_launchers._build_opencode_config_payload(
+        _runtime(
+            id="unit",
+            provider_profile="unit-env-only",
+            models=["unit-model"],
+            reasoning_effort="xhigh",
+            opencode_lite_agents=False,
+        ),
+        "unit-model",
+    )
+    model_config = payload["provider"]["mms"]["models"]["unit-model"]
+
+    assert model_config["options"] == {"thinking": {"type": "enabled"}}
+    assert "variants" not in model_config
+
+
+def test_opencode_agent_variant_is_data_driven(monkeypatch):
+    import mms_opencode_config
+    import mms_provider_profiles
+
+    monkeypatch.setattr(
+        mms_provider_profiles,
+        "load_provider_profiles",
+        lambda: {
+            "profiles": {
+                "unit-opencode": {
+                    "match": {"profile_only": True},
+                    "thinking": {"supported": True, "default_enabled": True},
+                    "effort": {
+                        "openai_chat": {
+                            "path": "reasoning_effort",
+                            "default": "high",
+                            "allowed": ["high", "max"],
+                            "map": {"xhigh": "max"},
+                        }
+                    },
+                },
+                "unit-env-only": {
+                    "match": {"profile_only": True},
+                    "thinking": {"supported": True, "default_enabled": True},
+                    "body_patches": {"openai_chat": {"thinking_on": {"thinking.type": "enabled"}}},
+                    "effort": {
+                        "claude_code_env": {
+                            "path": "CLAUDE_CODE_EFFORT_LEVEL",
+                            "default": "max",
+                            "allowed": ["high", "max"],
+                        }
+                    },
+                },
+            }
+        },
+    )
+    routes = [
+        {
+            "id": "reasoning",
+            "model": "unit-reasoner",
+            "provider_id": "unit",
+            "provider_ref": "mms-reasoning",
+            "protocol": "openai_chat_completions",
+            "openai_base_url": "https://unit.invalid/v1",
+            "provider_profile": "unit-opencode",
+        },
+        {
+            "id": "env_only",
+            "model": "unit-env",
+            "provider_id": "unit",
+            "provider_ref": "mms-env",
+            "protocol": "openai_chat_completions",
+            "openai_base_url": "https://unit.invalid/v1",
+            "provider_profile": "unit-env-only",
+        },
+    ]
+    agents = {
+        "reasoning-agent": {"model": "mms-reasoning/unit-reasoner", "variant": "high"},
+        "env-agent": {"model": "mms-env/unit-env", "variant": "high"},
+    }
+
+    updated = mms_opencode_config.opencode_apply_agent_model_variants(
+        agents,
+        {"reasoning_effort": "xhigh"},
+        routes,
+    )
+
+    assert updated["reasoning-agent"]["variant"] == "xhigh"
+    assert "variant" not in updated["env-agent"]
+
+
+def test_opencode_committee_gemini_policy_disables_builtin_search_tools(monkeypatch):
+    import mms_launchers
+    import mms_provider_profiles
+
+    monkeypatch.setattr(
+        mms_provider_profiles,
+        "load_provider_profiles",
+        lambda: {
+            "profiles": {
+                "unit-cpa-gemini": {
+                    "match": {"profile_only": True},
+                    "opencode": {
+                        "builtin_search_tools": "fallback_only",
+                        "shell_search_fallback": True,
+                        "strict_json_schema": "weak",
+                    },
+                },
+                "unit-kimi": {"match": {"profile_only": True}},
+            }
+        },
+    )
+    runtime = _runtime(
+        id="committee-test",
+        opencode_lite_agents=True,
+        opencode_roster="committee",
+        opencode_agent="committee-host",
+        opencode_default_agent="committee-host",
+        opencode_default_route_key="builder_primary",
+        bypass=False,
+        opencode_routes=[
+            {
+                "id": "builder_primary",
+                "model": "gpt-5.4",
+                "provider_id": "openai",
+                "provider_ref": "mms-builder",
+                "provider_name": "OpenAI",
+                "protocol": "openai_responses",
+                "openai_base_url": "https://api.openai.com/v1",
+                "api_key": "sk-openai",
+            },
+            {
+                "id": "custom_committee-gemini",
+                "model": "gemini-3-flash-agent(high)",
+                "provider_id": "cpa-antigravity",
+                "provider_ref": "mms-gemini",
+                "provider_name": "CPA Antigravity",
+                "protocol": "anthropic_messages",
+                "openai_base_url": "http://161.33.197.51:4001/v1",
+                "anthropic_base_url": "http://161.33.197.51:4001/v1",
+                "api_key": "sk-gemini",
+                "provider_profile": "unit-cpa-gemini",
+            },
+            {
+                "id": "custom_committee-kimi",
+                "model": "kimi-k2.7-code",
+                "provider_id": "kimi",
+                "provider_ref": "mms-kimi",
+                "provider_name": "Kimi",
+                "protocol": "anthropic_messages",
+                "anthropic_base_url": "https://api.kimi.com/coding/v1",
+                "api_key": "sk-kimi",
+                "provider_profile": "unit-kimi",
+            },
+        ],
+        opencode_agent_model_keys={
+            "committee-host": "builder_primary",
+            "committee-gemini": "custom_committee-gemini",
+            "committee-kimi": "custom_committee-kimi",
+        },
+        opencode_agent_roster={
+            "committee-gemini": {"enabled": True, "custom": True, "model": "gemini-3-flash-agent(high)"},
+            "committee-kimi": {"enabled": True, "custom": True, "model": "kimi-k2.7-code"},
+        },
+    )
+
+    payload = mms_launchers._build_opencode_config_payload(runtime, "gpt-5.4")
+
+    assert payload["provider"]["mms-gemini"]["npm"] == "@ai-sdk/anthropic"
+    gemini_agent = payload["agent"]["committee-gemini"]
+    assert gemini_agent["permission"]["grep"] == "deny"
+    assert gemini_agent["permission"]["glob"] == "deny"
+    assert gemini_agent["permission"]["list"] == "deny"
+    assert gemini_agent["permission"]["bash"]["rg *"] == "allow"
+    assert gemini_agent["permission"]["bash"].get("find *") != "allow"
+    assert "built-in grep/glob/list" in gemini_agent["prompt"]
+    assert "rg --files" in gemini_agent["prompt"]
+    assert "request `find` only when needed" in gemini_agent["prompt"]
+    assert "schema error" in gemini_agent["prompt"]
+
+    kimi_agent = payload["agent"]["committee-kimi"]
+    assert kimi_agent["permission"]["grep"] == "allow"
+    assert kimi_agent["permission"]["glob"] == "allow"
+    assert kimi_agent["permission"]["list"] == "allow"
+    assert "built-in grep/glob/list" not in kimi_agent["prompt"]
+
+
+def test_opencode_committee_route_policy_ignores_runtime_provider_profile(monkeypatch):
+    import mms_launchers
+    import mms_provider_profiles
+
+    monkeypatch.setattr(
+        mms_provider_profiles,
+        "load_provider_profiles",
+        lambda: {
+            "profiles": {
+                "unit-gemini-fallback": {
+                    "match": {"profile_only": True},
+                    "opencode": {"builtin_search_tools": "fallback_only"},
+                },
+                "unit-openai": {"match": {"profile_only": True}},
+                "unit-cpa-gemini": {
+                    "match": {
+                        "provider_id_contains": ["cpa", "antigravity"],
+                        "model_prefixes": ["gemini"],
+                        "require_model_prefix": True,
+                    },
+                    "opencode": {"builtin_search_tools": "fallback_only"},
+                },
+            }
+        },
+    )
+
+    def build_payload(*, runtime_profile, committee_route):
+        return mms_launchers._build_opencode_config_payload(
+            _runtime(
+                id="committee-test",
+                provider_profile=runtime_profile,
+                opencode_lite_agents=True,
+                opencode_roster="committee",
+                opencode_agent="committee-host",
+                opencode_default_agent="committee-host",
+                opencode_default_route_key="builder_primary",
+                bypass=False,
+                opencode_routes=[
+                    {
+                        "id": "builder_primary",
+                        "model": "gpt-5.4",
+                        "provider_id": "openai",
+                        "provider_ref": "mms-builder",
+                        "provider_name": "OpenAI",
+                        "protocol": "openai_responses",
+                        "openai_base_url": "https://api.openai.com/v1",
+                        "api_key": "sk-openai",
+                    },
+                    committee_route,
+                ],
+                opencode_agent_model_keys={
+                    "committee-host": "builder_primary",
+                    "committee-member": "custom_committee-member",
+                },
+                opencode_agent_roster={
+                    "committee-member": {
+                        "enabled": True,
+                        "custom": True,
+                        "model": committee_route["model"],
+                    },
+                },
+            ),
+            "gpt-5.4",
+        )
+
+    kimi_payload = build_payload(
+        runtime_profile="unit-gemini-fallback",
+        committee_route={
+            "id": "custom_committee-member",
+            "model": "kimi-k2.7-code",
+            "provider_id": "kimi",
+            "provider_ref": "mms-kimi",
+            "provider_name": "Kimi",
+            "protocol": "anthropic_messages",
+            "anthropic_base_url": "https://api.kimi.com/coding/v1",
+            "api_key": "sk-kimi",
+        },
+    )
+    kimi_agent = kimi_payload["agent"]["committee-member"]
+    assert kimi_agent["permission"]["grep"] == "allow"
+    assert kimi_agent["permission"]["glob"] == "allow"
+    assert kimi_agent["permission"]["list"] == "allow"
+    assert "built-in grep/glob/list" not in kimi_agent["prompt"]
+
+    gemini_payload = build_payload(
+        runtime_profile="unit-openai",
+        committee_route={
+            "id": "custom_committee-member",
+            "model": "gemini-3-flash-agent(high)",
+            "provider_id": "cpa-antigravity",
+            "provider_ref": "mms-gemini",
+            "provider_name": "CPA Antigravity",
+            "protocol": "anthropic_messages",
+            "openai_base_url": "http://161.33.197.51:4001/v1",
+            "anthropic_base_url": "http://161.33.197.51:4001/v1",
+            "api_key": "sk-gemini",
+        },
+    )
+    gemini_agent = gemini_payload["agent"]["committee-member"]
+    assert gemini_agent["permission"]["grep"] == "deny"
+    assert gemini_agent["permission"]["glob"] == "deny"
+    assert gemini_agent["permission"]["list"] == "deny"
+    assert "built-in grep/glob/list" in gemini_agent["prompt"]
+
+
+def test_opencode_model_limit_uses_shared_model_policy(monkeypatch):
+    import mms_capability_resolver
+    import mms_launchers
+
+    def fake_capabilities(model_name, **_kwargs):
+        return {
+            "model_name": str(model_name),
+            "context_window_tokens": 512_000,
+            "max_output_tokens": 65_536,
+            "sources": {
+                "context_window_tokens": "model_policy",
+                "max_output_tokens": "model_policy",
+            },
+        }
+
+    monkeypatch.setattr(mms_capability_resolver, "resolve_model_capabilities", fake_capabilities)
+    monkeypatch.setattr(mms_launchers, "resolve_model_capabilities", fake_capabilities)
+
+    config = mms_launchers._opencode_model_config(_runtime(id="policy-provider"), "unit-policy-model")
+
+    assert config["limit"] == {"context": 512_000, "output": 65_536}
+
+
+def test_opencode_model_config_uses_runtime_model_capabilities_for_limits_and_vision():
+    import mms_launchers
+
+    runtime = _runtime(
+        model_capabilities={
+            "mimo-v2.5": {
+                "vision": True,
+                "context_window_tokens": 1_048_576,
+                "max_output_tokens": 131_072,
+            },
+            "MiniMax-M3": {
+                "context_window_tokens": 1_000_000,
+                "max_output_tokens": 131_072,
+            },
+        }
+    )
+    mimo = mms_launchers._opencode_model_config(runtime, "mimo-v2.5")
+    assert mimo["attachment"] is True
+    assert mimo["modalities"] == {"input": ["text", "image"], "output": ["text"]}
+    assert mimo["reasoning"] is False
+    assert mimo["limit"] == {"context": 1_048_576, "output": 131_072}
+
+    minimax = mms_launchers._opencode_model_config(runtime, "MiniMax-M3")
+    assert "attachment" not in minimax
+    assert "modalities" not in minimax
+    assert minimax["limit"] == {"context": 1_000_000, "output": 131_072}
+
+    for model in ("mimo-v2.5-pro", "qwen3-coder-plus", "glm-5.1", "deepseek-v4-pro"):
         config = mms_launchers._opencode_model_config(_runtime(), model)
         assert "attachment" not in config
         assert "modalities" not in config
-        if model == "mimo-v2.5-pro":
-            assert config["reasoning"] is False
-            assert config["limit"] == {"context": 1048576, "output": 131072}
+
+
+def test_opencode_model_config_vision_falls_back_to_static_set_without_capability_data(monkeypatch):
+    """Fresh clones / isolated envs carry no capability snapshot (issue #58).
+
+    The attachment decision must not silently depend on local approved-facts
+    files: with no capability data at all it falls back to the static
+    vision-model set, so mimo-v2.5 stays image-capable and text-only models
+    stay text-only. Explicit runtime model_capabilities still win.
+    """
+    import mms_opencode_config
+
+    monkeypatch.setattr(
+        mms_opencode_config,
+        "opencode_model_capabilities",
+        lambda runtime, model_name, *args, **kwargs: {},
+    )
+
+    mimo = mms_opencode_config.opencode_model_config({}, "mimo-v2.5")
+    assert mimo["attachment"] is True
+    assert mimo["modalities"] == {"input": ["text", "image"], "output": ["text"]}
+
+    for model in ("mimo-v2.5-pro", "qwen3-coder-plus", "glm-5.1", "deepseek-v4-pro"):
+        config = mms_opencode_config.opencode_model_config({}, model)
+        assert "attachment" not in config
+        assert "modalities" not in config
 
 
 def test_core_opencode_prefers_mimo_openai_compatible_base_from_anthropic():
@@ -238,9 +929,12 @@ def test_opencode_gateway_env_writes_session_local_config(monkeypatch, tmp_path)
     monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, *_args, **_kwargs: env)
     monkeypatch.setattr(mms_launchers, "_apply_runtime_locale_profile", lambda env, *_args, **_kwargs: env)
     monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setenv("NPM_CONFIG_CACHE", "/tmp/inherited-npm")
+    monkeypatch.setenv("npm_config_cache", "/tmp/inherited-npm-lower")
+    monkeypatch.setenv("BUN_INSTALL_CACHE_DIR", "/tmp/inherited-bun")
 
     env = mms_launchers._opencode_gateway_env(
-        _runtime(),
+        _runtime(opencode_profile="lite_pro_orchestrated"),
         model_info={"model": "deepseek-chat"},
     )
 
@@ -250,20 +944,1428 @@ def test_opencode_gateway_env_writes_session_local_config(monkeypatch, tmp_path)
     assert config_path == session_home / ".config" / "opencode" / "opencode.json"
     config_payload = json.loads(config_path.read_text(encoding="utf-8"))
     assert config_payload["provider"]["mms"]["options"]["apiKey"] == "{env:MMS_OPENCODE_API_KEY}"
-    assert env["HOME"] == str(real_home)
+    assert env["HOME"] == str(session_home)
+    assert env["MMS_REAL_HOME"] == str(real_home)
     assert env["XDG_CONFIG_HOME"] == str(session_home / ".config")
     assert env["XDG_CACHE_HOME"] == str(session_home / ".cache")
-    assert env["XDG_DATA_HOME"] == str(session_home / ".local" / "share")
-    assert env["XDG_STATE_HOME"] == str(session_home / ".local" / "state")
+    shared_cache = real_home / ".local" / "share" / "mms-opencode" / "cache" / "lite_pro_orchestrated"
+    assert env["MMS_OPENCODE_SHARED_CACHE"] == "1"
+    assert env["MMS_OPENCODE_CACHE_ROOT"] == str(shared_cache)
+    assert env["MMS_OPENCODE_XDG_CACHE_SHARED"] == "1"
+    assert env["MMS_OPENCODE_HOME_CACHE_SHARED"] == "1"
+    assert env["NPM_CONFIG_CACHE"] == str(shared_cache / "npm")
+    assert env["npm_config_cache"] == str(shared_cache / "npm")
+    assert env["BUN_INSTALL_CACHE_DIR"] == str(shared_cache / "bun-install-cache")
+    assert (session_home / ".cache" / "opencode").is_symlink()
+    assert (session_home / ".cache" / "opencode").resolve() == shared_cache / "xdg-cache" / "opencode"
+    assert (session_home / ".npm").is_symlink()
+    assert (session_home / ".npm").resolve() == shared_cache / "npm"
+    assert (session_home / ".bun" / "install" / "cache").is_symlink()
+    assert (session_home / ".bun" / "install" / "cache").resolve() == shared_cache / "bun-install-cache"
+    assert (session_home / "Library" / "Caches").is_symlink()
+    assert (session_home / "Library" / "Caches").resolve() == shared_cache / "darwin-caches"
+    shared_state = real_home / ".local" / "share" / "mms-opencode" / "state" / "lite_pro_orchestrated"
+    assert env["XDG_DATA_HOME"] == str(shared_state)
+    assert env["XDG_STATE_HOME"] == str(shared_state)
     assert env["MMS_SESSION_HOME"] == str(session_home)
     assert env["MMS_HOME_ISOLATION_MODE"] == "soft"
     assert env["MMS_OPENCODE_SOFT_HOME"] == "1"
+    assert env["MMS_OPENCODE_HOME_ISOLATED"] == "1"
+    assert env["MMS_OPENCODE_REAL_HOME"] == "0"
+    assert env["MMS_OPENCODE_STATE_SHARED"] == "1"
+    assert env["MMS_OPENCODE_PROFILE"] == "lite_pro_orchestrated"
     assert env["MMS_OPENCODE_API_KEY"] == "sk-runtime"
     assert env["OPENAI_BASE_URL"] == "https://api.deepseek.com/v1"
     assert env["OPENCODE_CLIENT"] == "mms"
     assert env["OPENCODE_PERMISSION"] == mms_launchers.OPENCODE_BYPASS_PERMISSION_ENV
     assert env["MMS_OPENCODE_BYPASS"] == "1"
+    assert env["OPENCODE_DISABLE_EXTERNAL_SKILLS"] == "1"
+    assert env["OPENCODE_DISABLE_CLAUDE_CODE_SKILLS"] == "1"
+    assert env["MMS_OPENCODE_EXTERNAL_SKILLS"] == "0"
     assert "OPENCODE_CONFIG_CONTENT" not in env
+
+
+def test_opencode_gateway_env_can_disable_shared_cache(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(real_home))
+    monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_packet_env", lambda env, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_locale_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setenv("NPM_CONFIG_CACHE", "/tmp/inherited-npm")
+    monkeypatch.setenv("npm_config_cache", "/tmp/inherited-npm-lower")
+    monkeypatch.setenv("BUN_INSTALL_CACHE_DIR", "/tmp/inherited-bun")
+
+    env = mms_launchers._opencode_gateway_env(
+        _runtime(opencode_profile="lite_pro_orchestrated", opencode_shared_cache=False),
+        model_info={"model": "deepseek-chat"},
+    )
+
+    session_home = Path(env["MMS_SESSION_HOME"])
+    assert env["MMS_OPENCODE_SHARED_CACHE"] == "0"
+    assert "MMS_OPENCODE_CACHE_ROOT" not in env
+    assert "NPM_CONFIG_CACHE" not in env
+    assert "npm_config_cache" not in env
+    assert "BUN_INSTALL_CACHE_DIR" not in env
+    assert not (session_home / ".cache" / "opencode").exists()
+    assert not (session_home / ".npm").exists()
+    assert not (session_home / ".bun" / "install" / "cache").exists()
+    assert not (session_home / "Library" / "Caches").exists()
+
+
+def test_opencode_gateway_env_can_opt_into_external_skills(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(real_home))
+    monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_packet_env", lambda env, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_locale_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setenv("NPM_CONFIG_CACHE", "/tmp/inherited-npm")
+    monkeypatch.setenv("npm_config_cache", "/tmp/inherited-npm-lower")
+    monkeypatch.setenv("BUN_INSTALL_CACHE_DIR", "/tmp/inherited-bun")
+
+    env = mms_launchers._opencode_gateway_env(
+        _runtime(opencode_profile="lite_pro_orchestrated", opencode_external_skills=True),
+        model_info={"model": "deepseek-chat"},
+    )
+
+    assert "OPENCODE_DISABLE_EXTERNAL_SKILLS" not in env
+    assert "OPENCODE_DISABLE_CLAUDE_CODE_SKILLS" not in env
+    assert env["MMS_OPENCODE_EXTERNAL_SKILLS"] == "1"
+    assert env["HOME"] == str(real_home)
+    assert env["MMS_OPENCODE_HOME_ISOLATED"] == "0"
+    assert env["MMS_OPENCODE_REAL_HOME"] == "1"
+    assert env["MMS_OPENCODE_SHARED_CACHE"] == "1"
+    assert env["MMS_OPENCODE_XDG_CACHE_SHARED"] == "1"
+    assert env["MMS_OPENCODE_HOME_CACHE_SHARED"] == "0"
+    assert "NPM_CONFIG_CACHE" not in env
+    assert "npm_config_cache" not in env
+    assert "BUN_INSTALL_CACHE_DIR" not in env
+
+
+def test_opencode_gateway_env_can_opt_into_real_home_without_external_skills(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(real_home))
+    monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_packet_env", lambda env, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_locale_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setenv("NPM_CONFIG_CACHE", "/tmp/inherited-npm")
+    monkeypatch.setenv("npm_config_cache", "/tmp/inherited-npm-lower")
+    monkeypatch.setenv("BUN_INSTALL_CACHE_DIR", "/tmp/inherited-bun")
+
+    env = mms_launchers._opencode_gateway_env(
+        _runtime(opencode_profile="lite_pro_orchestrated", opencode_real_home=True),
+        model_info={"model": "deepseek-chat"},
+    )
+
+    assert env["HOME"] == str(real_home)
+    assert env["OPENCODE_DISABLE_EXTERNAL_SKILLS"] == "1"
+    assert env["OPENCODE_DISABLE_CLAUDE_CODE_SKILLS"] == "1"
+    assert env["MMS_OPENCODE_EXTERNAL_SKILLS"] == "0"
+    assert env["MMS_OPENCODE_HOME_ISOLATED"] == "0"
+    assert env["MMS_OPENCODE_REAL_HOME"] == "1"
+    assert env["MMS_OPENCODE_SHARED_CACHE"] == "1"
+    assert env["MMS_OPENCODE_XDG_CACHE_SHARED"] == "1"
+    assert env["MMS_OPENCODE_HOME_CACHE_SHARED"] == "0"
+    assert "NPM_CONFIG_CACHE" not in env
+    assert "npm_config_cache" not in env
+    assert "BUN_INSTALL_CACHE_DIR" not in env
+
+
+def test_opencode_gateway_env_requires_explicit_profile(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(real_home))
+
+    with pytest.raises(ValueError, match="opencode_profile is required"):
+        mms_launchers._opencode_gateway_env(
+            _runtime(),
+            model_info={"model": "deepseek-chat"},
+        )
+
+
+def test_opencode_gateway_env_profiles_get_isolated_shared_state(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(real_home))
+    monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_packet_env", lambda env, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_locale_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, *_args, **_kwargs: env)
+
+    agent_env = mms_launchers._opencode_gateway_env(
+        _runtime(opencode_profile="lite_pro_orchestrated"),
+        model_info={"model": "deepseek-chat"},
+    )
+    review_env = mms_launchers._opencode_gateway_env(
+        _runtime(opencode_profile="review_hub"),
+        model_info={"model": "deepseek-chat"},
+    )
+
+    assert agent_env["XDG_DATA_HOME"].endswith("/mms-opencode/state/lite_pro_orchestrated")
+    assert review_env["XDG_DATA_HOME"].endswith("/mms-opencode/state/review_hub")
+    assert agent_env["XDG_DATA_HOME"] != review_env["XDG_DATA_HOME"]
+    assert agent_env["XDG_STATE_HOME"] == agent_env["XDG_DATA_HOME"]
+    assert review_env["XDG_STATE_HOME"] == review_env["XDG_DATA_HOME"]
+
+
+def test_opencode_gateway_env_isolate_data_kill_switch_restores_session_local_state(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(real_home))
+    monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_packet_env", lambda env, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_locale_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setenv("MMS_OPENCODE_ISOLATE_DATA", "1")
+
+    env = mms_launchers._opencode_gateway_env(
+        _runtime(opencode_profile="lite_pro_orchestrated"),
+        model_info={"model": "deepseek-chat"},
+    )
+    session_home = Path(env["MMS_SESSION_HOME"])
+
+    assert env["XDG_DATA_HOME"] == str(session_home / ".local" / "share")
+    assert env["XDG_STATE_HOME"] == str(session_home / ".local" / "state")
+    assert "MMS_OPENCODE_STATE_SHARED" not in env
+    assert env["MMS_OPENCODE_PROFILE"] == "lite_pro_orchestrated"
+
+
+def test_opencode_gateway_env_migrates_existing_session_local_opencode_data(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_config_dir = old_session / ".config" / "opencode"
+    old_config_dir.mkdir(parents=True)
+    (old_config_dir / "opencode.json").write_text(
+        json.dumps({"default_agent": "mobius-builder-pro"}) + "\n",
+        encoding="utf-8",
+    )
+    old_opencode_dir = old_session / ".local" / "share" / "opencode"
+    old_opencode_dir.mkdir(parents=True)
+    (old_opencode_dir / "opencode.db").write_text("old-session-db", encoding="utf-8")
+    real_home.mkdir(exist_ok=True)
+    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(real_home))
+
+    def fake_cleanup(*_args, **_kwargs):
+        shared_db = real_home / ".local" / "share" / "mms-opencode" / "state" / "lite_pro_orchestrated" / "opencode" / "opencode.db"
+        assert shared_db.read_text(encoding="utf-8") == "old-session-db"
+        assert old_opencode_dir.exists()
+
+    monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", fake_cleanup)
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_packet_env", lambda env, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_locale_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, *_args, **_kwargs: env)
+
+    env = mms_launchers._opencode_gateway_env(
+        _runtime(opencode_profile="lite_pro_orchestrated"),
+        model_info={"model": "deepseek-chat"},
+    )
+    shared_state = Path(env["XDG_DATA_HOME"])
+
+    assert (shared_state / "opencode" / "opencode.db").read_text(encoding="utf-8") == "old-session-db"
+    assert (shared_state / ".mms-shared-state-migration-v1").read_text(encoding="utf-8") == "migrated=1\n"
+
+
+def test_opencode_gateway_env_migrates_all_legacy_profile_data_before_cleanup(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    sessions_dir = real_home / ".config" / "mms" / "opencode-gateway" / "s"
+    agent_session = sessions_dir / "123"
+    review_session = sessions_dir / "456"
+    for session, default_agent, db_text in (
+        (agent_session, "mobius-builder-pro", "agent-db"),
+        (review_session, "review-hub-host", "review-db"),
+    ):
+        config_dir = session / ".config" / "opencode"
+        config_dir.mkdir(parents=True)
+        (config_dir / "opencode.json").write_text(
+            json.dumps({"default_agent": default_agent}) + "\n",
+            encoding="utf-8",
+        )
+        opencode_dir = session / ".local" / "share" / "opencode"
+        opencode_dir.mkdir(parents=True)
+        (opencode_dir / "opencode.db").write_text(db_text, encoding="utf-8")
+
+    real_home.mkdir(exist_ok=True)
+    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(real_home))
+
+    def fake_cleanup(*_args, **_kwargs):
+        review_shared = real_home / ".local" / "share" / "mms-opencode" / "state" / "review_hub" / "opencode" / "opencode.db"
+        agent_shared = real_home / ".local" / "share" / "mms-opencode" / "state" / "lite_pro_orchestrated" / "opencode" / "opencode.db"
+        assert review_shared.read_text(encoding="utf-8") == "review-db"
+        assert agent_shared.read_text(encoding="utf-8") == "agent-db"
+
+    monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", fake_cleanup)
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_packet_env", lambda env, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_locale_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, *_args, **_kwargs: env)
+
+    env = mms_launchers._opencode_gateway_env(
+        _runtime(opencode_profile="review_hub"),
+        model_info={"model": "deepseek-chat"},
+    )
+    shared_state = Path(env["XDG_DATA_HOME"])
+
+    assert shared_state.name == "review_hub"
+    assert (shared_state / "opencode" / "opencode.db").read_text(encoding="utf-8") == "review-db"
+    agent_shared_db = real_home / ".local" / "share" / "mms-opencode" / "state" / "lite_pro_orchestrated" / "opencode" / "opencode.db"
+    assert agent_shared_db.read_text(encoding="utf-8") == "agent-db"
+
+
+def test_opencode_set_soft_home_replaces_read_only_shared_pack_file(tmp_path):
+    import mms_opencode_env
+
+    real_home = tmp_path / "real-home"
+    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_config_dir = old_session / ".config" / "opencode"
+    old_config_dir.mkdir(parents=True)
+    (old_config_dir / "opencode.json").write_text(
+        json.dumps({"default_agent": "mobius-builder-pro"}) + "\n",
+        encoding="utf-8",
+    )
+    rel_pack = Path("snapshot/a/b/objects/pack/pack-test.idx")
+    old_pack = old_session / ".local" / "share" / "opencode" / rel_pack
+    old_pack.parent.mkdir(parents=True)
+    old_pack.write_text("new-pack", encoding="utf-8")
+    shared_pack = (
+        real_home
+        / ".local"
+        / "share"
+        / "mms-opencode"
+        / "state"
+        / "lite_pro_orchestrated"
+        / "opencode"
+        / rel_pack
+    )
+    shared_pack.parent.mkdir(parents=True)
+    shared_pack.write_text("old-pack", encoding="utf-8")
+    os.chmod(old_pack, 0o444)
+    os.chmod(shared_pack, 0o444)
+    os.utime(shared_pack, (1000, 1000))
+    os.utime(old_pack, (2000, 2000))
+
+    def _real_user_path(*parts):
+        return str(real_home.joinpath(*parts))
+
+    env = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+
+    assert "MMS_OPENCODE_MIGRATION_FAILED" not in env
+    assert shared_pack.read_text(encoding="utf-8") == "new-pack"
+    assert shared_pack.stat().st_mode & 0o777 == 0o444
+
+
+def test_opencode_set_soft_home_marks_generic_file_copy_failure_without_crashing(monkeypatch, tmp_path):
+    import mms_opencode_env
+
+    real_home = tmp_path / "real-home"
+    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_config_dir = old_session / ".config" / "opencode"
+    old_config_dir.mkdir(parents=True)
+    (old_config_dir / "opencode.json").write_text(
+        json.dumps({"default_agent": "mobius-builder-pro"}) + "\n",
+        encoding="utf-8",
+    )
+    old_state = old_session / ".local" / "share" / "opencode" / "metadata.json"
+    old_state.parent.mkdir(parents=True)
+    old_state.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        mms_opencode_env.shutil,
+        "copy2",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(PermissionError("copy blocked")),
+    )
+
+    def _real_user_path(*parts):
+        return str(real_home.joinpath(*parts))
+
+    env = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+
+    assert env["MMS_OPENCODE_MIGRATION_FAILED"] == "1"
+
+
+def test_opencode_set_soft_home_skips_unchanged_legacy_tree_after_marker(monkeypatch, tmp_path):
+    import mms_opencode_env
+
+    real_home = tmp_path / "real-home"
+    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_config_dir = old_session / ".config" / "opencode"
+    old_config_dir.mkdir(parents=True)
+    (old_config_dir / "opencode.json").write_text(
+        json.dumps({"default_agent": "mobius-builder-pro"}) + "\n",
+        encoding="utf-8",
+    )
+    old_state = old_session / ".local" / "share" / "opencode" / "metadata.json"
+    old_state.parent.mkdir(parents=True)
+    old_state.write_text('{"status":"first"}\n', encoding="utf-8")
+
+    def _real_user_path(*parts):
+        return str(real_home.joinpath(*parts))
+
+    env = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+    shared_state = Path(env["XDG_DATA_HOME"]) / "opencode" / "metadata.json"
+    assert shared_state.read_text(encoding="utf-8") == '{"status":"first"}\n'
+
+    monkeypatch.setattr(
+        mms_opencode_env,
+        "_sync_opencode_tree",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unchanged legacy tree was scanned")),
+    )
+
+    env2 = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env2,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "201"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+
+    assert "MMS_OPENCODE_MIGRATION_FAILED" not in env2
+    assert shared_state.read_text(encoding="utf-8") == '{"status":"first"}\n'
+
+
+def test_opencode_set_soft_home_replays_db_after_marker_without_full_tree_scan(monkeypatch, tmp_path):
+    import mms_opencode_env
+
+    real_home = tmp_path / "real-home"
+    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_config_dir = old_session / ".config" / "opencode"
+    old_config_dir.mkdir(parents=True)
+    (old_config_dir / "opencode.json").write_text(
+        json.dumps({"default_agent": "mobius-builder-pro"}) + "\n",
+        encoding="utf-8",
+    )
+    old_db = old_session / ".local" / "share" / "opencode" / "opencode.db"
+    _write_opencode_session_db(
+        old_db,
+        sessions=[
+            {
+                "id": "session-1",
+                "title": "first",
+                "directory": "/tmp/project-a",
+                "time_created": 1,
+                "time_updated": 1,
+                "model": {"id": "gpt-5.4"},
+            }
+        ],
+    )
+
+    def _real_user_path(*parts):
+        return str(real_home.joinpath(*parts))
+
+    env = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+    shared_db = Path(env["XDG_DATA_HOME"]) / "opencode" / "opencode.db"
+    marker = Path(env["XDG_DATA_HOME"]) / ".mms-shared-state-migration-v1"
+
+    _write_opencode_session_db(
+        old_db,
+        sessions=[
+            {
+                "id": "session-1",
+                "title": "second",
+                "directory": "/tmp/project-a",
+                "time_created": 1,
+                "time_updated": 2,
+                "model": {"id": "gpt-5.5"},
+            }
+        ],
+    )
+    newer = marker.stat().st_mtime + 1
+    os.utime(old_db, (newer, newer))
+    monkeypatch.setattr(
+        mms_opencode_env,
+        "_sync_opencode_tree",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("incremental replay used full tree scan")),
+    )
+
+    env2 = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env2,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "201"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+
+    rows = _read_opencode_session_db(shared_db)
+    assert "MMS_OPENCODE_MIGRATION_FAILED" not in env2
+    assert rows["sessions"]["session-1"]["title"] == "second"
+
+
+def test_opencode_set_soft_home_replays_nested_state_after_marker_without_full_tree_scan(monkeypatch, tmp_path):
+    import mms_opencode_env
+
+    real_home = tmp_path / "real-home"
+    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_config_dir = old_session / ".config" / "opencode"
+    old_config_dir.mkdir(parents=True)
+    (old_config_dir / "opencode.json").write_text(
+        json.dumps({"default_agent": "mobius-builder-pro"}) + "\n",
+        encoding="utf-8",
+    )
+    old_nested = old_session / ".local" / "share" / "opencode" / "storage" / "nested.txt"
+    old_nested.parent.mkdir(parents=True)
+    old_nested.write_text("first\n", encoding="utf-8")
+
+    def _real_user_path(*parts):
+        return str(real_home.joinpath(*parts))
+
+    env = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+    shared_nested = Path(env["XDG_DATA_HOME"]) / "opencode" / "storage" / "nested.txt"
+    marker = Path(env["XDG_DATA_HOME"]) / ".mms-shared-state-migration-v1"
+    assert shared_nested.read_text(encoding="utf-8") == "first\n"
+
+    old_nested.write_text("second\n", encoding="utf-8")
+    newer = marker.stat().st_mtime + 1
+    os.utime(old_nested, (newer, newer))
+    monkeypatch.setattr(
+        mms_opencode_env,
+        "_sync_opencode_tree",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("incremental nested replay used full tree scan")),
+    )
+
+    env2 = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env2,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "201"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+
+    assert "MMS_OPENCODE_MIGRATION_FAILED" not in env2
+    assert shared_nested.read_text(encoding="utf-8") == "second\n"
+
+
+def test_opencode_set_soft_home_replays_write_after_incremental_scan_before_marker(monkeypatch, tmp_path):
+    import mms_opencode_env
+
+    real_home = tmp_path / "real-home"
+    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_config_dir = old_session / ".config" / "opencode"
+    old_config_dir.mkdir(parents=True)
+    (old_config_dir / "opencode.json").write_text(
+        json.dumps({"default_agent": "mobius-builder-pro"}) + "\n",
+        encoding="utf-8",
+    )
+    old_data_dir = old_session / ".local" / "share" / "opencode"
+    old_nested = old_data_dir / "storage" / "nested.txt"
+    old_nested.parent.mkdir(parents=True)
+    old_nested.write_text("first\n", encoding="utf-8")
+    os.utime(old_nested, ns=(100, 100))
+    cutoff_values = iter([100, 300, 500])
+    monkeypatch.setattr(mms_opencode_env, "_opencode_migration_cutoff_mtime_ns", lambda: next(cutoff_values))
+
+    def _real_user_path(*parts):
+        return str(real_home.joinpath(*parts))
+
+    env = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+    shared_nested = Path(env["XDG_DATA_HOME"]) / "opencode" / "storage" / "nested.txt"
+    marker = Path(env["XDG_DATA_HOME"]) / ".mms-shared-state-migration-v1"
+    assert shared_nested.read_text(encoding="utf-8") == "first\n"
+
+    old_nested.write_text("second\n", encoding="utf-8")
+    os.utime(old_nested, ns=(200, 200))
+    original_incremental = mms_opencode_env._sync_opencode_incremental_state
+
+    def racing_incremental(src, dst):
+        result = original_incremental(src, dst)
+        old_nested.write_text("third\n", encoding="utf-8")
+        os.utime(old_nested, ns=(400, 400))
+        return result
+
+    monkeypatch.setattr(mms_opencode_env, "_sync_opencode_incremental_state", racing_incremental)
+
+    env2 = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env2,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "201"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+
+    assert "MMS_OPENCODE_MIGRATION_FAILED" not in env2
+    assert shared_nested.read_text(encoding="utf-8") == "second\n"
+    assert marker.stat().st_mtime_ns <= 300
+
+    monkeypatch.setattr(mms_opencode_env, "_sync_opencode_incremental_state", original_incremental)
+    env3 = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env3,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "202"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+
+    assert "MMS_OPENCODE_MIGRATION_FAILED" not in env3
+    assert shared_nested.read_text(encoding="utf-8") == "third\n"
+
+
+def test_opencode_set_soft_home_replays_skipped_candidate_write_during_other_candidate_replay(monkeypatch, tmp_path):
+    import mms_opencode_env
+
+    real_home = tmp_path / "real-home"
+    sessions_dir = real_home / ".config" / "mms" / "opencode-gateway" / "s"
+    session_a = sessions_dir / "123"
+    session_b = sessions_dir / "124"
+
+    def write_legacy_session(session_dir, nested_rel, text):
+        config_dir = session_dir / ".config" / "opencode"
+        config_dir.mkdir(parents=True)
+        (config_dir / "opencode.json").write_text(
+            json.dumps({"default_agent": "mobius-builder-pro"}) + "\n",
+            encoding="utf-8",
+        )
+        nested = session_dir / ".local" / "share" / "opencode" / nested_rel
+        nested.parent.mkdir(parents=True)
+        nested.write_text(text, encoding="utf-8")
+        return nested
+
+    def set_tree_mtime(root, ns):
+        paths = sorted(Path(root).rglob("*"), key=lambda path: len(path.parts), reverse=True)
+        for path in paths:
+            os.utime(path, ns=(ns, ns))
+        os.utime(root, ns=(ns, ns))
+
+    nested_a = write_legacy_session(session_a, Path("storage") / "a" / "nested.txt", "A-first\n")
+    nested_b = write_legacy_session(session_b, Path("storage") / "b" / "nested.txt", "B-first\n")
+    data_a = session_a / ".local" / "share" / "opencode"
+    data_b = session_b / ".local" / "share" / "opencode"
+    set_tree_mtime(data_a, 80)
+    set_tree_mtime(data_b, 80)
+
+    cutoff_values = iter([100, 150, 250])
+    monkeypatch.setattr(mms_opencode_env, "_opencode_migration_cutoff_mtime_ns", lambda: next(cutoff_values))
+
+    def _real_user_path(*parts):
+        return str(real_home.joinpath(*parts))
+
+    env = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env,
+        str(sessions_dir / "200"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+    shared_a = Path(env["XDG_DATA_HOME"]) / "opencode" / "storage" / "a" / "nested.txt"
+    shared_b = Path(env["XDG_DATA_HOME"]) / "opencode" / "storage" / "b" / "nested.txt"
+    marker = Path(env["XDG_DATA_HOME"]) / ".mms-shared-state-migration-v1"
+    assert shared_a.read_text(encoding="utf-8") == "A-first\n"
+    assert shared_b.read_text(encoding="utf-8") == "B-first\n"
+    assert marker.stat().st_mtime_ns <= 100
+
+    nested_b.write_text("B-second\n", encoding="utf-8")
+    os.utime(nested_b, ns=(140, 140))
+    original_incremental = mms_opencode_env._sync_opencode_incremental_state
+
+    def racing_incremental(src, dst):
+        result = original_incremental(src, dst)
+        if Path(src) == data_b:
+            nested_a.write_text("A-race\n", encoding="utf-8")
+            os.utime(nested_a, ns=(160, 160))
+        return result
+
+    monkeypatch.setattr(mms_opencode_env, "_sync_opencode_incremental_state", racing_incremental)
+
+    env2 = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env2,
+        str(sessions_dir / "201"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+    assert "MMS_OPENCODE_MIGRATION_FAILED" not in env2
+    assert shared_a.read_text(encoding="utf-8") == "A-first\n"
+    assert shared_b.read_text(encoding="utf-8") == "B-second\n"
+    assert marker.stat().st_mtime_ns <= 150
+
+    monkeypatch.setattr(mms_opencode_env, "_sync_opencode_incremental_state", original_incremental)
+    env3 = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env3,
+        str(sessions_dir / "202"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+    assert "MMS_OPENCODE_MIGRATION_FAILED" not in env3
+    assert shared_a.read_text(encoding="utf-8") == "A-race\n"
+
+
+def test_opencode_set_soft_home_ignores_log_churn_after_marker(monkeypatch, tmp_path):
+    import mms_opencode_env
+
+    real_home = tmp_path / "real-home"
+    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_config_dir = old_session / ".config" / "opencode"
+    old_config_dir.mkdir(parents=True)
+    (old_config_dir / "opencode.json").write_text(
+        json.dumps({"default_agent": "mobius-builder-pro"}) + "\n",
+        encoding="utf-8",
+    )
+    old_log = old_session / ".local" / "share" / "opencode" / "log" / "current.log"
+    old_log.parent.mkdir(parents=True)
+    old_log.write_text("first\n", encoding="utf-8")
+
+    def _real_user_path(*parts):
+        return str(real_home.joinpath(*parts))
+
+    env = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+    shared_log = Path(env["XDG_DATA_HOME"]) / "opencode" / "log" / "current.log"
+    marker = Path(env["XDG_DATA_HOME"]) / ".mms-shared-state-migration-v1"
+    assert shared_log.read_text(encoding="utf-8") == "first\n"
+
+    old_log.write_text("second\n", encoding="utf-8")
+    newer = marker.stat().st_mtime + 1
+    os.utime(old_log, (newer, newer))
+    monkeypatch.setattr(
+        mms_opencode_env,
+        "_sync_opencode_incremental_state",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("log churn triggered incremental replay")),
+    )
+
+    env2 = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env2,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "201"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+
+    assert "MMS_OPENCODE_MIGRATION_FAILED" not in env2
+    assert shared_log.read_text(encoding="utf-8") == "first\n"
+
+
+def test_opencode_set_soft_home_replays_active_legacy_session_tail_writes(tmp_path):
+    import mms_opencode_env
+
+    real_home = tmp_path / "real-home"
+    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_config_dir = old_session / ".config" / "opencode"
+    old_config_dir.mkdir(parents=True)
+    (old_config_dir / "opencode.json").write_text(
+        json.dumps({"default_agent": "mobius-builder-pro"}) + "\n",
+        encoding="utf-8",
+    )
+    old_db = old_session / ".local" / "share" / "opencode" / "opencode.db"
+    _write_opencode_session_db(
+        old_db,
+        sessions=[
+            {
+                "id": "session-1",
+                "title": "first pass",
+                "directory": "/tmp/project-a",
+                "time_created": 1,
+                "time_updated": 1,
+                "model": {"id": "gpt-5.4"},
+                "metadata": {"phase": "first"},
+            }
+        ],
+        messages=[
+            {
+                "id": "message-1",
+                "session_id": "session-1",
+                "time_created": 1,
+                "time_updated": 1,
+                "data": {"role": "user", "text": "hello"},
+            }
+        ],
+        parts=[
+            {
+                "id": "part-1",
+                "message_id": "message-1",
+                "session_id": "session-1",
+                "time_created": 1,
+                "time_updated": 1,
+                "data": {"type": "text", "text": "hello"},
+            }
+        ],
+    )
+
+    def _real_user_path(*parts):
+        return str(real_home.joinpath(*parts))
+
+    env = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+    shared_db = Path(env["XDG_DATA_HOME"]) / "opencode" / "opencode.db"
+    rows = _read_opencode_session_db(shared_db)
+    assert rows["sessions"]["session-1"]["title"] == "first pass"
+    assert rows["sessions"]["session-1"]["time_updated"] == 1
+    assert rows["messages"]["message-1"]["data"] == {"role": "user", "text": "hello"}
+    assert rows["parts"]["part-1"]["data"] == {"type": "text", "text": "hello"}
+
+    _write_opencode_session_db(
+        old_db,
+        sessions=[
+            {
+                "id": "session-1",
+                "title": "second pass",
+                "directory": "/tmp/project-a",
+                "time_created": 1,
+                "time_updated": 2,
+                "model": {"id": "gpt-5.5"},
+                "metadata": {"phase": "second"},
+            },
+            {
+                "id": "session-2",
+                "title": "new session",
+                "directory": "/tmp/project-b",
+                "time_created": 3,
+                "time_updated": 3,
+                "model": {"id": "deepseek-chat"},
+                "metadata": {"phase": "new"},
+            },
+        ],
+        messages=[
+            {
+                "id": "message-1",
+                "session_id": "session-1",
+                "time_created": 1,
+                "time_updated": 2,
+                "data": {"role": "assistant", "text": "updated"},
+            },
+            {
+                "id": "message-2",
+                "session_id": "session-2",
+                "time_created": 3,
+                "time_updated": 3,
+                "data": {"role": "user", "text": "new message"},
+            },
+        ],
+        parts=[
+            {
+                "id": "part-1",
+                "message_id": "message-1",
+                "session_id": "session-1",
+                "time_created": 1,
+                "time_updated": 2,
+                "data": {"type": "text", "text": "updated"},
+            },
+            {
+                "id": "part-2",
+                "message_id": "message-2",
+                "session_id": "session-2",
+                "time_created": 3,
+                "time_updated": 3,
+                "data": {"type": "text", "text": "new message"},
+            },
+        ],
+    )
+
+    env2 = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env2,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "201"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+
+    rows = _read_opencode_session_db(shared_db)
+    assert rows["sessions"]["session-1"]["title"] == "second pass"
+    assert rows["sessions"]["session-1"]["time_updated"] == 2
+    assert rows["sessions"]["session-1"]["model"] == {"id": "gpt-5.5"}
+    assert rows["sessions"]["session-1"]["metadata"] == {"phase": "second"}
+    assert rows["sessions"]["session-2"]["title"] == "new session"
+    assert rows["messages"]["message-1"]["data"] == {"role": "assistant", "text": "updated"}
+    assert rows["messages"]["message-2"]["data"] == {"role": "user", "text": "new message"}
+    assert rows["parts"]["part-1"]["data"] == {"type": "text", "text": "updated"}
+    assert rows["parts"]["part-2"]["data"] == {"type": "text", "text": "new message"}
+
+
+def test_opencode_set_soft_home_does_not_overwrite_newer_shared_state_when_legacy_mtime_is_newer(tmp_path):
+    import mms_opencode_env
+
+    real_home = tmp_path / "real-home"
+    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_config_dir = old_session / ".config" / "opencode"
+    old_config_dir.mkdir(parents=True)
+    (old_config_dir / "opencode.json").write_text(
+        json.dumps({"default_agent": "mobius-builder-pro"}) + "\n",
+        encoding="utf-8",
+    )
+    old_db = old_session / ".local" / "share" / "opencode" / "opencode.db"
+    _write_opencode_session_db(
+        old_db,
+        sessions=[
+            {
+                "id": "session-1",
+                "title": "legacy",
+                "directory": "/tmp/project-a",
+                "time_created": 1,
+                "time_updated": 1,
+                "model": {"id": "gpt-5.4"},
+            }
+        ],
+    )
+
+    def _real_user_path(*parts):
+        return str(real_home.joinpath(*parts))
+
+    env = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+    shared_db = Path(env["XDG_DATA_HOME"]) / "opencode" / "opencode.db"
+    _write_opencode_session_db(
+        shared_db,
+        sessions=[
+            {
+                "id": "session-1",
+                "title": "shared-newer",
+                "directory": "/tmp/project-a",
+                "time_created": 1,
+                "time_updated": 5,
+                "model": {"id": "gpt-5.5"},
+            },
+            {
+                "id": "session-2",
+                "title": "shared-only",
+                "directory": "/tmp/project-b",
+                "time_created": 2,
+                "time_updated": 2,
+                "model": {"id": "deepseek-chat"},
+            },
+        ],
+        messages=[
+            {
+                "id": "message-shared",
+                "session_id": "session-2",
+                "time_created": 2,
+                "time_updated": 2,
+                "data": {"role": "assistant", "text": "keep me"},
+            }
+        ],
+    )
+    old_db.touch()
+
+    env2 = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env2,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "201"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+
+    rows = _read_opencode_session_db(shared_db)
+    assert rows["sessions"]["session-1"]["title"] == "shared-newer"
+    assert rows["sessions"]["session-1"]["time_updated"] == 5
+    assert rows["sessions"]["session-2"]["title"] == "shared-only"
+    assert rows["messages"]["message-shared"]["data"] == {"role": "assistant", "text": "keep me"}
+
+
+def test_opencode_set_soft_home_upgrades_existing_narrow_shared_schema(tmp_path):
+    import mms_opencode_env
+
+    real_home = tmp_path / "real-home"
+    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_config_dir = old_session / ".config" / "opencode"
+    old_config_dir.mkdir(parents=True)
+    (old_config_dir / "opencode.json").write_text(
+        json.dumps({"default_agent": "mobius-builder-pro"}) + "\n",
+        encoding="utf-8",
+    )
+    old_db = old_session / ".local" / "share" / "opencode" / "opencode.db"
+    _write_opencode_session_db(
+        old_db,
+        sessions=[
+            {
+                "id": "session-1",
+                "title": "legacy source",
+                "directory": "/tmp/project-a",
+                "time_created": 1,
+                "time_updated": 2,
+                "model": {"id": "gpt-5.5"},
+            }
+        ],
+        messages=[
+            {
+                "id": "message-1",
+                "session_id": "session-1",
+                "time_created": 1,
+                "time_updated": 2,
+                "data": {"role": "assistant", "text": "migrated content"},
+            }
+        ],
+    )
+
+    shared_root = real_home / ".local" / "share" / "mms-opencode" / "state" / "lite_pro_orchestrated" / "opencode"
+    shared_root.mkdir(parents=True, exist_ok=True)
+    narrow_db = shared_root / "opencode.db"
+    conn = sqlite3.connect(narrow_db)
+    try:
+        conn.execute("CREATE TABLE session (id TEXT PRIMARY KEY, title TEXT, directory TEXT, time_created INTEGER, time_updated INTEGER, model TEXT)")
+        conn.execute(
+            "INSERT INTO session VALUES (?, ?, ?, ?, ?, ?)",
+            ("session-1", "narrow target", "/tmp/project-a", 1, 1, json.dumps({"id": "gpt-5.4"})),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    def _real_user_path(*parts):
+        return str(real_home.joinpath(*parts))
+
+    env = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+
+    rows = _read_opencode_session_db(narrow_db)
+    session_columns_conn = sqlite3.connect(narrow_db)
+    try:
+        session_columns = [row[1] for row in session_columns_conn.execute("PRAGMA table_info(session)").fetchall()]
+        project_rows = session_columns_conn.execute("SELECT id, name FROM project ORDER BY id").fetchall()
+    finally:
+        session_columns_conn.close()
+
+    assert "project_id" in session_columns
+    assert "slug" in session_columns
+    assert "version" in session_columns
+    assert rows["sessions"]["session-1"]["title"] == "legacy source"
+    assert rows["sessions"]["session-1"]["time_updated"] == 2
+    assert rows["messages"]["message-1"]["data"] == {"role": "assistant", "text": "migrated content"}
+    assert project_rows[0][0] == "legacy-migrated-project"
+
+
+def test_opencode_set_soft_home_handles_narrow_source_project_schema(tmp_path):
+    import mms_opencode_env
+
+    real_home = tmp_path / "real-home"
+    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_config_dir = old_session / ".config" / "opencode"
+    old_config_dir.mkdir(parents=True)
+    (old_config_dir / "opencode.json").write_text(
+        json.dumps({"default_agent": "mobius-builder-pro"}) + "\n",
+        encoding="utf-8",
+    )
+    old_db = old_session / ".local" / "share" / "opencode" / "opencode.db"
+    old_db.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(old_db)
+    try:
+        conn.execute("CREATE TABLE project (id TEXT PRIMARY KEY, worktree TEXT NOT NULL, name TEXT, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, sandboxes TEXT NOT NULL)")
+        conn.execute("CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT, slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT NOT NULL, version TEXT NOT NULL, share_url TEXT, summary_additions INTEGER, summary_deletions INTEGER, summary_files INTEGER, summary_diffs TEXT, revert TEXT, permission TEXT, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, time_compacting INTEGER, time_archived INTEGER, workspace_id TEXT, path TEXT, agent TEXT, model TEXT, cost REAL DEFAULT 0 NOT NULL, tokens_input INTEGER DEFAULT 0 NOT NULL, tokens_output INTEGER DEFAULT 0 NOT NULL, tokens_reasoning INTEGER DEFAULT 0 NOT NULL, tokens_cache_read INTEGER DEFAULT 0 NOT NULL, tokens_cache_write INTEGER DEFAULT 0 NOT NULL, metadata TEXT, FOREIGN KEY (project_id) REFERENCES project(id) ON DELETE CASCADE)")
+        conn.execute("CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL, FOREIGN KEY (session_id) REFERENCES session(id) ON DELETE CASCADE)")
+        conn.execute("INSERT INTO project VALUES (?, ?, ?, ?, ?, ?)", ("project-1", "/tmp/worktree", "Legacy Narrow Project", 1, 1, json.dumps([])))
+        conn.execute("INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, share_url, summary_additions, summary_deletions, summary_files, summary_diffs, revert, permission, time_created, time_updated, time_compacting, time_archived, workspace_id, path, agent, model, cost, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", ("session-1", "project-1", None, "session-1", "/tmp/project-a", "legacy narrow source", "1", None, None, None, None, None, None, None, 1, 3, None, None, None, None, None, json.dumps({"id": "gpt-5.5"}), 0, 0, 0, 0, 0, 0, json.dumps({})))
+        conn.execute("INSERT INTO message VALUES (?, ?, ?, ?, ?)", ("message-1", "session-1", 1, 3, json.dumps({"role": "assistant", "text": "from narrow project schema"})))
+        conn.commit()
+    finally:
+        conn.close()
+
+    shared_root = real_home / ".local" / "share" / "mms-opencode" / "state" / "lite_pro_orchestrated" / "opencode"
+    shared_root.mkdir(parents=True, exist_ok=True)
+    narrow_db = shared_root / "opencode.db"
+    conn = sqlite3.connect(narrow_db)
+    try:
+        conn.execute("CREATE TABLE session (id TEXT PRIMARY KEY, title TEXT, directory TEXT, time_created INTEGER, time_updated INTEGER, model TEXT)")
+        conn.execute("INSERT INTO session VALUES (?, ?, ?, ?, ?, ?)", ("session-1", "dst narrow", "/tmp/project-a", 1, 1, json.dumps({"id": "gpt-5.4"})))
+        conn.commit()
+    finally:
+        conn.close()
+
+    def _real_user_path(*parts):
+        return str(real_home.joinpath(*parts))
+
+    env = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+
+    rows = _read_opencode_session_db(narrow_db)
+    assert rows["sessions"]["session-1"]["title"] == "legacy narrow source"
+    assert rows["sessions"]["session-1"]["time_updated"] == 3
+    assert rows["messages"]["message-1"]["data"] == {"role": "assistant", "text": "from narrow project schema"}
+
+
+def test_opencode_set_soft_home_commits_schema_backfill_when_source_tables_are_empty(tmp_path):
+    import mms_opencode_env
+
+    real_home = tmp_path / "real-home"
+    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_config_dir = old_session / ".config" / "opencode"
+    old_config_dir.mkdir(parents=True)
+    (old_config_dir / "opencode.json").write_text(
+        json.dumps({"default_agent": "mobius-builder-pro"}) + "\n",
+        encoding="utf-8",
+    )
+    old_db = old_session / ".local" / "share" / "opencode" / "opencode.db"
+    _write_opencode_session_db(old_db, sessions=[])
+
+    shared_root = real_home / ".local" / "share" / "mms-opencode" / "state" / "lite_pro_orchestrated" / "opencode"
+    shared_root.mkdir(parents=True, exist_ok=True)
+    narrow_db = shared_root / "opencode.db"
+    conn = sqlite3.connect(narrow_db)
+    try:
+        conn.execute("CREATE TABLE session (id TEXT PRIMARY KEY, title TEXT, directory TEXT, time_created INTEGER, time_updated INTEGER, model TEXT)")
+        conn.execute("INSERT INTO session VALUES (?, ?, ?, ?, ?, ?)", ("session-1", "dst narrow", "/tmp/project-a", 1, 1, json.dumps({"id": "gpt-5.4"})))
+        conn.commit()
+    finally:
+        conn.close()
+
+    def _real_user_path(*parts):
+        return str(real_home.joinpath(*parts))
+
+    env = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+
+    conn = sqlite3.connect(narrow_db)
+    try:
+        session_columns = [row[1] for row in conn.execute("PRAGMA table_info(session)").fetchall()]
+        project_row = conn.execute("SELECT id FROM project WHERE id = ?", ("legacy-migrated-project",)).fetchone()
+        session_row = conn.execute("SELECT project_id, slug, version FROM session WHERE id = ?", ("session-1",)).fetchone()
+    finally:
+        conn.close()
+
+    assert "project_id" in session_columns
+    assert project_row == ("legacy-migrated-project",)
+    assert session_row == ("legacy-migrated-project", "session-1", "1")
+
+
+def test_opencode_gateway_env_skips_cleanup_when_migration_fails(monkeypatch, tmp_path):
+    import mms_launchers
+    import mms_opencode_env
+
+    real_home = tmp_path / "real-home"
+    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_config_dir = old_session / ".config" / "opencode"
+    old_config_dir.mkdir(parents=True)
+    (old_config_dir / "opencode.json").write_text(
+        json.dumps({"default_agent": "mobius-builder-pro"}) + "\n",
+        encoding="utf-8",
+    )
+    old_opencode_dir = old_session / ".local" / "share" / "opencode"
+    old_opencode_dir.mkdir(parents=True)
+    (old_opencode_dir / "opencode.db").write_text("broken-sqlite", encoding="utf-8")
+
+    real_home.mkdir(exist_ok=True)
+    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(real_home))
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_packet_env", lambda env, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_locale_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(
+        mms_opencode_env,
+        "_sync_opencode_sqlite_db",
+        lambda _src, _dst: (True, False, True),
+    )
+    monkeypatch.setattr(
+        mms_launchers,
+        "_cleanup_stale_sessions",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("cleanup must be skipped on migration failure")),
+    )
+
+    env = mms_launchers._opencode_gateway_env(
+        _runtime(opencode_profile="lite_pro_orchestrated"),
+        model_info={"model": "deepseek-chat"},
+    )
+
+    assert env["MMS_OPENCODE_MIGRATION_FAILED"] == "1"
+
+
+def test_opencode_gateway_env_skips_cleanup_when_shared_target_is_non_sqlite(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_config_dir = old_session / ".config" / "opencode"
+    old_config_dir.mkdir(parents=True)
+    (old_config_dir / "opencode.json").write_text(
+        json.dumps({"default_agent": "mobius-builder-pro"}) + "\n",
+        encoding="utf-8",
+    )
+    old_db = old_session / ".local" / "share" / "opencode" / "opencode.db"
+    _write_opencode_session_db(
+        old_db,
+        sessions=[
+            {
+                "id": "session-1",
+                "title": "legacy source",
+                "directory": "/tmp/project-a",
+                "time_created": 1,
+                "time_updated": 2,
+                "model": {"id": "gpt-5.5"},
+            }
+        ],
+    )
+    shared_root = real_home / ".local" / "share" / "mms-opencode" / "state" / "lite_pro_orchestrated" / "opencode"
+    shared_root.mkdir(parents=True, exist_ok=True)
+    (shared_root / "opencode.db").write_text("corrupt-target", encoding="utf-8")
+
+    real_home.mkdir(exist_ok=True)
+    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(real_home))
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_packet_env", lambda env, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_locale_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_cleanup_stale_sessions",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("cleanup must be skipped for corrupt shared target")),
+    )
+
+    env = mms_launchers._opencode_gateway_env(
+        _runtime(opencode_profile="lite_pro_orchestrated"),
+        model_info={"model": "deepseek-chat"},
+    )
+
+    assert env["MMS_OPENCODE_MIGRATION_FAILED"] == "1"
+
+
+def test_opencode_gateway_env_skips_cleanup_when_legacy_source_is_non_sqlite_and_shared_target_is_valid(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_config_dir = old_session / ".config" / "opencode"
+    old_config_dir.mkdir(parents=True)
+    (old_config_dir / "opencode.json").write_text(
+        json.dumps({"default_agent": "mobius-builder-pro"}) + "\n",
+        encoding="utf-8",
+    )
+    old_opencode_dir = old_session / ".local" / "share" / "opencode"
+    old_opencode_dir.mkdir(parents=True)
+    (old_opencode_dir / "opencode.db").write_text("corrupt-source", encoding="utf-8")
+
+    shared_root = real_home / ".local" / "share" / "mms-opencode" / "state" / "lite_pro_orchestrated" / "opencode"
+    shared_root.mkdir(parents=True, exist_ok=True)
+    shared_db = shared_root / "opencode.db"
+    _write_opencode_session_db(
+        shared_db,
+        sessions=[
+            {
+                "id": "session-1",
+                "title": "shared state",
+                "directory": "/tmp/project-a",
+                "time_created": 1,
+                "time_updated": 3,
+                "model": {"id": "gpt-5.5"},
+            }
+        ],
+    )
+
+    real_home.mkdir(exist_ok=True)
+    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(real_home))
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_packet_env", lambda env, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_locale_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_cleanup_stale_sessions",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("cleanup must be skipped for corrupt legacy source")),
+    )
+
+    env = mms_launchers._opencode_gateway_env(
+        _runtime(opencode_profile="lite_pro_orchestrated"),
+        model_info={"model": "deepseek-chat"},
+    )
+
+    assert env["MMS_OPENCODE_MIGRATION_FAILED"] == "1"
+    rows = _read_opencode_session_db(shared_db)
+    assert rows["sessions"]["session-1"]["title"] == "shared state"
+
+
+def test_opencode_set_soft_home_initial_sqlite_backup_reads_wal_state(tmp_path):
+    import mms_opencode_env
+
+    real_home = tmp_path / "real-home"
+    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_config_dir = old_session / ".config" / "opencode"
+    old_config_dir.mkdir(parents=True)
+    (old_config_dir / "opencode.json").write_text(
+        json.dumps({"default_agent": "mobius-builder-pro"}) + "\n",
+        encoding="utf-8",
+    )
+    old_db = old_session / ".local" / "share" / "opencode" / "opencode.db"
+    old_db.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(old_db)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("CREATE TABLE project (id TEXT PRIMARY KEY, worktree TEXT NOT NULL, vcs TEXT, name TEXT, icon_url TEXT, icon_color TEXT, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, time_initialized INTEGER, sandboxes TEXT NOT NULL, commands TEXT, icon_url_override TEXT)")
+        conn.execute("CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT, slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT NOT NULL, version TEXT NOT NULL, share_url TEXT, summary_additions INTEGER, summary_deletions INTEGER, summary_files INTEGER, summary_diffs TEXT, revert TEXT, permission TEXT, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, time_compacting INTEGER, time_archived INTEGER, workspace_id TEXT, path TEXT, agent TEXT, model TEXT, cost REAL DEFAULT 0 NOT NULL, tokens_input INTEGER DEFAULT 0 NOT NULL, tokens_output INTEGER DEFAULT 0 NOT NULL, tokens_reasoning INTEGER DEFAULT 0 NOT NULL, tokens_cache_read INTEGER DEFAULT 0 NOT NULL, tokens_cache_write INTEGER DEFAULT 0 NOT NULL, metadata TEXT, FOREIGN KEY (project_id) REFERENCES project(id) ON DELETE CASCADE)")
+        conn.execute("CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL, FOREIGN KEY (session_id) REFERENCES session(id) ON DELETE CASCADE)")
+        conn.execute("INSERT INTO project VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", ("project-1", "/tmp/worktree", None, "WAL Project", None, None, 1, 1, None, json.dumps([]), None, None))
+        conn.execute("INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, share_url, summary_additions, summary_deletions, summary_files, summary_diffs, revert, permission, time_created, time_updated, time_compacting, time_archived, workspace_id, path, agent, model, cost, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", ("session-1", "project-1", None, "session-1", "/tmp/project-a", "wal source", "1", None, None, None, None, None, None, None, 1, 1, None, None, None, None, None, json.dumps({"id": "gpt-5.4"}), 0, 0, 0, 0, 0, 0, json.dumps({})))
+        conn.execute("INSERT INTO message VALUES (?, ?, ?, ?, ?)", ("message-wal", "session-1", 1, 1, json.dumps({"role": "assistant", "text": "from wal"})))
+        conn.commit()
+
+        def _real_user_path(*parts):
+            return str(real_home.joinpath(*parts))
+
+        env = {}
+        mms_opencode_env.opencode_set_soft_home(
+            env,
+            str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+            real_user_path=_real_user_path,
+            set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+            profile_id="lite_pro_orchestrated",
+        )
+    finally:
+        conn.close()
+
+    shared_db = Path(env["XDG_DATA_HOME"]) / "opencode" / "opencode.db"
+    rows = _read_opencode_session_db(shared_db)
+    assert rows["sessions"]["session-1"]["title"] == "wal source"
+    assert rows["messages"]["message-wal"]["data"] == {"role": "assistant", "text": "from wal"}
+
+
+def test_opencode_set_soft_home_skips_intentionally_isolated_session_data(tmp_path):
+    import mms_opencode_env
+
+    real_home = tmp_path / "real-home"
+
+    def _real_user_path(*parts):
+        return str(real_home.joinpath(*parts))
+
+    isolated_env = {"MMS_OPENCODE_ISOLATE_DATA": "1"}
+    isolated_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    mms_opencode_env.opencode_set_soft_home(
+        isolated_env,
+        str(isolated_session),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+    isolated_db = Path(isolated_env["XDG_DATA_HOME"]) / "opencode" / "opencode.db"
+    isolated_db.parent.mkdir(parents=True, exist_ok=True)
+    isolated_db.write_text("intentional-isolation", encoding="utf-8")
+
+    shared_env = {}
+    mms_opencode_env.opencode_set_soft_home(
+        shared_env,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+
+    shared_db = Path(shared_env["XDG_DATA_HOME"]) / "opencode" / "opencode.db"
+    assert not shared_db.exists()
 
 
 def test_opencode_gateway_env_materializes_session_assets(monkeypatch, tmp_path):
@@ -298,7 +2400,7 @@ def test_opencode_gateway_env_materializes_session_assets(monkeypatch, tmp_path)
     monkeypatch.setattr(mms_launchers, "_opencode_rtk_plugin_path", lambda _runtime=None: str(rtk_plugin))
 
     env = mms_launchers._opencode_gateway_env(
-        _runtime(caveman_mode="enable"),
+        _runtime(caveman_mode="enable", opencode_profile="lite_pro_orchestrated"),
         model_info={"model": "deepseek-chat"},
     )
 
@@ -334,7 +2436,7 @@ def test_opencode_gateway_env_can_disable_bypass(monkeypatch, tmp_path):
     monkeypatch.setenv("OPENCODE_PERMISSION", mms_launchers.OPENCODE_BYPASS_PERMISSION_ENV)
 
     env = mms_launchers._opencode_gateway_env(
-        _runtime(bypass=False),
+        _runtime(bypass=False, opencode_profile="lite_pro_orchestrated"),
         model_info={"model": "deepseek-chat"},
     )
     config_payload = json.loads(Path(env["OPENCODE_CONFIG"]).read_text(encoding="utf-8"))
@@ -482,6 +2584,7 @@ def test_launch_opencode_heavy_omo_uses_global_opencode_config(monkeypatch):
     assert captured["env"]["XDG_CONFIG_HOME"] == str(real_home / ".config")
     assert "OPENCODE_CONFIG" not in captured["env"]
     assert captured["env"]["OPENCODE_CLIENT"] == "mms"
+    assert captured["env"]["MMS_MODEL_NAME"] == "deepseek-chat"
     assert captured["env"]["MMS_OPENCODE_PROFILE"] == "heavy_omo"
     assert captured["env"]["OPENCODE_PERMISSION"] == mms_launchers.OPENCODE_BYPASS_PERMISSION_ENV
     assert captured["env"]["MMS_OPENCODE_BYPASS"] == "1"
@@ -557,6 +2660,7 @@ def test_get_export_env_for_heavy_omo_does_not_write_session_config(monkeypatch,
     exports = mms_launchers.get_export_env("opencode", runtime)
 
     assert exports == {
+        "MMS_MODEL_NAME": "deepseek-chat",
         "OPENCODE_CLIENT": "mms",
         "OPENCODE_PERMISSION": mms_launchers.OPENCODE_BYPASS_PERMISSION_ENV,
         "MMS_OPENCODE_BYPASS": "1",
@@ -639,12 +2743,23 @@ def test_core_opencode_profiles_are_fixed_launch_shapes():
     assert mms_core._normalize_opencode_profile_id("agent") == "lite_pro_orchestrated"
     assert mms_core._normalize_opencode_profile_id("orchestrated") == "lite_pro_orchestrated"
     assert mms_core._normalize_opencode_profile_id("openspec-multi") == "lite_pro_orchestrated"
+    assert mms_core._normalize_opencode_profile_id("review") == "review_hub"
+    assert mms_core._normalize_opencode_profile_id("multi-review") == "review_hub"
+    assert mms_core._normalize_opencode_profile_id("committee") == "committee"
+    assert mms_core._normalize_opencode_profile_id("debate") == "debate"
     assert mms_core._normalize_opencode_profile_id("omo") == "heavy_omo"
     assert mms_core._opencode_profile_selection("lite_pro_orchestrated_backend") == ("lite_pro_orchestrated", "serve")
     assert mms_core._opencode_profile_selection("lite_pro_orchestrated_acp") == ("lite_pro_orchestrated", "acp")
+    assert mms_core._opencode_profile_selection("review_backend") == ("review_hub", "serve")
+    assert mms_core._opencode_profile_selection("committee_backend") == ("committee", "serve")
+    assert mms_core._opencode_profile_selection("debate_backend") == ("debate", "serve")
+    assert mms_core._opencode_profile_selection("debate_acp") == ("debate", "acp")
 
     lite = mms_core._apply_opencode_profile(_runtime(), "lite")
     agent = mms_core._apply_opencode_profile(_runtime(), "agent")
+    review = mms_core._apply_opencode_profile(_runtime(), "review")
+    committee = mms_core._apply_opencode_profile(_runtime(), "committee")
+    debate = mms_core._apply_opencode_profile(_runtime(), "debate")
     backend_multi = mms_core._apply_opencode_profile(_runtime(), "lite_pro_orchestrated_backend")
     heavy = mms_core._apply_opencode_profile(_runtime(), "omo")
     raw = mms_core._apply_opencode_profile(_runtime(), "raw")
@@ -653,17 +2768,35 @@ def test_core_opencode_profiles_are_fixed_launch_shapes():
     assert lite["opencode_agent"] == "mobius-builder"
     assert lite["opencode_lite_agents"] is True
     assert agent["opencode_agent"] == "mobius-builder-pro"
+    assert agent["opencode_health_check"] == "async"
     assert agent["opencode_launch_preflight"] is False
     assert agent["opencode_launch_fallback_route_keys"] == ["builder_primary", "builder_fallback"]
     orchestrated = mms_core._apply_opencode_profile(_runtime(), "lite_pro_orchestrated")
     assert orchestrated["opencode_agent"] == "mobius-builder-pro"
     assert orchestrated["opencode_roster"] == "lite_pro_orchestrated"
     assert orchestrated["opencode_profile_label"] == "Agent"
+    assert review["opencode_agent"] == "review-hub-host"
+    assert review["opencode_health_check"] == "async"
+    assert review["opencode_roster"] == "review_hub"
+    assert review["opencode_profile_label"] == "Review"
+    assert review["opencode_launch_fallback_agents"]["builder_fallback"] == "review-hub-host-stable"
+    assert committee["opencode_agent"] == "committee-host"
+    assert committee["opencode_health_check"] == "async"
+    assert committee["opencode_roster"] == "committee"
+    assert committee["opencode_profile_label"] == "Committee"
+    assert committee["opencode_launch_fallback_agents"]["builder_fallback"] == "committee-host-pro"
+    assert debate["opencode_agent"] == "debate-host"
+    assert debate["opencode_health_check"] == "async"
+    assert debate["opencode_roster"] == "debate"
+    assert debate["opencode_profile_label"] == "Debate"
+    assert debate["opencode_contract_workflow"] == "debate"
+    assert debate["opencode_launch_fallback_agents"]["builder_fallback"] == "debate-host-pro"
     assert backend_multi["opencode_profile"] == "lite_pro_orchestrated"
     assert backend_multi["opencode_entrypoint"] == "serve"
     assert heavy["opencode_use_global_config"] is True
     assert heavy["opencode_lite_agents"] is False
     assert raw["opencode_pure"] is True
+    assert raw["opencode_health_check"] == "async"
     assert raw["opencode_agent"] == ""
     assert raw["opencode_lite_agents"] is False
 
@@ -771,6 +2904,10 @@ def test_core_opencode_lite_pro_builds_multi_model_roster(monkeypatch):
     vision_route = next(route for route in runtime["opencode_routes"] if route["id"] == "vision_primary")
     assert vision_route["provider_id"] == "mimo-direct-anthropic"
     assert payload["provider"]["mms-vision_primary"]["models"]["mimo-v2.5"]["attachment"] is True
+    assert payload["provider"]["mms-vision_primary"]["models"]["mimo-v2.5"]["modalities"] == {
+        "input": ["text", "image"],
+        "output": ["text"],
+    }
     assert payload["agent"]["mobius-reviewer-gpt55"]["model"].endswith("/gpt-5.5")
     reviewer_route = next(route for route in runtime["opencode_routes"] if route["id"] == "reviewer_primary")
     assert reviewer_route["provider_id"] == "mixed"
@@ -804,6 +2941,291 @@ def test_opencode_lite_pro_preflight_is_opt_in(monkeypatch):
 
     monkeypatch.setenv("MMS_OPENCODE_LAUNCH_PREFLIGHT", "1")
     assert mms_launchers._opencode_launch_preflight_enabled(runtime) is True
+
+
+def test_opencode_health_check_uses_primary_route_only_by_default(monkeypatch):
+    import mms_opencode_launch
+
+    monkeypatch.delenv("MMS_OPENCODE_HEALTHCHECK", raising=False)
+    monkeypatch.delenv("MMS_OPENCODE_HEALTHCHECK_MAX_ROUTES", raising=False)
+    monkeypatch.delenv("MMS_OPENCODE_HEALTHCHECK_TIMEOUT", raising=False)
+    calls = []
+    routes = [
+        {
+            "id": "builder_primary",
+            "provider_id": "primary",
+            "protocol": "openai_responses",
+            "openai_base_url": "https://primary.example/v1",
+            "api_key": "sk-primary",
+            "model": "gpt-5.4",
+        },
+        {
+            "id": "builder_fallback",
+            "provider_id": "fallback",
+            "protocol": "anthropic_messages",
+            "anthropic_base_url": "https://fallback.example/v1",
+            "api_key": "sk-fallback",
+            "model": "gpt-5.5",
+        },
+    ]
+
+    mms_opencode_launch.opencode_gateway_health_check(
+        {
+            "model": "gpt-5.4",
+            "opencode_default_route_key": "builder_primary",
+            "opencode_launch_fallback_route_keys": ["builder_primary", "builder_fallback"],
+        },
+        runtime_routes=lambda _runtime, _model: routes,
+        resolve_model=lambda runtime: runtime.get("model"),
+        provider_base_url=lambda _runtime: "https://default.example/v1",
+        gateway_health_check=lambda runtime: calls.append(runtime),
+    )
+
+    assert len(calls) == 1
+    assert calls[0]["id"] == "primary"
+    assert calls[0]["openai_base_url"] == "https://primary.example/v1"
+    assert calls[0]["anthropic_base_url"] == ""
+    assert calls[0]["gateway_health_timeout_sec"] == 2.0
+    assert calls[0]["gateway_health_source"] == "opencode"
+
+
+def test_opencode_health_check_can_probe_more_routes_with_short_timeout(monkeypatch):
+    import mms_opencode_launch
+
+    monkeypatch.setenv("MMS_OPENCODE_HEALTHCHECK_MAX_ROUTES", "2")
+    monkeypatch.setenv("MMS_OPENCODE_HEALTHCHECK_TIMEOUT", "0.5")
+    calls = []
+    routes = [
+        {
+            "id": "builder_primary",
+            "provider_id": "primary",
+            "protocol": "openai_responses",
+            "openai_base_url": "https://primary.example/v1",
+            "api_key": "sk-primary",
+            "model": "gpt-5.4",
+        },
+        {
+            "id": "builder_fallback",
+            "provider_id": "fallback",
+            "protocol": "anthropic_messages",
+            "anthropic_base_url": "https://fallback.example/v1",
+            "api_key": "sk-fallback",
+            "model": "gpt-5.5",
+        },
+    ]
+
+    mms_opencode_launch.opencode_gateway_health_check(
+        {"model": "gpt-5.4", "opencode_default_route_key": "builder_primary"},
+        runtime_routes=lambda _runtime, _model: routes,
+        resolve_model=lambda runtime: runtime.get("model"),
+        provider_base_url=lambda _runtime: "https://default.example/v1",
+        gateway_health_check=lambda runtime: calls.append(runtime),
+    )
+
+    assert [call["id"] for call in calls] == ["primary", "fallback"]
+    assert calls[0]["gateway_health_timeout_sec"] == 0.5
+    assert calls[1]["gateway_health_timeout_sec"] == 0.5
+    assert calls[1]["openai_base_url"] == ""
+    assert calls[1]["anthropic_base_url"] == "https://fallback.example/v1"
+
+
+def test_opencode_health_check_max_routes_zero_falls_back_to_default(monkeypatch):
+    import mms_opencode_launch
+
+    monkeypatch.setenv("MMS_OPENCODE_HEALTHCHECK_MAX_ROUTES", "0")
+    calls = []
+    routes = [
+        {
+            "id": "builder_primary",
+            "provider_id": "primary",
+            "protocol": "openai_responses",
+            "openai_base_url": "https://primary.example/v1",
+            "api_key": "sk-primary",
+            "model": "gpt-5.4",
+        },
+        {
+            "id": "builder_fallback",
+            "provider_id": "fallback",
+            "protocol": "anthropic_messages",
+            "anthropic_base_url": "https://fallback.example/v1",
+            "api_key": "sk-fallback",
+            "model": "gpt-5.5",
+        },
+    ]
+
+    mms_opencode_launch.opencode_gateway_health_check(
+        {"model": "gpt-5.4", "opencode_default_route_key": "builder_primary"},
+        runtime_routes=lambda _runtime, _model: routes,
+        resolve_model=lambda runtime: runtime.get("model"),
+        provider_base_url=lambda _runtime: "https://default.example/v1",
+        gateway_health_check=lambda runtime: calls.append(runtime),
+    )
+
+    assert [call["id"] for call in calls] == ["primary"]
+
+
+def test_opencode_health_check_nan_timeout_falls_back_to_default(monkeypatch):
+    import mms_opencode_launch
+
+    monkeypatch.setenv("MMS_OPENCODE_HEALTHCHECK_TIMEOUT", "nan")
+    calls = []
+
+    mms_opencode_launch.opencode_gateway_health_check(
+        {"model": "gpt-5.4"},
+        runtime_routes=lambda _runtime, _model: [
+            {
+                "id": "builder_primary",
+                "provider_id": "primary",
+                "openai_base_url": "https://primary.example/v1",
+                "api_key": "sk-primary",
+                "model": "gpt-5.4",
+            }
+        ],
+        resolve_model=lambda runtime: runtime.get("model"),
+        provider_base_url=lambda _runtime: "https://default.example/v1",
+        gateway_health_check=lambda runtime: calls.append(runtime),
+    )
+
+    assert calls[0]["gateway_health_timeout_sec"] == 2.0
+
+
+def test_opencode_health_check_env_can_disable_probe(monkeypatch):
+    import mms_opencode_launch
+
+    monkeypatch.setenv("MMS_OPENCODE_HEALTHCHECK", "0")
+    calls = []
+
+    mms_opencode_launch.opencode_gateway_health_check(
+        {"model": "gpt-5.4"},
+        runtime_routes=lambda _runtime, _model: [
+            {
+                "id": "builder_primary",
+                "provider_id": "primary",
+                "openai_base_url": "https://primary.example/v1",
+                "api_key": "sk-primary",
+                "model": "gpt-5.4",
+            }
+        ],
+        resolve_model=lambda runtime: runtime.get("model"),
+        provider_base_url=lambda _runtime: "https://default.example/v1",
+        gateway_health_check=lambda runtime: calls.append(runtime),
+    )
+
+    assert calls == []
+
+
+def test_opencode_profile_health_check_runtime_default_is_async_and_env_can_force_sync(monkeypatch):
+    import mms_opencode_launch
+
+    calls = []
+    scheduled = []
+    runtime = {
+        "model": "gpt-5.4",
+        "opencode_health_check": "async",
+    }
+    route = {
+        "id": "builder_primary",
+        "provider_id": "primary",
+        "openai_base_url": "https://primary.example/v1",
+        "api_key": "sk-primary",
+        "model": "gpt-5.4",
+    }
+    monkeypatch.setattr(
+        mms_opencode_launch,
+        "_run_opencode_health_check_async",
+        lambda check_fn: scheduled.append(check_fn),
+    )
+
+    monkeypatch.delenv("MMS_OPENCODE_HEALTHCHECK", raising=False)
+    mms_opencode_launch.opencode_gateway_health_check(
+        runtime,
+        runtime_routes=lambda _runtime, _model: [route],
+        resolve_model=lambda runtime: runtime.get("model"),
+        provider_base_url=lambda _runtime: "https://default.example/v1",
+        gateway_health_check=lambda runtime: calls.append(runtime),
+    )
+    assert calls == []
+    assert len(scheduled) == 1
+
+    scheduled.pop()()
+    assert len(calls) == 1
+    assert calls[0]["id"] == "primary"
+
+    monkeypatch.setenv("MMS_OPENCODE_HEALTHCHECK", "1")
+    mms_opencode_launch.opencode_gateway_health_check(
+        runtime,
+        runtime_routes=lambda _runtime, _model: [route],
+        resolve_model=lambda runtime: runtime.get("model"),
+        provider_base_url=lambda _runtime: "https://default.example/v1",
+        gateway_health_check=lambda runtime: calls.append(runtime),
+    )
+    assert len(scheduled) == 0
+    assert len(calls) == 2
+    assert calls[1]["id"] == "primary"
+
+
+def test_committee_trace_footer_instructs_executor_to_reply_with_mission_hash():
+    import mms_opencode_agents
+
+    agents = mms_opencode_agents.opencode_committee_agent_configs(
+        {
+            "committee-host": "mms/gpt-5.5",
+            "committee-kimi": "mms/kimi-k2.7-code",
+        }
+    )
+
+    host_prompt = agents["committee-host"]["prompt"]
+    assert "MMS-REPLY: After fixing or accepting this review" in host_prompt
+    assert "report back to the human with the MMS-MISSION id/hash above" in host_prompt
+    assert "MMS-MISSION, MMS-TARGET, and MMS-REPLY forward verbatim" in host_prompt
+
+
+def test_gateway_ping_uses_runtime_health_timeout(monkeypatch):
+    import mms_launchers
+
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+
+    def fake_request(method, url, runtime=None, headers=None, timeout=None):
+        captured.update({"method": method, "url": url, "timeout": timeout})
+        return FakeResponse()
+
+    monkeypatch.setattr(mms_launchers, "_runtime_httpx_request", fake_request)
+    monkeypatch.setattr(mms_launchers, "_build_gateway_url", lambda base_url, path: f"{base_url.rstrip('/')}{path}")
+
+    ok = mms_launchers._gateway_ping(
+        "https://gateway.example/v1",
+        "sk-test",
+        runtime={"gateway_health_timeout_sec": 1.25},
+    )
+
+    assert ok is True
+    assert captured["timeout"] == 1.25
+
+
+def test_gateway_ping_nan_timeout_falls_back_to_default(monkeypatch):
+    import mms_launchers
+
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+
+    def fake_request(method, url, runtime=None, headers=None, timeout=None):
+        captured["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setattr(mms_launchers, "_runtime_httpx_request", fake_request)
+    monkeypatch.setattr(mms_launchers, "_build_gateway_url", lambda base_url, path: f"{base_url.rstrip('/')}{path}")
+
+    assert mms_launchers._gateway_ping(
+        "https://gateway.example/v1",
+        "sk-test",
+        runtime={"gateway_health_timeout_sec": "nan"},
+    ) is True
+    assert captured["timeout"] == 8
 
 
 def test_core_opencode_lite_pro_orchestrated_delegates_to_executor_chain(monkeypatch):
@@ -889,6 +3311,1281 @@ def test_core_opencode_lite_pro_orchestrated_delegates_to_executor_chain(monkeyp
     assert qwen_route["protocol"] == "anthropic_messages"
     vision_qwen_route = next(route for route in runtime["opencode_routes"] if route["id"] == "vision_qwen")
     assert vision_qwen_route["protocol"] == "anthropic_messages"
+
+
+def test_core_opencode_review_profile_builds_review_hub_roster(monkeypatch):
+    import mms_core
+    import mms_launchers
+
+    cfg = {"providers": [], "account": {"defaults": {}}, "accounts": []}
+    provider = _runtime(
+        id="mixed",
+        name="Mixed",
+        supported_clis=["codex", "opencode"],
+        protocols=["anthropic_messages", "openai_chat_completions"],
+    )
+    mimo_direct = _runtime(
+        id="mimo-direct-anthropic",
+        name="MiMo Direct",
+        supported_clis=["opencode"],
+        protocols=["anthropic_messages"],
+        openai_base_url="",
+        anthropic_base_url="https://token-plan-cn.xiaomimimo.com/anthropic",
+    )
+    models = [
+        "gpt-5.5",
+        "gpt-5.4",
+        "qwen3.7-max",
+        "kimi-k2.6",
+        "kimi-k2.5",
+        "MiniMax-M2.7",
+        "MiniMax-M3",
+        "glm-5.1",
+        "glm-5-turbo",
+        "deepseek-v4-pro",
+    ]
+    monkeypatch.setattr(
+        mms_core,
+        "_provider_candidates",
+        lambda *_args: [(provider, models), (mimo_direct, ["mimo-v2.5-pro", "mimo-v2.5"])],
+    )
+
+    model_info, runtime = mms_core._resolve_opencode_profile_runtime(
+        cfg,
+        provider,
+        models,
+        "review",
+    )
+    payload = mms_launchers._build_opencode_config_payload(runtime, model_info["model"])
+
+    assert model_info == {"model": "glm-5-turbo", "profile": "review_hub"}
+    assert runtime["opencode_agent"] == "review-hub-host"
+    assert runtime["opencode_roster"] == "review_hub"
+    assert payload["default_agent"] == "review-hub-host"
+    assert payload["model"].endswith("/glm-5-turbo")
+    assert payload["agent"]["review-hub-host"]["mode"] == "primary"
+    assert payload["agent"]["review-hub-host"]["permission"]["task"]["review-qwen"] == "allow"
+    assert payload["agent"]["review-hub-host"]["permission"]["task"]["review-kimi"] == "allow"
+    assert payload["agent"]["review-qwen"]["model"].endswith("/qwen3.7-max")
+    assert payload["agent"]["review-kimi"]["model"].endswith("/kimi-k2.6")
+    assert payload["agent"]["review-glm"]["model"].endswith("/glm-5.1")
+    assert payload["agent"]["review-deepseek"]["model"].endswith("/deepseek-v4-pro")
+    assert payload["agent"]["review-mimo"]["model"].endswith("/mimo-v2.5")
+    assert payload["agent"]["review-mimo-pro"]["model"].endswith("/mimo-v2.5-pro")
+    assert "steps" not in payload["agent"]["review-qwen"]
+    assert "steps" not in payload["agent"]["review-mimo-pro"]
+    review_host_prompt = payload["agent"]["review-hub-host"]["prompt"]
+    review_host_prompt_lower = review_host_prompt.lower()
+    assert "review-hub aggregate" in review_host_prompt
+    assert "headless inline pr/mr review pack contract" in review_host_prompt_lower
+    assert "verdict: approve|comment|request_changes" in review_host_prompt_lower
+    assert "do not hydrate review-hub" in review_host_prompt_lower
+    assert "not a general committee host" in review_host_prompt_lower
+    assert "not debate-host" in review_host_prompt_lower
+    assert "concrete artifact review" in review_host_prompt_lower
+    assert "formal votes" in review_host_prompt_lower
+    assert "crossfire" in review_host_prompt_lower
+    assert "mms-mission" in review_host_prompt_lower
+    assert "mms-target" in review_host_prompt_lower
+    assert "mms-mode" in review_host_prompt_lower
+    assert "mms-source" in review_host_prompt_lower
+    assert "manual dispatch" in review_host_prompt_lower
+    assert "reviewed code target" in review_host_prompt_lower
+    assert "repeat mms-mission plus mms-target at the end" in review_host_prompt_lower
+    assert "unchanged mms-mission block" in payload["agent"]["review-qwen"]["prompt"].lower()
+    review_stable_prompt = payload["agent"]["review-hub-host-stable"]["prompt"].lower()
+    assert "headless inline pr/mr review pack contract" in review_stable_prompt
+    assert "mms-mission" in review_stable_prompt
+    assert "mms-target" in review_stable_prompt
+    assert "mms-mode" in review_stable_prompt
+    assert "mms-source" in review_stable_prompt
+    assert "every reviewer brief" in review_stable_prompt
+    assert "headless inline pr/mr review pack contract" in payload["agent"]["review-qwen"]["prompt"].lower()
+    assert payload["agent"]["review-qwen"]["permission"]["edit"] == "allow"
+    review_mimo_route = next(route for route in runtime["opencode_routes"] if route["id"] == "review_mimo")
+    assert review_mimo_route["provider_id"] == "mimo-direct-anthropic"
+
+    review_cfg, selection = mms_core._prepare_opencode_review_profile_config(
+        cfg,
+        provider,
+        models,
+        model_tokens=["kimi2.5", "minimax2.7", "glm5-turbo"],
+        interactive=False,
+    )
+    assert [item["model"] for item in selection["selected"]] == [
+        "kimi-k2.5",
+        "MiniMax-M2.7",
+        "glm-5-turbo",
+    ]
+    model_info, runtime = mms_core._resolve_opencode_profile_runtime(
+        review_cfg,
+        provider,
+        models,
+        "review",
+    )
+    payload = mms_launchers._build_opencode_config_payload(runtime, model_info["model"])
+
+    assert "review-kimi" not in payload["agent"]
+    assert payload["agent"]["review-kimi-k2-5"]["model"].endswith("/kimi-k2.5")
+    assert payload["agent"]["review-minimax-m2-7"]["model"].lower().endswith("/minimax-m2.7")
+    assert payload["agent"]["review-glm-5-turbo"]["model"].endswith("/glm-5-turbo")
+    assert "steps" not in payload["agent"]["review-kimi-k2-5"]
+    assert "steps" not in payload["agent"]["review-minimax-m2-7"]
+    assert payload["agent"]["review-hub-host"]["permission"]["task"]["review-kimi-k2-5"] == "allow"
+    dynamic_kimi_route = next(route for route in runtime["opencode_routes"] if route["id"] == "custom_review-kimi-k2-5")
+    assert dynamic_kimi_route["protocol"] == "anthropic_messages"
+    assert payload["provider"]["mms-custom_review-kimi-k2-5"]["npm"] == "@ai-sdk/anthropic"
+
+    _review_cfg, selection = mms_core._prepare_opencode_review_profile_config(
+        cfg,
+        provider,
+        models,
+        model_tokens=["minimaxm3"],
+        interactive=False,
+    )
+    assert [item["model"] for item in selection["selected"]] == ["MiniMax-M3"]
+
+
+def test_core_opencode_review_tui_uses_all_models_and_remembers_channels(monkeypatch):
+    import mms_core
+
+    cfg = {"providers": [], "account": {"defaults": {}}, "accounts": []}
+    provider_a = _runtime(
+        id="newapi-tokyo",
+        name="Tokyo",
+        supported_clis=["opencode"],
+        protocols=["anthropic_messages", "openai_chat_completions"],
+    )
+    provider_b = _runtime(
+        id="newapi-sg",
+        name="Singapore",
+        supported_clis=["opencode"],
+        protocols=["anthropic_messages", "openai_chat_completions"],
+    )
+    models_a = ["gpt-5.4", "gemini-3.1-pro-preview", "qwen3.7-max"]
+    models_b = ["gpt-5.4", "gemini-3.1-pro-preview", "glm-5.1"]
+    monkeypatch.setattr(
+        mms_core,
+        "_provider_candidates",
+        lambda *_args: [(provider_a, models_a), (provider_b, models_b)],
+    )
+
+    options = mms_core._opencode_review_tui_options(cfg, provider_a, models_a)
+    gemini_options = [item for item in options if item["model"] == "gemini-3.1-pro-preview"]
+
+    assert {item["provider_id"] for item in gemini_options} == {"newapi-tokyo", "newapi-sg"}
+    assert any(item["model"] == "gpt-5.4" for item in options)
+    assert any(item["model"] == "glm-5.1" for item in options)
+    all_selected, _unresolved = mms_core._resolve_opencode_review_models(
+        cfg,
+        provider_a,
+        models_a,
+        ["all"],
+    )
+    assert "gemini-3.1-pro-preview" in {item["model"] for item in all_selected}
+
+    review_cfg, selection = mms_core._prepare_opencode_review_profile_config(
+        cfg,
+        provider_a,
+        models_a,
+        host_model={"model": "gpt-5.4", "provider_id": "newapi-sg"},
+        model_tokens=[{"model": "gemini-3.1-pro-preview", "provider_id": "newapi-sg"}],
+        interactive=False,
+    )
+    roster = review_cfg["opencode"]["agent_roster"]
+
+    assert selection["host"] == "gpt-5.4"
+    assert selection["selected"][0]["provider_id"] == "newapi-sg"
+    assert roster["review-hub-host"]["provider_id"] == "newapi-sg"
+    dynamic_agent = next(agent for agent in roster if agent.startswith("review-gemini-3-1-pro-preview"))
+    assert roster[dynamic_agent]["provider_id"] == "newapi-sg"
+
+
+def test_core_opencode_profile_tui_respects_provider_hidden_models(monkeypatch):
+    import mms_core
+
+    cfg = {"providers": [], "account": {"defaults": {}}, "accounts": []}
+    visible_provider = _runtime(
+        id="visible-channel",
+        name="Visible",
+        supported_clis=["opencode"],
+        protocols=["anthropic_messages", "openai_chat_completions"],
+    )
+    hidden_provider = _runtime(
+        id="hidden-channel",
+        name="Hidden",
+        supported_clis=["opencode"],
+        protocols=["anthropic_messages", "openai_chat_completions"],
+        hidden_models=["gemini-3.1-pro-preview"],
+    )
+    models = ["gemini-3.1-pro-preview", "gpt-5.4"]
+    monkeypatch.setattr(
+        mms_core,
+        "_provider_candidates",
+        lambda *_args: [(visible_provider, models), (hidden_provider, models)],
+    )
+
+    options = mms_core._opencode_committee_tui_options(cfg, visible_provider, models)
+    gemini_options = [item for item in options if item["model"] == "gemini-3.1-pro-preview"]
+
+    assert [item["provider_id"] for item in gemini_options] == ["visible-channel"]
+
+    visible_provider["hidden_models"] = ["gemini-3.1-pro-preview"]
+    options = mms_core._opencode_committee_tui_options(cfg, visible_provider, models)
+
+    assert all(item["model"] != "gemini-3.1-pro-preview" for item in options)
+
+
+def test_core_opencode_model_families_use_priority_before_role(monkeypatch):
+    import mms_core
+
+    cfg = {"providers": [], "account": {"defaults": {}}, "accounts": []}
+    company = _runtime(id="company", name="Company", role="auto", priority=10)
+    tokyo = _runtime(id="tokyo", name="Tokyo", role="fallback", priority=190)
+    models = ["gemini-3-flash-agent(high)"]
+    monkeypatch.setattr(mms_core, "_provider_candidates", lambda *_args: [(company, models), (tokyo, models)])
+
+    families = mms_core._build_model_families_for_cli(cfg, "opencode", company, models)
+    gemini_models = next(item["models"] for item in families if item["family"] == "Gemini")
+    provider, provider_name = mms_core._resolve_best_provider(cfg, models[0], company, models, cli_name="opencode")
+
+    assert gemini_models[0]["provider_id"] == "tokyo"
+    assert provider["id"] == "tokyo"
+    assert provider_name == "Tokyo"
+
+
+def test_core_opencode_saved_committee_selection_uses_committee_agents_only():
+    import mms_core
+
+    cfg = {
+        "opencode": {
+            "committee": {
+                "models": ["gpt-5.4"],
+                "selected_agents": ["committee-gpt-5-4"],
+            },
+            "agent_roster": {
+                "review-gpt-5-4": {
+                    "enabled": True,
+                    "model": "gpt-5.4",
+                    "provider_id": "review-channel",
+                },
+                "committee-gpt-5-4": {
+                    "enabled": True,
+                    "model": "gpt-5.4",
+                    "provider_id": "committee-channel",
+                },
+            },
+        }
+    }
+
+    selected = mms_core._opencode_saved_model_selections(
+        cfg,
+        mms_core._opencode_committee_saved_model_tokens(cfg),
+        prefix="committee-",
+        agent_ids=mms_core._opencode_committee_saved_agent_ids(cfg),
+    )
+
+    assert selected == [{"model": "gpt-5.4", "family": "GPT", "provider_id": "committee-channel"}]
+
+
+def test_core_opencode_saved_options_restore_unhidden_saved_model():
+    import mms_core
+
+    visible_provider = _runtime(
+        id="direct-zai",
+        name="Z.ai",
+        supported_clis=["opencode"],
+        fallback_models=["glm-5.1"],
+        hidden_models=[],
+    )
+    hidden_provider = _runtime(
+        id="hidden-zai",
+        name="Hidden Z.ai",
+        supported_clis=["opencode"],
+        fallback_models=["glm-5.1"],
+        hidden_models=["glm-5.3"],
+    )
+    cfg = {"providers": [visible_provider, hidden_provider]}
+
+    options = mms_core._opencode_with_saved_selection_options(
+        cfg,
+        [],
+        [
+            {"model": "glm-5.2", "family": "GLM", "provider_id": "direct-zai"},
+            {"model": "glm-5.3", "family": "GLM", "provider_id": "hidden-zai"},
+        ],
+    )
+
+    assert [item["model"] for item in options] == ["glm-5.2"]
+    assert options[0]["provider_id"] == "direct-zai"
+
+
+def test_core_preview_runtime_merges_local_committee_preferences(monkeypatch):
+    import mms_core
+
+    bundle_cfg = {
+        "_mms_config_source": "latest-approved-bundle",
+        "opencode": {
+            "default_profile": "agent",
+            "committee": {"models": ["gpt-5.4"]},
+            "agent_roster": {
+                "committee-gpt-5-4": {"enabled": True, "model": "gpt-5.4", "provider_id": "bundle"}
+            },
+        },
+    }
+    local_cfg = {
+        "opencode": {
+            "default_profile": "committee",
+            "committee": {
+                "models": ["gpt-5.4", "deepseek-v4-flash"],
+                "selected_agents": ["committee-gpt-5-4", "committee-deepseek-v4-flash"],
+                "host": {"model": "mimo-v2.5", "provider_id": "mimo-direct"},
+            },
+            "agent_roster": {
+                "committee-gpt-5-4": {
+                    "enabled": True,
+                    "model": "gpt-5.4",
+                    "provider_id": "local-gpt",
+                },
+                "committee-deepseek-v4-flash": {
+                    "enabled": True,
+                    "model": "deepseek-v4-flash",
+                    "provider_id": "direct-deepseek",
+                },
+                "mobius-builder": {
+                    "enabled": True,
+                    "model": "should-not-merge",
+                    "provider_id": "local-only",
+                },
+            },
+        }
+    }
+    monkeypatch.setattr(mms_core, "load_config", lambda persist=False: local_cfg)
+
+    merged = mms_core._merge_preview_local_launch_preferences(bundle_cfg)
+
+    assert merged["opencode"]["default_profile"] == "committee"
+    assert merged["opencode"]["committee"]["models"] == ["gpt-5.4", "deepseek-v4-flash"]
+    assert merged["opencode"]["committee"]["host"]["provider_id"] == "mimo-direct"
+    assert merged["opencode"]["agent_roster"]["committee-gpt-5-4"]["provider_id"] == "local-gpt"
+    assert merged["opencode"]["agent_roster"]["committee-deepseek-v4-flash"]["provider_id"] == "direct-deepseek"
+    assert "mobius-builder" not in merged["opencode"]["agent_roster"]
+
+
+def test_core_opencode_committee_profile_builds_general_committee_roster(monkeypatch):
+    import mms_core
+    import mms_launchers
+
+    cfg = {
+        "providers": [],
+        "account": {"defaults": {}},
+        "accounts": [],
+        "opencode": {"committee": {"models": ["gpt-5.4", "gpt-5.5", "deepseek", "glm", "mimo", "kimi", "minimax"]}},
+    }
+    provider = _runtime(
+        id="mixed",
+        name="Mixed",
+        supported_clis=["codex", "opencode"],
+        protocols=["anthropic_messages", "openai_chat_completions"],
+    )
+    mimo_direct = _runtime(
+        id="mimo-direct-anthropic",
+        name="MiMo Direct",
+        supported_clis=["opencode"],
+        protocols=["anthropic_messages"],
+        openai_base_url="",
+        anthropic_base_url="https://token-plan-cn.xiaomimimo.com/anthropic",
+    )
+    models = [
+        "gpt-5.5",
+        "gpt-5.4",
+        "kimi-k2.6",
+        "MiniMax-M3",
+        "MiniMax-M2.7",
+        "glm-5.1",
+        "glm-5-turbo",
+        "deepseek-v4-pro",
+    ]
+    monkeypatch.setattr(
+        mms_core,
+        "_provider_candidates",
+        lambda *_args: [(provider, models), (mimo_direct, ["mimo-v2.5-pro", "mimo-v2.5"])],
+    )
+
+    committee_cfg, selection = mms_core._prepare_opencode_committee_profile_config(
+        cfg,
+        provider,
+        models,
+        host_model="gpt-5.5",
+        interactive=False,
+    )
+    model_info, runtime = mms_core._resolve_opencode_profile_runtime(
+        committee_cfg,
+        provider,
+        models,
+        "committee",
+    )
+    payload = mms_launchers._build_opencode_config_payload(runtime, model_info["model"])
+
+    tui_models = {item["model"] for item in mms_core._opencode_committee_tui_options(cfg, provider, models)}
+    assert {
+        "gpt-5.5",
+        "gpt-5.4",
+        "kimi-k2.6",
+        "MiniMax-M3",
+        "MiniMax-M2.7",
+        "glm-5.1",
+        "glm-5-turbo",
+        "deepseek-v4-pro",
+        "mimo-v2.5-pro",
+        "mimo-v2.5",
+    }.issubset(tui_models)
+    assert model_info == {"model": "gpt-5.5", "profile": "committee"}
+    assert selection["host"] == "gpt-5.5"
+    assert [item["model"] for item in selection["selected"]] == [
+        "gpt-5.4",
+        "gpt-5.5",
+        "deepseek-v4-pro",
+        "glm-5.1",
+        "mimo-v2.5-pro",
+        "kimi-k2.6",
+        "MiniMax-M3",
+    ]
+    assert runtime["opencode_agent"] == "committee-host"
+    assert runtime["opencode_roster"] == "committee"
+    assert payload["default_agent"] == "committee-host"
+    assert payload["agent"]["committee-host"]["mode"] == "primary"
+    assert payload["agent"]["committee-host"]["permission"]["task"]["committee-gpt-5-5"] == "allow"
+    assert payload["agent"]["committee-deepseek-v4-pro"]["model"].endswith("/deepseek-v4-pro")
+    assert payload["agent"]["committee-glm-5-1"]["model"].endswith("/glm-5.1")
+    assert payload["agent"]["committee-mimo-v2-5-pro"]["model"].endswith("/mimo-v2.5-pro")
+    assert payload["agent"]["committee-kimi-k2-6"]["model"].endswith("/kimi-k2.6")
+    assert payload["agent"]["committee-minimax-m3"]["model"].lower().endswith("/minimax-m3")
+    assert "steps" not in payload["agent"]["committee-deepseek-v4-pro"]
+    host_prompt = payload["agent"]["committee-host"]["prompt"]
+    host_prompt_lower = host_prompt.lower()
+    assert "review-hub" not in host_prompt_lower
+    assert "gate mode" in host_prompt_lower
+    assert "headless inline pr/mr review pack contract" in host_prompt_lower
+    assert "verdict: approve|comment|request_changes" in host_prompt_lower
+    assert "do not open external project files" in host_prompt_lower
+    assert "estimate mode" in host_prompt_lower
+    assert "committee_policy with decision_mode, playbook, artifact_mode" in host_prompt_lower
+    assert "mms-mission" in host_prompt_lower
+    assert "mms-target" in host_prompt_lower
+    assert "mms-mode" in host_prompt_lower
+    assert "mms-source" in host_prompt_lower
+    assert "manual dispatch" in host_prompt_lower
+    assert "reviewed code target" in host_prompt_lower
+    assert "declared decision_mode such as gate or review" in host_prompt_lower
+    assert "not committee-gate" in host_prompt_lower
+    assert "unchanged mms-mission block in each member brief" in host_prompt_lower
+    assert "repeat mms-mission plus mms-target at the very end" in host_prompt_lower
+    assert "mms-reply" in host_prompt_lower
+    assert "report back to the human with the mms-mission id/hash" in host_prompt_lower
+    assert "permission_profile" in host_prompt_lower
+    assert "decision modes are advisory, gate, estimate, review, and execution_packet" in host_prompt_lower
+    assert "playbooks are domain checklists, not decision modes" in host_prompt_lower
+    assert "use general for unspecialized tasks" in host_prompt_lower
+    assert "declared decision_mode output contract" in host_prompt_lower
+    assert "git_ci_security" in host_prompt_lower
+    assert "do not invent a hidden git mode" in host_prompt_lower
+    assert "artifact modes are chat_only, artifact_advisory, formal_vote_files" in host_prompt_lower
+    assert "permission profiles are readonly, artifact_write, checker_run" in host_prompt_lower
+    assert "member edits are denied in the generated default permissions" in host_prompt_lower
+    assert "explicit scoped escalation" in host_prompt_lower
+    assert "keep this separate from debate" in host_prompt_lower
+    assert "blind rounds, crossfire, stance-shift tracking" in host_prompt_lower
+    assert "median" in host_prompt_lower
+    assert "verify them directly" in host_prompt_lower
+    assert "deterministic evidence that model votes must not override" in host_prompt_lower
+    assert "at least 2-4 members" in host_prompt_lower
+    assert "agENTS.md".lower() in host_prompt_lower
+    assert "claude.md" in host_prompt_lower
+    assert "governance/readme.md" in host_prompt_lower
+    assert "local project rules" in host_prompt_lower
+    assert "override generic committee defaults" in host_prompt_lower
+    assert "durable formal artifacts" in host_prompt_lower
+    assert "votes/<model>.vote.md" in host_prompt
+    assert "must not write or update votes/<model>.vote.md" in host_prompt
+    assert "must not update decision.md or ratification markers" in host_prompt
+    assert "must not promote advisory/chat ballots into formal quorum votes" in host_prompt
+    assert "advisory review evidence only" in host_prompt
+    assert "formal durable ballots" in host_prompt_lower
+    assert "assign each member its own vote-file path" in host_prompt_lower
+    assert "never ratify, merge, or mark final approval" in host_prompt_lower
+    assert "host/adapter write votes" not in host_prompt
+    host_pro_prompt = payload["agent"]["committee-host-pro"]["prompt"].lower()
+    authority_order = "human > deterministic facts > member verdicts and tally > host"
+    # Primary and fallback committee hosts must carry the identical full contract.
+    for prompt_text in (host_prompt_lower, host_pro_prompt):
+        assert "host authority contract" in prompt_text
+        assert "you are not the decision authority" in prompt_text
+        assert authority_order in prompt_text
+        assert "headless inline pr/mr review pack contract" in prompt_text
+        assert "never answer in a member's place" in prompt_text
+        assert "never invent a member's missing" in prompt_text
+        assert "aggregate losslessly" in prompt_text
+        assert "the user does not need to restate" in prompt_text
+    assert "re-read and obey target project local" in host_pro_prompt
+    assert "preserve the same host boundary" in host_pro_prompt
+    assert "committee_policy fields" in host_pro_prompt
+    assert "mms-mission" in host_pro_prompt
+    assert "mms-target" in host_pro_prompt
+    assert "mms-mode" in host_pro_prompt
+    assert "mms-source" in host_pro_prompt
+    assert "every member brief" in host_pro_prompt
+    assert "mms-target, and mms-reply at the bottom" in host_pro_prompt
+    assert "mms-target at the very end" in host_pro_prompt
+    assert "advisory, gate, estimate, review, and execution_packet" in host_pro_prompt
+    assert "decision_mode, playbook, artifact_mode, permission_profile" in host_pro_prompt
+    assert "separation from debate semantics" in host_pro_prompt
+    assert "human review notes, copy-forward packet" in host_pro_prompt
+    assert "host recommendation at the bottom" in host_pro_prompt
+    assert "do not promote advisory/chat ballots into formal quorum votes" in host_pro_prompt
+    assert "simplified chinese section titles" in host_pro_prompt
+    assert "do not wrap the copy-forward packet in a fenced code block" in host_pro_prompt
+    assert "normal markdown" in host_pro_prompt
+    assert "追踪块 / trace" in host_pro_prompt
+    assert "人需要看的 / human notes" in host_pro_prompt
+    assert "结论 / decision" in host_pro_prompt
+    assert "主要问题 / findings" in host_pro_prompt
+    assert "事实核验 / direct verification" in host_pro_prompt
+    assert "委员票 / member ballots" in host_pro_prompt
+    assert "风险 / risks" in host_pro_prompt
+    assert "下一步 / next steps" in host_pro_prompt
+    assert "可直接复制转发 / copy-forward packet" in host_pro_prompt
+    assert "host 建议 / host recommendation" in host_pro_prompt
+    assert "追踪页脚 / trace footer" in host_pro_prompt
+    assert "slim, clean, and self-contained" in host_pro_prompt
+    assert "action must be one concise next-step sentence" in host_pro_prompt
+    assert "verbose/full audit packet" in host_pro_prompt
+    assert "host private advice" in host_pro_prompt
+    assert "模型耗时 / model timing" in host_pro_prompt
+    assert "task-local subagent scorecard and model timing" in host_pro_prompt
+    assert "do not place 追踪块 / trace before 人需要看的 / human notes" in host_pro_prompt
+    assert (
+        host_pro_prompt.index("人需要看的 / human notes")
+        < host_pro_prompt.index("可直接复制转发 / copy-forward packet")
+        < host_pro_prompt.index("追踪块 / trace")
+        < host_pro_prompt.index("host 建议 / host recommendation")
+        < host_pro_prompt.index("追踪页脚 / trace footer")
+    )
+    assert "artifact-first dispatch" in host_prompt_lower
+    assert "full artifact" in host_prompt_lower
+    assert "task-local model timing" in host_prompt_lower
+    assert "calibrated per-member elapsed time" in host_prompt_lower
+    assert "service=session.processor" in host_prompt_lower
+    assert "exiting loop" in host_prompt_lower
+    assert "speed ratio" in host_prompt_lower
+    assert "same-batch same-tier" in host_prompt_lower
+    assert "never cross-compare across batches" in host_prompt_lower
+    assert "committee-timing.jsonl" in host_prompt_lower
+    assert "never write" in host_prompt_lower and "as not_captured" in host_prompt_lower
+    assert "not_captured" not in re.sub(r"never write .* as not_captured", "", host_prompt)
+    assert "final synthesis order" in host_prompt_lower
+    assert "simplified chinese section titles" in host_prompt_lower
+    assert "do not wrap the copy-forward packet in a fenced code block" in host_prompt_lower
+    assert "normal markdown" in host_prompt_lower
+    assert "人需要看的 / human notes" in host_prompt_lower
+    assert "do not flatten findings, risks, timing, and scores" in host_prompt_lower
+    assert "old readable block pacing" in host_prompt_lower
+    assert "every subsection heading stands alone on its own line" in host_prompt_lower
+    assert "blank line before the next block" in host_prompt_lower
+    assert "结论 / decision" in host_prompt_lower
+    assert "主要问题 / findings" in host_prompt_lower
+    assert "事实核验 / direct verification" in host_prompt_lower
+    assert "委员票 / member ballots" in host_prompt_lower
+    assert "风险 / risks" in host_prompt_lower
+    assert "模型耗时 / model timing" in host_prompt_lower
+    assert "下一步 / next steps" in host_prompt_lower
+    assert "show tally first" in host_prompt_lower
+    assert "compact table or aligned list" in host_prompt_lower
+    assert "可直接复制转发 / copy-forward packet" in host_prompt_lower
+    assert "start this packet with 追踪块 / trace" in host_prompt_lower
+    assert "slim, clean, and self-contained" in host_prompt_lower
+    assert "mms-source when known" in host_prompt_lower
+    assert "action must be one concise next-step sentence" in host_prompt_lower
+    assert "optional verdict when a decision or tally exists" in host_prompt_lower
+    assert "fixing, accepting, merging, rejecting, or deferring" in host_prompt_lower
+    assert "do not put committee_policy" in host_prompt_lower
+    assert "selected_members" in host_prompt_lower
+    assert "non_dispatched_members" in host_prompt_lower
+    assert "model timing" in host_prompt_lower
+    assert "long verification summaries" in host_prompt_lower
+    assert "long host recommendations" in host_prompt_lower
+    assert "verbose/full audit packet" in host_prompt_lower
+    assert "do not duplicate human notes" in host_prompt_lower
+    assert "host 建议 / host recommendation" in host_prompt_lower
+    assert "追踪页脚 / trace footer" in host_prompt_lower
+    assert "per-member score rationale" in host_prompt_lower
+    assert "long ballot prose" in host_prompt_lower
+    assert "mms-mission plus mms-target at the very end" in host_prompt_lower
+    assert (
+        host_prompt_lower.index("人需要看的 / human notes")
+        < host_prompt_lower.index("可直接复制转发 / copy-forward packet")
+        < host_prompt_lower.index("追踪块 / trace")
+        < host_prompt_lower.index("host 建议 / host recommendation")
+        < host_prompt_lower.index("追踪页脚 / trace footer")
+    )
+    assert "same current dispatch" in host_prompt_lower
+    assert "previous/next pointers" in host_prompt_lower
+    assert "subagent scorecard" in host_prompt_lower
+    assert "task-local subagent scorecard and model timing" in host_pro_prompt
+    assert "1-5 scale" in host_prompt_lower
+    assert "usefulness" in host_prompt_lower
+    assert "evidence quality" in host_prompt_lower
+    assert "relevance" in host_prompt_lower
+    assert "independence" in host_prompt_lower
+    assert "not dispatched" in host_prompt_lower
+    assert "global model ranking" in host_prompt_lower
+    assert "output is truncated" in host_prompt_lower
+    assert "not to repeat already received content" in host_prompt_lower
+    member_prompt = payload["agent"]["committee-deepseek-v4-pro"]["prompt"].lower()
+    assert payload["agent"]["committee-deepseek-v4-pro"]["permission"]["edit"] == "deny"
+    assert payload["agent"]["committee-deepseek-v4-pro"]["permission"]["task"] == "deny"
+    assert "obey target project local instructions" in member_prompt
+    assert "copy it unchanged" in member_prompt
+    assert "headless inline pr/mr review pack contract" in member_prompt
+    assert "durable formal artifact" in member_prompt
+    assert "follow the host-declared committee_policy" in member_prompt
+    assert "decision_mode" in member_prompt
+    assert "artifact_mode" in member_prompt
+    assert "permission_profile" in member_prompt
+    assert "playbooks such as git_ci_security as evidence checklists" in member_prompt
+    assert "not as hidden decision modes" in member_prompt
+    assert "no blind rounds, crossfire" in member_prompt
+    assert "do not edit files under the default readonly profile" in member_prompt
+    assert "request the explicit scoped permission/profile escalation" in member_prompt
+    assert "write only your own assigned vote file" in member_prompt
+    assert "do not update decision.md" in member_prompt
+    assert "any other member's vote file" in member_prompt
+    assert "for review mode, return findings ordered by severity" in member_prompt
+    assert "missing validation" in member_prompt
+    assert "residual risk" in member_prompt
+    assert "recommended fix or escalation" in member_prompt
+    assert "for execution packet mode" in member_prompt
+    assert "long structured outputs" in member_prompt
+    assert "full content through chat" in member_prompt
+    assert "compact summary" in member_prompt
+    assert "do not repeat prior content" in member_prompt
+    mimo_route = next(route for route in runtime["opencode_routes"] if route["id"] == "custom_committee-mimo-v2-5-pro")
+    assert mimo_route["provider_id"] == "mimo-direct-anthropic"
+
+
+def test_committee_tier_alias_normalization():
+    import mms_opencode_profiles as profiles
+
+    assert profiles.normalize_opencode_profile_id("committee") == profiles.OPENCODE_COMMITTEE_PROFILE_ID
+    for tier in profiles.OPENCODE_COMMITTEE_TIERS:
+        assert profiles.normalize_opencode_profile_id(f"committee-{tier}") == profiles.OPENCODE_COMMITTEE_PROFILE_ID
+        assert profiles.normalize_opencode_profile_id(f"committee_{tier}") == profiles.OPENCODE_COMMITTEE_PROFILE_ID
+    # Unknown tier suffix does not collapse to the committee profile.
+    assert profiles.normalize_opencode_profile_id("committee-turbo") == ""
+
+
+def test_committee_tier_extraction():
+    import mms_opencode_profiles as profiles
+
+    assert profiles.extract_opencode_committee_tier("committee-fast") == "fast"
+    assert profiles.extract_opencode_committee_tier("committee_fast") == "fast"
+    assert profiles.extract_opencode_committee_tier("committee-heavy") == "heavy"
+    assert profiles.extract_opencode_committee_tier("committee") == ""
+    assert profiles.extract_opencode_committee_tier("") == ""
+    assert profiles.extract_opencode_committee_tier("committee-turbo") == ""
+    assert profiles.extract_opencode_committee_tier("review") == ""
+
+
+def test_committee_preset_reader_default_and_override():
+    import mms_opencode_profiles as profiles
+
+    bare = profiles.opencode_committee_preset_config({}, "")
+    assert bare["host_primary"] == "gpt-5.4"
+    assert bare["members"] == ["gpt-5.4"]
+    assert bare["channel"] == "direct"
+
+    standard = profiles.opencode_committee_preset_config({}, "standard")
+    assert standard["host_primary"] == "gpt-5.4"
+    assert standard["host_primary_channel"] == "uscrsopenai"
+    assert standard["host_fallback"] == "gpt-5.5"
+    assert standard["host_fallback_channel"] == "uscrsopenai"
+    assert standard["members"] == ["gpt-5.5", "glm-5.2", "deepseek-v4-pro", "MiniMax-M3", "mimo-v2.5-pro", "qwen3.7-max"]
+    assert standard["member_channels"]["gpt-5.5"] == "uscrsopenai"
+    assert standard["member_channels"]["glm-5.2"] == "direct-zai"
+
+    cfg = {"opencode": {"committee": {"presets": {
+        "standard": {"host_primary": "gpt-5.5", "members": ["deepseek-v4-pro"], "channel": "newapi-cn"},
+        "fast": {
+            "host_primary": "gpt-5.5",
+            "host_primary_channel": "newapi-cn",
+            "members": ["gpt-5.5", "deepseek-v4-pro"],
+            "channel": "direct",
+            "member_channels": {"gpt-5.5": "newapi-cn", "deepseek-v4-pro": "direct"},
+        },
+    }}}}
+    bare = profiles.opencode_committee_preset_config(cfg, "")
+    assert bare["host_primary"] == "gpt-5.4"
+    assert bare["members"] == ["gpt-5.4"]
+    assert bare["channel"] == "direct"
+
+    edited_standard = profiles.opencode_committee_preset_config(cfg, "standard")
+    assert edited_standard["host_primary"] == "gpt-5.5"
+    assert edited_standard["members"] == ["deepseek-v4-pro"]
+    assert edited_standard["channel"] == "newapi-cn"
+    assert edited_standard["host_primary_channel"] == "newapi-cn"
+    assert edited_standard["member_channels"] == {"deepseek-v4-pro": "newapi-cn"}
+
+    fast = profiles.opencode_committee_preset_config(cfg, "fast")
+    assert fast["host_primary"] == "gpt-5.5"
+    assert fast["host_primary_channel"] == "newapi-cn"
+    assert fast["members"] == ["gpt-5.5", "deepseek-v4-pro"]
+    assert fast["member_channels"] == {"gpt-5.5": "newapi-cn", "deepseek-v4-pro": "direct"}
+
+    # Unknown tier falls back to bare legacy defaults, never editable standard.
+    unknown = profiles.opencode_committee_preset_config(cfg, "turbo")
+    assert unknown["host_primary"] == "gpt-5.4"
+    assert unknown["members"] == ["gpt-5.4"]
+
+
+def test_committee_preset_bare_preserves_current_default():
+    import mms_opencode_profiles as profiles
+
+    # Named standard can evolve, but bare `--profile committee` keeps the legacy
+    # single-host default.
+    bare = profiles.opencode_committee_preset_config({}, "")
+    standard_default = profiles.OPENCODE_COMMITTEE_TIER_DEFAULTS["standard"]
+    assert bare["host_primary"] == "gpt-5.4"
+    assert bare["members"] == ["gpt-5.4"]
+    assert bare["channel"] == "direct"
+    assert standard_default["host_primary"] == "gpt-5.4"
+    assert list(standard_default["members"]) != bare["members"]
+    assert standard_default["host_primary_channel"] == "uscrsopenai"
+
+
+def test_committee_heavy_default_is_stronger_than_standard():
+    import mms_opencode_profiles as profiles
+
+    standard = profiles.opencode_committee_preset_config({}, "standard")
+    heavy = profiles.opencode_committee_preset_config({}, "heavy")
+
+    assert heavy["host_primary"] == "gpt-5.5"
+    assert heavy["host_fallback"] == "gpt-5.4"
+    assert heavy["members"][:2] == ["claude-opus-4-6-thinking", "gemini-3-flash-agent(high)"]
+    assert "gpt-5.4" in heavy["members"]
+    assert heavy["member_channels"]["claude-opus-4-6-thinking"] == "newapi-personal-tokyo"
+    assert heavy["members"] != standard["members"]
+
+
+def test_committee_fast_requires_two_members():
+    import mms_opencode_profiles as profiles
+
+    assert profiles.validate_opencode_committee_tier_preset("fast", {"host_primary": "gpt-5.4", "members": ["gpt-5.4", "gpt-5.3-codex"]}) == []
+    errors = profiles.validate_opencode_committee_tier_preset("fast", {"host_primary": "gpt-5.4", "members": ["gpt-5.4"]})
+    assert errors and any("at least two member" in e for e in errors)
+    # Non-fast tiers allow a single member.
+    assert profiles.validate_opencode_committee_tier_preset("light", {"host_primary": "gpt-5.4", "members": ["gpt-5.4"]}) == []
+
+
+def test_committee_prepare_uses_tier_preset_when_no_explicit(monkeypatch):
+    import mms_core
+
+    cfg = {"providers": [], "account": {"defaults": {}}, "accounts": [],
+           "opencode": {"committee": {"presets": {
+               "heavy": {"host_primary": "gpt-5.5", "members": ["gpt-5.5", "gpt-5.4", "deepseek-v4-pro"]},
+           }}}}
+    provider = _runtime(
+        id="mixed",
+        name="Mixed",
+        supported_clis=["codex", "opencode"],
+        protocols=["anthropic_messages", "openai_chat_completions"],
+    )
+    models = ["gpt-5.5", "gpt-5.4", "deepseek-v4-pro"]
+    monkeypatch.setattr(mms_core, "_provider_candidates", lambda *_args: [(provider, models)])
+
+    # No explicit host/models and empty saved config → tier preset drives defaults.
+    committee_cfg, selection = mms_core._prepare_opencode_committee_profile_config(
+        cfg, provider, models, interactive=False, committee_tier="heavy",
+    )
+    assert selection["host"] == "gpt-5.5"
+    assert [item["model"] for item in selection["selected"]] == ["gpt-5.5", "gpt-5.4", "deepseek-v4-pro"]
+
+
+def test_committee_prepare_wires_tier_channel_and_host_fallback(monkeypatch):
+    import mms_core
+
+    direct = _runtime(
+        id="direct",
+        name="Direct",
+        supported_clis=["opencode"],
+        protocols=["anthropic_messages", "openai_chat_completions"],
+    )
+    newapi = _runtime(
+        id="newapi-cn",
+        name="NewAPI CN",
+        openai_base_url="https://newapi.example/v1",
+        supported_clis=["opencode"],
+        protocols=["anthropic_messages", "openai_chat_completions"],
+    )
+    cfg = {
+        "providers": [direct, newapi],
+        "account": {"defaults": {}},
+        "accounts": [],
+        "opencode": {"committee": {"presets": {
+            "heavy": {
+                "host_primary": "gpt-5.5",
+                "host_fallback": "gpt-5.4",
+                "members": ["gpt-5.5", "deepseek-v4-pro"],
+                "channel": "newapi-cn",
+            },
+        }}},
+    }
+    models = ["gpt-5.5", "gpt-5.4", "deepseek-v4-pro"]
+    monkeypatch.setattr(mms_core, "_provider_candidates", lambda *_args: [(direct, models), (newapi, models)])
+
+    committee_cfg, selection = mms_core._prepare_opencode_committee_profile_config(
+        cfg, direct, models, interactive=False, committee_tier="heavy",
+    )
+    roster = committee_cfg["opencode"]["agent_roster"]
+
+    assert selection["host"] == "gpt-5.5"
+    assert selection["host_fallback"] == "gpt-5.4"
+    assert selection["channel"] == "newapi-cn"
+    assert {item["provider_id"] for item in selection["selected"]} == {"newapi-cn"}
+    assert roster["committee-host"]["provider_id"] == "newapi-cn"
+    assert roster["committee-host-pro"]["model"] == "gpt-5.4"
+    assert roster["committee-host-pro"]["provider_id"] == "newapi-cn"
+    assert roster["committee-deepseek-v4-pro"]["provider_id"] == "newapi-cn"
+
+    model_info, runtime = mms_core._resolve_opencode_profile_runtime(committee_cfg, direct, models, "committee")
+    routes = {route["id"]: route for route in runtime["opencode_routes"]}
+
+    assert model_info == {"model": "gpt-5.5", "profile": "committee"}
+    assert routes["builder_primary"]["provider_id"] == "newapi-cn"
+    assert routes["builder_fallback"]["provider_id"] == "newapi-cn"
+    assert routes["custom_committee-deepseek-v4-pro"]["provider_id"] == "newapi-cn"
+
+
+def test_committee_prepare_bare_tier_stays_legacy_default(monkeypatch):
+    import mms_core
+
+    cfg = {
+        "providers": [],
+        "account": {"defaults": {}},
+        "accounts": [],
+        "opencode": {"committee": {"presets": {
+            "standard": {"host_primary": "gpt-5.5", "members": ["deepseek-v4-pro"]},
+        }}},
+    }
+    provider = _runtime(
+        id="mixed",
+        name="Mixed",
+        supported_clis=["codex", "opencode"],
+        protocols=["anthropic_messages", "openai_chat_completions"],
+    )
+    models = ["gpt-5.4", "gpt-5.5", "deepseek-v4-pro"]
+    monkeypatch.setattr(mms_core, "_provider_candidates", lambda *_args: [(provider, models)])
+
+    # Bare committee (no tier) keeps the legacy default and does not inherit the
+    # editable standard preset.
+    committee_cfg, selection = mms_core._prepare_opencode_committee_profile_config(
+        cfg, provider, models, interactive=False,
+    )
+    assert selection["host"] == "gpt-5.4"
+    assert [item["model"] for item in selection["selected"]] == ["gpt-5.4"]
+
+    # Explicit `committee-standard` is the editable standard preset; bare
+    # `committee` remains the legacy host path above.
+    _standard_cfg, standard_selection = mms_core._prepare_opencode_committee_profile_config(
+        cfg, provider, models, interactive=False, committee_tier="standard",
+    )
+    assert standard_selection["host"] == "gpt-5.5"
+    assert [item["model"] for item in standard_selection["selected"]] == ["deepseek-v4-pro"]
+    assert standard_selection["source"] == "tier"
+
+
+def test_committee_prepare_builtin_standard_routes_per_model_channel(monkeypatch):
+    import mms_core
+
+    protocols = ["anthropic_messages", "openai_chat_completions"]
+    providers = [
+        _runtime(id="uscrsopenai", name="US CRS OpenAI", protocols=protocols),
+        _runtime(id="direct-zai", name="ZAI Direct", protocols=protocols),
+        _runtime(id="direct-deepseek", name="DeepSeek Direct", protocols=protocols),
+        _runtime(id="direct-minimax", name="MiniMax Direct", protocols=protocols),
+        _runtime(id="mimo-direct", name="Mimo Direct", protocols=protocols),
+        _runtime(id="direct-qwen", name="Qwen Direct", protocols=protocols),
+    ]
+    models_by_provider = {
+        "uscrsopenai": ["gpt-5.4", "gpt-5.5"],
+        "direct-zai": ["glm-5.2"],
+        "direct-deepseek": ["deepseek-v4-pro"],
+        "direct-minimax": ["MiniMax-M3"],
+        "mimo-direct": ["mimo-v2.5-pro"],
+        "direct-qwen": ["qwen3.7-max"],
+    }
+    cfg = {
+        "providers": providers,
+        "account": {"defaults": {}},
+        "accounts": [],
+        "opencode": {},
+    }
+    monkeypatch.setattr(
+        mms_core,
+        "_provider_candidates",
+        lambda *_args: [(provider, models_by_provider[provider["id"]]) for provider in providers],
+    )
+
+    committee_cfg, selection = mms_core._prepare_opencode_committee_profile_config(
+        cfg, providers[0], models_by_provider["uscrsopenai"], interactive=False, committee_tier="standard",
+    )
+    selected_by_model = {item["model"]: item["provider_id"] for item in selection["selected"]}
+
+    assert selection["host"] == "gpt-5.4"
+    assert selection["host_fallback"] == "gpt-5.5"
+    assert selection["host_channel"] == "uscrsopenai"
+    assert selected_by_model == {
+        "gpt-5.5": "uscrsopenai",
+        "glm-5.2": "direct-zai",
+        "deepseek-v4-pro": "direct-deepseek",
+        "MiniMax-M3": "direct-minimax",
+        "mimo-v2.5-pro": "mimo-direct",
+        "qwen3.7-max": "direct-qwen",
+    }
+
+    model_info, runtime = mms_core._resolve_opencode_profile_runtime(committee_cfg, providers[0], models_by_provider["uscrsopenai"], "committee")
+    routes = {route["id"]: route for route in runtime["opencode_routes"]}
+
+    assert model_info == {"model": "gpt-5.4", "profile": "committee"}
+    assert routes["builder_primary"]["provider_id"] == "uscrsopenai"
+    assert routes["builder_fallback"]["provider_id"] == "uscrsopenai"
+    assert routes["custom_committee-glm-5-2"]["provider_id"] == "direct-zai"
+    assert routes["custom_committee-deepseek-v4-pro"]["provider_id"] == "direct-deepseek"
+    assert routes["custom_committee-minimax-m3"]["provider_id"] == "direct-minimax"
+    assert routes["custom_committee-mimo-v2-5-pro"]["provider_id"] == "mimo-direct"
+    assert routes["custom_committee-qwen3-7-max"]["provider_id"] == "direct-qwen"
+
+
+def test_debate_contract_declares_assigned_role_and_stance_authenticity():
+    import pathlib
+
+    contract = (
+        pathlib.Path(__file__).resolve().parents[1]
+        / "docs"
+        / "DEBATE_STATE_RESULT_CONTRACT_v1.md"
+    ).read_text(encoding="utf-8")
+    assert "### `assigned_role`" in contract
+    assert "### `stance_authenticity`" in contract
+    round1 = contract.split("## `round-3-crossfire.json`")[0]
+    crossfire = contract.split("## `round-3-crossfire.json`")[1].split(
+        "## `round-4-revision.json`"
+    )[0]
+    revision = contract.split("## `round-4-revision.json`")[1].split(
+        "## `resolution.json`"
+    )[0]
+    # Each round that the prompt requires the field in must also declare it.
+    assert "assigned_role" in round1
+    assert "assigned_role" in crossfire
+    assert "stance_authenticity" in revision
+    # The stale lens field must not linger in the seed example.
+    assert '"lens"' not in round1
+    # steelman must have a behavioral definition, not just sit in the enum;
+    # the all-free default boundary must be documented.
+    assert "steelman`: build the strongest" in contract
+    assert "all-`free`" in contract
+
+    # The host rubric that the host actually consults must enforce the
+    # stance_authenticity honesty filter, not only the contract/prompt text.
+    # This guards the slice-3 gap where convergence was declared on raw camps.
+    rubric = (
+        pathlib.Path(__file__).resolve().parents[1]
+        / "docs"
+        / "DEBATE_HOST_RESOLUTION_RUBRIC_v1.md"
+    ).read_text(encoding="utf-8")
+    converged = rubric.split("### Emit `converged`")[1].split("### Emit `leaning`")[0]
+    leaning = rubric.split("### Emit `leaning`")[1].split("## Priority order")[0]
+    assert "stance_authenticity=honest" in converged
+    assert "stance_authenticity=honest" in leaning
+    # assigned stances must be explicitly excluded from convergence in the rubric.
+    assert "stance_authenticity" in rubric.split("## Step 3")[0]
+
+
+def test_core_opencode_debate_profile_builds_structured_debate_roster(monkeypatch):
+    import mms_core
+    import mms_launchers
+
+    cfg = {
+        "providers": [],
+        "account": {"defaults": {}},
+        "accounts": [],
+        "opencode": {"debate": {"models": ["gpt-5.4", "gpt-5.5", "deepseek", "glm", "mimo", "kimi"]}},
+    }
+    provider = _runtime(
+        id="mixed",
+        name="Mixed",
+        supported_clis=["codex", "opencode"],
+        protocols=["anthropic_messages", "openai_chat_completions"],
+    )
+    mimo_direct = _runtime(
+        id="mimo-direct-anthropic",
+        name="MiMo Direct",
+        supported_clis=["opencode"],
+        protocols=["anthropic_messages"],
+        openai_base_url="",
+        anthropic_base_url="https://token-plan-cn.xiaomimimo.com/anthropic",
+    )
+    models = [
+        "gpt-5.5",
+        "gpt-5.4",
+        "kimi-k2.6",
+        "glm-5.1",
+        "deepseek-v4-pro",
+    ]
+    monkeypatch.setattr(
+        mms_core,
+        "_provider_candidates",
+        lambda *_args: [(provider, models), (mimo_direct, ["mimo-v2.5-pro", "mimo-v2.5"])],
+    )
+
+    debate_cfg, selection = mms_core._prepare_opencode_debate_profile_config(
+        cfg,
+        provider,
+        models,
+        host_model="gpt-5.5",
+        interactive=False,
+    )
+    model_info, runtime = mms_core._resolve_opencode_profile_runtime(
+        debate_cfg,
+        provider,
+        models,
+        "debate",
+    )
+    payload = mms_launchers._build_opencode_config_payload(runtime, model_info["model"])
+
+    assert model_info == {"model": "gpt-5.5", "profile": "debate"}
+    assert selection["host"] == "gpt-5.5"
+    assert [item["model"] for item in selection["selected"]] == [
+        "gpt-5.4",
+        "gpt-5.5",
+        "deepseek-v4-pro",
+        "glm-5.1",
+        "mimo-v2.5-pro",
+        "kimi-k2.6",
+    ]
+    assert runtime["opencode_agent"] == "debate-host"
+    assert runtime["opencode_roster"] == "debate"
+    assert payload["default_agent"] == "debate-host"
+    assert payload["agent"]["debate-host"]["mode"] == "primary"
+    assert payload["agent"]["debate-host"]["permission"]["task"]["debate-gpt-5-5"] == "allow"
+    assert payload["agent"]["debate-deepseek-v4-pro"]["model"].endswith("/deepseek-v4-pro")
+    assert payload["agent"]["debate-glm-5-1"]["model"].endswith("/glm-5.1")
+    assert payload["agent"]["debate-mimo-v2-5-pro"]["model"].endswith("/mimo-v2.5-pro")
+    assert payload["agent"]["debate-kimi-k2-6"]["model"].endswith("/kimi-k2.6")
+
+    host_prompt = payload["agent"]["debate-host"]["prompt"]
+    host_prompt_lower = host_prompt.lower()
+    assert "not committee" in host_prompt_lower
+    assert "not legacy discuss" in host_prompt_lower
+    assert ".ai/debate/<thread-id>/" in host_prompt
+    assert "mms-mission" in host_prompt_lower
+    assert "mms-target" in host_prompt_lower
+    assert "mms-mode" in host_prompt_lower
+    assert "mms-source" in host_prompt_lower
+    assert "manual dispatch" in host_prompt_lower
+    assert "reviewed code target" in host_prompt_lower
+    assert "mission object" in host_prompt_lower
+    assert "unchanged mms-mission block" in host_prompt_lower
+    assert "visible mms-mission trace in the provenance/trace area" in host_prompt_lower
+    assert "repeat mms-mission plus mms-target at the bottom" in host_prompt_lower
+    assert "blind seed -> crossfire -> revision" in host_prompt_lower
+    assert "round-1-seed.json" in host_prompt
+    assert "round-2-clusters.json" in host_prompt
+    assert "round-3-crossfire.json" in host_prompt
+    assert "round-4-revision.json" in host_prompt
+    assert "resolution.json" in host_prompt
+    assert "skipped revision" in host_prompt_lower
+    assert "no helper command or validator program in v1" in host_prompt_lower
+    assert "self-check" in host_prompt_lower
+    assert "insufficient_evidence > split_human_required > converged > leaning" in host_prompt
+    assert "host_authored" in host_prompt
+    assert "fake consensus" in host_prompt_lower
+    assert "committee vote files" in host_prompt_lower
+    assert "review-hub request roots" in host_prompt_lower
+    host_pro_prompt = payload["agent"]["debate-host-pro"]["prompt"].lower()
+    authority_order = (
+        "human > deterministic facts > rubric applied to member outputs > host"
+    )
+    # Primary and fallback hosts must carry the identical full authority contract
+    # and the same debate trigger contract.
+    for prompt_text in (host_prompt_lower, host_pro_prompt):
+        assert "host authority contract" in prompt_text
+        assert "you are not the decision authority" in prompt_text
+        assert authority_order in prompt_text
+        assert "never answer in a member's place" in prompt_text
+        assert "never invent a member's missing position" in prompt_text
+        assert "aggregate losslessly" in prompt_text
+        assert "the user does not need to" in prompt_text
+        assert "debate trigger contract" in prompt_text
+        assert "fork or proposition" in prompt_text
+        assert "use the committee profile" in prompt_text
+        assert "assigned_role" in prompt_text
+        assert "stance_authenticity" in prompt_text
+    # Members must honor assigned_role and keep their final stance honest.
+    member_prompts = [
+        cfg["prompt"].lower()
+        for name, cfg in payload["agent"].items()
+        if name.startswith("debate-")
+        and name not in {"debate-host", "debate-host-pro"}
+    ]
+    assert member_prompts
+    for member_prompt in member_prompts:
+        # assigned_role must appear in both the seed and crossfire field lists,
+        # not just once in passing.
+        assert member_prompt.count("assigned_role") >= 2
+        assert "stance_authenticity" in member_prompt
+    # Primary host must require assigned_role in both seed and crossfire rounds.
+    assert host_prompt_lower.count("assigned_role") >= 2
+    # Fallback host-pro must be symmetric: assigned_role in more than one place
+    # (assign + echo in fields) and the same convergence exclusion, not a single
+    # passing mention.
+    assert host_pro_prompt.count("assigned_role") >= 2
+    assert "stance_authenticity=assigned" in host_pro_prompt
+    # Both hosts must exclude assigned stances from genuine convergence.
+    assert "stance_authenticity=assigned" in host_prompt_lower
+    assert "mms-mission" in host_pro_prompt
+    assert "mms-target" in host_pro_prompt
+    assert "mms-mode" in host_pro_prompt
+    assert "mms-source" in host_pro_prompt
+    assert "every debate member packet" in host_pro_prompt
+    assert "visible mms-mission trace in the final reply" in host_pro_prompt
+
+    member_prompt = payload["agent"]["debate-deepseek-v4-pro"]["prompt"].lower()
+    assert "independent debate member" in member_prompt
+    assert "not a committee voter" in member_prompt
+    assert "mms-mission block" in member_prompt
+    assert "copy it unchanged" in member_prompt
+    assert "blind seed" in member_prompt
+    assert "stance_shift" in member_prompt
+    assert "deterministic facts" in member_prompt
+    assert payload["agent"]["debate-deepseek-v4-pro"]["permission"]["edit"] == "deny"
+    assert payload["agent"]["debate-deepseek-v4-pro"]["permission"]["task"] == "deny"
+    mimo_route = next(route for route in runtime["opencode_routes"] if route["id"] == "custom_debate-mimo-v2-5-pro")
+    assert mimo_route["provider_id"] == "mimo-direct-anthropic"
+
+
+def test_core_opencode_review_host_models_are_configurable(monkeypatch):
+    import mms_core
+    import mms_launchers
+
+    cfg = {
+        "providers": [],
+        "account": {"defaults": {}},
+        "accounts": [],
+        "opencode": {
+            "review": {
+                "host": {
+                    "primary_models": ["qwen3.7-max", "glm-5-turbo"],
+                    "fallback_models": ["kimi-k2.6", "gpt-5.4"],
+                }
+            }
+        },
+    }
+    provider = _runtime(
+        id="mixed",
+        name="Mixed",
+        supported_clis=["codex", "opencode"],
+        protocols=["anthropic_messages", "openai_chat_completions"],
+    )
+    models = ["gpt-5.4", "qwen3.7-max", "kimi-k2.6", "glm-5-turbo", "glm-5.1"]
+    monkeypatch.setattr(mms_core, "_provider_candidates", lambda *_args: [(provider, models)])
+
+    model_info, runtime = mms_core._resolve_opencode_profile_runtime(
+        cfg,
+        provider,
+        models,
+        "review",
+    )
+    payload = mms_launchers._build_opencode_config_payload(runtime, model_info["model"])
+    builder_route = next(route for route in runtime["opencode_routes"] if route["id"] == "builder_primary")
+    fallback_route = next(route for route in runtime["opencode_routes"] if route["id"] == "builder_fallback")
+
+    assert model_info == {"model": "qwen3.7-max", "profile": "review_hub"}
+    assert builder_route["model"] == "qwen3.7-max"
+    assert fallback_route["model"] == "kimi-k2.6"
+    assert payload["model"].endswith("/qwen3.7-max")
+    assert payload["agent"]["review-hub-host-stable"]["model"].endswith("/kimi-k2.6")
+
+
+def test_core_preview_bundle_restores_opencode_review_host(monkeypatch):
+    import mms_core
+    import mms_registry
+
+    bundle = {
+        "manifest": {"bundle_revision": "bundle-test"},
+        "payloads": {
+            "profile": {
+                "provider": {"default": "demo"},
+                "profiles": {
+                    "demo": {
+                        "name": "Demo",
+                        "role": "primary",
+                        "priority": 100,
+                        "protocols": ["openai_chat_completions"],
+                        "supported_clis": ["opencode"],
+                        "models_endpoint": "manual",
+                    }
+                },
+                "runtime_config": {
+                    "opencode": {
+                        "review": {
+                            "host": {
+                                "primary_models": ["mimo-v2.5"],
+                                "fallback_models": ["glm-5-turbo"],
+                            }
+                        }
+                    }
+                },
+            },
+            "router": {
+                "routes": {
+                    "mimo-v2.5": {
+                        "primary": {
+                            "provider_id": "demo",
+                            "model": "mimo-v2.5",
+                            "openai_base_url": "https://demo.example/v1",
+                            "api_key": "plain-test-key",
+                        },
+                        "fallbacks": [],
+                    }
+                }
+            },
+        },
+    }
+    monkeypatch.setattr(mms_core, "_preview_root_mode", lambda: True)
+    monkeypatch.setattr(mms_registry, "load_latest_approved_bundle", lambda **_kwargs: bundle)
+    monkeypatch.setattr(
+        mms_core,
+        "load_config",
+        lambda persist=False: {
+            "opencode": {
+                "review": {
+                    "models": ["kimi-k2.7-code"],
+                    "host": {
+                        "primary_models": ["local-should-not-replace-bundle"],
+                    },
+                }
+            }
+        },
+    )
+
+    cfg = mms_core._merge_preview_local_launch_preferences(
+        mms_core._load_preview_runtime_config_from_latest_bundle()
+    )
+
+    assert cfg["opencode"]["review"]["host"] == {
+        "primary_models": ["mimo-v2.5"],
+        "fallback_models": ["glm-5-turbo"],
+    }
+    assert cfg["opencode"]["review"]["models"] == ["kimi-k2.7-code"]
 
 
 def test_core_opencode_lite_pro_uses_agent_model_overrides(monkeypatch):
@@ -1368,8 +5065,16 @@ def test_core_tui_opencode_profile_action_resolves_before_model_channel(monkeypa
     monkeypatch.setattr(mms_tui, "confirm_tui", fake_confirm_tui)
 
     assert mms_core._handle_tui_launcher_selection(cfg, provider, False, ["opencode"]) is True
-    assert [item["id"] for item in captured["profile_options"]["opencode"]] == ["agent", "omo", "raw"]
-    assert [item["label"] for item in captured["profile_options"]["opencode"]] == ["Agent", "OMO", "Raw"]
+    assert [item["id"] for item in captured["profile_options"]["opencode"]] == ["agent", "review", "committee", "debate", "omo", "raw"]
+    assert [item["profile_id"] for item in captured["profile_options"]["opencode"]] == [
+        "lite_pro_orchestrated",
+        "review_hub",
+        "committee",
+        "debate",
+        "heavy_omo",
+        "raw",
+    ]
+    assert [item["label"] for item in captured["profile_options"]["opencode"]] == ["Agent", "Review", "Committee", "Debate", "OMO", "Raw"]
     assert captured["cli"] == "opencode"
     assert captured["model_info"] == {"model": "gpt-5.4", "profile": "lite_pro_orchestrated"}
     assert captured["runtime"]["id"] == "dual-protocol"
@@ -1490,6 +5195,60 @@ def test_main_uses_configured_opencode_default_profile_for_direct_target(monkeyp
     assert captured["profile_models"] == ["gpt-5.5"]
     assert captured["cli"] == "opencode"
     assert captured["runtime"]["opencode_profile"] == "lite_pro_orchestrated"
+
+
+def test_main_opencode_preset_applies_agent_profile_when_preset_has_no_profile(monkeypatch):
+    import mms_core
+
+    cfg = {
+        "providers": [],
+        "account": {"defaults": {}},
+        "accounts": [],
+        "presets": {
+            "fast-opencode": {
+                "cli": "opencode",
+                "provider": "default-provider",
+                "model": "deepseek-chat",
+            }
+        },
+    }
+    provider = _runtime(id="default-provider", name="Default Provider")
+    captured = {}
+
+    monkeypatch.setattr(mms_core.sys, "argv", ["mms", "--preset", "fast-opencode"])
+    monkeypatch.setattr(mms_core, "_extract_global_lang", lambda argv: (argv, None))
+    monkeypatch.setattr(mms_core, "load_config", lambda: cfg)
+    monkeypatch.setattr(mms_core, "_load_command_config", lambda: cfg)
+    monkeypatch.setattr(mms_core, "set_language", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_core, "_resolve_ui_language", lambda *_args, **_kwargs: "zh")
+    monkeypatch.setattr(mms_core, "_ensure_startup_snapshot_guard", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_core, "_refresh_routes_export_for_hive", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(mms_core, "_update_notice", lambda: None)
+    monkeypatch.setattr(mms_core, "_start_async_update_check", lambda: None)
+    monkeypatch.setattr(mms_core, "apply_local_overrides", lambda current_cfg: current_cfg)
+    monkeypatch.setattr(mms_core, "ensure_provider_credentials", lambda _cfg, provider_id=None: provider)
+    monkeypatch.setattr(mms_core, "ensure_models_ready", lambda _cfg, _provider: (provider, ["deepseek-chat"]))
+    monkeypatch.setattr(mms_core, "_warm_probe_cache_async", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_core, "_resolve_visible_clis", lambda *_args, **_kwargs: ["opencode"])
+    monkeypatch.setattr(
+        mms_core,
+        "_select_opencode_profile",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("preset launch must not prompt for profile")),
+    )
+    monkeypatch.setattr(
+        mms_core,
+        "_launch_with_tracking",
+        lambda cli, model_info, runtime, once=False: captured.update(
+            {"cli": cli, "model_info": model_info, "runtime": runtime, "once": once}
+        ),
+    )
+
+    mms_core.main()
+
+    assert captured["cli"] == "opencode"
+    assert captured["model_info"] == {"model": "deepseek-chat"}
+    assert captured["runtime"]["opencode_profile"] == "lite_pro_orchestrated"
+    assert captured["runtime"]["opencode_agent"] == "mobius-builder-pro"
 
 
 def test_existing_openai_provider_lists_show_opencode_without_config_migration(monkeypatch):
@@ -1756,6 +5515,21 @@ def test_opencode_smoke_classifies_thinking_block_roundtrip_as_blocked():
     assert smoke_opencode_profile._health_status(error_class, 0.5) == "blocked"
 
 
+def test_opencode_profile_summaries_state_debate_vs_committee_split():
+    import mms_opencode_profiles as profiles
+
+    by_id = {opt.get("id"): opt for opt in profiles.OPENCODE_PROFILE_OPTIONS}
+    debate_summary = by_id["debate"]["summary"]
+    committee_summary = by_id["committee"]["summary"]
+    # Debate selection surface states the fork/proposition trigger split.
+    assert "fork" in debate_summary
+    assert "命题" in debate_summary
+    assert "Committee" in debate_summary
+    # Committee side is symmetric: judges an artifact, points forks at Debate.
+    assert "artifact" in committee_summary
+    assert "Debate" in committee_summary
+
+
 def test_core_opencode_profile_menu_includes_lite_pro_health_summary(monkeypatch):
     import mms_core
 
@@ -1801,7 +5575,10 @@ def test_core_opencode_profile_menu_includes_lite_pro_health_summary(monkeypatch
     options = mms_core._opencode_profile_menu_options()
     agent = next(option for option in options if option["id"] == "agent")
 
-    assert [option["id"] for option in options] == ["agent", "omo", "raw"]
+    assert [option["id"] for option in options] == ["agent", "review", "committee", "debate", "omo", "raw"]
+    assert next(option for option in options if option["id"] == "review")["profile_id"] == "review_hub"
+    assert next(option for option in options if option["id"] == "committee")["profile_id"] == "committee"
+    assert next(option for option in options if option["id"] == "debate")["profile_id"] == "debate"
     assert agent["label"] == "Agent"
     assert agent["badge"] == "默认"
     assert "health: 1/18 healthy" in agent["summary"]

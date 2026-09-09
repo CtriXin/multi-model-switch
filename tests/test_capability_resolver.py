@@ -6,6 +6,8 @@ from pathlib import Path
 import pytest
 
 from mms_capability_resolver import CapabilityBundleError
+from mms_capability_resolver import clear_capability_resolver_caches
+from mms_capability_resolver import load_default_approved_facts
 from mms_capability_resolver import resolve_model_capabilities
 
 
@@ -115,6 +117,83 @@ def test_approved_registry_export_facts_win_over_provider_profile() -> None:
         assert caps["sources"][field] == "approved_facts"
 
 
+def test_model_policy_context_wins_over_approved_facts() -> None:
+    caps = resolve_model_capabilities(
+        "mimo-v2.5",
+        approved_facts={"mimo-v2.5": {"context_window_tokens": 262_144}},
+        model_policy={
+            "models": {
+                "mimo-v2.5": {
+                    "capabilities": {
+                        "context_window_tokens": 1_000_000,
+                    }
+                }
+            }
+        },
+    )
+
+    assert caps["context_window_tokens"] == 1_000_000
+    assert caps["sources"]["context_window_tokens"] == "model_policy"
+
+
+def test_model_policy_one_m_and_thinking_aliases_drive_capabilities() -> None:
+    caps = resolve_model_capabilities(
+        "mimo-v2.5",
+        approved_facts={},
+        model_policy={
+            "models": {
+                "mimo-v2.5": {
+                    "capabilities": {
+                        "one_m_context": True,
+                        "thinking": True,
+                    }
+                }
+            }
+        },
+    )
+
+    assert caps["context_window_tokens"] == 1_000_000
+    assert caps["sources"]["context_window_tokens"] == "model_policy"
+    assert caps["supports_thinking"] is True
+    assert caps["sources"]["supports_thinking"] == "model_policy"
+
+
+def test_model_policy_vision_alias_drives_capability() -> None:
+    caps = resolve_model_capabilities(
+        "MiniMax-M3",
+        approved_facts={},
+        model_policy={
+            "models": {
+                "MiniMax-M3": {
+                    "capabilities": {
+                        "vision": True,
+                    }
+                }
+            }
+        },
+    )
+
+    assert caps["supports_vision"] is True
+    assert caps["sources"]["supports_vision"] == "model_policy"
+
+
+def test_approved_facts_vision_drives_capability() -> None:
+    caps = resolve_model_capabilities(
+        "MiniMax-M3",
+        approved_facts={
+            "models": [
+                {
+                    "alias": "MiniMax-M3",
+                    "supports_vision": True,
+                }
+            ]
+        },
+    )
+
+    assert caps["supports_vision"] is True
+    assert caps["sources"]["supports_vision"] == "approved_facts"
+
+
 def test_provider_profile_wins_over_conservative_fallback_and_preserves_mimo_alias(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
     import mms_provider_profiles
@@ -133,6 +212,24 @@ def test_provider_profile_wins_over_conservative_fallback_and_preserves_mimo_ali
     assert caps["sources"]["context_window_tokens"] == "provider_profile"
     assert caps["sources"]["max_output_tokens"] == "provider_profile"
     assert caps["sources"]["body_patch_aliases"] == "provider_profile"
+
+
+def test_provider_profile_marks_minimax_m3_as_one_m_context(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
+    import mms_provider_profiles
+
+    mms_provider_profiles.load_provider_profiles.cache_clear()
+    caps = resolve_model_capabilities(
+        "MiniMax-M3",
+        provider_id="minimax-direct",
+        base_url="https://api.minimax.io/v1",
+        approved_facts={},
+    )
+
+    assert caps["context_window_tokens"] == 1_000_000
+    assert caps["supports_thinking"] is True
+    assert caps["sources"]["context_window_tokens"] == "provider_profile"
+    assert caps["sources"]["supports_thinking"] == "provider_profile"
 
 
 def test_missing_or_corrupt_registry_facts_fall_back_safely(tmp_path) -> None:
@@ -219,17 +316,134 @@ def test_cache_sensitive_dual_protocol_routes_keep_anthropic_first() -> None:
 
 
 def test_selected_root_missing_latest_approved_capabilities_fails_closed(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
     monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
     with pytest.raises(CapabilityBundleError, match="latest-approved capabilities unavailable"):
         resolve_model_capabilities("missing-approved-model")
 
 
 def test_stable_legacy_root_missing_latest_approved_capabilities_falls_back(monkeypatch, tmp_path: Path) -> None:
+    clear_capability_resolver_caches()
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
     monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    monkeypatch.delenv("MMS_PREVIEW_MODE", raising=False)
+    monkeypatch.delenv("MMS_COMMAND_NAME", raising=False)
 
     caps = resolve_model_capabilities("legacy-unknown-model")
 
     assert caps["context_window_tokens"] == 8_192
     assert caps["sources"]["context_window_tokens"] == "conservative_fallback"
+
+
+def test_default_approved_capabilities_bundle_is_cached(monkeypatch, tmp_path: Path) -> None:
+    clear_capability_resolver_caches()
+    config_root = tmp_path / "mms-next"
+    manifest = config_root / "generated" / "model-registry.latest-approved.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text("{}", encoding="utf-8")
+    calls = []
+
+    def fake_resolve_mms_config_dir() -> str:
+        return str(config_root)
+
+    def fake_root_mode(_config_root: str) -> str:
+        return "preview"
+
+    def fake_load_latest_approved_bundle(*, include_secret: bool = False, config_dir: str = "", **_kwargs):
+        calls.append((include_secret, config_dir))
+        return {
+            "payloads": {
+                "capabilities": {
+                    "cached-model": {
+                        "context_window_tokens": 123_456,
+                    }
+                }
+            }
+        }
+
+    monkeypatch.setattr("mms_state_io.resolve_mms_config_dir", fake_resolve_mms_config_dir)
+    monkeypatch.setattr("mms_state_io.mms_config_root_mode", fake_root_mode)
+    monkeypatch.setattr("mms_registry.load_latest_approved_bundle", fake_load_latest_approved_bundle)
+
+    first = resolve_model_capabilities("cached-model")
+    second = resolve_model_capabilities("cached-model")
+    first["context_window_tokens"] = 1
+    third = resolve_model_capabilities("cached-model")
+
+    assert first["sources"]["context_window_tokens"] == "approved_facts"
+    assert second["context_window_tokens"] == 123_456
+    assert third["context_window_tokens"] == 123_456
+    assert calls == [(False, str(config_root))]
+    clear_capability_resolver_caches()
+
+
+def test_public_default_approved_capabilities_returns_copy(monkeypatch, tmp_path: Path) -> None:
+    clear_capability_resolver_caches()
+    config_root = tmp_path / "mms-next"
+    manifest = config_root / "generated" / "model-registry.latest-approved.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text("{}", encoding="utf-8")
+    calls = []
+
+    monkeypatch.setattr("mms_state_io.resolve_mms_config_dir", lambda: str(config_root))
+    monkeypatch.setattr("mms_state_io.mms_config_root_mode", lambda _config_root: "preview")
+
+    def fake_load_latest_approved_bundle(*, include_secret: bool = False, config_dir: str = "", **_kwargs):
+        calls.append((include_secret, config_dir))
+        return {"payloads": {"capabilities": {"cached-model": {"context_window_tokens": 123_456}}}}
+
+    monkeypatch.setattr("mms_registry.load_latest_approved_bundle", fake_load_latest_approved_bundle)
+
+    first = load_default_approved_facts()
+    first["cached-model"]["context_window_tokens"] = 1
+    second = load_default_approved_facts()
+
+    assert second["cached-model"]["context_window_tokens"] == 123_456
+    assert calls == [(False, str(config_root))]
+    clear_capability_resolver_caches()
+
+
+
+def test_provider_profile_resolution_ignores_runtime_provider_entries() -> None:
+    provider_profiles = {
+        "profiles": {
+            "openrouter": {
+                "name": "OpenRouter runtime provider",
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["codex", "opencode"],
+            },
+            "openrouter-mimo": {
+                "match": {
+                    "provider_id_contains": ["openrouter"],
+                    "base_url_contains": ["openrouter.ai"],
+                    "model_prefixes": ["mimo"],
+                    "require_model_prefix": True,
+                },
+                "context_windows": {"mimo-v2.5": 1_048_576},
+            },
+            "glm": {
+                "match": {
+                    "provider_id_contains": ["glm"],
+                    "base_url_contains": ["api.z.ai"],
+                    "model_prefixes": ["glm"],
+                },
+                "thinking": {"supported": True},
+                "context_windows": {"glm-5.2": 1_000_000},
+                "max_output_tokens": {"glm-5.2": 131_072},
+            },
+        }
+    }
+
+    caps = resolve_model_capabilities(
+        "z-ai/glm-5.2",
+        provider_id="openrouter",
+        base_url="https://openrouter.ai/api/v1",
+        approved_facts={},
+        provider_profiles=provider_profiles,
+    )
+
+    assert caps["context_window_tokens"] == 1_000_000
+    assert caps["max_output_tokens"] == 131_072
+    assert caps["supports_thinking"] is True
+    assert caps["sources"]["context_window_tokens"] == "provider_profile"

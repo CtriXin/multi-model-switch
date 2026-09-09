@@ -146,10 +146,14 @@ _COMPATIBILITY_PROFILE_SECTIONS = (
     "context_windows",
     "endpoints",
     "effort",
+    "input_modalities",
+    "max_output_tokens",
     "match",
     "model_aliases",
     "model_overrides",
+    "output_modalities",
     "parameter_aliases",
+    "supports_vision",
     "thinking",
 )
 
@@ -213,17 +217,25 @@ def _profile_match_score(profile_id: str, profile: dict[str, Any], *, provider_i
     provider_l = _lower(provider_id)
     base_l = _lower(base_url)
     model_l = _normalize_model(model_name)
+    model_prefixes = [_lower(item) for item in match.get("model_prefixes") or [] if _lower(item)]
+    model_matched = any(model_l.startswith(token) for token in model_prefixes)
+    require_model_prefix = bool(match.get("require_model_prefix") or match.get("provider_base_requires_model_prefix"))
+    allow_provider_base_match = not (require_model_prefix and model_prefixes and not model_matched)
+    provider_base_matched = False
 
     for item in match.get("provider_id_contains") or []:
         token = _lower(item)
-        if token and token in provider_l:
+        if allow_provider_base_match and token and token in provider_l:
+            provider_base_matched = True
             score = max(score, 70)
     for item in match.get("base_url_contains") or []:
         token = _lower(item)
-        if token and token in base_l:
+        if allow_provider_base_match and token and token in base_l:
+            provider_base_matched = True
             score = max(score, 90)
-    for item in match.get("model_prefixes") or []:
-        token = _lower(item)
+    if match.get("require_provider_or_base") and not provider_base_matched:
+        return 0
+    for token in model_prefixes:
         if token and model_l.startswith(token):
             score = max(score, 50)
     if profile_id and profile_id in {provider_l, model_l}:
@@ -317,6 +329,7 @@ def profile_thinking_capabilities(
     provider_id: str = "",
     base_url: str = "",
     profile_id: str = "",
+    protocol: str = "",
 ) -> dict[str, Any]:
     profile_id, profile = resolve_provider_profile(
         runtime=runtime,
@@ -324,6 +337,7 @@ def profile_thinking_capabilities(
         base_url=base_url,
         model_name=model_name,
         profile_id=profile_id,
+        protocol=protocol,
     )
     if not profile:
         return {"profile": "", "thinking_supported": False, "effort_supported": False}
@@ -332,6 +346,8 @@ def profile_thinking_capabilities(
     effort_allowed: set[str] = set()
     effort_map: dict[str, str] = {}
     effort_default = ""
+    effort_official_default = ""
+    effort_recommended_default = ""
     for config in effort.values():
         if not isinstance(config, dict) or not config.get("path"):
             continue
@@ -339,7 +355,11 @@ def profile_thinking_capabilities(
         if isinstance(config.get("map"), dict):
             effort_map.update({_lower(key): _lower(value) for key, value in config["map"].items() if _lower(key)})
         if not effort_default:
-            effort_default = _lower(config.get("default"))
+            effort_default = _lower(config.get("request_default") or config.get("recommended_default") or config.get("default"))
+        if not effort_official_default:
+            effort_official_default = _lower(config.get("official_default") or config.get("default"))
+        if not effort_recommended_default:
+            effort_recommended_default = _lower(config.get("recommended_default") or config.get("request_default") or config.get("default"))
     return {
         "profile": profile_id,
         "thinking_supported": bool(thinking.get("supported")),
@@ -347,6 +367,8 @@ def profile_thinking_capabilities(
         "effort_allowed": sorted(effort_allowed),
         "effort_map": effort_map,
         "effort_default": effort_default,
+        "effort_official_default": effort_official_default,
+        "effort_recommended_default": effort_recommended_default,
         "ui": thinking.get("ui") or "",
         "default_enabled": thinking.get("default_enabled"),
     }
@@ -442,15 +464,16 @@ def _apply_parameter_aliases(payload: dict[str, Any], profile: dict[str, Any], p
 
 
 def _normalize_effort(value: Any, config: dict[str, Any]) -> str:
-    raw = _lower(value or config.get("default") or "")
+    request_default = config.get("request_default") or config.get("recommended_default") or config.get("default")
+    raw = _lower(value or request_default or "")
     mapping = config.get("map") if isinstance(config.get("map"), dict) else {}
     if raw in mapping:
         raw = _lower(mapping[raw])
     allowed = [_lower(item) for item in (config.get("allowed") or []) if _lower(item)]
     if allowed and raw not in allowed:
-        default = _lower(config.get("default"))
+        default = _lower(request_default)
         return default if default in allowed else allowed[0]
-    return raw or _lower(config.get("default"))
+    return raw or _lower(request_default)
 
 
 def _normalize_budget(value: Any, config: dict[str, Any]) -> int | None:
@@ -463,6 +486,23 @@ def _normalize_budget(value: Any, config: dict[str, Any]) -> int | None:
         return int(raw)
     except (TypeError, ValueError):
         return None
+
+
+def _profile_forces_thinking_enabled(thinking: dict[str, Any]) -> bool:
+    mode = _lower(thinking.get("mode"))
+    if mode in {"always_on", "required", "force_on"}:
+        return True
+    return thinking.get("disable_supported") is False
+
+
+def _effective_thinking_enabled(thinking: dict[str, Any], requested: bool | None) -> bool | None:
+    effective = requested
+    if effective is None:
+        default_enabled = thinking.get("default_enabled")
+        effective = default_enabled if isinstance(default_enabled, bool) else None
+    if _profile_forces_thinking_enabled(thinking):
+        return True
+    return effective
 
 
 def _relay_model_profile_hint(*, provider_id: str, base_url: str, model_name: str) -> str:
@@ -502,28 +542,23 @@ def apply_profile_body_patches(
     if not profile:
         return ""
 
-    protocol_patches = (profile.get("body_patches") or {}).get(protocol)
+    effective_model = model_name or payload.get("model", "")
+    protocol_patches = _effective_section(profile, "body_patches", effective_model).get(protocol)
     if isinstance(protocol_patches, dict):
         if purpose and purpose != "default" and isinstance(protocol_patches.get(purpose), dict):
             _apply_patch_map(payload, protocol_patches[purpose])
         else:
-            thinking = _effective_section(profile, "thinking", model_name or payload.get("model", ""))
-            effective_enabled = thinking_enabled
-            if effective_enabled is None:
-                default_enabled = thinking.get("default_enabled")
-                effective_enabled = default_enabled if isinstance(default_enabled, bool) else None
+            thinking = _effective_section(profile, "thinking", effective_model)
+            effective_enabled = _effective_thinking_enabled(thinking, thinking_enabled)
             patch_key = "thinking_on" if effective_enabled is True else "thinking_off" if effective_enabled is False else ""
             if patch_key and isinstance(protocol_patches.get(patch_key), dict):
                 _apply_patch_map(payload, protocol_patches[patch_key])
 
-    effort_by_protocol = _effective_section(profile, "effort", model_name or payload.get("model", ""))
+    effort_by_protocol = _effective_section(profile, "effort", effective_model)
     effort_config = effort_by_protocol.get(protocol) if isinstance(effort_by_protocol.get(protocol), dict) else {}
     if effort_config.get("path"):
-        thinking = _effective_section(profile, "thinking", model_name or payload.get("model", ""))
-        effective_enabled = thinking_enabled
-        if effective_enabled is None:
-            default_enabled = thinking.get("default_enabled")
-            effective_enabled = default_enabled if isinstance(default_enabled, bool) else None
+        thinking = _effective_section(profile, "thinking", effective_model)
+        effective_enabled = _effective_thinking_enabled(thinking, thinking_enabled)
         if effective_enabled is False:
             _delete_path(payload, str(effort_config["path"]))
         else:
@@ -531,14 +566,11 @@ def apply_profile_body_patches(
             if effort_value:
                 _set_path(payload, str(effort_config["path"]), effort_value)
 
-    budget_by_protocol = _effective_section(profile, "budget", model_name or payload.get("model", ""))
+    budget_by_protocol = _effective_section(profile, "budget", effective_model)
     budget_config = budget_by_protocol.get(protocol) if isinstance(budget_by_protocol.get(protocol), dict) else {}
     if budget_config.get("path"):
-        thinking = _effective_section(profile, "thinking", model_name or payload.get("model", ""))
-        effective_enabled = thinking_enabled
-        if effective_enabled is None:
-            default_enabled = thinking.get("default_enabled")
-            effective_enabled = default_enabled if isinstance(default_enabled, bool) else None
+        thinking = _effective_section(profile, "thinking", effective_model)
+        effective_enabled = _effective_thinking_enabled(thinking, thinking_enabled)
         if effective_enabled is False:
             _delete_path(payload, str(budget_config["path"]))
         else:
@@ -618,6 +650,33 @@ def profile_context_window(
                 best_value = None
             best_len = len(key_l)
     return best_value
+
+
+def profile_opencode_policy(
+    model_name: str,
+    *,
+    runtime: dict[str, Any] | None = None,
+    provider_id: str = "",
+    base_url: str = "",
+    profile_id: str = "",
+    protocol: str = "",
+) -> dict[str, Any]:
+    """Return OpenCode-specific model policy from the resolved provider profile."""
+    resolved_id, profile = resolve_provider_profile(
+        runtime=runtime,
+        provider_id=provider_id,
+        base_url=base_url,
+        model_name=model_name,
+        profile_id=profile_id,
+        protocol=protocol,
+    )
+    if not resolved_id or not profile:
+        return {}
+    policy = _effective_section(profile, "opencode", model_name)
+    if not policy:
+        return {}
+    policy["profile"] = resolved_id
+    return policy
 
 
 def profile_model_alias(

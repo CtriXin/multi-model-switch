@@ -6,8 +6,11 @@ from dataclasses import dataclass
 
 from mms_opencode_profiles import (
     OPENCODE_AGENT_PROFILE_ID,
+    OPENCODE_COMMITTEE_PROFILE_ID,
+    OPENCODE_DEBATE_PROFILE_ID,
     OPENCODE_DEFAULT_MODEL_PREFERENCES,
-    opencode_lite_pro_specs,
+    OPENCODE_REVIEW_PROFILE_ID,
+    opencode_lite_pro_specs_for_config,
     opencode_profile_label,
     opencode_profile_selection,
 )
@@ -116,6 +119,10 @@ def find_opencode_model_route(
                     "api_key": provider.get("openai_api_key") or provider.get("api_key", ""),
                     "protocols": opencode_provider_protocols(provider),
                 }
+                if isinstance(provider.get("model_capabilities"), dict):
+                    route["model_capabilities"] = provider["model_capabilities"]
+                if provider.get("provider_profile"):
+                    route["provider_profile"] = provider.get("provider_profile")
                 health_row = deps.route_health_for_route(latest_health, profile_id, route_key, route)
                 if not deps.route_health_allows_route(health_row):
                     continue
@@ -161,7 +168,7 @@ def resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models, pro
         profile_id=profile_id,
     )
 
-    default_specs = list(opencode_lite_pro_specs(profile_id))
+    default_specs = list(opencode_lite_pro_specs_for_config(cfg, profile_id))
     default_agents = {str(spec.get("agent") or "").strip() for spec in default_specs}
     default_keys = {str(spec.get("key") or "").strip() for spec in default_specs}
 
@@ -217,7 +224,7 @@ def resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models, pro
     for _priority, agent_id, entry in sorted(custom_items, key=lambda item: (item[0], item[1])):
         route_key = opencode_custom_route_key(agent_id)
         model_names = (entry["model"],) if entry.get("model") else opencode_roster_preset_models(entry.get("preset"))
-        route_policy = ""
+        route_policy = str(entry.get("route_policy") or "").strip()
         if entry.get("preset") == "vision" and str(entry.get("model") or "").lower().startswith("mimo-"):
             route_policy = "mimo_direct"
         route = find_opencode_model_route(
@@ -284,7 +291,12 @@ def resolve_opencode_profile_runtime(cfg, default_provider, default_models, prof
         }
         runtime = deps.apply_profile(runtime, profile_id)
         return {"model": "global-omo"}, deps.apply_entrypoint(runtime, selection_entrypoint)
-    if profile_id == OPENCODE_AGENT_PROFILE_ID:
+    if profile_id in {
+        OPENCODE_AGENT_PROFILE_ID,
+        OPENCODE_REVIEW_PROFILE_ID,
+        OPENCODE_COMMITTEE_PROFILE_ID,
+        OPENCODE_DEBATE_PROFILE_ID,
+    }:
         model_info, runtime = resolve_opencode_lite_pro_runtime(
             cfg,
             default_provider,

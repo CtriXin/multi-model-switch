@@ -1,0 +1,81 @@
+{
+  "schema": "mms.model_capability_calibration.v1",
+  "generated_at": "2026-09-02T11:25:00.000Z",
+  "description": "Moonshot Kimi K3 / Kimi-for-Coding official capability calibration for the NewAPI Tokyo k3 + kimi routes. Facts captured 2026-09-02 from platform.kimi.ai and kimi.com/code/docs. The registry previously carried no k3 entry at all, so the Pi thinkingLevelMap relied on a hardcoded k3 branch instead of registry evidence.",
+  "mms_source": "manual-official-addition",
+  "models": [
+    {
+      "alias": "k3",
+      "routed_model_id": "k3",
+      "provider_id": "newapi-personal-tokyo",
+      "vendor": "Moonshot AI",
+      "canonical_model_id": "kimi-k3",
+      "alias_status": "official_exact",
+      "confidence": "official_exact",
+      "official_context_window_tokens": 1048576,
+      "official_max_output_tokens": null,
+      "supports_vision": null,
+      "supports_thinking": true,
+      "one_million_context": true,
+      "one_million_request_format": null,
+      "expected_protocol": "openai_chat_completions",
+      "current_mms_context_window_tokens": null,
+      "thinking_control": {
+        "control_type": "parameter",
+        "path": "reasoning_effort",
+        "allowed_values": ["low", "high", "max"],
+        "default": "max",
+        "disable_supported": false
+      },
+      "evidence": [
+        { "url": "https://platform.kimi.ai/docs/guide/use-reasoning-effort", "official": true },
+        { "url": "https://www.kimi.com/code/docs/", "official": true }
+      ],
+      "notes": "Top-level `reasoning_effort` on Chat Completions accepts low / high / max, default max. Reasoning is always-on (cannot be disabled) — effort only controls depth. Docs warn switching levels invalidates prefix-cache hits, so pick the level before a conversation starts. Reasoning tokens bill as output. 1M context is gated to Allegretto+ membership; k3-256k is the 256K variant. supports_vision intentionally null (not confirmed on pages captured today)."
+    },
+    {
+      "alias": "kimi-for-coding",
+      "routed_model_id": "kimi-for-coding",
+      "provider_id": "newapi-personal-tokyo",
+      "vendor": "Moonshot AI",
+      "canonical_model_id": "kimi-for-coding",
+      "alias_status": "official_exact",
+      "confidence": "official_exact",
+      "official_context_window_tokens": null,
+      "official_max_output_tokens": null,
+      "supports_vision": null,
+      "supports_thinking": null,
+      "one_million_context": null,
+      "one_million_request_format": null,
+      "expected_protocol": "openai_chat_completions",
+      "current_mms_context_window_tokens": null,
+      "thinking_control": null,
+      "evidence": [
+        { "url": "https://www.kimi.com/code/docs/", "official": true }
+      ],
+      "notes": "Listed as a Kimi Code model available to all membership tiers. The three-tier reasoning_effort contract is documented for k3 / k3-256k only — NOT claimed for kimi-for-coding. thinking_control left null rather than assumed."
+    },
+    {
+      "alias": "kimi-for-coding-highspeed",
+      "routed_model_id": "kimi-for-coding-highspeed",
+      "provider_id": "newapi-personal-tokyo",
+      "vendor": "Moonshot AI",
+      "canonical_model_id": "kimi-for-coding-highspeed",
+      "alias_status": "official_exact",
+      "confidence": "official_exact",
+      "official_context_window_tokens": null,
+      "official_max_output_tokens": null,
+      "supports_vision": null,
+      "supports_thinking": null,
+      "one_million_context": null,
+      "one_million_request_format": null,
+      "expected_protocol": "openai_chat_completions",
+      "current_mms_context_window_tokens": null,
+      "thinking_control": null,
+      "evidence": [
+        { "url": "https://www.kimi.com/code/docs/", "official": true }
+      ],
+      "notes": "Allegretto+ only per Kimi Code model list. No documented reasoning_effort contract — thinking_control left null rather than assumed. Matches the empirical probe: the Pi thinkingLevelMap carries no levels for this model."
+    }
+  ]
+}

@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from math import pow
 from mms_fake_upstream import status_payload as _fake_upstream_status_payload
 from mms_i18n import pick as _L, get_language as _get_language
+from mms_reasoning_effort import model_supports_max_reasoning_effort
 from mms_state_io import resolve_mms_config_dir
 
 # CJK locale 下 ambiguous-width 字符渲染为 2 列
@@ -359,6 +360,60 @@ def _sort_model_entries_for_tui(models, family_name="", now=None):
     return sorted(list(models or []), key=_key)
 
 
+def _normalize_profile_token(value):
+    return str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def _last_profile_id(last_item):
+    if not isinstance(last_item, dict):
+        return ""
+    for key in ("opencode_profile", "profile", "profile_id"):
+        value = str(last_item.get(key) or "").strip()
+        if value:
+            return value
+    for nested_key in ("model_info", "runtime_hint"):
+        nested = last_item.get(nested_key)
+        if not isinstance(nested, dict):
+            continue
+        for key in ("opencode_profile", "profile", "profile_id"):
+            value = str(nested.get(key) or "").strip()
+            if value:
+                return value
+    model_name = ""
+    model_info = last_item.get("model_info")
+    if isinstance(model_info, dict):
+        model_name = str(model_info.get("model") or "").strip()
+    model_name = model_name or str(last_item.get("model") or "").strip()
+    if _normalize_profile_token(model_name) == "global_omo":
+        return "heavy_omo"
+    return ""
+
+
+def _profile_option_matches(option, profile_id):
+    target = _normalize_profile_token(profile_id)
+    if not target or not isinstance(option, dict):
+        return False
+    candidates = (
+        option.get("id"),
+        option.get("profile_id"),
+        option.get("canonical_profile_id"),
+        option.get("opencode_profile"),
+        option.get("label"),
+    )
+    return target in {_normalize_profile_token(candidate) for candidate in candidates if candidate}
+
+
+def _sort_profile_options_for_tui(profile_options, last_used=None):
+    """Keep the last-used OpenCode profile at the top without mutating config order."""
+    options = list(profile_options or [])
+    profile_id = _last_profile_id(last_used)
+    if not profile_id:
+        return options
+    indexed = list(enumerate(options))
+    indexed.sort(key=lambda item: (0 if _profile_option_matches(item[1], profile_id) else 1, item[0]))
+    return [option for _index, option in indexed]
+
+
 def select_family_tui(
     families_by_cli,
     cli_names,
@@ -422,11 +477,14 @@ def select_family_tui(
             detail = families_detail.get(cli, {})
             provider_options_map = (provider_options_by_cli or {}).get(cli, {})
             provider_options_loader = (provider_options_loader_by_cli or {}).get(cli)
-            profile_options = list((profile_options_by_cli or {}).get(cli) or [])
             broker_available = False
 
             # 上次使用
             cli_last = (last_used or {}).get(cli)
+            profile_options = _sort_profile_options_for_tui(
+                (profile_options_by_cli or {}).get(cli) or [],
+                cli_last,
+            )
             use_profile_menu = bool(profile_options)
             has_last = cli_last and cli_last.get("model") and not search_query and not use_profile_menu
 
@@ -1537,6 +1595,342 @@ def select_submodel_tui(
             return _inner(stdscr)
         except curses.error:
             return None
+
+    try:
+        return curses.wrapper(_inner)
+    except curses.error:
+        return None
+
+
+def _build_review_model_rows(options, selected_models=None, *, selected_first=True):
+    """Normalize review/committee model rows without requiring curses."""
+    raw_options = [opt for opt in (options or []) if isinstance(opt, dict) and opt.get("model")]
+    selected = set()
+    selected_order = {}
+    selected_provider = {}
+    selected_provider_name = {}
+    for item in selected_models or []:
+        if isinstance(item, dict):
+            model = str(item.get("model") or "").strip()
+            provider_id = str(item.get("provider_id") or "").strip()
+            provider_name = str(item.get("provider_name") or "").strip()
+        else:
+            model = str(item or "").strip()
+            provider_id = ""
+            provider_name = ""
+        if not model:
+            continue
+        key = model.lower()
+        selected.add(key)
+        selected_order.setdefault(key, len(selected_order))
+        if provider_id:
+            selected_provider[key] = provider_id
+        if provider_name:
+            selected_provider_name[key] = provider_name
+
+    grouped = []
+    by_model = {}
+
+    def _add_provider(row, opt):
+        providers = opt.get("providers") if isinstance(opt.get("providers"), list) else [opt]
+        seen = {str(item.get("provider_id") or item.get("provider_name") or "").strip() for item in row["providers"]}
+        for provider in providers:
+            if not isinstance(provider, dict):
+                continue
+            provider_id = str(provider.get("provider_id") or "").strip()
+            provider_name = str(provider.get("provider_name") or provider_id or "").strip()
+            provider_key = provider_id or provider_name
+            if not provider_key or provider_key in seen:
+                continue
+            seen.add(provider_key)
+            row["providers"].append({
+                "provider_id": provider_id,
+                "provider_name": provider_name,
+                "priority": int(provider.get("priority", 100) or 100) if str(provider.get("priority", "")).strip() else 100,
+                "role_weight": int(provider.get("role_weight", 1) or 1) if str(provider.get("role_weight", "")).strip() else 1,
+                "role": str(provider.get("role") or "auto"),
+            })
+
+    for opt in raw_options:
+        model = str(opt.get("model") or "").strip()
+        if not model:
+            continue
+        key = model.lower()
+        row = by_model.get(key)
+        if row is None:
+            row = {
+                "model": model,
+                "family": str(opt.get("family") or "").strip(),
+                "providers": [],
+                "_index": len(grouped),
+            }
+            by_model[key] = row
+            grouped.append(row)
+        elif not row.get("family") and opt.get("family"):
+            row["family"] = str(opt.get("family") or "").strip()
+        _add_provider(row, opt)
+
+    for row in grouped:
+        row["providers"].sort(
+            key=lambda provider: (
+                -int(provider.get("priority", 100) or 100),
+                int(provider.get("role_weight", 1) or 1),
+                str(provider.get("provider_name") or provider.get("provider_id") or ""),
+            )
+        )
+
+    visible_keys = {str(row.get("model") or "").strip().lower() for row in grouped}
+    selected = {key for key in selected if key in visible_keys}
+
+    provider_idx = {}
+    for row in grouped:
+        key = row["model"].lower()
+        wanted = selected_provider.get(key, "")
+        wanted_name = selected_provider_name.get(key, "")
+        idx = 0
+        if wanted or wanted_name:
+            for i, opt in enumerate(row["providers"]):
+                if wanted and str(opt.get("provider_id") or "") == wanted:
+                    idx = i
+                    break
+                if wanted_name and str(opt.get("provider_name") or "") == wanted_name:
+                    idx = i
+                    break
+        provider_idx[key] = idx
+
+    if selected_first and selected:
+        grouped.sort(
+            key=lambda row: (
+                0 if str(row.get("model") or "").strip().lower() in selected else 1,
+                selected_order.get(str(row.get("model") or "").strip().lower(), 10**9),
+                int(row.get("_index", 0) or 0),
+            )
+        )
+
+    return grouped, selected, provider_idx
+
+
+def select_review_models_tui(options, selected_models=None, title=None, return_provider=False):
+    """Review/committee multi-select with per-model channel cycling."""
+    grouped, selected, provider_idx = _build_review_model_rows(options, selected_models)
+    if not grouped:
+        return None
+
+    skipped_saved = []
+    seen_skipped = set()
+    for item in selected_models or []:
+        if isinstance(item, dict):
+            model = str(item.get("model") or "").strip()
+        else:
+            model = str(item or "").strip()
+        key = model.lower()
+        if key and key not in selected and key not in seen_skipped:
+            seen_skipped.add(key)
+            skipped_saved.append(model)
+
+    def _option_key(opt):
+        return str(opt.get("model") or "").strip().lower()
+
+    def _active_provider(row):
+        providers = row.get("providers") or []
+        if not providers:
+            return {"provider_id": "", "provider_name": ""}
+        key = _option_key(row)
+        idx = max(0, min(provider_idx.get(key, 0), len(providers) - 1))
+        provider_idx[key] = idx
+        return providers[idx]
+
+    def _selected_rows_in_option_order():
+        rows = []
+        for row in grouped:
+            key = _option_key(row)
+            if key not in selected:
+                continue
+            if return_provider:
+                active = _active_provider(row)
+                rows.append({
+                    "model": str(row.get("model") or "").strip(),
+                    "family": str(row.get("family") or "").strip(),
+                    "provider_id": str(active.get("provider_id") or "").strip(),
+                    "provider_name": str(active.get("provider_name") or "").strip(),
+                })
+            else:
+                rows.append(str(row.get("model") or "").strip())
+        return [row for row in rows if row]
+
+    def _row_matches(row, query):
+        if not query:
+            return True
+        haystack = [str(row.get("model") or ""), str(row.get("family") or "")]
+        for provider in row.get("providers") or []:
+            haystack.append(str(provider.get("provider_name") or ""))
+            haystack.append(str(provider.get("provider_id") or ""))
+        return query in " ".join(haystack).lower()
+
+    def _inner(stdscr):
+        curses.curs_set(0)
+        curses.use_default_colors()
+        curses.init_pair(1, curses.COLOR_CYAN, -1)
+        curses.init_pair(2, curses.COLOR_WHITE, -1)
+        curses.init_pair(4, curses.COLOR_YELLOW, -1)
+        curses.init_pair(5, curses.COLOR_GREEN, -1)
+
+        idx = 0
+        scroll = 0
+        search = ""
+        status_text = (
+            "已跳过隐藏/不可用: " + ", ".join(skipped_saved[:3]) + ("..." if len(skipped_saved) > 3 else "")
+            if skipped_saved
+            else ""
+        )
+
+        while True:
+            stdscr.erase()
+            max_y, max_w = stdscr.getmaxyx()
+            query = search.lower().strip()
+            filtered = [row for row in grouped if _row_matches(row, query)] if query else list(grouped)
+            if not filtered:
+                filtered = list(grouped)
+            idx = max(0, min(idx, len(filtered) - 1))
+
+            total_w = min(96, max_w - 4)
+            left_w = max(32, min(46, total_w - 42))
+            visible = max(1, min(len(filtered), max_y - 9))
+            ph = visible + 7 + (1 if search else 0) + (1 if status_text else 0)
+            px = max(0, (max_w - total_w) // 2)
+            py = max(1, (max_y - ph) // 2)
+            ll = px + 2
+            sep = px + left_w
+            rl = sep + 2
+            rr = px + total_w - 2
+
+            row_y = py
+            _safe_addstr(stdscr, row_y, px, "-" * total_w, curses.color_pair(1))
+            row_y += 1
+            header = title or _L("Review 模型多选", "Review Model Multi-select")
+            _safe_addstr(stdscr, row_y, ll, header, curses.color_pair(1) | curses.A_BOLD)
+            count_text = f"{len(selected)} selected"
+            _safe_addstr(stdscr, row_y, rr - len(count_text), count_text, curses.color_pair(5) | curses.A_BOLD)
+            row_y += 1
+            _safe_addstr(stdscr, row_y, px, "-" * total_w, curses.A_DIM)
+            row_y += 1
+            if search:
+                _safe_addstr(stdscr, row_y, ll, f"/ {search}_", curses.color_pair(4) | curses.A_BOLD)
+                row_y += 1
+
+            _safe_addstr(stdscr, row_y, ll + 1, _L("模型", "Model"), curses.color_pair(1) | curses.A_BOLD)
+            _safe_addstr(stdscr, row_y, rl, _L("通道", "Channel"), curses.color_pair(4) | curses.A_BOLD)
+            row_y += 1
+            _safe_addstr(stdscr, row_y, px, "-" * left_w + "+" + "-" * (total_w - left_w - 1), curses.A_DIM)
+            row_y += 1
+
+            if idx < scroll:
+                scroll = idx
+            elif idx >= scroll + visible:
+                scroll = idx - visible + 1
+
+            content_y = row_y
+            for i in range(scroll, min(scroll + visible, len(filtered))):
+                y = content_y + i - scroll
+                opt = filtered[i]
+                model = str(opt.get("model") or "").strip()
+                family = str(opt.get("family") or "").strip()
+                key = _option_key(opt)
+                providers = opt.get("providers") or []
+                active = _active_provider(opt)
+                provider_name = str(active.get("provider_name") or active.get("provider_id") or "-").strip()
+                pidx = provider_idx.get(key, 0)
+                channel_text = provider_name
+                if len(providers) > 1:
+                    channel_text = f"<{pidx + 1}/{len(providers)}> {provider_name}"
+                is_selected = key in selected
+                is_cursor = i == idx
+                mark = "[x]" if is_selected else "[ ]"
+                left = f"{mark} {model}"
+                if family:
+                    left = f"{left}  {family}"
+                attr = curses.color_pair(1) | curses.A_REVERSE if is_cursor else curses.color_pair(2)
+                if is_selected and not is_cursor:
+                    attr = curses.color_pair(5) | curses.A_BOLD
+                _safe_addstr(stdscr, y, sep, "|", curses.A_DIM)
+                if is_cursor:
+                    _safe_addstr(stdscr, y, ll, " " * max(1, left_w - 3), attr)
+                _safe_addstr(stdscr, y, ll, left, attr, max_w=max(10, left_w - 3))
+                channel_attr = curses.color_pair(4) | curses.A_BOLD if is_cursor else curses.A_DIM
+                if is_selected and not is_cursor:
+                    channel_attr = curses.color_pair(5)
+                _safe_addstr(stdscr, y, rl, channel_text, channel_attr, max_w=max(10, rr - rl))
+
+            bot_y = content_y + visible
+            _safe_addstr(stdscr, bot_y, px, "-" * total_w, curses.A_DIM)
+            bot_y += 1
+            if status_text:
+                _safe_addstr(stdscr, bot_y, ll, status_text, curses.color_pair(4) | curses.A_DIM, max_w=total_w - 4)
+                bot_y += 1
+            if search:
+                _safe_addstr(stdscr, bot_y, ll, _L("Esc 清除", "Esc Clear"), curses.color_pair(4) | curses.A_DIM)
+                _safe_addstr(stdscr, bot_y, ll + 11, _L("BS 删字", "BS Delete"), curses.A_DIM)
+                _safe_addstr(stdscr, bot_y, ll + 20, _L("Space 勾选", "Space Toggle"), curses.color_pair(5) | curses.A_DIM)
+            else:
+                footer = "↑↓ 移动  ←/→ 切通道  Space 勾选  Enter 启动并记住  A 全选  C 清空  输入搜索  Esc 返回"
+                _safe_addstr(stdscr, bot_y, ll, footer, curses.A_DIM, max_w=total_w - 4)
+            bot_y += 1
+            _safe_addstr(stdscr, bot_y, px, "-" * total_w, curses.color_pair(1))
+
+            stdscr.refresh()
+            key = stdscr.getch()
+            status_text = ""
+
+            if key == curses.KEY_UP:
+                idx = (idx - 1) % len(filtered)
+            elif key == curses.KEY_DOWN:
+                idx = (idx + 1) % len(filtered)
+            elif key in (curses.KEY_LEFT, curses.KEY_RIGHT) and not search:
+                if filtered:
+                    current = filtered[idx]
+                    providers = current.get("providers") or []
+                    if len(providers) > 1:
+                        key_name = _option_key(current)
+                        delta = -1 if key == curses.KEY_LEFT else 1
+                        provider_idx[key_name] = (provider_idx.get(key_name, 0) + delta) % len(providers)
+            elif key == ord(" "):
+                if filtered:
+                    key_name = _option_key(filtered[idx])
+                    if key_name in selected:
+                        selected.remove(key_name)
+                    else:
+                        selected.add(key_name)
+            elif key in (10, 13, curses.KEY_ENTER):
+                if not selected and filtered:
+                    selected.add(_option_key(filtered[idx]))
+                chosen = _selected_rows_in_option_order()
+                if chosen:
+                    return chosen
+                status_text = _L("至少选择一个模型", "Select at least one model")
+            elif key in (ord("a"), ord("A")) and not search:
+                for opt in filtered:
+                    selected.add(_option_key(opt))
+            elif key in (ord("c"), ord("C")) and not search:
+                selected.clear()
+            elif key == 27:
+                if search:
+                    search = ""
+                    idx = 0
+                    scroll = 0
+                else:
+                    return None
+            elif key in (ord("q"), ord("Q")) and not search:
+                return None
+            elif key in (curses.KEY_BACKSPACE, 127, 8):
+                if search:
+                    search = search[:-1]
+                    idx = 0
+                    scroll = 0
+            elif 32 <= key <= 126:
+                if key != ord(" "):
+                    search += chr(key)
+                    idx = 0
+                    scroll = 0
 
     try:
         return curses.wrapper(_inner)
@@ -3292,9 +3686,10 @@ def confirm_tui(
 
     返回 (action, bypass, claude_1m_enabled, caveman_enabled, agent_pack, thinking_enabled, reasoning_effort, disabled_session_surfaces, nsr_enabled, caveman_level)。
     action: "" = 启动, "b" = 返回, "q" = 取消
-    bypass: bool, codex/claude/opencode/agy 有效；OpenCode 会启用 permission allow / run bypass
-    claude_1m_enabled: bool，仅 Claude Opus/Sonnet 有效，True 时本次启动开启 1M
-    caveman_enabled: bool，仅 claude/codex/opencode/agy 且 Caveman 可用时有效，True 时本次会话开启 Caveman
+        bypass: bool, codex/claude/opencode/agy 有效；OpenCode 会启用 permission allow
+    claude_1m_enabled: bool 或 None，仅 Claude Opus/Sonnet 有效，True 时本次启动开启 1M；
+        None 表示本次未展示 1M 开关（非 Claude 模型），调用方不应覆盖既有 claude_1m_mode
+        caveman_enabled: bool，仅 claude/codex/opencode/agy 且 Caveman 可用时有效，True 时本次会话开启 Caveman
     caveman_level: "light" / "standard" / "full"，仅 Caveman 开启时有效
     nsr_enabled: bool，仅 claude/codex 且 NSR hook 可用时有效，True 时本次会话开启 NSR hooks
     agent_pack: "none" / "ecc" / "omc"，仅 Claude 国产模型能力包有效；三选一互斥
@@ -3613,6 +4008,10 @@ def confirm_tui(
             return _L("OMC · orchestration runtime / team / verify loop", "OMC · orchestration runtime / team / verify loop")
         return _L("关闭", "Off")
 
+    def _initial_claude_1m_default(rt):
+        raw = str((rt or {}).get("claude_1m_mode", "auto")).strip().lower()
+        return raw in {"1", "true", "yes", "on", "enable", "enabled"}
+
     def _initial_disabled_surfaces():
         payload = (runtime or {}).get("disabled_session_surfaces") if isinstance(runtime, dict) else {}
         payload = payload if isinstance(payload, dict) else {}
@@ -3651,7 +4050,7 @@ def confirm_tui(
         curses.init_pair(6, curses.COLOR_MAGENTA, -1)
 
         bypass_mode = initial_bypass_mode
-        claude_1m_mode = False
+        claude_1m_mode = bool(has_claude_1m and _initial_claude_1m_default(runtime))
         caveman_level = initial_caveman_level
         nsr_mode = bool(has_nsr and nsr_enabled_default)
         agent_pack = default_pack
@@ -3937,7 +4336,7 @@ def confirm_tui(
                 return (
                     "",
                     bypass_mode,
-                    claude_1m_mode,
+                    claude_1m_mode if has_claude_1m else None,
                     _caveman_enabled(),
                     agent_pack,
                     thinking_mode,
@@ -3947,9 +4346,9 @@ def confirm_tui(
                     _normalize_caveman_level(caveman_level),
                 )
             elif key in (ord('b'), ord('B')):
-                return ("b", False, False, False, "none", True, effort_default, {}, False)
+                return ("b", False, None, False, "none", True, effort_default, {}, False)
             elif key in (ord('q'), ord('Q'), 27):
-                return ("q", False, False, False, "none", True, effort_default, {}, False)
+                return ("q", False, None, False, "none", True, effort_default, {}, False)
             elif key == 9 and has_bypass:
                 bypass_mode = not bypass_mode
             elif key in (curses.KEY_LEFT, ord('h'), ord('H')) and len(panels) > 1:
@@ -4012,6 +4411,14 @@ _EFFORT_OPTIONS = [
     ("high",   "High   — 深度思考，慢但更准"),
     ("xhigh",  "XHigh  — 更深推理，最慢但更稳"),
 ]
+_MAX_EFFORT_OPTION = ("max", "Max    — 模型支持时的最高推理")
+
+
+def _reasoning_effort_options_for_model(model_info=None):
+    options = list(_EFFORT_OPTIONS)
+    if model_supports_max_reasoning_effort(model_info):
+        options.append(_MAX_EFFORT_OPTION)
+    return options
 
 
 def _confirm_model_tokens(model_info):
@@ -4058,6 +4465,40 @@ def _confirm_explicit_thinking_default(runtime):
     if value in {"1", "true", "yes", "on", "enable", "enabled"}:
         return True
     return None
+
+
+def _confirm_policy_capability_flags(tokens):
+    flags = {"thinking": [], "reasoning": []}
+    try:
+        from mms_capability_resolver import load_default_model_policy
+
+        policy = load_default_model_policy()
+    except Exception:
+        return flags
+    models = policy.get("models") if isinstance(policy, dict) else {}
+    if not isinstance(models, dict):
+        return flags
+
+    def norm(value):
+        text = str(value or "").strip().lower()
+        return text.rsplit("/", 1)[-1]
+
+    wanted = {norm(token) for token in tokens if norm(token)}
+    for key, entry in models.items():
+        if norm(key) not in wanted or not isinstance(entry, dict):
+            continue
+        caps = entry.get("capabilities") if isinstance(entry.get("capabilities"), dict) else {}
+        if isinstance(caps.get("thinking"), bool):
+            flags["thinking"].append(bool(caps["thinking"]))
+        elif isinstance(caps.get("supports_thinking"), bool):
+            flags["thinking"].append(bool(caps["supports_thinking"]))
+        if isinstance(caps.get("reasoning"), bool):
+            flags["reasoning"].append(bool(caps["reasoning"]))
+        elif isinstance(caps.get("reasoning_effort"), bool):
+            flags["reasoning"].append(bool(caps["reasoning_effort"]))
+        elif str(caps.get("reasoning_effort") or "").strip():
+            flags["reasoning"].append(True)
+    return flags
 
 
 def _confirm_profile_capabilities(model_info, runtime=None):
@@ -4129,13 +4570,22 @@ def _confirm_profile_capabilities(model_info, runtime=None):
             result["default_enabled"] = False
         result["effort_allowed"] = sorted(effort_allowed)
         result["effort_map"] = effort_map
+
+    policy_flags = _confirm_policy_capability_flags(tokens)
+    if policy_flags["thinking"]:
+        result["thinking_supported"] = any(policy_flags["thinking"])
+        result["default_enabled"] = any(policy_flags["thinking"])
+    if policy_flags["reasoning"]:
+        result["effort_supported"] = any(policy_flags["reasoning"])
     return result
 
 
 def _confirm_effort_values(profile_caps, model_tokens):
-    values = [value for value, _label in _EFFORT_OPTIONS]
     allowed = set(profile_caps.get("effort_allowed") or [])
     effort_map = profile_caps.get("effort_map") if isinstance(profile_caps.get("effort_map"), dict) else {}
+    values = [value for value, _label in _EFFORT_OPTIONS]
+    if model_supports_max_reasoning_effort(model_tokens):
+        values.append("max")
     if allowed:
         filtered = [
             value for value in values
@@ -4143,12 +4593,15 @@ def _confirm_effort_values(profile_caps, model_tokens):
         ]
         return filtered or values
     if not any(_confirm_is_gpt_like_token(token) for token in model_tokens):
-        return [value for value in values if value != "xhigh"]
+        return [value for value in values if value not in {"xhigh", "max"}]
+    if not model_supports_max_reasoning_effort(model_tokens):
+        return [value for value in values if value != "max"]
     return values
 
 
-def select_reasoning_effort_tui(default="high"):
-    """选择 GPT reasoning effort。返回 'low' / 'medium' / 'high' / 'xhigh'，Esc 返回 default。"""
+def select_reasoning_effort_tui(default="high", *, options=None):
+    """选择 GPT reasoning effort。Esc 返回 default。"""
+    options = list(options or _EFFORT_OPTIONS)
 
     def _inner(stdscr):
         curses.curs_set(0)
@@ -4156,7 +4609,7 @@ def select_reasoning_effort_tui(default="high"):
         curses.init_pair(1, curses.COLOR_CYAN, -1)
         curses.init_pair(2, curses.COLOR_WHITE, -1)
 
-        default_idx = next((i for i, (v, _) in enumerate(_EFFORT_OPTIONS) if v == default), 1)
+        default_idx = next((i for i, (v, _) in enumerate(options) if v == default), 1)
         sel = default_idx
 
         while True:
@@ -4166,7 +4619,7 @@ def select_reasoning_effort_tui(default="high"):
             stdscr.addstr(1, 2, title, curses.color_pair(1) | curses.A_BOLD)
             stdscr.addstr(2, 2, "─" * min(40, max_w - 4), curses.color_pair(2))
 
-            for i, (_, label) in enumerate(_EFFORT_OPTIONS):
+            for i, (_, label) in enumerate(options):
                 row = 4 + i
                 if row >= max_y - 1:
                     break
@@ -4182,11 +4635,11 @@ def select_reasoning_effort_tui(default="high"):
 
             key = stdscr.getch()
             if key == curses.KEY_UP:
-                sel = (sel - 1) % len(_EFFORT_OPTIONS)
+                sel = (sel - 1) % len(options)
             elif key == curses.KEY_DOWN:
-                sel = (sel + 1) % len(_EFFORT_OPTIONS)
+                sel = (sel + 1) % len(options)
             elif key in (10, 13):
-                return _EFFORT_OPTIONS[sel][0]
+                return options[sel][0]
             elif key == 27:
                 return default
 

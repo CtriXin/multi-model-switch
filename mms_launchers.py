@@ -1,9 +1,11 @@
 """MMS 启动器：按 provider 或账号档案启动 CLI。"""
 
+from mms_hook_retirement import is_retired_automatic_hook
 from contextlib import contextmanager
 import copy
 import inspect
 import json
+import math
 import os
 import re
 import shlex
@@ -88,7 +90,7 @@ from mms_opencode_session import (
     overlay_opencode_session_assets as _overlay_opencode_session_assets_impl,
     opencode_rtk_plugin_path as _opencode_rtk_plugin_path_impl,
     opencode_session_plugin_runtime as _opencode_session_plugin_runtime,
-    opencode_xmem_plugin_path as _opencode_xmem_plugin_path_impl,
+    opencode_nsr_plugin_path as _opencode_nsr_plugin_path_impl,
     overlay_opencode_plugin as _overlay_opencode_plugin_impl,
 )
 from mms_core import (
@@ -100,6 +102,8 @@ from mms_core import (
     _runtime_httpx_request,
     detect_working_base_url,
     load_config,
+    managed_assets_enabled,
+    managed_assets_root,
     preference_asset_root,
 )
 from mms_capability_resolver import resolve_model_capabilities
@@ -110,8 +114,16 @@ from mms_fake_upstream import (
     status_payload as _fake_upstream_status_payload,
 )
 from mms_host_context import host_capability_env, resolve_tool_bins, write_host_context
-from mms_project_store import CLAUDE_PERSISTENT_ENTRIES, claude_raw_entry_path, ensure_claude_project_store, read_slot_marker, write_slot_marker
+from mms_project_store import (
+    CLAUDE_PERSISTENT_ENTRIES,
+    canonical_project_path,
+    claude_raw_entry_path,
+    ensure_claude_project_store,
+    read_slot_marker,
+    write_slot_marker,
+)
 from mms_provider_profiles import profile_context_window, resolve_provider_profile
+from mms_reasoning_effort import model_supports_max_reasoning_effort
 import mms_pi_support as _pi_support
 from mms_runtime import cli_search_dirs, prepare_cli_command
 from mms_session_index import finalize_claude_session, list_indexed_sessions, record_claude_session_start
@@ -188,7 +200,6 @@ def _ensure_speed_stats():
         return
     from mms_speed_stats import build_provider_speed_scope as _bps
     build_provider_speed_scope = _bps
-
 
 class _PlainStatus:
     def __init__(self, message):
@@ -340,8 +351,15 @@ _MODEL_CONTEXT_WINDOWS = {
     "claude-sonnet-4-6": 1_000_000,
     "claude-haiku-4-5-20251001": 200_000,
     "claude-haiku-4-5": 200_000,
-    # Kimi / K2 — K2.5/K2.6 系列均为 256K (262144)
+    # Kimi — Kimi API `kimi-k3` is 1M; Kimi Code plain `k3` is 256K, `k3[1m]` opts into 1M.
+    "k3": 262_144,
+    "k3[1m]": 1_048_576,
+    "kimi-k3": 1_048_576,
+    "moonshotai/kimi-k3": 1_048_576,
     "kimi-for-coding": 262_144,
+    "kimi-for-coding-highspeed": 262_144,
+    "kimi-k2.7-code": 262_144,
+    "kimi-k2.7-code-highspeed": 262_144,
     "kimi-k2.5": 262_144,
     "kimi-k2.6": 262_144,
     "kimi-k2.6-code-preview": 262_144,
@@ -380,12 +398,14 @@ _DEFAULT_CONTEXT_WINDOW = 200_000  # 未知模型的安全默认值
 _ONE_M_CONTEXT_SUFFIX = "[1m]"
 _ONE_M_SUFFIX_CONTEXT_WINDOWS = {
     # MiMo documents [1m] as an opt-in long-context suffix for Claude Code.
+    "k3": 1_048_576,
     "mimo-v2.5-pro": 1_000_000,
     "mimo-v2.5": 1_000_000,
 }
 _ONE_M_SUFFIX_BASE_SAFE_CONTEXT_WINDOWS = {
     # The base wire model can support 1M in some surfaces, but Claude Code must
     # opt in with the selector suffix before MMS advertises that large window.
+    "k3": 262_144,
     "mimo-v2.5-pro": 262_144,
     "mimo-v2.5": 262_144,
 }
@@ -434,6 +454,63 @@ def _coerce_context_window(value):
 def _provider_advertises_plain_mimo_1m(provider_id):
     provider = str(provider_id or "").strip().lower()
     return bool(provider and any(token in provider for token in _MIMO_PLAIN_ONE_M_PROVIDER_HINTS))
+
+
+def _capability_context_window(model_name, *, provider_id=None, accepted_sources=None):
+    try:
+        caps = resolve_model_capabilities(str(model_name or "").strip(), provider_id=provider_id or "")
+    except Exception:
+        if accepted_sources is None or "model_policy" not in set(accepted_sources):
+            return None
+        try:
+            from mms_capability_resolver import load_default_model_policy
+
+            caps = resolve_model_capabilities(
+                str(model_name or "").strip(),
+                provider_id=provider_id or "",
+                approved_facts={},
+                model_policy=load_default_model_policy(),
+            )
+        except Exception:
+            return None
+    source = caps.get("sources", {}).get("context_window_tokens")
+    if accepted_sources is not None and source not in set(accepted_sources):
+        return None
+    return _coerce_context_window(caps.get("context_window_tokens"))
+
+
+def _plain_kimi_k3_profile_context_window(model_name, *, provider_id=None):
+    normalized = str(model_name or "").strip().lower().rsplit("/", 1)[-1]
+    if normalized != "k3":
+        return None
+    profiled = profile_context_window("k3", provider_id=provider_id or "")
+    safe_base = _ONE_M_SUFFIX_BASE_SAFE_CONTEXT_WINDOWS.get("k3")
+    if profiled is not None and safe_base is not None and profiled <= safe_base:
+        return profiled
+    return None
+
+
+def _capability_max_output_tokens(model_name, *, provider_id=None, accepted_sources=None):
+    try:
+        caps = resolve_model_capabilities(str(model_name or "").strip(), provider_id=provider_id or "")
+    except Exception:
+        if accepted_sources is None or "model_policy" not in set(accepted_sources):
+            return None
+        try:
+            from mms_capability_resolver import load_default_model_policy
+
+            caps = resolve_model_capabilities(
+                str(model_name or "").strip(),
+                provider_id=provider_id or "",
+                approved_facts={},
+                model_policy=load_default_model_policy(),
+            )
+        except Exception:
+            return None
+    source = caps.get("sources", {}).get("max_output_tokens")
+    if accepted_sources is not None and source not in set(accepted_sources):
+        return None
+    return _coerce_context_window(caps.get("max_output_tokens"))
 
 
 def _model_context_overrides_path():
@@ -546,11 +623,42 @@ def _lookup_context_window(model_name, provider_id=None):
     if model_exact is not None:
         return model_exact
 
+    profile_safe_selector_window = None
+    if not has_1m_suffix:
+        profile_safe_selector_window = _plain_kimi_k3_profile_context_window(
+            clean,
+            provider_id=provider_id,
+        )
+    if profile_safe_selector_window is not None:
+        return profile_safe_selector_window
+
     if has_1m_suffix:
         suffixed_window = _ONE_M_SUFFIX_CONTEXT_WINDOWS.get(lower)
         if suffixed_window is not None:
             return suffixed_window
-    else:
+
+    # User policy is the preferred surface for context size. It must win before
+    # the legacy MiMo safe-base guard that otherwise caps plain model names.
+    policy_window = _capability_context_window(
+        clean,
+        provider_id=provider_id,
+        accepted_sources={"model_policy", "manual_override"},
+    )
+    if policy_window is not None:
+        return policy_window
+
+    if not has_1m_suffix:
+        # Latest-approved capability facts are the WebUI/runtime truth after
+        # preview publish. Keep the MiMo safe-base branch as a fallback only, or
+        # the UI can show 1M while Claude launch still receives 262K.
+        approved_window = _capability_context_window(
+            clean,
+            provider_id=provider_id,
+            accepted_sources={"approved_facts", "model_policy", "manual_override"},
+        )
+        if approved_window is not None:
+            return approved_window
+
         if _provider_advertises_plain_mimo_1m(provider_key):
             plain_one_m_window = _MIMO_PLAIN_ONE_M_CONTEXT_WINDOWS.get(lower)
             if plain_one_m_window is not None:
@@ -568,17 +676,6 @@ def _lookup_context_window(model_name, provider_id=None):
     model_clean = _model_override_lookup(clean, lower)
     if model_clean is not None:
         return model_clean
-
-    try:
-        from mms_capability_resolver import resolve_model_capabilities
-
-        caps = resolve_model_capabilities(clean, provider_id=provider_id or "")
-        if caps.get("sources", {}).get("context_window_tokens") == "approved_facts":
-            approved_window = _coerce_context_window(caps.get("context_window_tokens"))
-            if approved_window is not None:
-                return approved_window
-    except Exception:
-        pass
 
     profiled = profile_context_window(clean, provider_id=provider_id or "")
     if profiled is not None:
@@ -629,6 +726,25 @@ def _effective_context_window(*models, enable_claude_1m=True, provider_id=None):
                 w = 200_000
         windows.append(w or _DEFAULT_CONTEXT_WINDOW)
     return min(windows) if windows else _DEFAULT_CONTEXT_WINDOW
+
+
+def _context_windows_for_models(*models, enable_claude_1m=True, provider_id=None):
+    result = {}
+    for model in models:
+        if not model:
+            continue
+        raw_model = str(model).strip()
+        if not raw_model:
+            continue
+        clean = raw_model.replace(_ONE_M_CONTEXT_SUFFIX, "").strip()
+        window = _effective_context_window(
+            raw_model,
+            enable_claude_1m=enable_claude_1m,
+            provider_id=provider_id,
+        )
+        result[raw_model] = window
+        result[clean] = window
+    return result
 
 
 @contextmanager
@@ -1144,12 +1260,13 @@ def _set_codex_soft_home(env, session_home):
     return env
 
 
-def _set_opencode_soft_home(env, session_home):
+def _set_opencode_soft_home(env, session_home, *, profile_id):
     return _opencode_set_soft_home_impl(
         env,
         session_home,
         real_user_path=_real_user_path,
         set_session_home_hint=_set_session_home_hint,
+        profile_id=profile_id,
     )
 
 
@@ -1234,6 +1351,7 @@ def _session_guard_process_identity(pid):
             capture_output=True,
             text=True,
             check=False,
+            env={**os.environ, "LC_ALL": "C", "LANG": "C"},
         )
     except Exception:
         return ""
@@ -1256,7 +1374,14 @@ def _session_guard_pid_alive(pid, *, identity=""):
     except PermissionError:
         return True
     if identity:
-        return _session_guard_process_identity(normalized_pid) == str(identity or "").strip()
+        current_identity = _session_guard_process_identity(normalized_pid)
+        if current_identity == str(identity or "").strip():
+            return True
+        # Older markers used locale-dependent `ps lstart` text. Different
+        # terminals can format the same live process differently, so never
+        # delete an otherwise alive session only because the identity text
+        # does not match.
+        return True
     return True
 
 
@@ -1274,7 +1399,8 @@ def _write_session_guard_marker(session_home, *, account_id="", runtime_kind="",
     os.makedirs(os.path.dirname(marker_path), exist_ok=True)
     with locked_state_file(marker_path):
         marker = _load_json_dict_unlocked(marker_path)
-        launcher_pid = int(marker.get("launcher_pid") or os.getpid())
+        launcher_pid = os.getpid()
+        launcher_identity = _session_guard_process_identity(launcher_pid)
         marker.update(
             {
                 "account_id": str(account_id or marker.get("account_id") or "").strip(),
@@ -1282,8 +1408,8 @@ def _write_session_guard_marker(session_home, *, account_id="", runtime_kind="",
                 "session_home": str(session_home or ""),
                 "launcher_pid": launcher_pid,
                 "launcher_identity": str(
-                    marker.get("launcher_identity")
-                    or _session_guard_process_identity(launcher_pid)
+                    launcher_identity
+                    or marker.get("launcher_identity")
                     or ""
                 ).strip(),
                 "updated_at": _guard_utc_now(),
@@ -2077,9 +2203,7 @@ def _resolve_local_hooks_dir(module_file=None):
         canonical_hooks = os.path.join(canonical_root, "hooks")
         required_hooks = (
             "nsr-codex-hook.sh",
-            "xmem-session-start-hook.sh",
-            "xmem-session-end-hook.sh",
-            "xmem-gateway-hook.sh",
+            "nsr-claude-hook.sh",
         )
         if all(os.path.isfile(os.path.join(canonical_hooks, name)) for name in required_hooks):
             return canonical_hooks
@@ -2087,7 +2211,16 @@ def _resolve_local_hooks_dir(module_file=None):
 
 
 _LOCAL_HOOKS_DIR = _resolve_local_hooks_dir()
-_CLAUDE_FEISHU_WEBFETCH_GUARD_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "claude-feishu-webfetch-guard.sh")
+
+
+def _global_or_local_hook_path(name):
+    """Prefer the user's installed hook over an MMF worktree copy."""
+    global_hook = _real_user_path(".mms", "hooks", str(name or ""))
+    if os.path.isfile(global_hook):
+        return global_hook
+    return os.path.join(_LOCAL_HOOKS_DIR, str(name or ""))
+
+
 _CLAUDE_HIVE_COMPACT_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "hive-compact-hook.sh")
 _CLAUDE_BRAINKEEPER_SESSION_START_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "brainkeeper-session-start-hook.sh")
 _CLAUDE_BRAINKEEPER_SESSION_END_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "brainkeeper-session-end-hook.sh")
@@ -2097,12 +2230,9 @@ _CLAUDE_MINDKEEPER_SESSION_END_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "mindkeeper
 _CLAUDE_MINDKEEPER_TOKEN_MONITOR_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "mindkeeper-token-monitor-hook.sh")
 _CLAUDE_CODEGRAPH_AUTO_INDEX_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "claude-codegraph-auto-index.sh")
 _CLAUDE_MMS_RESUME_HINT_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "mms-resume-hint.sh")
-_XMEM_SESSION_START_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "xmem-session-start-hook.sh")
-_XMEM_SESSION_END_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "xmem-session-end-hook.sh")
-_XMEM_GATEWAY_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "xmem-gateway-hook.sh")
-_NSR_CLAUDE_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "nsr-claude-hook.sh")
-_NSR_CODEX_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "nsr-codex-hook.sh")
-_NSR_BUILTIN_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "nsr-builtin-hook.py")
+_NSR_CLAUDE_HOOK = _global_or_local_hook_path("nsr-claude-hook.sh")
+_NSR_CODEX_HOOK = _global_or_local_hook_path("nsr-codex-hook.sh")
+_NSR_BUILTIN_HOOK = _global_or_local_hook_path("nsr-builtin-hook.py")
 
 _CLAUDE_STATUSLINE_CONFIG = {
     "command": f"/bin/bash {_LOCAL_STATUSLINE_SCRIPT}",
@@ -2263,6 +2393,9 @@ _CLAUDE_OAUTH_ENV_PREFIX_BLOCKLIST = (
 _OPENAI_ENV_PREFIX_BLOCKLIST = (
     "OPENAI_",
 )
+_HEADROOM_ENV_PREFIX_BLOCKLIST = (
+    "HEADROOM_",
+)
 _RUNTIME_PROXY_ENV_KEYS = (
     "HTTP_PROXY",
     "HTTPS_PROXY",
@@ -2326,11 +2459,16 @@ def _claude_gateway_home():
     return os.path.join(sessions_dir, str(os.getpid()))
 
 
-def _claude_route_status_paths():
+def _claude_route_status_paths(*, gateway_home=None):
+    # 优先用当前 launch 显式传入的 gateway_home（per-PID 会话隔离），
+    # 不读 ambient MMS_SESSION_HOME env（继承链不可靠，多 session 会串改）。
+    gh = str(gateway_home or "").strip()
+    if gh:
+        return [os.path.join(gh, ".config", "mms", "route_status.json")]
     if str(os.environ.get("MMS_CONFIG_ROOT") or os.environ.get("MMS_CONFIG_DIR") or "").strip():
         return [os.path.join(_resolve_mms_config_dir(), "route_status.json")]
-    gateway_home = _claude_gateway_home()
-    return [os.path.join(gateway_home, ".config", "mms", "route_status.json")]
+    fallback = _claude_gateway_home()
+    return [os.path.join(fallback, ".config", "mms", "route_status.json")]
 
 
 def _anthropic_cache_key(provider_id, configured_url):
@@ -2632,7 +2770,6 @@ def _prune_session_only_snapshot_entries(snapshot_data):
     hooks = snapshot_data.get("hooks") or {}
     local_hooks_dir = _LOCAL_HOOKS_DIR
     session_only_commands = {
-        _normalize_hook_command(_CLAUDE_FEISHU_WEBFETCH_GUARD_HOOK),
         _normalize_hook_command(f"bash {_CLAUDE_HIVE_COMPACT_HOOK}"),
         _normalize_hook_command(_CLAUDE_HIVE_COMPACT_HOOK),
         _normalize_hook_command(_CLAUDE_BRAINKEEPER_SESSION_START_HOOK),
@@ -2643,14 +2780,10 @@ def _prune_session_only_snapshot_entries(snapshot_data):
         _normalize_hook_command(_CLAUDE_MINDKEEPER_TOKEN_MONITOR_HOOK),
         _normalize_hook_command(_CLAUDE_CODEGRAPH_AUTO_INDEX_HOOK),
         _normalize_hook_command(_CLAUDE_MMS_RESUME_HINT_HOOK),
-        _normalize_hook_command(_XMEM_SESSION_START_HOOK),
-        _normalize_hook_command(_XMEM_SESSION_END_HOOK),
-        _normalize_hook_command(_XMEM_GATEWAY_HOOK),
         _normalize_hook_command(_NSR_CLAUDE_HOOK),
         _normalize_hook_command(_NSR_CODEX_HOOK),
         _normalize_hook_command(f"python3 {_NSR_BUILTIN_HOOK}"),
         _normalize_hook_command(_NSR_BUILTIN_HOOK),
-        _normalize_hook_command(os.path.join(local_hooks_dir, "claude-feishu-webfetch-guard.sh")),
         _normalize_hook_command(f"bash {os.path.join(local_hooks_dir, 'hive-compact-hook.sh')}"),
         _normalize_hook_command(os.path.join(local_hooks_dir, "hive-compact-hook.sh")),
         _normalize_hook_command(os.path.join(local_hooks_dir, "brainkeeper-session-start-hook.sh")),
@@ -2661,9 +2794,6 @@ def _prune_session_only_snapshot_entries(snapshot_data):
         _normalize_hook_command(os.path.join(local_hooks_dir, "mindkeeper-token-monitor-hook.sh")),
         _normalize_hook_command(os.path.join(local_hooks_dir, "claude-codegraph-auto-index.sh")),
         _normalize_hook_command(os.path.join(local_hooks_dir, "mms-resume-hint.sh")),
-        _normalize_hook_command(os.path.join(local_hooks_dir, "xmem-session-start-hook.sh")),
-        _normalize_hook_command(os.path.join(local_hooks_dir, "xmem-session-end-hook.sh")),
-        _normalize_hook_command(os.path.join(local_hooks_dir, "xmem-gateway-hook.sh")),
     }
     pruned_hooks = {}
     for event_name, groups in hooks.items():
@@ -2675,6 +2805,7 @@ def _prune_session_only_snapshot_entries(snapshot_data):
                 command
                 for command in group.get("commands") or []
                 if _normalize_hook_command(command) not in session_only_commands
+                and not _is_retired_personal_policy_hook_command(command)
             ]
             if not commands:
                 continue
@@ -2856,9 +2987,9 @@ def repair_current_session_claude_settings(session_claude_dir):
 
 
 def _strip_agent_im_hooks(hooks_data):
-    # Inherit hooks from global settings as-is
-    # Users control what's in their ~/.claude/settings.json
-    return hooks_data if isinstance(hooks_data, dict) else None
+    # MMF owns Claude routing for gateway sessions; inherited Headroom hooks can
+    # re-point Claude Code at the global proxy and shadow the selected bridge.
+    return _filter_hook_commands(hooks_data, _is_headroom_hook_command)
 
 
 def _merge_claude_hook_groups(existing_groups, template_groups):
@@ -2904,6 +3035,73 @@ def _merge_claude_hooks(existing_hooks, template_hooks):
         return merged
     for event_name, template_groups in template_hooks.items():
         merged[event_name] = _merge_claude_hook_groups(merged.get(event_name), template_groups)
+    return merged
+
+
+def _load_managed_hook_file(path):
+    path = str(path or "").strip()
+    if not path or not os.path.isfile(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except Exception:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    hooks_data = payload.get("hooks") if isinstance(payload.get("hooks"), dict) else payload
+    if not isinstance(hooks_data, dict):
+        return {}
+    filtered = {}
+    for event_name, groups in hooks_data.items():
+        if not isinstance(groups, list):
+            continue
+        kept_groups = []
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            hook_items = group.get("hooks")
+            if not isinstance(hook_items, list):
+                continue
+            kept_hooks = []
+            for hook in hook_items:
+                if not isinstance(hook, dict):
+                    continue
+                if str(hook.get("type") or "").strip() != "command":
+                    continue
+                command = str(hook.get("command") or "").strip()
+                if not command or not _hook_command_targets_exist(command):
+                    continue
+                kept_hooks.append(dict(hook))
+            if kept_hooks:
+                next_group = dict(group)
+                next_group["hooks"] = kept_hooks
+                kept_groups.append(next_group)
+        if kept_groups:
+            filtered[str(event_name)] = kept_groups
+    return filtered
+
+
+def _load_managed_session_hooks():
+    try:
+        if not managed_assets_enabled():
+            return {}
+        root = os.path.join(managed_assets_root(), "hooks")
+    except Exception:
+        return {}
+    if not os.path.isdir(root):
+        return {}
+    paths = [os.path.join(root, "hooks.json")]
+    try:
+        for name in sorted(os.listdir(root)):
+            candidate = os.path.join(root, name, "hooks.json")
+            if os.path.isfile(candidate):
+                paths.append(candidate)
+    except OSError:
+        return {}
+    merged = {}
+    for path in paths:
+        merged = _merge_claude_hooks(merged, _load_managed_hook_file(path))
     return merged
 
 
@@ -3035,12 +3233,7 @@ def _append_shell_command_hook(
 
 def _merge_mms_session_hooks(existing_hooks, template_hooks=None):
     hooks_data = _merge_claude_hooks(existing_hooks, template_hooks)
-    hooks_data = _append_command_hook(
-        hooks_data,
-        "PreToolUse",
-        _CLAUDE_FEISHU_WEBFETCH_GUARD_HOOK,
-        matcher="WebFetch",
-    )
+    hooks_data = _merge_claude_hooks(hooks_data, _load_managed_session_hooks())
     hooks_data = _append_command_hook(
         hooks_data,
         "Stop",
@@ -3049,19 +3242,11 @@ def _merge_mms_session_hooks(existing_hooks, template_hooks=None):
     )
     hooks_data = _append_command_hook(
         hooks_data,
-        "Stop",
-        _XMEM_SESSION_END_HOOK,
-        matcher="",
-        timeout=10,
-        status_message="Closing xmem",
-    )
-    hooks_data = _append_command_hook(
-        hooks_data,
         "SessionEnd",
         _CLAUDE_MMS_RESUME_HINT_HOOK,
         matcher="",
     )
-    return hooks_data
+    return _filter_hook_commands(hooks_data, _is_retired_personal_policy_hook_command)
 
 
 def _filter_claude_session_hooks(hooks_data, *, allow_execution_surfaces=True):
@@ -3081,16 +3266,20 @@ def _resolve_nsr_root():
         explicit = str(os.environ.get(key) or "").strip()
         if explicit:
             candidates.append(os.path.abspath(os.path.expanduser(explicit)))
+    candidates.extend([
+        _real_user_path("auto-skills", "shared-skills", "nsr"),
+        _real_user_path("auto-skills", "Non-Stop-Run"),
+    ])
     pref = _asset_root_preference("nsr")
     if pref:
         candidates.append(os.path.abspath(os.path.expanduser(pref)))
     nsr_home = str(os.environ.get("NSR_HOME") or "").strip()
     if nsr_home:
         candidates.append(os.path.abspath(os.path.expanduser(nsr_home)))
+    candidates.extend(_managed_asset_root_candidates("packs", "nsr", "non-stop-run"))
+    candidates.extend(_bundled_asset_root_candidates("packs", "nsr", "non-stop-run"))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "non-stop-run"),
-        _real_user_path("auto-skills", "shared-skills", "nsr"),
-        _real_user_path("auto-skills", "Non-Stop-Run"),
         _real_user_path("auto-skills", "shared-skills", "looop.deprecated"),
     ])
 
@@ -3099,7 +3288,7 @@ def _resolve_nsr_root():
         if not candidate or candidate in seen:
             continue
         seen.add(candidate)
-        if (
+        if os.path.isfile(os.path.join(candidate, "loop_hook.py")) or (
             os.path.isfile(os.path.join(candidate, "scripts", "codex_hook.py"))
             and os.path.isfile(os.path.join(candidate, "scripts", "claude_hook.py"))
         ):
@@ -3195,15 +3384,70 @@ def _runtime_thinking_enabled(runtime):
     return _normalize_thinking_mode((runtime or {}).get("thinking_mode", "enable")) == "enable"
 
 
-def _normalize_reasoning_effort(value, default="high"):
+def _normalize_reasoning_effort(value, default="high", *, model_name=""):
     raw = str(value or "").strip().lower()
-    if raw in {"low", "medium", "high", "xhigh"}:
+    allowed = {"low", "medium", "high", "xhigh"}
+    if model_supports_max_reasoning_effort(model_name):
+        allowed.add("max")
+    if raw in allowed:
         return raw
+    if raw == "max":
+        return "xhigh"
     return default if default in {"low", "medium", "high", "xhigh"} else "high"
 
 
-def _runtime_reasoning_effort(runtime, default="high"):
-    return _normalize_reasoning_effort((runtime or {}).get("reasoning_effort", default), default=default)
+def _runtime_reasoning_effort(runtime, default="high", *, model_name=""):
+    model_name = model_name or (runtime or {}).get("model", "")
+    return _normalize_reasoning_effort(
+        (runtime or {}).get("reasoning_effort", default),
+        default=default,
+        model_name=model_name,
+    )
+
+
+def _claude_code_effort_env_value(model_name, runtime):
+    model = str(model_name or "").strip().lower().rsplit("/", 1)[-1]
+    if model.startswith("k3") or model.startswith("kimi-k3"):
+        return "max"
+    if not model.startswith("glm"):
+        return ""
+    raw = str((runtime or {}).get("reasoning_effort") or "").strip().lower()
+    if raw in {"xhigh", "max", "ultracode"}:
+        return "max"
+    if raw in {"low", "medium", "high"}:
+        return "high"
+    return ""
+
+
+def _is_kimi_k3_claude_env_model(model_name):
+    model = str(model_name or "").strip().lower().rsplit("/", 1)[-1]
+    return model == "kimi-k3" or model == "k3" or model.startswith("k3[")
+
+
+def _is_non_claude_routed_model(model_name):
+    """桥接场景下真实路由到非 Claude 家族模型的判定（剥 [1m]、取末段）。"""
+    model = _normalized_model_name(model_name)
+    if not model:
+        return False
+    return not _is_claude_family_model_name(model)
+
+
+def _apply_claude_context_env_overrides(env, *, context_window, model_names=()):
+    window = _coerce_context_window(context_window)
+    if window is None:
+        return env
+    env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = str(window)
+    env["CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE"] = str(max(window - 3000, 10000))
+    # 非 Claude 桥接模型 + window>=1M 时，Claude Code 的 [1m] 壳名豁免不生效，
+    # 必须显式给 CLAUDE_CODE_MAX_CONTEXT_TOKENS 才能撑开 autocompact 阈值。
+    needs_explicit_context_cap = any(
+        _is_kimi_k3_claude_env_model(model)
+        or (window >= 1_000_000 and _is_non_claude_routed_model(model))
+        for model in model_names
+    )
+    if needs_explicit_context_cap:
+        env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] = str(window)
+    return env
 
 
 def _runtime_vision_sidecar(runtime):
@@ -3213,6 +3457,90 @@ def _runtime_vision_sidecar(runtime):
     if not sidecar.get("enabled", True):
         return {}
     return dict(sidecar)
+
+
+def _capability_model_key(model_name):
+    normalized = str(model_name or "").strip().lower()
+    if "/" in normalized:
+        normalized = normalized.rsplit("/", 1)[-1]
+    if normalized.endswith("[1m]"):
+        normalized = normalized[:-4]
+    return normalized
+
+
+def _model_capability_entry(model_capabilities, model_name):
+    if not isinstance(model_capabilities, dict):
+        return {}
+    target = _capability_model_key(model_name)
+    if not target:
+        return {}
+    for key, value in model_capabilities.items():
+        if _capability_model_key(key) == target and isinstance(value, dict):
+            return value
+    return {}
+
+
+def _set_model_capability_entry(model_capabilities, model_name, entry):
+    target = _capability_model_key(model_name)
+    if not target:
+        return
+    updated = False
+    for key, value in list(model_capabilities.items()):
+        if _capability_model_key(key) == target and isinstance(value, dict):
+            merged = dict(value)
+            merged.update(entry)
+            model_capabilities[key] = merged
+            updated = True
+    if not updated:
+        model_capabilities[model_name] = dict(entry)
+
+
+def _model_capabilities_support_vision(model_capabilities, model_name):
+    caps = _model_capability_entry(model_capabilities, model_name)
+    nested = caps.get("capabilities") if isinstance(caps.get("capabilities"), dict) else {}
+    for source in (caps, nested):
+        for key in ("vision", "supports_vision"):
+            if isinstance(source.get(key), bool):
+                return bool(source[key])
+    return None
+
+
+def _runtime_model_capabilities(runtime, model_name=""):
+    capabilities = (runtime or {}).get("model_capabilities")
+    if not isinstance(capabilities, dict):
+        capabilities = {}
+    result = dict(capabilities)
+    model_name = str(model_name or "").strip()
+    if not model_name:
+        return result
+    existing = dict(_model_capability_entry(result, model_name))
+    resolved_vision = None
+    try:
+        runtime_dict = runtime if isinstance(runtime, dict) else {}
+        resolved = resolve_model_capabilities(
+            model_name,
+            runtime=runtime_dict,
+            provider_id=str(runtime_dict.get("id") or runtime_dict.get("provider_id") or ""),
+            base_url=str(
+                runtime_dict.get("anthropic_base_url")
+                or runtime_dict.get("openai_base_url")
+                or runtime_dict.get("base_url")
+                or ""
+            ),
+            profile_id=str(runtime_dict.get("profile") or runtime_dict.get("provider_profile") or ""),
+        )
+        source = (resolved.get("sources") or {}).get("supports_vision") if isinstance(resolved, dict) else ""
+        if source and source != "conservative_fallback" and isinstance(resolved.get("supports_vision"), bool):
+            resolved_vision = bool(resolved["supports_vision"])
+    except Exception:
+        pass
+    if resolved_vision is None and _model_supports_vision(model_name):
+        resolved_vision = True
+    if resolved_vision is not None:
+        existing["vision"] = resolved_vision
+        existing["supports_vision"] = resolved_vision
+        _set_model_capability_entry(result, model_name, existing)
+    return result
 
 
 def _resolve_native_fallback_routes(runtime, model_name):
@@ -3253,6 +3581,106 @@ def _asset_root_preference(asset_name):
         return ""
 
 
+def _asset_root_candidates_from_root(root, surface, *names):
+    root = str(root or "").strip()
+    if not root:
+        return []
+    root = os.path.abspath(os.path.expanduser(root))
+    surface = str(surface or "").strip()
+    candidates = []
+    for name in names:
+        raw = str(name or "").strip()
+        if not raw:
+            continue
+        variants = [raw]
+        alt = raw.replace("_", "-")
+        if alt not in variants:
+            variants.append(alt)
+        alt = raw.replace("-", "_")
+        if alt not in variants:
+            variants.append(alt)
+        for variant in variants:
+            if surface:
+                candidates.append(os.path.join(root, surface, variant))
+            candidates.append(os.path.join(root, "packages", variant))
+    deduped = []
+    seen = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        deduped.append(candidate)
+    return deduped
+
+
+def _managed_asset_root_candidates(surface, *names):
+    try:
+        if not managed_assets_enabled():
+            return []
+        root = str(managed_assets_root() or "").strip()
+    except Exception:
+        return []
+    return _asset_root_candidates_from_root(root, surface, *names)
+
+
+_BUILTIN_MANAGED_SESSION_SKILLS = {
+    "web-access",
+    "weber",
+    "agent-browser",
+    "codegraph",
+    "toon",
+    "token-saver",
+    "auto-github-contributor",
+}
+
+
+def _managed_dynamic_skill_entries(*, exclude_names=None):
+    try:
+        if not managed_assets_enabled():
+            return []
+        root = str(managed_assets_root() or "").strip()
+    except Exception:
+        return []
+    if not root:
+        return []
+
+    normalized_exclude = {
+        str(item or "").strip()
+        for item in (_BUILTIN_MANAGED_SESSION_SKILLS | set(exclude_names or ()))
+        if str(item or "").strip()
+    }
+    entries = []
+    seen = set()
+    parent = os.path.join(root, "skills")
+    if not os.path.isdir(parent):
+        return []
+    try:
+        names = sorted(os.listdir(parent))
+    except OSError:
+        return []
+    for name in names:
+        name = str(name or "").strip()
+        if not name or name in normalized_exclude or name in seen:
+            continue
+        skill_root = os.path.join(parent, name)
+        if not os.path.isdir(skill_root):
+            continue
+        if not os.path.isfile(os.path.join(skill_root, "SKILL.md")):
+            continue
+        entries.append({"name": name, "root": skill_root})
+        seen.add(name)
+    return entries
+
+
+def _bundled_assets_root():
+    root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "session-assets")
+    return root if os.path.isdir(root) else ""
+
+
+def _bundled_asset_root_candidates(surface, *names):
+    return _asset_root_candidates_from_root(_bundled_assets_root(), surface, *names)
+
+
 def _resolve_caveman_root():
     candidates = []
     explicit = str(os.environ.get("MMS_CAVEMAN_ROOT") or "").strip()
@@ -3261,6 +3689,8 @@ def _resolve_caveman_root():
     pref = _asset_root_preference("caveman")
     if pref:
         candidates.append(os.path.abspath(os.path.expanduser(pref)))
+    candidates.extend(_managed_asset_root_candidates("packs", "caveman"))
+    candidates.extend(_bundled_asset_root_candidates("packs", "caveman"))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "caveman"),
         _real_user_path("auto-skills", "vendor", "caveman"),
@@ -3340,6 +3770,8 @@ def _resolve_ecc_root():
     pref = _asset_root_preference("ecc")
     if pref:
         candidates.append(os.path.abspath(os.path.expanduser(pref)))
+    candidates.extend(_managed_asset_root_candidates("packs", "ecc", "everything-claude-code"))
+    candidates.extend(_bundled_asset_root_candidates("packs", "ecc", "everything-claude-code"))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent-packs", "everything-claude-code"),
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "everything-claude-code"),
@@ -3369,6 +3801,8 @@ def _resolve_omc_root():
     pref = _asset_root_preference("omc")
     if pref:
         candidates.append(os.path.abspath(os.path.expanduser(pref)))
+    candidates.extend(_managed_asset_root_candidates("packs", "omc", "oh-my-claudecode"))
+    candidates.extend(_bundled_asset_root_candidates("packs", "omc", "oh-my-claudecode"))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent-packs", "oh-my-claudecode"),
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "oh-my-claudecode"),
@@ -3392,13 +3826,16 @@ def _resolve_omc_root():
 
 
 def _resolve_web_access_root():
-    candidates = []
+    # Installer maintains this as a symlink to the bundled web-access source.
+    candidates = [_real_user_path("auto-skills", "installed-skills", "web-access")]
     explicit = str(os.environ.get("MMS_WEB_ACCESS_ROOT") or "").strip()
     if explicit:
         candidates.append(os.path.abspath(os.path.expanduser(explicit)))
     pref = _asset_root_preference("web_access")
     if pref:
         candidates.append(os.path.abspath(os.path.expanduser(pref)))
+    candidates.extend(_managed_asset_root_candidates("skills", "web-access", "web_access"))
+    candidates.extend(_bundled_asset_root_candidates("skills", "web-access", "web_access"))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "web-access"),
         _real_user_path("auto-skills", "vendor", "web-access"),
@@ -3423,6 +3860,8 @@ def _resolve_weber_root():
     pref = _asset_root_preference("weber")
     if pref:
         candidates.append(os.path.abspath(os.path.expanduser(pref)))
+    candidates.extend(_managed_asset_root_candidates("skills", "weber"))
+    candidates.extend(_bundled_asset_root_candidates("skills", "weber"))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "weber"),
         _real_user_path("auto-skills", "shared-skills", "weber"),
@@ -3448,6 +3887,8 @@ def _resolve_agent_browser_root():
     pref = _asset_root_preference("agent_browser")
     if pref:
         candidates.append(os.path.abspath(os.path.expanduser(pref)))
+    candidates.extend(_managed_asset_root_candidates("skills", "agent-browser", "agent_browser"))
+    candidates.extend(_bundled_asset_root_candidates("skills", "agent-browser", "agent_browser"))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "agent-browser"),
         _real_user_path("auto-skills", "installed-skills", "agent-browser"),
@@ -3473,6 +3914,8 @@ def _resolve_codegraph_root():
     pref = _asset_root_preference("codegraph")
     if pref:
         candidates.append(os.path.abspath(os.path.expanduser(pref)))
+    candidates.extend(_managed_asset_root_candidates("skills", "codegraph"))
+    candidates.extend(_bundled_asset_root_candidates("skills", "codegraph"))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "codegraph"),
         _real_user_path("auto-skills", "shared-skills", "codegraph"),
@@ -3498,6 +3941,8 @@ def _resolve_toon_root():
     pref = _asset_root_preference("toon")
     if pref:
         candidates.append(os.path.abspath(os.path.expanduser(pref)))
+    candidates.extend(_managed_asset_root_candidates("skills", "toon"))
+    candidates.extend(_bundled_asset_root_candidates("skills", "toon"))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "toon"),
         _real_user_path("auto-skills", "vendor", "toon"),
@@ -3522,6 +3967,8 @@ def _resolve_token_saver_root():
     pref = _asset_root_preference("token_saver")
     if pref:
         candidates.append(os.path.abspath(os.path.expanduser(pref)))
+    candidates.extend(_managed_asset_root_candidates("skills", "token-saver", "token_saver"))
+    candidates.extend(_bundled_asset_root_candidates("skills", "token-saver", "token_saver"))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "token-saver"),
         _real_user_path("auto-skills", "shared-skills", "token-saver"),
@@ -3540,51 +3987,7 @@ def _resolve_token_saver_root():
 
 
 def _resolve_xmem_root():
-    candidates = []
-    explicit = str(os.environ.get("MMS_XMEM_ROOT") or "").strip()
-    if explicit:
-        candidates.append(os.path.abspath(os.path.expanduser(explicit)))
-    pref = _asset_root_preference("xmem")
-    if pref:
-        candidates.append(os.path.abspath(os.path.expanduser(pref)))
-    candidates.extend([
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "xmem"),
-        _real_user_path("auto-skills", "shared-skills", "xmem"),
-        _real_user_path("auto-skills", "CtriXin-repo", "xmem", "skills", "xmem"),
-        _real_user_path(".codex", "skills", "xmem"),
-        _real_user_path(".agents", "skills", "xmem"),
-    ])
-
-    seen = set()
-    for candidate in candidates:
-        if not candidate or candidate in seen:
-            continue
-        seen.add(candidate)
-        if os.path.isfile(os.path.join(candidate, "SKILL.md")):
-            return candidate
-    return ""
-
-
-def _xmem_cli_path():
-    candidates = []
-    for key in ("MMS_XMEM_BIN", "XMEM_BIN"):
-        explicit = str(os.environ.get(key) or "").strip()
-        if explicit:
-            candidates.append(os.path.abspath(os.path.expanduser(explicit)))
-    candidates.extend([
-        _real_user_path(".local", "bin", "xmem"),
-        _real_user_path("auto-skills", "CtriXin-repo", "xmem", "bin", "xmem"),
-    ])
-    found = shutil.which("xmem")
-    if found:
-        candidates.append(found)
-    seen = set()
-    for candidate in candidates:
-        if not candidate or candidate in seen:
-            continue
-        seen.add(candidate)
-        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-            return candidate
+    # xmem is global-only now; MMS should not bundle or inject a session-local copy.
     return ""
 
 
@@ -3596,6 +3999,8 @@ def _resolve_auto_github_contributor_root():
     pref = _asset_root_preference("auto_github_contributor")
     if pref:
         candidates.append(os.path.abspath(os.path.expanduser(pref)))
+    candidates.extend(_managed_asset_root_candidates("skills", "auto-github-contributor", "auto_github_contributor"))
+    candidates.extend(_bundled_asset_root_candidates("skills", "auto-github-contributor", "auto_github_contributor"))
     candidates.extend([
         _real_user_path("auto-skills", "installed-skills", "auto-github-contributor"),
         _real_user_path("auto-skills", "vendor", "auto-github-contributor", "skills", "auto-github-contributor"),
@@ -3717,7 +4122,6 @@ def _is_mms_managed_hook_command(command_text):
     if not command_text:
         return False
     markers = (
-        "claude-feishu-webfetch-guard.sh",
         "hive-compact-hook.sh",
         "brainkeeper-session-start-hook.sh",
         "brainkeeper-session-end-hook.sh",
@@ -3727,18 +4131,40 @@ def _is_mms_managed_hook_command(command_text):
         "mindkeeper-token-monitor-hook.sh",
         "claude-codegraph-auto-index.sh",
         "mms-resume-hint.sh",
-        "xmem-session-start-hook.sh",
-        "xmem-session-end-hook.sh",
-        "xmem-gateway-hook.sh",
         "claude-map-auto-index.sh",
         "nsr-claude-hook.sh",
         "nsr-codex-hook.sh",
         "nsr-builtin-hook.py",
-        "scmp_hook.py --host codex",
         "caveman-activate.js",
         "caveman-mode-tracker.js",
         "everything-claude-code",
         "oh-my-claudecode",
+    )
+    return any(marker in command_text for marker in markers)
+
+
+def _is_headroom_hook_command(command_text):
+    command_text = str(command_text or "").strip().lower()
+    if not command_text:
+        return False
+    return "headroom" in command_text
+
+
+def _is_retired_personal_policy_hook_command(command_text):
+    if is_retired_automatic_hook(command_text):
+        return True
+    command_text = str(command_text or "").strip().lower()
+    if not command_text:
+        return False
+    markers = (
+        "scmp_hook.py",
+        "work_hook.py",
+        "claude-feishu-prompt.sh",
+        "claude-feishu-webfetch-guard.sh",
+        "xmem-session-start-hook.sh",
+        "xmem-session-end-hook.sh",
+        "xmem-gateway-hook.sh",
+        "xmem agent-hook",
     )
     return any(marker in command_text for marker in markers)
 
@@ -3905,6 +4331,23 @@ def _session_surface_disabled(disabled_session_surfaces, surface, value):
     return value in disabled.get(surface, set())
 
 
+def _session_mcp_opt_in_enabled(name):
+    token = re.sub(r"[^A-Za-z0-9]+", "_", str(name or "").strip()).strip("_").upper()
+    if not token:
+        return False
+    for key in (f"MMS_ENABLE_MCP_{token}", f"MMS_ENABLE_{token}_MCP"):
+        if str(os.environ.get(key) or "").strip().lower() in {"1", "true", "yes", "on", "enable", "enabled"}:
+            return True
+    return False
+
+
+def _session_mcp_default_enabled(name):
+    name = str(name or "").strip().lower()
+    if name in {"pilot", "figma"}:
+        return _session_mcp_opt_in_enabled(name)
+    return True
+
+
 def _filter_mcp_servers_by_disabled(mcp_servers, disabled_session_surfaces=None):
     if not isinstance(mcp_servers, dict):
         return {}
@@ -3977,11 +4420,6 @@ def _filter_hooks_by_disabled(hooks_data, disabled_session_surfaces=None):
         return {}
     disabled = _normalize_session_surface_disabled(disabled_session_surfaces)
     disabled_commands = disabled.get("hooks", set())
-    if "xmem" in disabled.get("skills", set()):
-        disabled_commands = set(disabled_commands)
-        disabled_commands.add(_normalize_hook_command(_XMEM_SESSION_START_HOOK))
-        disabled_commands.add(_normalize_hook_command(_XMEM_SESSION_END_HOOK))
-        disabled_commands.add(_normalize_hook_command(_XMEM_GATEWAY_HOOK))
     if not disabled_commands:
         return hooks_data
     return _filter_hook_commands(
@@ -3992,6 +4430,24 @@ def _filter_hooks_by_disabled(hooks_data, disabled_session_surfaces=None):
 
 def _session_skill_disabled(disabled_session_surfaces, skill_name):
     return _session_surface_disabled(disabled_session_surfaces, "skills", skill_name)
+
+
+def _disabled_skill_names_for_cli(disabled_session_surfaces, cli_name=""):
+    disabled = _normalize_session_surface_disabled(disabled_session_surfaces).get("skills", set())
+    cli_name = str(cli_name or "").strip().lower()
+    names = set()
+    prefix = f"{cli_name}:" if cli_name else ""
+    for value in disabled:
+        text = str(value or "").strip()
+        if not text:
+            continue
+        if ":" not in text:
+            names.add(text)
+        elif prefix and text.lower().startswith(prefix):
+            scoped = text.split(":", 1)[1].strip()
+            if scoped:
+                names.add(scoped)
+    return names
 
 
 def _caveman_claude_activate_command(caveman_root, caveman_level="light"):
@@ -4148,49 +4604,12 @@ def _configure_codex_caveman_hooks(hooks_data, *, enable_caveman=False, caveman_
 
 
 def _configure_claude_nsr_hooks(hooks_data, *, enable_nsr=False):
-    hooks_data = _filter_hook_commands(hooks_data, _is_loop_family_hook_command)
-    if not enable_nsr or not _nsr_available_for_cli("claude"):
-        return hooks_data
-    for event_name, matcher in (
-        ("PermissionRequest", "*"),
-        ("PreToolUse", "*"),
-        ("PostToolUse", "*"),
-        ("PreCompact", ""),
-        ("PostCompact", ""),
-        ("Stop", ""),
-    ):
-        hooks_data = _append_shell_command_hook(
-            hooks_data,
-            event_name,
-            _NSR_CLAUDE_HOOK,
-            matcher=matcher,
-            timeout=10,
-            status_message="Loading NSR",
-        )
-    return hooks_data
+    # Legacy toggle remains parseable; automatic continuation is retired.
+    return _filter_hook_commands(hooks_data, lambda command: _is_legacy_loop_hook_command(command) or is_retired_automatic_hook(command))
 
 
 def _configure_codex_nsr_hooks(hooks_data, *, enable_nsr=False):
-    hooks_data = _filter_hook_commands(hooks_data, _is_loop_family_hook_command)
-    if not enable_nsr or not _nsr_available_for_cli("codex"):
-        return hooks_data
-    for event_name, matcher in (
-        ("PermissionRequest", "*"),
-        ("PreToolUse", "*"),
-        ("PostToolUse", "*"),
-        ("PreCompact", ""),
-        ("PostCompact", ""),
-        ("Stop", ""),
-    ):
-        hooks_data = _append_shell_command_hook(
-            hooks_data,
-            event_name,
-            _NSR_CODEX_HOOK,
-            matcher=matcher,
-            timeout=10,
-            status_message="Loading NSR",
-        )
-    return hooks_data
+    return _filter_hook_commands(hooks_data, lambda command: _is_legacy_loop_hook_command(command) or is_retired_automatic_hook(command))
 
 
 def _configure_claude_caveman_hooks(hooks_data, *, enable_caveman=False, caveman_level="light"):
@@ -4273,14 +4692,8 @@ def _build_codex_session_hooks(
         caveman_level=caveman_level,
     )
     hooks_data = _configure_codex_nsr_hooks(hooks_data, enable_nsr=enable_nsr)
-    hooks_data = _append_shell_command_hook(
-        hooks_data,
-        "Stop",
-        _XMEM_SESSION_END_HOOK,
-        matcher="",
-        timeout=10,
-        status_message="Closing xmem",
-    )
+    hooks_data = _merge_claude_hooks(hooks_data, _load_managed_session_hooks())
+    hooks_data = _filter_hook_commands(hooks_data, _is_retired_personal_policy_hook_command)
     hooks_data = _filter_hooks_by_disabled(hooks_data, disabled_session_surfaces)
     hooks_data = _filter_missing_managed_hook_commands(hooks_data)
     if hooks_data:
@@ -4869,6 +5282,12 @@ def _overlay_session_entry_dir(parent_dir, overlay_root, entry_name, extra_sourc
                 continue
             os.symlink(src, link)
 
+    for item in exclude_names:
+        link = os.path.join(merged_dir, item)
+        if os.path.islink(link) or os.path.isfile(link):
+            os.unlink(link)
+        elif os.path.isdir(link):
+            shutil.rmtree(link)
     if os.path.exists(dst) or os.path.islink(dst):
         _merge_dir(os.path.realpath(dst))
     _merge_dir(extra_dir)
@@ -4914,6 +5333,26 @@ def _overlay_session_skill_dir(parent_dir, overlay_root, skill_name, skill_root,
                 continue
             os.symlink(src, link)
 
+    def _global_skill_root():
+        parent_real = os.path.realpath(parent_dir)
+        roots = []
+        if f"{os.sep}.claude" in parent_real:
+            roots.extend([
+                _real_user_path(".claude", "skills", skill_name),
+                _real_user_path(".agents", "skills", skill_name),
+            ])
+        elif f"{os.sep}.codex" in parent_real:
+            roots.extend([
+                _real_user_path(".codex", "skills", skill_name),
+                _real_user_path(".agents", "skills", skill_name),
+            ])
+        else:
+            roots.append(_real_user_path(".agents", "skills", skill_name))
+        for root in roots:
+            if os.path.isfile(os.path.join(root, "SKILL.md")):
+                return root
+        return ""
+
     disabled = _session_skill_disabled(disabled_session_surfaces, skill_name)
     if os.path.exists(skills_dir) or os.path.islink(skills_dir):
         _merge_dir(os.path.realpath(skills_dir), exclude_names={skill_name} if disabled else None)
@@ -4929,12 +5368,13 @@ def _overlay_session_skill_dir(parent_dir, overlay_root, skill_name, skill_root,
             os.symlink(merged_dir, skills_dir)
         return False
 
-    if not os.path.isfile(os.path.join(skill_root, "SKILL.md")):
+    preferred_skill_root = _global_skill_root() or skill_root
+    if not os.path.isfile(os.path.join(preferred_skill_root, "SKILL.md")):
         return False
 
     skill_link = os.path.join(merged_dir, skill_name)
     if not os.path.exists(skill_link) and not os.path.islink(skill_link):
-        os.symlink(skill_root, skill_link)
+        os.symlink(preferred_skill_root, skill_link)
 
     if not os.listdir(merged_dir):
         return False
@@ -5064,15 +5504,6 @@ def _overlay_toon_session_entries(parent_dir, session_home, *, disabled_session_
     _overlay_session_skill_dir(parent_dir, overlay_root, "toon", toon_root, disabled_session_surfaces=disabled_session_surfaces)
 
 
-def _overlay_xmem_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
-    xmem_root = _resolve_xmem_root()
-    if not xmem_root:
-        return
-    overlay_root = os.path.join(session_home, ".mms-xmem-overlay")
-    os.makedirs(overlay_root, exist_ok=True)
-    _overlay_session_skill_dir(parent_dir, overlay_root, "xmem", xmem_root, disabled_session_surfaces=disabled_session_surfaces)
-
-
 def _overlay_token_saver_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
     token_saver_root = _resolve_token_saver_root()
     if not token_saver_root:
@@ -5097,6 +5528,20 @@ def _overlay_token_saver_session_entries(parent_dir, session_home, *, disabled_s
         return
     _overlay_session_skill_dir(parent_dir, overlay_root, "token-saver", token_saver_root, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_session_entry_dir(parent_dir, overlay_root, "commands", token_saver_root)
+
+
+def _overlay_managed_dynamic_skill_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
+    entries = _managed_dynamic_skill_entries()
+    if not entries:
+        return
+    overlay_root = os.path.join(session_home, ".mms-managed-dynamic-skills-overlay")
+    os.makedirs(overlay_root, exist_ok=True)
+    for entry in entries:
+        name = str(entry.get("name") or "").strip()
+        root = str(entry.get("root") or "").strip()
+        if not name or not root:
+            continue
+        _overlay_session_skill_dir(parent_dir, overlay_root, name, root, disabled_session_surfaces=disabled_session_surfaces)
 
 
 def _overlay_auto_github_contributor_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
@@ -5242,7 +5687,7 @@ def _overlay_agy_session_assets(
     _overlay_codegraph_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_toon_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_token_saver_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
-    _overlay_xmem_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
+    _overlay_managed_dynamic_skill_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_auto_github_contributor_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
 
 
@@ -5260,9 +5705,17 @@ def _overlay_opencode_session_assets(config_dir, session_home, *, enable_caveman
         overlay_codegraph_session_entries=_overlay_codegraph_session_entries,
         overlay_toon_session_entries=_overlay_toon_session_entries,
         overlay_token_saver_session_entries=_overlay_token_saver_session_entries,
-        overlay_xmem_session_entries=_overlay_xmem_session_entries,
-        overlay_opencode_xmem_plugin=_overlay_opencode_xmem_plugin,
+        overlay_managed_dynamic_skill_entries=_overlay_managed_dynamic_skill_entries,
+        overlay_opencode_nsr_plugin=_overlay_opencode_nsr_plugin,
     )
+
+
+def _overlay_xmem_session_entries(*_args, **_kwargs):
+    return None
+
+
+def _overlay_opencode_xmem_plugin(*_args, **_kwargs):
+    return None
 
 
 def _configure_ecc_session_env(env_data, *, enable_ecc=False):
@@ -5471,6 +5924,7 @@ def _resolve_hive_root(module_path=None):
     install_home = str(os.environ.get("HIVE_HOME") or "").strip()
     if install_home:
         candidates.append(os.path.abspath(os.path.expanduser(install_home)))
+    candidates.extend(_managed_asset_root_candidates("mcp", "hive"))
 
     module_dir = os.path.dirname(os.path.abspath(module_path or __file__))
     local_candidates = [
@@ -5518,6 +5972,7 @@ def _resolve_pilot_root(module_path=None):
     explicit = str(os.environ.get("MMS_PILOT_ROOT") or "").strip()
     if explicit:
         candidates.append(os.path.abspath(os.path.expanduser(explicit)))
+    candidates.extend(_managed_asset_root_candidates("mcp", "pilot"))
 
     module_dir = os.path.dirname(os.path.abspath(module_path or __file__))
     auto_skills_root = os.path.dirname(os.path.dirname(module_dir))
@@ -5547,6 +6002,8 @@ def _resolve_pilot_root(module_path=None):
 
 
 def _default_pilot_session_mcp_server():
+    if not _session_mcp_opt_in_enabled("pilot"):
+        return None
     pilot_root = _resolve_pilot_root()
     if pilot_root:
         return {
@@ -5658,6 +6115,8 @@ def _session_managed_mcp_servers(settings_data, *, allow_execution_surfaces=True
             inherited[name] = copy.deepcopy(fallback[name])
     if allow_execution_surfaces:
         for name, spec in _installed_claude_plugin_mcp_servers().items():
+            if not _session_mcp_default_enabled(name):
+                continue
             inherited.setdefault(name, copy.deepcopy(spec))
         hive_spec = _default_hive_session_mcp_server()
         if isinstance(hive_spec, dict) and str(hive_spec.get("command") or "").strip():
@@ -5987,6 +6446,20 @@ def _strip_claude_restore_state(data, *, strip_sensitive_auth=False):
     return payload
 
 
+def _claude_resume_project_path_variants(project_path):
+    variants = []
+    raw = os.path.realpath(str(project_path or "").strip())
+    if raw:
+        variants.append(raw)
+    try:
+        canonical = os.path.realpath(canonical_project_path(raw or None))
+        if canonical and canonical not in variants:
+            variants.append(canonical)
+    except Exception:
+        pass
+    return variants
+
+
 def _load_project_scoped_claude_resume_session_id(
     project_path,
     *,
@@ -5994,11 +6467,10 @@ def _load_project_scoped_claude_resume_session_id(
     runtime_kind="",
     resume_model="",
 ):
-    normalized_project = os.path.realpath(str(project_path or "").strip())
-    normalized_account_id = str(account_id or "").strip()
-    normalized_runtime_kind = str(runtime_kind or "").strip()
-    normalized_resume_model = _claude_resume_model_name(resume_model)
-    if not normalized_project or not normalized_account_id:
+    normalized_projects = set(_claude_resume_project_path_variants(project_path))
+    # Native Claude resume is project-scoped. MMS should not hide a resumable
+    # conversation just because the current launch uses another model/provider.
+    if not normalized_projects:
         return None
     try:
         sessions = list_indexed_sessions("claude")
@@ -6007,24 +6479,12 @@ def _load_project_scoped_claude_resume_session_id(
 
     candidates: list[tuple[str, str]] = []
     for session in sessions:
-        if str(session.get("account_id") or "").strip() != normalized_account_id:
-            continue
         session_project = os.path.realpath(
             str(session.get("project_path") or session.get("cwd") or "").strip()
         )
-        if session_project != normalized_project:
+        session_cwd = os.path.realpath(str(session.get("cwd") or "").strip())
+        if session_project not in normalized_projects and session_cwd not in normalized_projects:
             continue
-        session_runtime_kind = str(session.get("runtime_kind") or "").strip()
-        if normalized_runtime_kind and session_runtime_kind and session_runtime_kind != normalized_runtime_kind:
-            continue
-        if normalized_resume_model:
-            session_resume_model = _claude_resume_model_name(
-                session.get("resume_model"),
-                session.get("display_model"),
-                session.get("selected_model"),
-            )
-            if session_resume_model != normalized_resume_model:
-                continue
         session_id = str(session.get("session_id") or "").strip()
         if not session_id or session_id.startswith("pid-"):
             continue
@@ -6046,11 +6506,11 @@ def _overlay_project_scoped_claude_resume_state(
     resume_model="",
 ):
     payload = dict(data) if isinstance(data, dict) else {}
-    normalized_project = os.path.realpath(str(project_path or "").strip())
-    if not normalized_project:
+    normalized_projects = _claude_resume_project_path_variants(project_path)
+    if not normalized_projects:
         return payload
     session_id = _load_project_scoped_claude_resume_session_id(
-        normalized_project,
+        normalized_projects[0],
         account_id=account_id,
         runtime_kind=runtime_kind,
         resume_model=resume_model,
@@ -6061,10 +6521,11 @@ def _overlay_project_scoped_claude_resume_state(
     projects = payload.get("projects")
     if not isinstance(projects, dict):
         projects = {}
-    entry = projects.get(normalized_project)
-    next_entry = dict(entry) if isinstance(entry, dict) else {}
-    next_entry["lastSessionId"] = session_id
-    projects[normalized_project] = next_entry
+    for normalized_project in normalized_projects:
+        entry = projects.get(normalized_project)
+        next_entry = dict(entry) if isinstance(entry, dict) else {}
+        next_entry["lastSessionId"] = session_id
+        projects[normalized_project] = next_entry
     payload["projects"] = projects
     return payload
 
@@ -6584,6 +7045,30 @@ def _write_claude_session_settings(
     return settings_data, settings_path
 
 
+def _validate_claude_session_settings(settings_path, required_env):
+    if not settings_path or not os.path.isabs(str(settings_path)):
+        return
+    settings_path = str(settings_path)
+    loaded = _load_json_dict_unlocked(settings_path)
+    env_data = loaded.get("env") if isinstance(loaded, dict) else None
+    if not isinstance(env_data, dict):
+        raise RuntimeError(f"Claude session settings missing env: {settings_path}")
+    missing = [
+        key
+        for key in ("ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "MMS_ROUTE_STATUS_PATH")
+        if not str(env_data.get(key) or "").strip()
+    ]
+    if missing:
+        raise RuntimeError(
+            f"Claude session settings missing required env {', '.join(missing)}: {settings_path}"
+        )
+    for key, expected in (required_env or {}).items():
+        if key not in env_data:
+            raise RuntimeError(f"Claude session settings missing required env {key}: {settings_path}")
+        if str(env_data.get(key) or "") != str(expected or ""):
+            raise RuntimeError(f"Claude session settings env mismatch for {key}: {settings_path}")
+
+
 def _seed_oauth_claude_session_settings(account_claude_dir, session_claude_dir):
     account_settings = _load_claude_settings_from_dir(account_claude_dir)
     seeded_settings = _sanitize_claude_inherited_settings_payload(
@@ -6597,6 +7082,20 @@ def _seed_oauth_claude_session_settings(account_claude_dir, session_claude_dir):
     with locked_state_file(settings_path):
         atomic_write_json(settings_path, seeded_settings, mode=0o600)
     return seeded_settings
+
+
+def _gateway_ping_timeout(runtime=None):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    raw = runtime.get("gateway_health_timeout_sec")
+    if raw in (None, ""):
+        raw = 8
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return 8
+    if not math.isfinite(value) or value <= 0:
+        return 8
+    return min(value, 8)
 
 
 def _gateway_ping(base_url, api_key, runtime=None):
@@ -6622,7 +7121,7 @@ def _gateway_ping(base_url, api_key, runtime=None):
             models_url,
             runtime=runtime,
             headers=headers,
-            timeout=8,
+            timeout=_gateway_ping_timeout(runtime),
         )
         return 200 <= int(getattr(r, "status_code", 0) or 0) < 300
     except Exception:
@@ -6798,6 +7297,10 @@ def _scrub_claude_oauth_env(env):
 
 def _scrub_inherited_runtime_env(env, *, strip_openai=False, strip_proxy=False):
     env = _scrub_claude_oauth_env(env)
+    for key in list(env.keys()):
+        normalized = str(key or "").strip()
+        if any(normalized.startswith(prefix) for prefix in _HEADROOM_ENV_PREFIX_BLOCKLIST):
+            env.pop(key, None)
     if strip_openai:
         for key in list(env.keys()):
             normalized = str(key or "").strip()
@@ -6882,7 +7385,7 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
         _link_shared_dotfiles(session_home)
         # .claude/ 目录：创建真实目录，只按 allowlist 暴露可继承项。
         session_claude_dir = os.path.join(session_home, ".claude")
-        _prepare_claude_session_tree(
+        session_tree_env = _prepare_claude_session_tree(
             session_home,
             session_claude_dir,
             account_id=account.get("id", ""),
@@ -6891,7 +7394,11 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
             skip_real_entries={"settings.json"},
             source_claude_dir=account_claude_dir,
             allowed_source_entries=_CLAUDE_OAUTH_SESSION_SOURCE_ENTRY_ALLOWLIST,
+            disabled_session_surfaces=disabled_session_surfaces,
         )
+        agent_rules_diagnostics_path = ""
+        if isinstance(session_tree_env, dict):
+            agent_rules_diagnostics_path = str(session_tree_env.get("agent_rules_diagnostics") or "")
         _seed_oauth_claude_session_settings(account_claude_dir, session_claude_dir)
         _overlay_web_access_session_entries(
             session_claude_dir,
@@ -6908,14 +7415,11 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
             session_home,
             disabled_session_surfaces=disabled_session_surfaces,
         )
-        _overlay_xmem_session_entries(
-            session_claude_dir,
-            session_home,
-            disabled_session_surfaces=disabled_session_surfaces,
-        )
         _scrub_claude_oauth_env(env)
         env["HOME"] = session_home
         _set_session_home_hint(env, session_home)
+        if agent_rules_diagnostics_path:
+            env["MMS_AGENT_RULES_DIAGNOSTICS_JSON"] = agent_rules_diagnostics_path
         _install_host_context_env(
             env,
             cli="claude",
@@ -6989,7 +7493,11 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
                 session_home,
                 disabled_session_surfaces=disabled_session_surfaces,
             )
-            codex_resume_writeback_root = _overlay_codex_shared_resume(home_dir, session_home)
+            codex_resume_writeback_root = _overlay_codex_shared_resume(
+                home_dir,
+                session_home,
+                disabled_session_surfaces=disabled_session_surfaces,
+            )
             _overlay_web_access_session_entries(
                 os.path.join(session_home, ".codex"),
                 session_home,
@@ -7020,7 +7528,7 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
                 session_home,
                 disabled_session_surfaces=disabled_session_surfaces,
             )
-            _overlay_xmem_session_entries(
+            _overlay_managed_dynamic_skill_entries(
                 os.path.join(session_home, ".codex"),
                 session_home,
                 disabled_session_surfaces=disabled_session_surfaces,
@@ -7060,7 +7568,6 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
                 "codegraph": bool(_resolve_codegraph_root()) and not _session_skill_disabled(disabled_session_surfaces, "codegraph"),
                 "toon": bool(_resolve_toon_root()) and not _session_skill_disabled(disabled_session_surfaces, "toon"),
                 "token_saver": bool(_resolve_token_saver_root()) and not _session_skill_disabled(disabled_session_surfaces, "token-saver"),
-                "xmem": bool(_resolve_xmem_root()) and not _session_skill_disabled(disabled_session_surfaces, "xmem"),
                 "auto_github_contributor": bool(_resolve_auto_github_contributor_root()) and not _session_skill_disabled(disabled_session_surfaces, "auto-github-contributor"),
             },
             extra_paths={"host_context": host_context_env.get("MMS_HOST_CONTEXT_JSON", "")},
@@ -7076,7 +7583,7 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
     return env
 
 
-def _overlay_codex_shared_resume(home_dir, session_home):
+def _overlay_codex_shared_resume(home_dir, session_home, *, disabled_session_surfaces=None):
     account_codex_dir = os.path.join(home_dir, ".codex")
     real_codex_dir = _real_user_path(".codex")
     if os.path.realpath(account_codex_dir) == os.path.realpath(real_codex_dir):
@@ -7098,7 +7605,12 @@ def _overlay_codex_shared_resume(home_dir, session_home):
             continue
         src = os.path.join(account_codex_dir, entry)
         dst = os.path.join(session_codex_dir, entry)
-        _materialize_codex_session_entry(entry, src, dst)
+        _materialize_codex_session_entry_filtered(
+            entry,
+            src,
+            dst,
+            disabled_session_surfaces=disabled_session_surfaces,
+        )
 
     source_roots = [account_codex_dir]
     source_roots.extend(
@@ -7153,6 +7665,29 @@ _CODEX_SESSION_LOCAL_ONLY_PREFIXES = (
 
 
 def _materialize_codex_session_entry(entry, src, dst):
+    # Back-compat wrapper: default path preserves the old broad symlink/merge.
+    return _materialize_codex_session_entry_filtered(entry, src, dst)
+
+
+def _materialize_codex_session_entry_filtered(entry, src, dst, *, disabled_session_surfaces=None):
+    if entry == "skills" and os.path.isdir(src):
+        disabled_names = _disabled_skill_names_for_cli(disabled_session_surfaces, "codex")
+        if disabled_names or (os.path.isdir(dst) and not os.path.islink(dst)):
+            if os.path.islink(dst):
+                os.unlink(dst)
+            os.makedirs(dst, exist_ok=True)
+            for child in os.listdir(src):
+                if child in disabled_names:
+                    child_dst = os.path.join(dst, child)
+                    if os.path.islink(child_dst) or os.path.isfile(child_dst):
+                        os.unlink(child_dst)
+                    continue
+                child_src = os.path.join(src, child)
+                child_dst = os.path.join(dst, child)
+                if os.path.exists(child_dst) or os.path.islink(child_dst):
+                    continue
+                os.symlink(child_src, child_dst)
+            return
     if os.path.isdir(src) and os.path.isdir(dst):
         os.makedirs(dst, exist_ok=True)
         for child in os.listdir(src):
@@ -8233,23 +8768,6 @@ def _install_session_command_wrappers(session_home, env):
             env["MMS_TOKEN_GAIN_BIN"] = token_gain_wrapper_path
             env.setdefault("MMS_CONTEXT_DIR", os.path.join(session_home, ".mms", "context-store"))
 
-    xmem_script = _xmem_cli_path()
-    if xmem_script:
-        xmem_wrapper_path = os.path.join(wrapper_dir, "xmem")
-        xmem_wrapper = "\n".join(
-            [
-                "#!/bin/sh",
-                f"exec {json.dumps(xmem_script)} \"$@\"",
-                "",
-            ]
-        )
-        with open(xmem_wrapper_path, "w", encoding="utf-8") as handle:
-            handle.write(xmem_wrapper)
-        os.chmod(xmem_wrapper_path, 0o755)
-        if isinstance(env, dict):
-            env["XMEM_BIN"] = xmem_wrapper_path
-            env["MMS_XMEM_BIN"] = xmem_wrapper_path
-
     session_path = env.get("PATH") or current_path
     env["PATH"] = wrapper_dir + os.pathsep + session_path if session_path else wrapper_dir
 
@@ -8328,7 +8846,12 @@ def _mmc_launch_env_overrides(model_info, runtime, *, enable_claude_1m=True):
         "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
     }
     _inject_selected_model_name(env, resolved_model)
-    _apply_claude_model_overrides(env, model_info or resolved_model, enable_1m=enable_claude_1m)
+    _apply_claude_model_overrides(
+        env,
+        model_info or resolved_model,
+        enable_1m=enable_claude_1m,
+        provider_id=(runtime or {}).get("id"),
+    )
     if isinstance(model_info, dict):
         env["CLAUDE_CODE_ENABLE_SUBAGENT_PARALLELISM"] = "1"
         env["CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS"] = "5"
@@ -8338,8 +8861,11 @@ def _mmc_launch_env_overrides(model_info, runtime, *, enable_claude_1m=True):
         enable_claude_1m=enable_claude_1m,
         provider_id=(runtime or {}).get("id"),
     )
-    env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = str(ctx_window)
-    env["CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE"] = str(max(ctx_window - 3000, 10000))
+    _apply_claude_context_env_overrides(
+        env,
+        context_window=ctx_window,
+        model_names=(resolved_model,),
+    )
     return env
 
 
@@ -8527,6 +9053,8 @@ def _append_codex_mcp_servers_from_claude_json(config_text, *, disabled_session_
     servers = copy.deepcopy(servers) if isinstance(servers, dict) else {}
     enabled_codex_plugins = _enabled_real_codex_plugin_names()
     for name, spec in _installed_claude_plugin_mcp_servers().items():
+        if not _session_mcp_default_enabled(name):
+            continue
         if (
             isinstance(spec, dict)
             and isinstance(spec.get("url"), str)
@@ -8721,6 +9249,35 @@ def _apply_claude_visible_model_overrides(target, model_name, *, fallback_model=
     return visible_model
 
 
+def _apply_claude_shell_context_slots(target, *, context_window, fallback_model="", enable_1m=True, provider_id=None):
+    """Keep Claude Code's shell model cap from shrinking larger routed contexts."""
+    window = _coerce_context_window(context_window)
+    if window is None or window <= _DEFAULT_CONTEXT_WINDOW:
+        return ""
+    shell_model = _normalized_model_name(
+        target.get("ANTHROPIC_MODEL")
+        or target.get("ANTHROPIC_DEFAULT_SONNET_MODEL")
+        or target.get("ANTHROPIC_REASONING_MODEL")
+        or fallback_model
+        or "claude-sonnet-4-6"
+    )
+    if not _is_claude_family_model_name(shell_model):
+        shell_model = "claude-sonnet-4-6"
+    shell_model = _with_1m_suffix(shell_model, enable_1m=enable_1m, provider_id=provider_id)
+    if _ONE_M_CONTEXT_SUFFIX not in shell_model.lower():
+        return ""
+    for key in (
+        "ANTHROPIC_MODEL",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_REASONING_MODEL",
+        "CLAUDE_CODE_SUBAGENT_MODEL",
+    ):
+        target[key] = shell_model
+    target["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = _strip_one_m_context_suffix(shell_model)
+    return shell_model
+
+
 def _claude_resume_model_name(*candidates):
     for candidate in candidates:
         normalized = _normalized_model_name(candidate)
@@ -8739,7 +9296,7 @@ def _primary_claude_model(model_info):
     return _normalized_model_name(model_info)
 
 
-def _with_1m_suffix(model_name, *, enable_1m=True):
+def _with_1m_suffix(model_name, *, enable_1m=True, provider_id=None):
     """对 opus/sonnet Claude 模型追加 [1m] 后缀以启用 1M context。
     Haiku 不支持 1M。非 Claude 模型不能把 [1m] 暴露给 Claude Code model slot。
     Claude Code 会在 API 请求前自动剥离 Claude-family 的 [1m]。
@@ -8759,11 +9316,14 @@ def _with_1m_suffix(model_name, *, enable_1m=True):
         return normalized
     # opus 和 sonnet 支持 1M context
     if any(k in lower for k in ("opus", "sonnet")) and "haiku" not in lower:
+        configured_window = _lookup_context_window(normalized, provider_id=provider_id)
+        if configured_window is not None and configured_window < 1_000_000:
+            return normalized
         return normalized + _ONE_M_CONTEXT_SUFFIX
     return normalized
 
 
-def _apply_claude_model_overrides(target, model_info, *, enable_1m=True):
+def _apply_claude_model_overrides(target, model_info, *, enable_1m=True, provider_id=None):
     primary_model = _primary_claude_model(model_info)
     if not primary_model:
         return ""
@@ -8772,22 +9332,36 @@ def _apply_claude_model_overrides(target, model_info, *, enable_1m=True):
         opus_model = _normalized_model_name(model_info.get("opus")) or primary_model
         sonnet_model = _normalized_model_name(model_info.get("sonnet")) or primary_model
         haiku_model = _normalized_model_name(model_info.get("haiku")) or primary_model
-        target["ANTHROPIC_DEFAULT_OPUS_MODEL"] = _with_1m_suffix(opus_model, enable_1m=enable_1m)
-        target["ANTHROPIC_DEFAULT_SONNET_MODEL"] = _with_1m_suffix(sonnet_model, enable_1m=enable_1m)
+        target["ANTHROPIC_DEFAULT_OPUS_MODEL"] = _with_1m_suffix(
+            opus_model,
+            enable_1m=enable_1m,
+            provider_id=provider_id,
+        )
+        target["ANTHROPIC_DEFAULT_SONNET_MODEL"] = _with_1m_suffix(
+            sonnet_model,
+            enable_1m=enable_1m,
+            provider_id=provider_id,
+        )
         target["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = haiku_model  # haiku 不支持 1M
-        target["ANTHROPIC_MODEL"] = _with_1m_suffix(primary_model, enable_1m=enable_1m)
+        target["ANTHROPIC_MODEL"] = _with_1m_suffix(
+            primary_model,
+            enable_1m=enable_1m,
+            provider_id=provider_id,
+        )
         target["ANTHROPIC_REASONING_MODEL"] = _with_1m_suffix(
             sonnet_model or primary_model,
             enable_1m=enable_1m,
+            provider_id=provider_id,
         )
         subagent_model = _normalized_model_name(model_info.get("subagent")) or sonnet_model or primary_model
         target["CLAUDE_CODE_SUBAGENT_MODEL"] = _with_1m_suffix(
             subagent_model,
             enable_1m=enable_1m,
+            provider_id=provider_id,
         )
         return primary_model
 
-    primary_1m = _with_1m_suffix(primary_model, enable_1m=enable_1m)
+    primary_1m = _with_1m_suffix(primary_model, enable_1m=enable_1m, provider_id=provider_id)
     for key in (
         "ANTHROPIC_MODEL",
         "ANTHROPIC_DEFAULT_OPUS_MODEL",
@@ -8831,7 +9405,7 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
             _print_launch_step_done("gateway 健康检查", step_start)
 
         speed_scope = build_provider_speed_scope(runtime)
-        route_status_paths = _claude_route_status_paths()
+        route_status_paths = _claude_route_status_paths(gateway_home=_claude_gateway_home())
         probe_result = runtime.get("_launch_prefetched_probe")
         if probe_result is None:
             try:
@@ -8902,7 +9476,11 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
         _thinking_enabled = _runtime_thinking_enabled(runtime)
         _gpt_default_effort = _default_gpt_reasoning_effort()
         if "reasoning_effort" in runtime:
-            _reasoning_effort = _runtime_reasoning_effort(runtime, default=_gpt_default_effort)
+            _reasoning_effort = _runtime_reasoning_effort(
+                runtime,
+                default=_gpt_default_effort,
+                model_name=probe_model,
+            )
         elif _gpt_openai_url and _is_gpt_model(probe_model):
             from mms_tui import select_reasoning_effort_tui as _sel_effort_claude
             _reasoning_effort = _sel_effort_claude(default=_gpt_default_effort)
@@ -8910,12 +9488,29 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
             _reasoning_effort = "high"
         if _gpt_openai_url and _is_gpt_model(probe_model):
             console.print(f"[dim]thinking: {'on' if _thinking_enabled else 'off'} · effort: {_reasoning_effort}[/dim]")
+        _model_capabilities = _runtime_model_capabilities(runtime, probe_model)
         _vision_sidecar = _runtime_vision_sidecar(runtime)
+        if _model_capabilities_support_vision(_model_capabilities, probe_model) is True:
+            _vision_sidecar = {}
         if _vision_sidecar:
             console.print(
                 f"[dim]vision sidecar: {_vision_sidecar.get('provider_id', '-')} / {_vision_sidecar.get('model', '-')}[/dim]"
             )
         rescue_bridge_kwargs = _rescue_bridge_kwargs()
+        _context_models = [m for m in (probe_model, lb_medium, lb_light) if m]
+        _session_context_window = _effective_context_window(
+            *(_context_models or [probe_model]),
+            enable_claude_1m=enable_claude_1m,
+            provider_id=provider_id,
+        )
+        _bridge_context_kwargs = {
+            "context_windows": _context_windows_for_models(
+                *(_context_models or [probe_model]),
+                enable_claude_1m=enable_claude_1m,
+                provider_id=provider_id,
+            ),
+            "session_context_window": _session_context_window,
+        }
 
         if anthropic_url is not None:
             bridge_gw_url = anthropic_url.rstrip("/")
@@ -8946,6 +9541,8 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
                                                     reasoning_effort=_reasoning_effort,
                                                     native_fallback_routes=native_fallback_routes,
                                                     vision_sidecar=_vision_sidecar,
+                                                    model_capabilities=_model_capabilities,
+                                                    **_bridge_context_kwargs,
                                                     **rescue_bridge_kwargs)
                 bridge_cfg = cleanup_ctx.__enter__()
                 env = _prepare_claude_env_with_status(
@@ -8986,6 +9583,8 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
                     reasoning_effort=_reasoning_effort,
                     native_fallback_routes=native_fallback_routes,
                     vision_sidecar=_vision_sidecar,
+                    model_capabilities=_model_capabilities,
+                    **_bridge_context_kwargs,
                     **rescue_bridge_kwargs,
                 )
                 bridge_cfg = cleanup_ctx.__enter__()
@@ -9046,6 +9645,8 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
                                                 reasoning_enabled=_thinking_enabled,
                                                 reasoning_effort=_reasoning_effort,
                                                 vision_sidecar=_vision_sidecar,
+                                                model_capabilities=_model_capabilities,
+                                                **_bridge_context_kwargs,
                                                 **rescue_bridge_kwargs)
             bridge_cfg = cleanup_ctx.__enter__()
             env = _prepare_claude_env_with_status(
@@ -9083,6 +9684,8 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
                                                 strip_upstream_user_agent=strip_upstream_user_agent,
                                                 minimal_claude_header_passthrough=minimal_claude_header_passthrough,
                                                 vision_sidecar=_vision_sidecar,
+                                                model_capabilities=_model_capabilities,
+                                                **_bridge_context_kwargs,
                                                 **rescue_bridge_kwargs)
             bridge_cfg = cleanup_ctx.__enter__()
             env = _prepare_claude_env_with_status(
@@ -9127,6 +9730,8 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
                                                     strip_upstream_user_agent=strip_upstream_user_agent,
                                                     minimal_claude_header_passthrough=minimal_claude_header_passthrough,
                                                     vision_sidecar=_vision_sidecar,
+                                                    model_capabilities=_model_capabilities,
+                                                    **_bridge_context_kwargs,
                                                     **rescue_bridge_kwargs)
                 bridge_cfg = cleanup_ctx.__enter__()
                 env = _prepare_claude_env_with_status(
@@ -9182,6 +9787,8 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
                     reasoning_effort=_reasoning_effort,
                     native_fallback_routes=native_fallback_routes,
                     vision_sidecar=_vision_sidecar,
+                    model_capabilities=_model_capabilities,
+                    **_bridge_context_kwargs,
                     **rescue_bridge_kwargs,
                 )
                 bridge_cfg = cleanup_ctx.__enter__()
@@ -9204,6 +9811,9 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
     env["CLAUDE_CODE_ATTRIBUTION_HEADER"] = "0"
     env["API_TIMEOUT_MS"] = "3000000"
     env["MMS_RESUME_COMMAND_NAME"] = _mms_resume_command_name()
+    effort_env = _claude_code_effort_env_value(probe_model, runtime)
+    if effort_env:
+        env["CLAUDE_CODE_EFFORT_LEVEL"] = effort_env
 
     # bridge 模式下跳过 model slot：Claude Code 用默认 claude-* 模型名通过校验，
     # bridge 在转发时替换成真实模型名（heavy_model / medium_model / light_model）。
@@ -9219,12 +9829,22 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
 
     if isinstance(model_info, dict):
         if not _skip_model:
-            _apply_claude_model_overrides(env, model_info, enable_1m=enable_claude_1m)
+            _apply_claude_model_overrides(
+                env,
+                model_info,
+                enable_1m=enable_claude_1m,
+                provider_id=(runtime or {}).get("id"),
+            )
 
         env["CLAUDE_CODE_ENABLE_SUBAGENT_PARALLELISM"] = "1"
         env["CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS"] = "5"
     elif not _skip_model:
-        _apply_claude_model_overrides(env, model_info, enable_1m=enable_claude_1m)
+        _apply_claude_model_overrides(
+            env,
+            model_info,
+            enable_1m=enable_claude_1m,
+            provider_id=(runtime or {}).get("id"),
+        )
 
     # ── Context window: 用真实模型名（probe_model）计算，非壳名 ──
     _real_models = [m for m in (probe_model, lb_medium, lb_light) if m]
@@ -9235,18 +9855,35 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
         enable_claude_1m=enable_claude_1m,
         provider_id=(runtime or {}).get("id"),
     )
-    env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = str(ctx_window)
-    env["CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE"] = str(max(ctx_window - 3000, 10000))
+    _apply_claude_context_env_overrides(
+        env,
+        context_window=ctx_window,
+        model_names=_real_models,
+    )
+    _apply_claude_shell_context_slots(
+        env,
+        context_window=ctx_window,
+        fallback_model=env.get("ANTHROPIC_MODEL")
+        or env.get("ANTHROPIC_DEFAULT_SONNET_MODEL")
+        or "claude-sonnet-4-6",
+        enable_1m=enable_claude_1m or any(
+            _is_non_claude_routed_model(m) for m in _real_models
+        ),
+        provider_id=(runtime or {}).get("id"),
+    )
 
     claude_bin = _resolve_real_home_command_path("claude", env) or "claude"
     cmd = [claude_bin]
+    session_home = env.get("HOME")
+    settings_path = os.path.join(session_home, ".claude", "settings.json") if session_home else ""
+    if settings_path:
+        cmd += ["--settings", settings_path]
     if runtime.get("bypass"):
         cmd += ["--add-dir", os.path.realpath(_safe_getcwd())]
         cmd.append("--dangerously-skip-permissions")
     if extra_args:
         cmd += list(extra_args)
     console.print("[dim]⏳ 正在启动 Claude CLI...[/dim]")
-    session_home = env.get("HOME")
     exit_callback = None
     if session_home:
         exit_callback = lambda exit_code: _finalize_claude_slot(session_home, exit_code=exit_code)
@@ -9463,15 +10100,35 @@ def _copy_tree_files_if_missing(src, dst):
                 pass
 
 
+def _mirror_claude_project_resume_dir_aliases(projects_dir, current_cwd):
+    projects_dir = os.path.abspath(os.path.expanduser(str(projects_dir or "")))
+    if not os.path.isdir(projects_dir):
+        return
+    aliases = [
+        os.path.join(projects_dir, dirname)
+        for dirname in _claude_project_resume_dir_names(current_cwd)
+    ]
+    aliases = [path for path in dict.fromkeys(aliases)]
+    existing = [path for path in aliases if os.path.isdir(path)]
+    if not existing:
+        return
+    for source in existing:
+        for target in aliases:
+            if os.path.realpath(source) == os.path.realpath(target):
+                continue
+            _copy_tree_files_if_missing(source, target)
+
+
 def _normalized_claude_slot_account(value):
     return str(value or "").strip().lower()
 
 
 def _claude_project_resume_dir_names(project_path):
-    paths = {
-        os.path.abspath(os.path.expanduser(str(project_path or ""))),
-        os.path.realpath(os.path.expanduser(str(project_path or ""))),
-    }
+    paths = set(_claude_resume_project_path_variants(project_path))
+    raw = os.path.expanduser(str(project_path or ""))
+    if raw:
+        paths.add(os.path.abspath(raw))
+        paths.add(os.path.realpath(raw))
     names = set()
     for path in paths:
         if not path:
@@ -9487,7 +10144,42 @@ def _claude_slot_roots_for_resume_backfill(account_id):
     normalized_account_id = _normalized_claude_slot_account(account_id)
     if normalized_account_id:
         roots.append(_real_user_path(".config", "mms", "accounts", normalized_account_id, "s"))
+    accounts_root = _real_user_path(".config", "mms", "accounts")
+    if os.path.isdir(accounts_root):
+        for name in os.listdir(accounts_root):
+            candidate = os.path.join(accounts_root, name, "s")
+            if candidate not in roots:
+                roots.append(candidate)
     return roots
+
+
+def _backfill_project_store_claude_resume_files(target_projects_dir, current_cwd):
+    try:
+        from mms_project_store import get_projects_dir
+    except Exception:
+        return
+    projects_root = get_projects_dir()
+    if not projects_root.is_dir():
+        return
+    current_cwd = os.path.realpath(current_cwd or _safe_getcwd())
+    current_path_variants = {
+        os.path.realpath(path)
+        for path in _claude_resume_project_path_variants(current_cwd)
+        if str(path or "").strip()
+    }
+    current_path_variants.add(current_cwd)
+    for metadata_path in projects_root.glob("*/claude/state/metadata.json"):
+        try:
+            payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        canonical_path = os.path.realpath(str(payload.get("canonical_path") or ""))
+        if canonical_path not in current_path_variants:
+            continue
+        source_projects_dir = metadata_path.parents[1] / "raw" / "projects"
+        if os.path.realpath(str(source_projects_dir)) == os.path.realpath(target_projects_dir):
+            continue
+        _copy_tree_files_if_missing(str(source_projects_dir), target_projects_dir)
 
 
 def _backfill_real_claude_project_resume_files(target_projects_dir, current_cwd):
@@ -9520,6 +10212,7 @@ def _backfill_claude_project_resume_files(target_projects_dir, current_cwd, acco
     expected_account = _normalized_claude_slot_account(account_id)
 
     _backfill_real_claude_project_resume_files(target_projects_dir, current_cwd)
+    _backfill_project_store_claude_resume_files(target_projects_dir, current_cwd)
 
     for slots_root in _claude_slot_roots_for_resume_backfill(expected_account):
         if not os.path.isdir(slots_root):
@@ -9535,13 +10228,11 @@ def _backfill_claude_project_resume_files(target_projects_dir, current_cwd, acco
                 continue
             if os.path.realpath(str(marker.get("cwd") or "")) != current_cwd:
                 continue
-            marker_account = _normalized_claude_slot_account(marker.get("account_id"))
-            if expected_account and marker_account != expected_account:
-                continue
             source_projects_dir = os.path.join(slot_home, ".claude", "projects")
             if os.path.realpath(source_projects_dir) == os.path.realpath(target_projects_dir):
                 continue
             _copy_tree_files_if_missing(source_projects_dir, target_projects_dir)
+    _mirror_claude_project_resume_dir_aliases(target_projects_dir, current_cwd)
 
 
 def _link_claude_persistent_entry(session_claude_dir, entry, target):
@@ -9569,6 +10260,209 @@ def _link_claude_persistent_entry(session_claude_dir, entry, target):
     os.symlink(target, dst)
 
 
+_AGENT_RULE_FILE_SUFFIXES = (".md", ".markdown")
+AGENT_RULES_DIAGNOSTICS_SCHEMA = "mms.agent_rules_diagnostics.v1"
+_AGENT_RULES_DIAGNOSTICS_REL_PATH = os.path.join(".mms", "diagnostics", "agent-rules.json")
+_AGENT_RULES_CHECKED_PATH = "~/.agents/rules/"
+
+
+def _agent_rule_directory_listing(rules_dir):
+    """Inspect optional rule filenames only; never read private rule content."""
+    rules_dir = str(rules_dir or "").strip()
+    listing = {
+        "exists": bool(rules_dir and os.path.isdir(rules_dir)),
+        "entry_count": 0,
+        "supported_files": [],
+        "unsupported_count": 0,
+    }
+    if not listing["exists"]:
+        return listing
+    try:
+        names = sorted(os.listdir(rules_dir), key=lambda item: (item.casefold(), item))
+    except OSError:
+        return listing
+    listing["entry_count"] = len(names)
+    for name in names:
+        suffix = os.path.splitext(name)[1].lower()
+        path = os.path.join(rules_dir, name)
+        if suffix in _AGENT_RULE_FILE_SUFFIXES and os.path.isfile(path):
+            listing["supported_files"].append((name, path))
+        else:
+            listing["unsupported_count"] += 1
+    return listing
+
+
+def _optional_agent_rule_files(rules_dir):
+    """Return supported local agent rule files in deterministic load order."""
+    return list(_agent_rule_directory_listing(rules_dir).get("supported_files") or [])
+
+
+def _agent_rules_diagnostics_payload(rules_dir, *, allow_agent_rules, loaded_files=None):
+    listing = _agent_rule_directory_listing(rules_dir)
+    supported_files = list(listing.get("supported_files") or [])
+    loaded_names = [
+        str(name)
+        for name in dict.fromkeys(loaded_files or [])
+        if str(name or "").strip()
+    ]
+    if not allow_agent_rules:
+        status = "skipped-by-restricted-allowlist"
+    elif not listing.get("exists"):
+        status = "missing"
+    elif int(listing.get("entry_count") or 0) <= 0:
+        status = "empty"
+    elif not supported_files:
+        status = "unsupported-only"
+    else:
+        status = "loaded"
+    return {
+        "schema": AGENT_RULES_DIAGNOSTICS_SCHEMA,
+        "checked_path": _AGENT_RULES_CHECKED_PATH,
+        "status": status,
+        "allow_agent_rules": bool(allow_agent_rules),
+        "entry_count": int(listing.get("entry_count") or 0),
+        "supported_count": len(supported_files),
+        "unsupported_count": int(listing.get("unsupported_count") or 0),
+        "loaded_count": len(loaded_names),
+        "loaded_files": loaded_names,
+    }
+
+
+def _write_agent_rules_diagnostics(session_home, rules_dir, *, allow_agent_rules, loaded_files=None):
+    session_home = str(session_home or "").strip()
+    if not session_home:
+        return ""
+    path = os.path.join(session_home, _AGENT_RULES_DIAGNOSTICS_REL_PATH)
+    try:
+        atomic_write_json(
+            path,
+            _agent_rules_diagnostics_payload(
+                rules_dir,
+                allow_agent_rules=allow_agent_rules,
+                loaded_files=loaded_files,
+            ),
+            mode=0o600,
+        )
+    except Exception:
+        return ""
+    return path
+
+
+def _merge_optional_agent_rules_into_session_tree(session_claude_dir, agents_dir):
+    """Load optional ~/.agents/rules/*.md into the isolated Claude rules dir."""
+    rule_files = _optional_agent_rule_files(os.path.join(str(agents_dir or ""), "rules"))
+    if not rule_files:
+        return []
+
+    dst = os.path.join(session_claude_dir, "rules")
+    if os.path.isdir(dst) and not os.path.islink(dst):
+        loaded = []
+        for name, src in rule_files:
+            link = os.path.join(dst, name)
+            if os.path.exists(link) or os.path.islink(link):
+                continue
+            try:
+                os.symlink(src, link)
+            except OSError:
+                continue
+            loaded.append(name)
+        return loaded
+
+    overlay_root = os.path.join(os.path.dirname(session_claude_dir), ".mms-agent-rules-overlay")
+    merged_dir = os.path.join(overlay_root, "rules")
+    if os.path.isdir(merged_dir) and not os.path.islink(merged_dir):
+        shutil.rmtree(merged_dir)
+    elif os.path.exists(merged_dir) or os.path.islink(merged_dir):
+        os.unlink(merged_dir)
+    os.makedirs(merged_dir, exist_ok=True)
+
+    def _merge_existing(src_dir):
+        src_dir = str(src_dir or "").strip()
+        if not src_dir or not os.path.isdir(src_dir):
+            return
+        try:
+            if os.path.samefile(src_dir, merged_dir):
+                return
+        except Exception:
+            pass
+        try:
+            names = sorted(os.listdir(src_dir), key=lambda item: (item.casefold(), item))
+        except OSError:
+            return
+        for name in names:
+            src = os.path.join(src_dir, name)
+            link = os.path.join(merged_dir, name)
+            if os.path.exists(link) or os.path.islink(link):
+                continue
+            try:
+                os.symlink(src, link)
+            except OSError:
+                pass
+
+    if os.path.exists(dst) or os.path.islink(dst):
+        _merge_existing(os.path.realpath(dst))
+
+    loaded = []
+    for name, src in rule_files:
+        link = os.path.join(merged_dir, name)
+        if not os.path.exists(link) and not os.path.islink(link):
+            try:
+                os.symlink(src, link)
+            except OSError:
+                continue
+        loaded.append(name)
+
+    if not os.listdir(merged_dir):
+        return []
+    if os.path.islink(dst):
+        os.unlink(dst)
+    elif os.path.isdir(dst):
+        shutil.rmtree(dst)
+    elif os.path.exists(dst):
+        os.unlink(dst)
+    os.symlink(merged_dir, dst)
+    return loaded
+
+
+def _merge_agents_into_session_tree(session_claude_dir, agents_dir, allowed_entry_set, *, allow_agent_rules=False):
+    """Merge entries from ~/.agents/{skills,commands,rules} into the session .claude tree.
+
+    When ``~/.claude/skills/`` is a real directory (not a symlink), the existing
+    symlink-creation logic in ``_prepare_claude_session_tree`` skips it.  Skills
+    installed via ``install_global_commands.py`` live under ``~/.agents/skills/``
+    and would therefore never reach the overlay chain.  This helper symlinks
+    individual entries from ``~/.agents/{skills,commands}`` into the session
+    ``.claude/{skills,commands}`` directories so that they are picked up.  It
+    also opportunistically exposes Markdown files from ``~/.agents/rules/`` as
+    a local-only rule overlay; a missing or empty rules directory is a no-op.
+    """
+    loaded_agent_rules = []
+    if not os.path.isdir(agents_dir):
+        return loaded_agent_rules
+    for sub in ("skills", "commands"):
+        if sub not in allowed_entry_set:
+            continue
+        agents_sub = os.path.join(agents_dir, sub)
+        if not os.path.isdir(agents_sub):
+            continue
+        session_sub = os.path.join(session_claude_dir, sub)
+        if os.path.islink(session_sub):
+            continue
+        os.makedirs(session_sub, exist_ok=True)
+        for item in os.listdir(agents_sub):
+            dst = os.path.join(session_sub, item)
+            if os.path.exists(dst) or os.path.islink(dst):
+                continue
+            src = os.path.join(agents_sub, item)
+            try:
+                os.symlink(src, dst)
+            except OSError:
+                pass
+    if allow_agent_rules:
+        loaded_agent_rules = _merge_optional_agent_rules_into_session_tree(session_claude_dir, agents_dir)
+    return loaded_agent_rules
+
+
 def _prepare_claude_session_tree(
     session_home,
     session_claude_dir,
@@ -9580,11 +10474,14 @@ def _prepare_claude_session_tree(
     skip_real_entries=None,
     source_claude_dir=None,
     allowed_source_entries=None,
+    disabled_session_surfaces=None,
+    allow_agent_rules=None,
 ):
     current_cwd = os.path.realpath(_safe_getcwd())
     normalized_account_id = str(account_id or "").strip()
     store = ensure_claude_project_store(current_cwd, account_id=normalized_account_id)
     skip_real_entries = set(skip_real_entries or ())
+    using_default_source_entries = allowed_source_entries is None
     allowed_source_entries = [
         str(entry).strip()
         for entry in (
@@ -9595,7 +10492,10 @@ def _prepare_claude_session_tree(
         if str(entry or "").strip()
     ]
     allowed_source_entry_set = set(allowed_source_entries)
+    if allow_agent_rules is None:
+        allow_agent_rules = using_default_source_entries
     scoped_claude_dir = source_claude_dir or _real_user_path(".claude")
+    agents_dir = _real_user_path(".agents")
     if os.path.islink(session_claude_dir):
         os.unlink(session_claude_dir)
     os.makedirs(session_claude_dir, exist_ok=True)
@@ -9614,9 +10514,34 @@ def _prepare_claude_session_tree(
                 continue
             src = os.path.join(scoped_claude_dir, entry)
             dst = os.path.join(session_claude_dir, entry)
-            if (not os.path.exists(src) and not os.path.islink(src)) or os.path.exists(dst) or os.path.islink(dst):
+            if not os.path.exists(src) and not os.path.islink(src):
+                continue
+            if entry == "skills":
+                disabled_names = _disabled_skill_names_for_cli(disabled_session_surfaces, "claude")
+                if disabled_names:
+                    _overlay_session_entry_dir(
+                        session_claude_dir,
+                        os.path.join(session_home, ".mms-global-skill-overlay", "claude"),
+                        "skills",
+                        scoped_claude_dir,
+                        exclude_names=disabled_names,
+                    )
+                    continue
+            if os.path.exists(dst) or os.path.islink(dst):
                 continue
             os.symlink(src, dst)
+    loaded_agent_rules = _merge_agents_into_session_tree(
+        session_claude_dir,
+        agents_dir,
+        allowed_source_entry_set,
+        allow_agent_rules=bool(allow_agent_rules),
+    )
+    agent_rules_diagnostics_path = _write_agent_rules_diagnostics(
+        session_home,
+        os.path.join(agents_dir, "rules"),
+        allow_agent_rules=bool(allow_agent_rules),
+        loaded_files=loaded_agent_rules,
+    )
     for entry in CLAUDE_PERSISTENT_ENTRIES:
         dst = os.path.join(session_claude_dir, entry)
         target = str(
@@ -9650,6 +10575,7 @@ def _prepare_claude_session_tree(
         runtime_kind=runtime_kind,
         account_home=account_home,
     )
+    return {"agent_rules_diagnostics": agent_rules_diagnostics_path}
 
 
 def _sync_claude_session_state_to_account_home(session_home, account_home, *, state_mode="oauth"):
@@ -9774,7 +10700,7 @@ def _claude_gateway_env(
         stale_callback=_finalize_claude_slot,
         timings=_timings,
     )
-    route_status_path = _claude_route_status_paths()[0]
+    route_status_path = _claude_route_status_paths(gateway_home=gateway_home)[0]
     os.makedirs(gateway_home, exist_ok=True)
     disabled_session_surfaces = runtime.get("disabled_session_surfaces")
     agent_pack = _runtime_agent_pack(runtime)
@@ -9836,13 +10762,8 @@ def _claude_gateway_env(
         project_state=current_project_state,
         disabled_session_surfaces=disabled_session_surfaces,
     )
-    data = _overlay_project_scoped_claude_resume_state(
-        data,
-        current_project,
-        account_id=str(runtime.get("id", "")),
-        runtime_kind=runtime_kind or str(runtime.get("auth_mode", "api_key")),
-        resume_model=resume_model,
-    )
+    # Normal launch must start from the selected model, not from Claude Code's
+    # previous project pointer. Explicit `mms resume <id>` passes --resume.
     with locked_state_file(gw_json):
         atomic_write_json(gw_json, data, mode=0o600)
     if isinstance(_timings, list):
@@ -9859,8 +10780,9 @@ def _claude_gateway_env(
 
     # ── ~/.claude 目录：仅保留 project-scoped 持久项，其余不再继承真实树 ──
     gw_claude_dir = os.path.join(gateway_home, ".claude")
+    agent_rules_diagnostics_path = ""
     with _timed_launch_step(_timings, "prepare claude tree"):
-        _prepare_claude_session_tree(
+        session_tree_env = _prepare_claude_session_tree(
             gateway_home,
             gw_claude_dir,
             account_id=str(runtime.get("id", "")),
@@ -9868,7 +10790,10 @@ def _claude_gateway_env(
             runtime_kind=runtime_kind or str(runtime.get("auth_mode", "api_key")),
             resume_model=resume_model,
             skip_real_entries={"settings.json"},
+            disabled_session_surfaces=disabled_session_surfaces,
         )
+        if isinstance(session_tree_env, dict):
+            agent_rules_diagnostics_path = str(session_tree_env.get("agent_rules_diagnostics") or "")
     report = runtime.get("_account_guard_report")
     if report:
         _persist_account_guard_launch(
@@ -9908,6 +10833,8 @@ def _claude_gateway_env(
     }
     if mms_model_name:
         required_settings_env["MMS_MODEL_NAME"] = mms_model_name
+    if agent_rules_diagnostics_path:
+        required_settings_env["MMS_AGENT_RULES_DIAGNOSTICS_JSON"] = agent_rules_diagnostics_path
     default_settings_env: dict = {}
     if sensitive_provider:
         required_settings_env["CLAUDE_CODE_DISABLE_1M_CONTEXT"] = "1"
@@ -9923,6 +10850,7 @@ def _claude_gateway_env(
             required_settings_env,
             selected_model,
             enable_1m=enable_claude_1m,
+            provider_id=provider_id,
         )
     # 非 Claude 模型默认仍可用于 status；但 non-Claude [1m] selector 不能进入
     # ANTHROPIC_MODEL，否则 Claude Code compact/resume 会按字面模型名校验失败。
@@ -9945,6 +10873,12 @@ def _claude_gateway_env(
             model_info={"model": display_model or selected_model or heavy_model or best_model or ""},
             session_home=gateway_home,
         )
+        session_packet_extra_paths = {
+            "route_status": route_status_path,
+            "host_context": host_context_env.get("MMS_HOST_CONTEXT_JSON", ""),
+        }
+        if agent_rules_diagnostics_path:
+            session_packet_extra_paths["agent_rules_diagnostics"] = agent_rules_diagnostics_path
         session_packet_env = _install_session_packet_env(
             {},
             cli="claude",
@@ -9966,13 +10900,9 @@ def _claude_gateway_env(
                 "codegraph": bool(_resolve_codegraph_root()) and not _session_skill_disabled(disabled_session_surfaces, "codegraph"),
                 "toon": bool(_resolve_toon_root()) and not _session_skill_disabled(disabled_session_surfaces, "toon"),
                 "token_saver": bool(_resolve_token_saver_root()) and not _session_skill_disabled(disabled_session_surfaces, "token-saver"),
-                "xmem": bool(_resolve_xmem_root()) and not _session_skill_disabled(disabled_session_surfaces, "xmem"),
                 "auto_github_contributor": bool(_resolve_auto_github_contributor_root()) and not _session_skill_disabled(disabled_session_surfaces, "auto-github-contributor"),
             },
-            extra_paths={
-                "route_status": route_status_path,
-                "host_context": host_context_env.get("MMS_HOST_CONTEXT_JSON", ""),
-            },
+            extra_paths=session_packet_extra_paths,
         )
         required_settings_env.update(host_context_env)
         required_settings_env.update(session_packet_env)
@@ -9980,7 +10910,7 @@ def _claude_gateway_env(
             _load_real_claude_settings(),
             _load_claude_settings_from_dir(persistent_gateway_claude_dir),
         )
-        _write_claude_session_settings(
+        _settings_data, settings_path = _write_claude_session_settings(
             gw_claude_dir,
             required_env=required_settings_env,
             default_env=default_settings_env,
@@ -9992,6 +10922,7 @@ def _claude_gateway_env(
             enable_omc=enable_omc,
             disabled_session_surfaces=disabled_session_surfaces,
         )
+        _validate_claude_session_settings(settings_path, required_settings_env)
     with _timed_launch_step(_timings, "overlay session assets"):
         _overlay_caveman_session_entries(
             gw_claude_dir,
@@ -10016,7 +10947,7 @@ def _claude_gateway_env(
         _overlay_codegraph_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
         _overlay_toon_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
         _overlay_token_saver_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
-        _overlay_xmem_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
+        _overlay_managed_dynamic_skill_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
         _overlay_auto_github_contributor_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
 
     with _timed_launch_step(_timings, "build env and wrappers"):
@@ -10030,17 +10961,24 @@ def _claude_gateway_env(
         env["ANTHROPIC_BASE_URL"] = base_url
         env["ANTHROPIC_AUTH_TOKEN"] = effective_token
         env["MMS_ROUTE_STATUS_PATH"] = route_status_path
+        if agent_rules_diagnostics_path:
+            env["MMS_AGENT_RULES_DIAGNOSTICS_JSON"] = agent_rules_diagnostics_path
         _inject_selected_model_name(env, mms_model_name)
         if sensitive_provider:
             env["CLAUDE_CODE_DISABLE_1M_CONTEXT"] = "1"
         if best_model:
-            best_1m = _with_1m_suffix(best_model, enable_1m=enable_claude_1m)
+            best_1m = _with_1m_suffix(best_model, enable_1m=enable_claude_1m, provider_id=provider_id)
             for key in ("ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL",
                         "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_REASONING_MODEL"):
                 env[key] = best_1m
             env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = best_model  # haiku 不支持 1M
         if selected_model:
-            _apply_claude_model_overrides(env, selected_model, enable_1m=enable_claude_1m)
+            _apply_claude_model_overrides(
+                env,
+                selected_model,
+                enable_1m=enable_claude_1m,
+                provider_id=provider_id,
+            )
         if display_model:
             _apply_claude_visible_model_overrides(
                 env,
@@ -10068,9 +11006,20 @@ def _claude_gateway_env(
         status_model = display_model or selected_model or heavy_model or best_model or "unknown"
         status_tier = "heavy" if auth_token else "-"
         status_reason = "init_selected_model" if selected_model else ("bridge_ready" if auth_token else "direct")
+        status_context_window = _effective_context_window(
+            *[m for m in (status_model, medium_model, light_model) if m],
+            enable_claude_1m=enable_claude_1m,
+            provider_id=provider_id,
+        )
         _ensure_bridge_helpers()
         try:
-            _write_route_status(status_tier, status_model, status_reason, status_paths=[route_status_path])
+            _write_route_status(
+                status_tier,
+                status_model,
+                status_reason,
+                status_paths=[route_status_path],
+                context_window_tokens=status_context_window,
+            )
         except Exception:
             pass
 
@@ -10088,12 +11037,21 @@ def _claude_gateway_env(
     return env
 
 
+def _codex_gateway_root():
+    """Keep MMF Codex gateway state inside its selected preview root."""
+    command_name = str(os.environ.get("MMS_COMMAND_NAME") or "").strip().lower()
+    preview_mode = str(os.environ.get("MMS_PREVIEW_MODE") or "").strip().lower()
+    if command_name == "mmf" or preview_mode == "mmf":
+        return os.path.join(_selected_mms_config_root({}), "codex-gateway")
+    return _real_user_path(".config", "mms", "codex-gateway")
+
+
 def _codex_gateway_env(runtime, base_url, model_info=None):
     """为 gateway api_key 模式创建隔离 session，并复用稳定 CODEX_HOME。"""
     import json as _json
     openai_key = runtime.get("openai_api_key") or runtime["api_key"]
     disabled_session_surfaces = runtime.get("disabled_session_surfaces")
-    gateway_base = _real_user_path(".config", "mms", "codex-gateway")
+    gateway_base = _codex_gateway_root()
     gateway_codex_dir = os.path.join(gateway_base, ".codex")
     os.makedirs(gateway_base, exist_ok=True)
 
@@ -10423,7 +11381,12 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
                 continue
             src = os.path.join(real_codex_dir, entry)
             dst = os.path.join(codex_dir, entry)
-            _materialize_codex_session_entry(entry, src, dst)
+            _materialize_codex_session_entry_filtered(
+                entry,
+                src,
+                dst,
+                disabled_session_surfaces=disabled_session_surfaces,
+            )
     source_roots = [gateway_codex_dir]
     source_roots.extend(sibling_codex_roots)
     source_roots.append(real_codex_dir)
@@ -10440,7 +11403,7 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
     _overlay_codegraph_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_toon_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_token_saver_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
-    _overlay_xmem_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
+    _overlay_managed_dynamic_skill_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_auto_github_contributor_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
 
     env = os.environ.copy()
@@ -10478,7 +11441,6 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
             "codegraph": bool(_resolve_codegraph_root()) and not _session_skill_disabled(disabled_session_surfaces, "codegraph"),
             "toon": bool(_resolve_toon_root()) and not _session_skill_disabled(disabled_session_surfaces, "toon"),
             "token_saver": bool(_resolve_token_saver_root()) and not _session_skill_disabled(disabled_session_surfaces, "token-saver"),
-            "xmem": bool(_resolve_xmem_root()) and not _session_skill_disabled(disabled_session_surfaces, "xmem"),
             "auto_github_contributor": bool(_resolve_auto_github_contributor_root()) and not _session_skill_disabled(disabled_session_surfaces, "auto-github-contributor"),
         },
         extra_paths={"host_context": host_context_env.get("MMS_HOST_CONTEXT_JSON", "")},
@@ -10549,7 +11511,7 @@ def launch_codex(model_info, runtime, once=False, extra_args=None):
         bridge_label = f"模型 {model}" if model else "当前模型"
         console.print(f"[dim]{bridge_label} 通过本地 Chat Completions bridge 启动 Codex...[/dim]")
         bridge_thinking_enabled = _runtime_thinking_enabled(runtime)
-        bridge_reasoning_effort = _runtime_reasoning_effort(runtime, default="high")
+        bridge_reasoning_effort = _runtime_reasoning_effort(runtime, default="high", model_name=model)
         rescue_bridge_kwargs = _rescue_bridge_kwargs()
         with codex_chatcompletions_bridge(
             gateway_url,
@@ -10596,10 +11558,16 @@ def launch_codex(model_info, runtime, once=False, extra_args=None):
     thinking_enabled = _runtime_thinking_enabled(runtime)
     gpt_default_effort = _default_gpt_reasoning_effort()
     if "reasoning_effort" in runtime:
-        reasoning_effort = _runtime_reasoning_effort(runtime, default=gpt_default_effort)
+        reasoning_effort = _runtime_reasoning_effort(runtime, default=gpt_default_effort, model_name=model)
     else:
-        from mms_tui import select_reasoning_effort_tui as _sel_effort
-        reasoning_effort = _sel_effort(default=gpt_default_effort)
+        from mms_tui import (
+            _reasoning_effort_options_for_model,
+            select_reasoning_effort_tui as _sel_effort,
+        )
+        reasoning_effort = _sel_effort(
+            default=gpt_default_effort,
+            options=_reasoning_effort_options_for_model(model),
+        )
     console.print(f"[dim]thinking: {'on' if thinking_enabled else 'off'} · effort: {reasoning_effort}[/dim]")
     native_fallback_routes = _resolve_codex_responses_fallback_routes(runtime, model)
     if native_fallback_routes:
@@ -10691,6 +11659,11 @@ def _opencode_model_config(runtime, model_name):
         runtime,
         model_name,
         context_window_resolver=_effective_context_window,
+        output_limit_resolver=lambda model, provider_id=None: _capability_max_output_tokens(
+            model,
+            provider_id=provider_id,
+            accepted_sources={"model_policy", "manual_override", "approved_facts"},
+        ),
     )
 
 
@@ -10704,17 +11677,6 @@ def _opencode_rtk_plugin_path(runtime=None):
     )
 
 
-def _opencode_xmem_plugin_path(runtime=None):
-    return _opencode_xmem_plugin_path_impl(
-        runtime,
-        module_file=__file__,
-        normalize_session_surface_disabled=_normalize_session_surface_disabled,
-        session_skill_disabled=_session_skill_disabled,
-        resolve_xmem_root=_resolve_xmem_root,
-        xmem_cli_path=_xmem_cli_path,
-    )
-
-
 def _overlay_opencode_rtk_plugin(config_dir, runtime=None):
     return _overlay_opencode_plugin_impl(
         config_dir,
@@ -10723,20 +11685,34 @@ def _overlay_opencode_rtk_plugin(config_dir, runtime=None):
     )
 
 
-def _overlay_opencode_xmem_plugin(config_dir, runtime=None):
-    return _overlay_opencode_plugin_impl(
-        config_dir,
-        _opencode_xmem_plugin_path(runtime),
-        "mms-xmem.ts",
-    )
-
-
 def _opencode_rtk_plugin_enabled(runtime=None):
     return bool(_opencode_rtk_plugin_path(runtime))
 
 
-def _opencode_xmem_plugin_enabled(runtime=None):
-    return bool(_opencode_xmem_plugin_path(runtime))
+
+def _opencode_nsr_plugin_path(runtime=None):
+    # Keep OpenCode aligned with the repo-wide NSR toggle: if launch/runtime says
+    # NSR is disabled, do not overlay the experimental plugin even when the env
+    # opt-in is present.
+    if not _runtime_nsr_enabled(runtime):
+        return ""
+    return _opencode_nsr_plugin_path_impl(
+        runtime,
+        module_file=__file__,
+        normalize_session_surface_disabled=_normalize_session_surface_disabled,
+    )
+
+
+def _overlay_opencode_nsr_plugin(config_dir, runtime=None):
+    return _overlay_opencode_plugin_impl(
+        config_dir,
+        _opencode_nsr_plugin_path(runtime),
+        "mms-nsr.ts",
+    )
+
+
+def _opencode_nsr_plugin_enabled(runtime=None):
+    return bool(_opencode_nsr_plugin_path(runtime))
 
 
 def _build_opencode_config_payload(runtime, model_name=""):
@@ -10744,6 +11720,11 @@ def _build_opencode_config_payload(runtime, model_name=""):
         runtime,
         model_name,
         context_window_resolver=_effective_context_window,
+        output_limit_resolver=lambda model, provider_id=None: _capability_max_output_tokens(
+            model,
+            provider_id=provider_id,
+            accepted_sources={"model_policy", "manual_override", "approved_facts"},
+        ),
     )
 
 
@@ -10752,6 +11733,11 @@ def _build_opencode_config_content(runtime, model_name=""):
         runtime,
         model_name,
         context_window_resolver=_effective_context_window,
+        output_limit_resolver=lambda model, provider_id=None: _capability_max_output_tokens(
+            model,
+            provider_id=provider_id,
+            accepted_sources={"model_policy", "manual_override", "approved_facts"},
+        ),
     )
 
 
@@ -10801,15 +11787,14 @@ def _opencode_gateway_env(runtime, model_info=None):
         resolve_codegraph_root=_resolve_codegraph_root,
         resolve_toon_root=_resolve_toon_root,
         resolve_token_saver_root=_resolve_token_saver_root,
-        resolve_xmem_root=_resolve_xmem_root,
         session_skill_disabled=_session_skill_disabled,
         opencode_rtk_plugin_enabled=_opencode_rtk_plugin_enabled,
-        opencode_xmem_plugin_enabled=_opencode_xmem_plugin_enabled,
+        opencode_nsr_plugin_enabled=_opencode_nsr_plugin_enabled,
     )
 
 
 def _opencode_global_omo_env(runtime):
-    return _opencode_global_omo_env_impl(
+    env = _opencode_global_omo_env_impl(
         runtime,
         clear_opencode_config_env=_clear_opencode_config_env,
         inject_real_home_hints=_inject_real_home_hints,
@@ -10819,6 +11804,7 @@ def _opencode_global_omo_env(runtime):
         apply_runtime_locale_profile=_apply_runtime_locale_profile,
         apply_runtime_ip_stack_profile=_apply_runtime_ip_stack_profile,
     )
+    return _inject_selected_model_name(env, _resolve_model(runtime), model_info=runtime)
 
 
 def _opencode_global_command(runtime, entrypoint):
@@ -11017,10 +12003,11 @@ def _is_opencode_global_profile_runtime(cli, runtime):
 
 
 def _opencode_global_export_env(runtime):
-    return _opencode_global_export_env_impl(
+    exports = _opencode_global_export_env_impl(
         runtime,
         apply_bypass_env=_opencode_apply_bypass_env,
     )
+    return _inject_selected_model_name(exports, _resolve_model(runtime), model_info=runtime)
 
 
 def _opencode_provider_export_env(runtime, model):
@@ -11064,6 +12051,20 @@ def get_export_env(cli, runtime, model_info=None):
         exports["ANTHROPIC_AUTH_TOKEN"] = api_key
         exports["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
         exports["API_TIMEOUT_MS"] = "3000000"
+        effort_env = _claude_code_effort_env_value(_resolve_model(model_info or runtime), runtime)
+        if effort_env:
+            exports["CLAUDE_CODE_EFFORT_LEVEL"] = effort_env
+        model = _resolve_model(model_info or runtime)
+        ctx_window = _effective_context_window(
+            model,
+            enable_claude_1m=_runtime_supports_claude_1m(runtime),
+            provider_id=runtime.get("id"),
+        )
+        _apply_claude_context_env_overrides(
+            exports,
+            context_window=ctx_window,
+            model_names=(model,),
+        )
     elif cli == "codex":
         exports["OPENAI_API_KEY"] = api_key
         exports["OPENAI_BASE_URL"] = _openai_base_url(runtime)
@@ -11080,7 +12081,6 @@ def get_export_env(cli, runtime, model_info=None):
     mms_gain_script = _mms_gain_script_path()
     token_saver_script = _token_saver_script_path()
     token_gain_script = _token_gain_script_path()
-    xmem_script = _xmem_cli_path()
     if cli in {"claude", "codex", "opencode", "pi"}:
         if toon_script:
             exports["MMS_TOON_BIN"] = toon_script
@@ -11098,13 +12098,10 @@ def get_export_env(cli, runtime, model_info=None):
             exports["TOKEN_GAIN_BIN"] = token_gain_script
             exports["MMS_TOKEN_GAIN_BIN"] = token_gain_script
             exports.setdefault("MMS_CONTEXT_DIR", os.path.join(_safe_getcwd(), ".mms", "context-store"))
-        if xmem_script:
-            exports["XMEM_BIN"] = xmem_script
-            exports["MMS_XMEM_BIN"] = xmem_script
-        first_script = toon_script or context_script or mms_gain_script or token_saver_script or token_gain_script or xmem_script
+        first_script = toon_script or context_script or mms_gain_script or token_saver_script or token_gain_script
         if first_script:
             exports["PATH"] = f"{os.path.dirname(first_script)}:$PATH"
-    return exports
+    return _inject_selected_model_name(exports, _resolve_model(runtime), model_info=runtime)
 
 
 def _show_launch_info(cli, runtime, auth_mode):

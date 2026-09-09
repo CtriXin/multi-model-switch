@@ -1265,12 +1265,6 @@ def export_model_routes(cfg=None, force=False, startup_safe=False):
     # 模型 claim：按每个 model 的有效 priority 单独排序后 claim
     # 过滤上游 gateway 吐出的 claude- 前缀国产模型别名（如 claude-glm-5、claude-kimi-k2.5）
     _DOMESTIC_KEYWORDS = ("glm", "kimi", "qwen", "minimax", "deepseek", "doubao", "seed", "bailian")
-    # 只保留最新一代 Claude 模型，过滤旧版（3.x、4-1、4-20250514 等）
-    _CLAUDE_KEEP = {
-        "claude-opus-4-6", "claude-opus-4-6-thinking", "claude-sonnet-4-6",
-        "claude-opus-4-5-20251101", "claude-sonnet-4-5-20250929",
-        "claude-haiku-4-5-20251001",
-    }
     # Model-CLI compatibility: keep the coarse family filter aligned with current
     # runtime routing, but do not expose executor metadata to route-export consumers.
     def _model_cli_compatible(model_name, supported_clis):
@@ -1306,9 +1300,6 @@ def export_model_routes(cfg=None, force=False, startup_safe=False):
                 continue
             # claude- 前缀 + 国产关键词 → 虚拟别名，跳过
             if normalized.startswith("claude-") and any(kw in normalized.lower() for kw in _DOMESTIC_KEYWORDS):
-                continue
-            # 旧版 Claude 模型 → 跳过，只保留白名单
-            if normalized.startswith("claude-") and normalized not in _CLAUDE_KEEP:
                 continue
 
             effective_priority = _runtime_priority_for_model(pinfo, normalized)

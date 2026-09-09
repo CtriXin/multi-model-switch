@@ -9,7 +9,88 @@ def test_runtime_reasoning_helpers_normalize_values():
     assert mms_launchers._runtime_thinking_enabled({"thinking_mode": "disable"}) is False
     assert mms_launchers._runtime_thinking_enabled({"thinking_mode": "enable"}) is True
     assert mms_launchers._runtime_reasoning_effort({"reasoning_effort": "xhigh"}) == "xhigh"
+    assert mms_launchers._runtime_reasoning_effort(
+        {"reasoning_effort": "max"}, model_name="gpt-5.6-luna"
+    ) == "max"
+    assert mms_launchers._runtime_reasoning_effort(
+        {"reasoning_effort": "max"}, model_name="gpt-5.5"
+    ) == "xhigh"
     assert mms_launchers._runtime_reasoning_effort({"reasoning_effort": "weird"}) == "high"
+    assert mms_launchers._claude_code_effort_env_value("glm-5.2", {"reasoning_effort": "xhigh"}) == "max"
+    assert mms_launchers._claude_code_effort_env_value("k3[1m]", {}) == "max"
+    assert mms_launchers._claude_code_effort_env_value("k3", {"reasoning_effort": "low"}) == "max"
+    assert mms_launchers._claude_code_effort_env_value("kimi-k3", {"reasoning_effort": "low"}) == "max"
+    assert mms_launchers._claude_code_effort_env_value("gpt-5.4", {"reasoning_effort": "xhigh"}) == ""
+
+
+def test_claude_kimi_k3_context_env_uses_selector_window(monkeypatch):
+    import mms_launchers
+
+    monkeypatch.setattr(
+        mms_launchers,
+        "_load_model_context_overrides",
+        lambda: {"models": {}, "provider_overrides": {}},
+    )
+
+    def fake_capability_context_window(model_name, *, provider_id=None, accepted_sources=None):
+        if str(model_name).lower() == "k3" and accepted_sources == {"model_policy", "manual_override"}:
+            return 1_000_000
+        return None
+
+    monkeypatch.setattr(mms_launchers, "_capability_context_window", fake_capability_context_window)
+
+    assert mms_launchers._lookup_context_window("k3", provider_id="kimi") == 262_144
+    assert mms_launchers._lookup_context_window("k3[1m]", provider_id="kimi") == 1_048_576
+
+
+def test_get_export_env_for_claude_kimi_k3_sets_effort_and_context(monkeypatch):
+    import mms_launchers
+
+    monkeypatch.setattr(mms_launchers, "validate_provider_for_cli", lambda *_args, **_kwargs: None)
+    runtime = {
+        "id": "kimi",
+        "auth_mode": "api_key",
+        "api_key": "sk-kimi",
+        "anthropic_base_url": "https://api.kimi.com/coding/",
+        "protocols": ["anthropic_messages"],
+        "supported_clis": ["claude"],
+    }
+
+    exports = mms_launchers.get_export_env("claude", runtime, model_info={"model": "k3[1m]"})
+
+    assert exports["CLAUDE_CODE_EFFORT_LEVEL"] == "max"
+    assert exports["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] == "1048576"
+    assert exports["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] == "1048576"
+    assert exports["CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE"] == "1045576"
+
+
+def test_claude_glm_1m_context_sets_client_cap_without_selector():
+    import mms_launchers
+
+    env = {}
+    mms_launchers._apply_claude_context_env_overrides(
+        env,
+        context_window=1_000_000,
+        model_names=("glm-5.2",),
+    )
+
+    assert env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] == "1000000"
+    assert env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] == "1000000"
+    assert env["CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE"] == "997000"
+    assert all("[1m]" not in value for value in env.values())
+
+
+def test_claude_glm_below_1m_does_not_override_client_cap():
+    import mms_launchers
+
+    env = {}
+    mms_launchers._apply_claude_context_env_overrides(
+        env,
+        context_window=200_000,
+        model_names=("glm-5.2",),
+    )
+
+    assert "CLAUDE_CODE_MAX_CONTEXT_TOKENS" not in env
 
 
 def test_default_gpt_reasoning_effort_uses_xhigh_for_source_checkout(monkeypatch):
@@ -29,11 +110,26 @@ def test_default_gpt_reasoning_effort_keeps_high_for_installed_layout(monkeypatc
 
 
 def test_mms_core_prefers_xhigh_for_gpt_in_source_checkout(monkeypatch):
+    import mms_capability_resolver
     import mms_core
 
     monkeypatch.setattr(mms_core, "resolve_real_user_home", lambda env=None: "/tmp/real-home")
+    monkeypatch.setattr(mms_capability_resolver, "load_default_model_policy", lambda: {})
 
     assert mms_core._default_reasoning_effort_for_model_info({"model": "gpt-5.4"}) == "xhigh"
+
+
+def test_mms_core_uses_model_policy_reasoning_effort(monkeypatch):
+    import mms_capability_resolver
+    import mms_core
+
+    monkeypatch.setattr(
+        mms_capability_resolver,
+        "load_default_model_policy",
+        lambda: {"models": {"glm-5.2": {"capabilities": {"reasoning_effort": "max"}}}},
+    )
+
+    assert mms_core._default_reasoning_effort_for_model_info({"model": "glm-5.2"}) == "xhigh"
 
 
 def test_mms_core_keeps_high_for_installed_layout(monkeypatch):
@@ -65,8 +161,9 @@ def test_launch_codex_passes_reasoning_effort_to_codex_config(monkeypatch):
         lambda runtime, model: [{"provider_id": "codex-fallback", "gateway_url": "https://fallback.test/v1"}],
     )
 
-    def fake_select_reasoning_effort_tui(default="medium"):
+    def fake_select_reasoning_effort_tui(default="medium", **kwargs):
         captured["default_effort"] = default
+        captured["options"] = kwargs.get("options")
         return "xhigh"
 
     monkeypatch.setattr(mms_tui, "select_reasoning_effort_tui", fake_select_reasoning_effort_tui)
@@ -100,6 +197,7 @@ def test_launch_codex_passes_reasoning_effort_to_codex_config(monkeypatch):
         {"provider_id": "codex-fallback", "gateway_url": "https://fallback.test/v1"}
     ]
     assert captured["default_effort"] == "xhigh"
+    assert [value for value, _label in captured["options"]] == ["low", "medium", "high", "xhigh"]
     assert '-c' in captured["cmd"]
     assert 'model_reasoning_effort="xhigh"' in captured["cmd"]
     assert captured["force_subprocess"] is True
@@ -200,3 +298,11 @@ def test_launch_codex_bypass_mode_skips_hook_review_prompt(monkeypatch):
 
     assert "--dangerously-bypass-approvals-and-sandbox" in captured["cmd"]
     assert "--dangerously-bypass-hook-trust" in captured["cmd"]
+
+
+def test_gpt_explicit_model_effort_precedes_checkout_default(monkeypatch):
+    import mms_capability_resolver
+    import mms_core
+    monkeypatch.setattr(mms_capability_resolver, "load_default_model_policy", lambda: {"models": {"gpt-5": {"capabilities": {"reasoning_effort": "low"}}}})
+    assert mms_core._default_reasoning_effort_for_model_info({"model": "gpt-5"}) == "low"
+    assert mms_core._default_reasoning_effort_for_model_info({"model": "gpt-unconfigured"}) == mms_core._default_gpt_reasoning_effort()

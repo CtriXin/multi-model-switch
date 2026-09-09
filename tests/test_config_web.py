@@ -1,14 +1,57 @@
 import json
+import threading
+from http.server import ThreadingHTTPServer
+from urllib.request import Request, urlopen
+
+import pytest
 
 import mms_config_web
+import mms_config_web_assets
+import mms_config_web_server
 import mms_core
+
+
+@pytest.fixture(autouse=True)
+def _isolate_mms_root_env(monkeypatch):
+    # These tests pass explicit config_path values; ambient MMS session env should not reclassify temp roots.
+    for key in ("MMS_CONFIG_ROOT", "MMS_CONFIG_DIR", "MMS_COMMAND_NAME", "MMS_PREVIEW_MODE"):
+        monkeypatch.delenv(key, raising=False)
+
+
+def _frontend_source() -> str:
+    return "\n".join(
+        [
+            mms_config_web._HTML_PAGE,
+            mms_config_web_assets.read_static_asset("config-web.css")[0].decode("utf-8"),
+            mms_config_web_assets.read_static_asset("config-web.js")[0].decode("utf-8"),
+        ]
+    )
+
+
+def test_config_web_version_display_includes_release_track(monkeypatch):
+    class FakeCore:
+        @staticmethod
+        def _release_version_info():
+            return {
+                "release": "v3.4.0-1-gabc123",
+                "git_branch": "canary",
+                "git_commit": "abc123",
+                "release_track_label": "4.0 Canary Preview",
+            }
+
+    monkeypatch.setattr(mms_config_web, "_load_mms_core", lambda: FakeCore)
+
+    info = mms_config_web._version_info_for_snapshot("mmg")
+
+    assert info["command"] == "mmg"
+    assert info["display"] == "4.0 Canary Preview · canary@abc123"
 
 
 def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
     cfg = {
         "providers": [
             {
-                "id": "direct-qwen",
+                "id": "webui-test-direct-qwen",
                 "name": "Qwen Direct",
                 "enabled": True,
                 "api_key": "sk-super-secret-value",
@@ -16,15 +59,43 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
                 "protocols": ["anthropic_messages"],
                 "supported_clis": ["claude", "opencode"],
                 "fallback_models": ["qwen3.6-plus"],
+                "claude_1m_mode": "enable",
+                "proxy": "http://provider-proxy.example",
+                "no_proxy": "provider.internal",
+                "timezone": "Asia/Tokyo",
+                "note": "primary qwen route",
             }
         ],
+        "accounts": [
+            {
+                "id": "claude-main",
+                "name": "Claude Main",
+                "cli": "claude",
+                "home_dir": "/Users/example/.config/mms/accounts/claude-main",
+                "proxy": "http://proxy.example",
+                "no_proxy": "localhost",
+                "timezone": "Asia/Singapore",
+                "note": "human owned claude account",
+            }
+        ],
+        "account": {"defaults": {"claude": "claude-main"}},
         "vision_sidecar": {
             "enabled": True,
-            "provider_id": "direct-qwen",
+            "provider_id": "webui-test-direct-qwen",
             "model": "qwen3.6-plus",
             "api_key": "sk-vision-secret",
         },
         "rescue": {"fallback_model": "deepseek-v4-flash", "hot_fallback_enabled": False},
+        "load_balance": {
+            "default": "daily",
+            "profiles": {
+                "daily": {
+                    "heavy": {"model": "gpt-5.5", "provider_id": "webui-test-direct-qwen"},
+                    "medium": "qwen3.6-plus",
+                    "light": "deepseek-v4-flash",
+                }
+            },
+        },
     }
 
     snapshot = mms_config_web.build_config_snapshot(
@@ -34,16 +105,114 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
         command_name="mms",
     )
     encoded = json.dumps(snapshot, ensure_ascii=False)
+    encoded_config_scope = json.dumps(
+        {
+            "providers": snapshot["providers"],
+            "accounts": snapshot["accounts"],
+            "account_defaults": snapshot["account_defaults"],
+            "vision_sidecar": snapshot["vision_sidecar"],
+        },
+        ensure_ascii=False,
+    )
 
     assert snapshot["mode"] == "interactive_audited_save"
     assert snapshot["schema"] == "mms.setup_web.snapshot.v2"
-    assert snapshot["providers"][0]["id"] == "direct-qwen"
+    assert snapshot["version_info"]["display"]
+    assert snapshot["providers"][0]["id"] == "webui-test-direct-qwen"
     assert snapshot["providers"][0]["has_api_key"] is True
     assert snapshot["providers"][0]["model_count"] == 1
     assert snapshot["providers"][0]["api_key"] == ""
+    assert snapshot["providers"][0]["claude_1m_mode"] == "enable"
+    assert snapshot["providers"][0]["proxy_configured"] is True
+    assert snapshot["providers"][0]["no_proxy_configured"] is True
+    assert snapshot["providers"][0]["timezone"] == "Asia/Tokyo"
+    assert snapshot["providers"][0]["note"] == "primary qwen route"
+    assert snapshot["providers"][0]["usage"]["launches"] == 0
+    assert snapshot["accounts"][0]["id"] == "claude-main"
+    assert snapshot["accounts"][0]["is_default"] is True
+    assert snapshot["accounts"][0]["home_dir_configured"] is True
+    assert snapshot["accounts"][0]["proxy_configured"] is True
+    assert snapshot["accounts"][0]["no_proxy_configured"] is True
+    assert snapshot["accounts"][0]["note"] == "human owned claude account"
+    assert snapshot["accounts"][0]["is_claude_human_only"] is True
+    assert snapshot["accounts"][0]["webui_write_policy"] == "claude_human_only_locked"
+    assert snapshot["account_defaults"] == {"claude": "claude-main"}
+    assert snapshot["account_write_policy"]["claude"] == "human_only_locked"
+    assert "http://proxy.example" not in encoded_config_scope
+    assert "http://provider-proxy.example" not in encoded_config_scope
+    assert "provider.internal" not in encoded_config_scope
+    assert "localhost" not in encoded_config_scope
+    assert "/Users/example/.config/mms/accounts/claude-main" not in encoded_config_scope
     assert snapshot["vision_sidecar"]["api_key"] != "sk-vision-secret"
     assert "sk-vision-secret" not in encoded
     assert "sk-super-secret-value" not in encoded
+    assert {item["area"] for item in snapshot["webui_capability_coverage"]} >= {"通道", "账号", "设置", "主屏入口"}
+    assert "负载" not in {item["area"] for item in snapshot["webui_capability_coverage"]}
+    assert {item["action_id"] for item in snapshot["settings_actions"]} >= {"refresh-sources", "registry-doctor"}
+    mapping = snapshot["tui_webui_mapping"]
+    assert snapshot["tui_webui_mapping_summary"]["total"] == len(mapping)
+    assert snapshot["tui_webui_mapping_summary"]["counts"] == {
+        "native": 19,
+        "report": 17,
+        "draft_review": 3,
+        "human_gate": 20,
+        "missing": 0,
+    }
+    assert snapshot["tui_webui_mapping_summary"]["counts"]["missing"] == 0
+    assert snapshot["tui_webui_mapping_summary"]["clickable_rows"] == len(mapping)
+    assert snapshot["tui_webui_mapping_summary"]["rows_with_open_target"] == len(mapping)
+    assert "每行都可在 WebUI 点击" in snapshot["tui_webui_mapping_summary"]["user_check_policy"]
+    assert all(item["clickable"] == "yes" for item in mapping)
+    assert all(item["click_targets"] for item in mapping)
+    assert all(item["acceptance_check"] for item in mapping)
+    assert {item["tui_action_id"] for item in mapping} >= {
+        "provider_mgmt",
+        "account_mgmt",
+        "registry",
+        "guard",
+        "rescue",
+        "language",
+        "routes_export",
+        "about",
+    }
+    assert {item["id"] for item in mapping} >= {
+        "connect.add_gateway",
+        "connect.add_official",
+        "channel.provider_browse",
+        "channel.family_autosort",
+        "provider.credentials",
+        "provider.model_patch_reset",
+        "provider.advanced_metadata",
+        "provider.network_policy",
+        "account.login",
+        "account.rename",
+        "account.edit_metadata",
+        "account.network_policy",
+        "registry.publish_approved",
+        "guard.accept",
+    }
+    assert next(item for item in mapping if item["id"] == "guard.accept")["status"] == "human_gate"
+    assert next(item for item in mapping if item["id"] == "provider.remove")["status"] == "native"
+    assert next(item for item in mapping if item["id"] == "settings.language")["status"] == "native"
+    official_row = next(item for item in mapping if item["id"] == "connect.add_official")
+    assert official_row["status"] == "report"
+    assert official_row["write_policy"] == "deprecated_read_only_compat"
+    assert next(item for item in mapping if item["id"] == "provider.model_patch_reset")["status"] == "native"
+    assert next(item for item in mapping if item["id"] == "provider.advanced_metadata")["status"] == "native"
+    assert next(item for item in mapping if item["id"] == "provider.network_policy")["status"] == "human_gate"
+    assert next(item for item in mapping if item["id"] == "account.rename")["status"] == "human_gate"
+    assert next(item for item in mapping if item["id"] == "account.edit_metadata")["status"] == "draft_review"
+    assert next(item for item in mapping if item["id"] == "account.network_policy")["status"] == "human_gate"
+    verify_approved = next(item for item in mapping if item["id"] == "registry.verify_approved")
+    assert verify_approved["status"] == "report"
+    assert verify_approved["api_action"] == "verify_approved"
+    assert verify_approved["write_policy"] == "read_only_report"
+    assert not any(str(item["id"]).startswith("load_balance.") for item in mapping)
+    assert snapshot["ui"]["language"] == "zh"
+    assert "Qwen" in snapshot["model_families"]
+    assert "StepFun" in snapshot["model_families"]
+    assert snapshot["load_balance"]["default_profile"] == "daily"
+    assert snapshot["load_balance"]["profiles"][0]["slots"]["heavy"]["provider_id"] == "webui-test-direct-qwen"
     assert "vision_sidecar" in snapshot["snippets"]
     assert [step["id"] for step in snapshot["setup_flow"]] == [
         "channel",
@@ -52,9 +221,308 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
         "validation",
         "fallbacks",
         "runtime",
+        "session_assets",
     ]
     assert {item["id"] for item in snapshot["test_contracts"]} >= {"models_endpoint", "model_ping", "simple_chat"}
     assert snapshot["save_contract"]["requires_confirm_save"] is True
+    assert snapshot["session_assets"]["schema"] == "mms.session_assets.snapshot.v1"
+    assert [item["id"] for item in snapshot["session_assets"]["cli_visibility"]["items"]] == [
+        "claude",
+        "codex",
+        "opencode",
+        "pi",
+        "agy",
+    ]
+    assert "preference_snippet" in snapshot["session_assets"]
+
+
+def test_config_web_settings_report_is_read_only_and_lists_gap_status(tmp_path):
+    cfg = {
+        "providers": [{"id": "demo", "name": "Demo", "fallback_models": ["gpt-5.5"]}],
+        "accounts": [{"id": "codex-main", "name": "Codex Main", "cli": "codex", "proxy": "http://proxy.example"}],
+        "account": {"defaults": {"codex": "codex-main"}},
+        "load_balance": {
+            "default": "fast",
+            "profiles": {
+                "fast": {
+                    "heavy": {"model": "gpt-5.5", "provider_id": "demo"},
+                    "light": "qwen3.6-flash",
+                }
+            },
+        },
+    }
+    report = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "coverage"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+    accounts = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "accounts"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+    registry = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "registry_status"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+    mapping = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "tui_mapping"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+    guard = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "guard_status"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+    guard_accept = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "guard_accept_gate"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+    language = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "language_status"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+    channel_status = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "provider_channel_status"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+    official_gate = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "connect_official_gate"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+    autosort_gate = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "family_autosort_gate"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+    encoded = json.dumps(accounts, ensure_ascii=False)
+
+    assert report["ok"] is True
+    assert report["write_policy"] == "read_only"
+    assert any(item["webui"] == "draft_review_human_gate" for item in report["coverage"])
+    assert accounts["write_policy"] == "draft_review_human_gate"
+    assert accounts["accounts"][0]["id"] == "codex-main"
+    assert accounts["accounts"][0]["is_default"] is True
+    assert accounts["account_defaults"] == {"codex": "codex-main"}
+    assert accounts["account_write_policy"]["blocked_fields"]
+    assert "http://proxy.example" not in encoded
+    assert registry["ok"] is True
+    assert registry["write_policy"] == "read_only"
+    assert "can initialize SQLite" in registry["note"]
+    assert mapping["ok"] is True
+    assert mapping["summary"]["counts"]["human_gate"] > 0
+    assert mapping["summary"]["counts"]["missing"] == 0
+    assert mapping["summary"]["clickable_rows"] == mapping["summary"]["total"]
+    assert any(item["tui_action_id"] == "provider_mgmt" for item in mapping["mapping"])
+    assert guard["write_policy"] == "read_only_report"
+    assert guard["status"] == "report"
+    assert "mmf guard status" in guard["commands"]
+    assert guard["report"]["providers"] >= 1
+    assert "accept baseline" in guard["note"]
+    assert guard_accept["status"] == "human_gate"
+    assert guard_accept["requires_human_confirmation"] is True
+    assert "mmf guard accept" in guard_accept["commands"]
+    assert language["status"] == "native"
+    assert channel_status["status"] == "native"
+    assert channel_status["provider_default"] == "demo"
+    assert official_gate["status"] == "deprecated"
+    assert official_gate["write_policy"] == "deprecated_read_only_compat"
+    assert official_gate["blocked_auto_execute"] is True
+    assert official_gate["commands"] == []
+    assert "OAuth / AGY 官方登录入口" in " ".join(official_gate["manual_steps"])
+    assert autosort_gate["write_policy"] == "speed_stats_write_human_gate"
+    assert "WebUI 已提供手工 family priority 草稿" in autosort_gate["safe_alternative"]
+    assert any(item["id"] == "provider.network_policy" for item in mapping["mapping"])
+    assert any(item["id"] == "account.rename" for item in mapping["mapping"])
+    assert any(item["id"] == "account.network_policy" for item in mapping["mapping"])
+    assert not (tmp_path / "mms-next" / "registry").exists()
+
+
+def test_config_web_human_gate_reports_are_actionable(tmp_path):
+    cfg = {
+        "providers": [{"id": "demo", "name": "Demo", "fallback_models": ["gpt-5.5"]}],
+        "accounts": [{"id": "codex-main", "name": "Codex Main", "cli": "codex"}],
+    }
+    mapping = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "tui_mapping"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )["mapping"]
+    gate_actions = sorted({row["api_action"] for row in mapping if row["status"] == "human_gate" and row.get("api_action")})
+
+    assert gate_actions
+    assert "about_upgrade_gate" in gate_actions
+    assert "refresh_due_sources_gate" in gate_actions
+    assert "provider_network_gate" in gate_actions
+    assert "account_rename_gate" in gate_actions
+    assert "account_network_gate" in gate_actions
+    assert "verify_approved_gate" not in gate_actions
+    for action in gate_actions:
+        report = mms_config_web.build_settings_report(
+            cfg,
+            {"action": action},
+            config_path=str(tmp_path / "mms-next" / "config.toml"),
+            command_name="mmf",
+        )
+        assert report["ok"] is True
+        assert report["status"] == "human_gate"
+        assert report["blocked_auto_execute"] is True
+        assert report["requires_human_confirmation"] is True
+        assert report["manual_steps"], action
+        assert report["commands"], action
+        assert "risk_level" in report
+
+    scheduled = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "scheduled_refresh_gate"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+    publish = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "publish_approved_gate"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+
+    assert "mmf registry scheduled-refresh --dry-run --no-network" in scheduled["commands"]
+    assert "mmf registry publish-approved" in publish["commands"]
+    assert any("model-registry.latest-approved.json" in item for item in publish["writes"])
+
+
+def test_config_web_usage_reports_include_tui_detail_rows(monkeypatch, tmp_path):
+    def fake_usage_rows(runtime_kind, runtime_id):
+        return [
+            {
+                "cli": "codex",
+                "runtime_kind": runtime_kind,
+                "id": runtime_id,
+                "name": f"{runtime_kind}:{runtime_id}",
+                "launches": 7,
+                "last_model": "qwen3.6-plus",
+                "last_used_at": "2026-05-30T10:00:00+08:00",
+                "models": {"qwen3.6-plus": 5, "gpt-5.5": 2},
+            }
+        ]
+
+    monkeypatch.setattr(mms_core, "_usage_rows_for_runtime", fake_usage_rows)
+    cfg = {
+        "providers": [
+            {"id": "demo", "name": "Demo", "fallback_models": ["qwen3.6-plus", "gpt-5.5", "unused-model"]},
+            {"id": "other", "name": "Other", "fallback_models": ["other-model"]},
+        ],
+        "accounts": [{"id": "codex-main", "name": "Codex Main", "cli": "codex"}],
+        "account": {"defaults": {"codex": "codex-main"}},
+    }
+
+    provider_report = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "provider_usage_summary"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+    account_report = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "accounts"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+    scoped_provider_report = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "provider_usage_summary", "provider_id": "demo"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+
+    provider_rows = provider_report["providers"][0]["usage_rows"]
+    account_rows = account_report["accounts"][0]["usage_rows"]
+    assert provider_rows[0]["runtime_kind"] == "provider"
+    assert provider_rows[0]["launches"] == 7
+    assert provider_rows[0]["top_models"][0] == {"model": "qwen3.6-plus", "launches": 5}
+    assert provider_rows[0]["model_usage"] == [
+        {"model": "qwen3.6-plus", "launches": 5},
+        {"model": "gpt-5.5", "launches": 2},
+    ]
+    assert len(provider_report["providers"]) == 2
+    assert scoped_provider_report["scope"] == "provider"
+    assert [item["id"] for item in scoped_provider_report["providers"]] == ["demo"]
+    assert [item["id"] for item in scoped_provider_report["providers"][0]["models"]] == [
+        "gpt-5.5",
+        "qwen3.6-plus",
+        "unused-model",
+    ]
+    assert account_rows[0]["runtime_kind"] == "account"
+    assert account_rows[0]["id"] == "codex-main"
+
+
+def test_config_web_verify_approved_report_is_read_only(monkeypatch, tmp_path):
+    import mms_registry_cli
+
+    calls = {}
+
+    def fake_verify_approved_bundle(**kwargs):
+        calls.update(kwargs)
+        return {"verified": True, "manifest_path": "generated/model-registry.latest-approved.json"}
+
+    monkeypatch.setattr(mms_registry_cli, "verify_approved_bundle", fake_verify_approved_bundle)
+
+    config_root = tmp_path / "mms-next"
+    report = mms_config_web.build_settings_report(
+        {},
+        {"action": "verify_approved"},
+        config_path=str(config_root / "config.toml"),
+        command_name="mmf",
+    )
+
+    assert report["ok"] is True
+    assert report["status"] == "report"
+    assert report["write_policy"] == "read_only_report"
+    assert report["report"]["verified"] is True
+    assert calls["config_dir"] == str(config_root)
+    assert "不会 publish" in report["note"]
+    assert not config_root.exists()
+
+
+def test_config_web_json_response_redacts_account_protected_paths():
+    _status, body, _content_type = mms_config_web._json_response(
+        {
+            "config": {
+                "accounts": [
+                    {
+                        "id": "codex-main",
+                        "home_dir": "/Users/example/.config/mms/accounts/codex-main",
+                        "proxy": "http://proxy.example",
+                        "no_proxy": "localhost",
+                    }
+                ]
+            }
+        }
+    )
+    encoded = body.decode("utf-8")
+
+    assert "/Users/example/.config/mms/accounts/codex-main" not in encoded
+    assert "http://proxy.example" not in encoded
+    assert "localhost" not in encoded
+    assert '"home_dir": true' in encoded
+    assert '"proxy": true' in encoded
+    assert '"no_proxy": true' in encoded
 
 
 def test_config_web_bundle_runtime_models_are_not_manual_extra_models():
@@ -88,6 +556,61 @@ def test_config_web_bundle_runtime_models_are_not_manual_extra_models():
     assert provider["extra_models"] == []
     assert provider["models"][0]["id"] == "gpt-preview"
     assert provider["models"][0]["source"] == "approved"
+
+
+def test_config_web_plan_removes_approved_selector_from_fallback_models(tmp_path):
+    current_cfg = {
+        "provider": {"default": "mimo-direct"},
+        "providers": [
+            {
+                "id": "mimo-direct",
+                "name": "MiMo Direct",
+                "enabled": True,
+                "models_endpoint": "manual",
+                "protocols": ["anthropic_messages", "openai_chat_completions"],
+                "supported_clis": ["claude"],
+                "fallback_models": ["mimo-v2.5", "mimo-v2.5[1m]"],
+            }
+        ],
+    }
+    payload = {
+        "draft": {
+            "provider_default": "mimo-direct",
+            "route_scope_provider_ids": ["mimo-direct"],
+            "providers": [
+                {
+                    "original_id": "mimo-direct",
+                    "id": "mimo-direct",
+                    "name": "MiMo Direct",
+                    "enabled": True,
+                    "models_endpoint": "manual",
+                    "protocols": ["anthropic_messages", "openai_chat_completions"],
+                    "supported_clis": ["claude"],
+                    "approved_route_models": ["mimo-v2.5"],
+                    "extra_models": [],
+                    "hidden_models": [],
+                    "models": [{"id": "mimo-v2.5", "visible": True}],
+                }
+            ],
+            "rescue": {},
+            "vision_sidecar": {},
+            "runtime": {},
+            "opencode": {},
+        }
+    }
+
+    plan = mms_config_web.build_config_plan(
+        current_cfg,
+        payload,
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+
+    provider = plan["config"]["providers"][0]
+    assert provider["models"] == [{"id": "mimo-v2.5", "visible": True}]
+    assert "mimo-v2.5[1m]" not in json.dumps(provider)
+    assert plan["route_scope_provider_ids"] == ["mimo-direct"]
+    assert plan["summary"]["will_write_config"] is True
 
 
 def test_config_web_bundle_runtime_exposes_derived_aliases_for_hiding():
@@ -157,6 +680,241 @@ def test_config_web_bundle_runtime_ignores_remote_probe_cache(monkeypatch):
     assert rows[0]["source"] == "approved"
 
 
+def test_config_web_model_capability_defaults_are_profile_backed_not_hardcoded():
+    cfg = {
+        "providers": [
+            {
+                "id": "capability-demo",
+                "name": "Capability Demo",
+                "enabled": True,
+                "models_endpoint": "manual",
+                "fallback_models": ["mimo-v2.5", "mimo-v2.5-pro", "MiniMax-M3"],
+            }
+        ],
+    }
+
+    snapshot = mms_config_web.build_config_snapshot(
+        cfg,
+        config_path="/tmp/mms/config.toml",
+        command_name="mms",
+    )
+    rows = {row["id"]: row["capabilities"] for row in snapshot["providers"][0]["models"]}
+
+    assert rows["mimo-v2.5"]["vision"] is False
+    assert rows["mimo-v2.5"]["tool_use"] is False
+    assert rows["mimo-v2.5"]["reasoning"] is True
+    assert rows["mimo-v2.5"]["long_context"] is True
+    assert rows["mimo-v2.5-pro"]["vision"] is False
+    assert rows["mimo-v2.5-pro"]["tool_use"] is False
+    assert rows["mimo-v2.5-pro"]["reasoning"] is True
+    assert rows["MiniMax-M3"]["tool_use"] is False
+    assert rows["MiniMax-M3"]["reasoning"] is True
+    assert rows["MiniMax-M3"]["long_context"] is True
+
+
+def test_config_web_text_capability_false_hides_model_in_policy(tmp_path):
+    payload = _large_route_draft_payload(count=1)
+    row = payload["draft"]["providers"][0]["models"][0]
+    row["id"] = "non-text-embedding-model"
+    row["visible"] = True
+    row["policy_touched"] = True
+    row["capabilities"] = {
+        "text": False,
+        "vision": False,
+        "tool_use": False,
+        "reasoning": False,
+        "long_context": False,
+    }
+
+    plan = mms_config_web.build_config_plan(
+        {"providers": []},
+        payload,
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    entry = plan["model_policy"]["models"]["non-text-embedding-model"]
+    assert entry["visible"] is False
+    assert entry["capabilities"]["text"] is False
+
+
+def test_config_web_context_tokens_are_saved_to_model_policy(tmp_path):
+    payload = _large_route_draft_payload(count=1)
+    row = payload["draft"]["providers"][0]["models"][0]
+    row["id"] = "mimo-v2.5"
+    row["visible"] = True
+    row["policy_touched"] = True
+    row["capabilities"] = {
+        "text": True,
+        "vision": True,
+        "tool_use": True,
+        "reasoning": True,
+        "long_context": False,
+        "context_window_tokens": 1_000_000,
+    }
+
+    plan = mms_config_web.build_config_plan(
+        {"providers": []},
+        payload,
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    caps = plan["model_policy"]["models"]["mimo-v2.5"]["capabilities"]
+    assert caps["context_window_tokens"] == 1_000_000
+    assert caps["long_context"] is True
+
+
+def test_config_web_review_summary_includes_model_policy_detail_rows(tmp_path):
+    (tmp_path / "model-policy.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "models": {
+                    "mimo-v2.5": {
+                        "visible": True,
+                        "capabilities": {"vision": False, "context_window_tokens": 262144},
+                    }
+                },
+                "projects": {},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    payload = _large_route_draft_payload(count=1)
+    row = payload["draft"]["providers"][0]["models"][0]
+    row["id"] = "mimo-v2.5"
+    row["visible"] = True
+    row["policy_touched"] = True
+    row["capabilities"] = {
+        "text": True,
+        "vision": True,
+        "context_window_tokens": 1_000_000,
+        "max_output_tokens": 131_072,
+    }
+    row["capability_sources"] = {
+        "vision": {
+            "source_layer": "provider_catalog",
+            "source_name": "OpenRouter catalog",
+            "confidence": "provider_catalog_openrouter",
+            "source_path": "https://openrouter.ai/api/v1/models",
+        },
+        "context_window_tokens": {
+            "source_layer": "provider_catalog",
+            "source_name": "OpenRouter catalog",
+            "confidence": "provider_catalog_openrouter",
+            "source_path": "https://openrouter.ai/api/v1/models",
+        },
+        "max_output_tokens": {
+            "source_layer": "provider_catalog",
+            "source_name": "OpenRouter catalog",
+            "confidence": "provider_catalog_openrouter",
+            "source_path": "https://openrouter.ai/api/v1/models",
+        },
+    }
+
+    plan = mms_config_web.build_config_plan(
+        {"providers": []},
+        payload,
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    changes = plan["review_summary"]["model_policy_changes"]
+    item = changes["items"][0]
+
+    assert changes["total"] == 1
+    assert changes["updated"] == 1
+    assert item["model"] == "mimo-v2.5"
+    assert item["action"] == "updated"
+    assert "capabilities.context_window_tokens" in item["changed_fields"]
+    assert any(change["label"] == "看图" and change["after"] is True for change in item["changes"])
+    assert any(change["label"] == "输出上限" and change["after"] == 131_072 for change in item["changes"])
+    assert plan["model_policy"]["models"]["mimo-v2.5"]["capability_sources"]["vision"]["source_name"] == "OpenRouter catalog"
+    assert any(change["label"] == "看图" and change["source_label"] == "OpenRouter catalog" for change in item["changes"])
+
+
+def test_config_web_capability_touched_rows_save_only_changed_capability_subset(tmp_path):
+    payload = _large_route_draft_payload(count=1)
+    row = payload["draft"]["providers"][0]["models"][0]
+    row["id"] = "deepseek-v4-flash"
+    row["visible"] = True
+    row["capability_touched"] = True
+    row["capabilities"] = {
+        "text": True,
+        "tool_use": True,
+        "reasoning": True,
+        "thinking": True,
+        "context_window_tokens": 1_048_576,
+        "one_m_context": True,
+        "long_context": True,
+    }
+    row["policy_capabilities"] = {
+        "context_window_tokens": 1_048_576,
+        "one_m_context": True,
+        "long_context": True,
+    }
+    row["capability_sources"] = {
+        "context_window_tokens": {
+            "source_layer": "provider_catalog",
+            "source_name": "OpenRouter catalog",
+            "confidence": "provider_catalog_openrouter",
+        },
+        "one_m_context": {
+            "source_layer": "provider_catalog",
+            "source_name": "OpenRouter catalog",
+            "confidence": "provider_catalog_openrouter",
+        },
+    }
+
+    plan = mms_config_web.build_config_plan(
+        {"providers": []},
+        payload,
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    entry = plan["model_policy"]["models"]["deepseek-v4-flash"]
+    assert "visible" not in entry
+    assert entry["capabilities"] == {
+        "context_window_tokens": 1_048_576,
+        "long_context": True,
+        "one_m_context": True,
+    }
+    assert "text" not in entry["capabilities"]
+    changes = plan["review_summary"]["model_policy_changes"]["items"][0]["changes"]
+    assert any(change["label"] == "上下文" and change["source_label"] == "OpenRouter catalog" for change in changes)
+
+
+def test_config_web_one_m_and_think_capabilities_are_saved_to_model_policy(tmp_path):
+    payload = _large_route_draft_payload(count=1)
+    row = payload["draft"]["providers"][0]["models"][0]
+    row["id"] = "mimo-v2.5"
+    row["visible"] = True
+    row["policy_touched"] = True
+    row["capabilities"] = {
+        "text": True,
+        "vision": True,
+        "tool_use": True,
+        "reasoning": True,
+        "thinking": True,
+        "one_m_context": True,
+        "cache_sensitive": True,
+    }
+
+    plan = mms_config_web.build_config_plan(
+        {"providers": []},
+        payload,
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    caps = plan["model_policy"]["models"]["mimo-v2.5"]["capabilities"]
+    assert caps["context_window_tokens"] == 1_000_000
+    assert caps["long_context"] is True
+    assert caps["one_m_context"] is True
+    assert caps["thinking"] is True
+    assert caps["supports_thinking"] is True
+    assert caps["reasoning"] is True
+    assert caps["cache_sensitive_transport"] is True
+
+
 def test_config_web_json_response_keeps_non_secret_counts_visible():
     _status, body, _content_type = mms_config_web._json_response(
         {
@@ -166,6 +924,7 @@ def test_config_web_json_response_keeps_non_secret_counts_visible():
             "runtime_blockers": {"missing_api_key_count": 32, "missing_base_url_count": 0},
             "secret_count": 2,
             "secrets": [{"value": "sk-super-secret-value"}],
+            "model": {"capabilities": {"context_window_tokens": 1_000_000, "max_output_tokens": 131_072}},
         }
     )
     payload = json.loads(body)
@@ -177,6 +936,8 @@ def test_config_web_json_response_keeps_non_secret_counts_visible():
     assert payload["runtime_blockers"]["missing_base_url_count"] == 0
     assert payload["secret_count"] == 2
     assert payload["secrets"] != [{"value": "sk-super-secret-value"}]
+    assert payload["model"]["capabilities"]["context_window_tokens"] == 1_000_000
+    assert payload["model"]["capabilities"]["max_output_tokens"] == 131_072
     assert "sk-super-secret-value" not in body.decode("utf-8")
 
 
@@ -194,6 +955,146 @@ def test_config_web_secret_ref_without_value_is_not_key_set():
     )
 
     assert summary["has_api_key"] is False
+
+
+def test_config_web_attach_preview_secret_refs_replaces_redacted_ref(tmp_path):
+    config_root = tmp_path / "mms-next"
+    secrets_dir = config_root / "secrets"
+    secrets_dir.mkdir(parents=True)
+    (secrets_dir / "webui-secrets.json").write_text(
+        json.dumps(
+            {
+                "secrets": [
+                    {
+                        "provider_id": "demo",
+                        "field": "api_key",
+                        "secret_ref": "pending-webui:demo:api_key",
+                        "value": "sk-demo-secret",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    result = mms_config_web._attach_preview_secret_refs(
+        {"providers": [{"id": "demo", "secret_ref": "pen***key"}]},
+        config_path=str(config_root / "config.toml"),
+        command_name="mmf",
+    )
+
+    assert result["providers"][0]["secret_ref"] == "pending-webui:demo:api_key"
+
+
+def test_config_web_resolve_preview_provider_secret_replaces_redacted_ref(tmp_path):
+    config_root = tmp_path / "mms-next"
+    secrets_dir = config_root / "secrets"
+    secrets_dir.mkdir(parents=True)
+    (secrets_dir / "webui-secrets.json").write_text(
+        json.dumps(
+            {
+                "secrets": [
+                    {
+                        "provider_id": "demo",
+                        "field": "api_key",
+                        "secret_ref": "pending-webui:demo:api_key",
+                        "value": "sk-demo-secret",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    result = mms_config_web._resolve_preview_provider_secret(
+        {"id": "demo", "secret_ref": "pen***key"},
+        config_path=str(config_root / "config.toml"),
+        command_name="mmf",
+    )
+
+    assert result["secret_ref"] == "pending-webui:demo:api_key"
+    assert result["api_key"] == "sk-demo-secret"
+
+
+def test_config_web_preview_bundle_config_from_verified_files_replaces_redacted_ref(tmp_path):
+    config_root = tmp_path / "mms-next"
+    generated_dir = config_root / "generated"
+    secrets_dir = config_root / "secrets"
+    generated_dir.mkdir(parents=True)
+    secrets_dir.mkdir(parents=True)
+    (secrets_dir / "webui-secrets.json").write_text(
+        json.dumps(
+            {
+                "secrets": [
+                    {
+                        "provider_id": "demo",
+                        "field": "api_key",
+                        "secret_ref": "pending-webui:demo:api_key",
+                        "value": "sk-demo-secret",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    profile_path = generated_dir / "provider-profiles.generated.json"
+    router_path = generated_dir / "model-routes.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "profiles": {
+                    "demo": {
+                        "name": "Demo",
+                        "protocols": ["openai_chat_completions"],
+                        "supported_clis": ["codex"],
+                    }
+                },
+                "provider": {"default": "demo"},
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    router_path.write_text(
+        json.dumps(
+            {
+                "routes": {
+                    "gpt-5.5": {
+                        "primary": {
+                            "provider_id": "demo",
+                            "model": "gpt-5.5",
+                            "openai_base_url": "https://demo.example/v1",
+                            "api_key": "",
+                            "secret_ref": "pen***key",
+                        },
+                        "fallbacks": [],
+                    }
+                }
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    result = mms_config_web._preview_bundle_config_from_verified_files(
+        {
+            "profile": {"path": str(profile_path)},
+            "router": {"path": str(router_path)},
+        },
+        config_root=str(config_root),
+    )
+
+    provider = result["providers"][0]
+    assert provider["secret_ref"] == "pending-webui:demo:api_key"
+    assert provider["has_api_key"] is True
 
 
 def test_config_web_snapshot_includes_read_only_model_source_status(tmp_path):
@@ -296,6 +1197,506 @@ def test_config_web_print_summary_exits_without_server(capsys):
     assert payload["recommendations"]
 
 
+def test_config_web_reexports_split_backend_modules():
+    import mms_config_web_server
+    import mms_config_web_settings
+
+    assert mms_config_web.ConfigWebApp is mms_config_web_server.ConfigWebApp
+    assert mms_config_web.run_config_web is mms_config_web_server.run_config_web
+    assert mms_config_web.build_settings_report is mms_config_web_settings.build_settings_report
+
+
+def test_config_web_frontend_assets_are_external_files():
+    html = mms_config_web._HTML_PAGE
+    css_body, css_type = mms_config_web_assets.read_static_asset("config-web.css")
+    js_body, js_type = mms_config_web_assets.read_static_asset("config-web.js")
+
+    assert '<link rel="stylesheet" href="/static/config-web.css">' in html
+    assert '<script src="/static/config-web.js"></script>' in html
+    assert '<body class="booting" data-ui-mode="default">' in html
+    assert "读取本地配置中" in html
+    assert "/api/migration/export" in js_body.decode("utf-8")
+    assert "/api/migration/start" in js_body.decode("utf-8")
+    assert "/api/session/catalog" in js_body.decode("utf-8")
+    assert "/api/session/preview" in js_body.decode("utf-8")
+    assert "parseApiResponse" in js_body.decode("utf-8")
+    assert "JSON.parse" in js_body.decode("utf-8")
+    assert "接口不存在或服务未刷新" in js_body.decode("utf-8")
+    assert "filteredSessionRows" in js_body.decode("utf-8")
+    assert "limit:3000" in js_body.decode("utf-8")
+    assert "搜索不会重复扫描" in js_body.decode("utf-8")
+    assert "重新扫描" in js_body.decode("utf-8")
+    assert "按项目文件夹分组" in js_body.decode("utf-8")
+    assert "session-folder" in js_body.decode("utf-8")
+    assert "session-context" in js_body.decode("utf-8")
+    assert "当前选择" in js_body.decode("utf-8")
+    assert "当前会话" in js_body.decode("utf-8")
+    assert "查看内容" in js_body.decode("utf-8")
+    assert "收起" in js_body.decode("utf-8")
+    assert "collapseSessionRow" in js_body.decode("utf-8")
+    assert "已收起当前会话" in js_body.decode("utf-8")
+    assert "aria-expanded" in js_body.decode("utf-8")
+    assert "sessionModelFilter" in js_body.decode("utf-8")
+    assert "有上次模型" in js_body.decode("utf-8")
+    assert "模型未记录" in html
+    assert "session-selected-summary" in js_body.decode("utf-8")
+    assert "session-detail-pinned" in js_body.decode("utf-8")
+    assert "这条历史没有摘要" in js_body.decode("utf-8")
+    assert "renderSessionResumePanel" in js_body.decode("utf-8")
+    assert "恢复信息" in js_body.decode("utf-8")
+    assert "session-inline-panel" in js_body.decode("utf-8")
+    assert "查看、复制和搜索都在这条记录下方完成" in js_body.decode("utf-8")
+    assert "block:'center'" in js_body.decode("utf-8")
+    assert "最近内容和搜索面板已经展开在左侧选中的会话记录下方" in js_body.decode("utf-8")
+    assert "默认恢复：按 MMS 当前恢复逻辑启动" in js_body.decode("utf-8")
+    assert "按上次模型恢复" in js_body.decode("utf-8")
+    assert "打开原始记录位置" in js_body.decode("utf-8")
+    assert "sessionLastModelCommand" in js_body.decode("utf-8")
+    assert "/api/path/reveal" in js_body.decode("utf-8")
+    assert "session-cli-badge" in js_body.decode("utf-8")
+    assert "上次模型" in js_body.decode("utf-8")
+    assert "模型来源" in js_body.decode("utf-8")
+    assert "session-summary-meta" in js_body.decode("utf-8")
+    assert "最近内容" in js_body.decode("utf-8")
+    assert "紧凑" in js_body.decode("utf-8")
+    assert "展开全部" in js_body.decode("utf-8")
+    assert "原始记录路径" in js_body.decode("utf-8")
+    assert "自动读取最近内容" in js_body.decode("utf-8")
+    assert "搜索本会话" in js_body.decode("utf-8")
+    assert "--select-model" in js_body.decode("utf-8")
+    assert "选择模型后恢复" in js_body.decode("utf-8")
+    assert "迁移 / 分享" in html
+    assert "会话历史" in html
+    assert "按项目文件夹查看" in html
+    assert "导入后开工" in html
+    assert "<style>" not in html
+    assert "刷新能力证据入口" not in html
+    assert "这里直接改 MMS 启动会读取的模型能力" in html
+    assert "compatSelectorBox" in js_body.decode("utf-8")
+    assert "已批准兼容 selector" in js_body.decode("utf-8")
+    assert "不是手动添加的 extra_models" in js_body.decode("utf-8")
+    assert "removeApprovedRouteModel" in js_body.decode("utf-8")
+    assert "data-rm-approved" in js_body.decode("utf-8")
+    assert "从当前通道批准清单移除" in js_body.decode("utf-8")
+    assert "modelSourceLabel(source,r.id)" in js_body.decode("utf-8")
+    assert "modelSourceTitle(source,r.id)" in js_body.decode("utf-8")
+    assert css_type.startswith("text/css")
+    assert js_type.startswith("application/javascript")
+    assert b".panel" in css_body
+    assert b".session-selected-summary" in css_body
+    assert b".session-detail-pinned" in css_body
+    assert b".session-detail {\n      grid-column: 2;\n      position: sticky;" in css_body
+    assert b".session-detail-pinned {\n      position: relative;" in css_body
+    assert b"max-height: calc(100dvh - 40px)" not in css_body
+    assert b"max-height: none" in css_body
+    assert b"overflow: visible" in css_body
+    assert b"display: block" in css_body
+    assert b".session-summary-meta" in css_body
+    assert b".session-resume-panel" in css_body
+    assert b".session-resume-hints" in css_body
+    assert b".session-model-filters" in css_body
+    assert b".session-inline-panel" in css_body
+    assert b".session-inline-actions" in css_body
+    assert b".session-card.is-claude" in css_body
+    assert b"#bd3f35" in css_body
+    assert b".session-card.is-codex" in css_body
+    assert b"#183a68" in css_body
+    assert b".session-card .is-collapse" in css_body
+    assert b".session-preview-items.is-compact" in css_body
+    assert b"flex: 0 0 auto" in css_body
+    assert b".session-preview-source summary" in css_body
+    assert b".session-message.is-user" in css_body
+    assert b"justify-self: end" in css_body
+    assert b"#15895e" in css_body
+    assert b".session-message.is-assistant" in css_body
+    assert b"#2563c8" in css_body
+    assert b".session-cli-badge" in css_body
+    assert b".session-preview-actions" in css_body
+    assert b"white-space: pre-wrap" in css_body
+    assert b"max-height: none" in css_body
+    assert b"overflow: visible" in css_body
+    assert b"model-table-wrap" in css_body
+    assert b"cap-toggle-grid" in css_body
+    assert b"body.booting" in css_body
+    assert b"CAPABILITY_META" in js_body
+    assert b"function renderAll" in js_body
+    assert b"function renderSessions" in js_body
+    assert b"setBootMessage" in js_body
+    assert "MMS 自动别名".encode("utf-8") in js_body
+    assert "能力配置".encode("utf-8") in js_body
+    assert "缓存优先".encode("utf-8") in js_body
+    assert "派生 alias".encode("utf-8") not in js_body
+
+
+def test_config_web_server_serves_external_static_assets(tmp_path):
+    app = mms_config_web.ConfigWebApp(
+        {"providers": []},
+        config_path=str(tmp_path / "config.toml"),
+        preferences_path=str(tmp_path / "preferences.toml"),
+    )
+    handler = type("TestSetupWebHandler", (mms_config_web_server._SetupWebHandler,), {"app": app})
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f"http://{server.server_address[0]}:{server.server_address[1]}"
+    try:
+        with urlopen(f"{url}/static/config-web.css", timeout=3) as response:
+            css_body = response.read()
+            css_type = response.headers.get("Content-Type", "")
+        with urlopen(f"{url}/static/config-web.js", timeout=3) as response:
+            js_body = response.read()
+            js_type = response.headers.get("Content-Type", "")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
+
+    assert css_type.startswith("text/css")
+    assert js_type.startswith("application/javascript")
+    assert b".panel" in css_body
+    assert b"function renderAll" in js_body
+
+
+def test_config_web_session_catalog_api(monkeypatch):
+    import mms_session_catalog
+
+    rows = [
+        {
+            "cli": "claude",
+            "session_id": "claude-session",
+            "project_path": "/tmp/repo",
+            "project_name": "repo",
+            "updated_at": "2026-06-04T01:00:00+00:00",
+            "source_kind": "claude-jsonl",
+        },
+        {
+            "cli": "codex",
+            "session_id": "codex-session",
+            "project_path": "/tmp/repo",
+            "project_name": "repo",
+            "updated_at": "2026-06-04T00:00:00+00:00",
+            "source_kind": "codex-jsonl",
+        },
+    ]
+
+    def fake_list_session_records(cli="all", query="", limit=None):
+        assert cli == "all"
+        assert query == ""
+        assert limit is None
+        return list(rows)
+
+    monkeypatch.setattr(mms_session_catalog, "list_session_records", fake_list_session_records)
+
+    app = mms_config_web.ConfigWebApp({}, command_name="mmz")
+    payload = app.session_catalog({"cli": "claude", "query": " repo ", "limit": 50})
+
+    assert payload["ok"] is True
+    assert payload["schema"] == "mms.session_catalog.v1"
+    assert payload["read_only"] is True
+    assert payload["counts"] == {"all": 2, "claude": 1, "codex": 1}
+    assert [row["session_id"] for row in payload["rows"]] == ["claude-session"]
+    assert payload["rows"][0]["resume_command"] == "mmz resume claude:claude-session"
+
+
+def test_config_web_session_catalog_uses_process_cache(monkeypatch):
+    import mms_session_catalog
+
+    calls = {"count": 0}
+
+    def fake_list_session_records(cli="all", query="", limit=None):
+        calls["count"] += 1
+        return [
+            {"cli": "claude", "session_id": "claude-session", "project_name": "repo"},
+            {"cli": "codex", "session_id": "codex-session", "project_name": "other"},
+        ]
+
+    monkeypatch.setattr(mms_session_catalog, "list_session_records", fake_list_session_records)
+    app = mms_config_web.ConfigWebApp({}, command_name="mmz")
+
+    first = app.session_catalog({"query": "repo"})
+    second = app.session_catalog({"query": "other"})
+    refreshed = app.session_catalog({"query": "repo", "force": True})
+
+    assert calls["count"] == 2
+    assert [row["session_id"] for row in first["rows"]] == ["claude-session"]
+    assert [row["session_id"] for row in second["rows"]] == ["codex-session"]
+    assert refreshed["rows"][0]["resume_command"] == "mmz resume claude:claude-session"
+
+
+def test_config_web_session_preview_api_uses_cached_record(monkeypatch):
+    import mms_session_catalog
+
+    calls = {"list": 0, "preview": []}
+    rows = [
+        {
+            "cli": "claude",
+            "session_id": "claude-session",
+            "project_name": "repo",
+            "source_kind": "claude-jsonl",
+            "source_path": "/tmp/claude-session.jsonl",
+        }
+    ]
+
+    def fake_list_session_records(cli="all", query="", limit=None):
+        calls["list"] += 1
+        assert cli == "all"
+        return list(rows)
+
+    def fake_preview_session_record(session_ref, *, cli="all", record=None, query="", limit=18, max_lines=20000):
+        calls["preview"].append(
+            {
+                "session_ref": session_ref,
+                "cli": cli,
+                "record": record,
+                "query": query,
+                "limit": limit,
+                "max_lines": max_lines,
+            }
+        )
+        return {
+            "ok": True,
+            "schema": "mms.session_preview.v1",
+            "session_id": session_ref,
+            "cli": cli,
+            "query": query,
+            "items": [{"role": "用户", "text": "hello", "line": 3}],
+            "read_only": True,
+        }
+
+    monkeypatch.setattr(mms_session_catalog, "list_session_records", fake_list_session_records)
+    monkeypatch.setattr(mms_session_catalog, "preview_session_record", fake_preview_session_record)
+    app = mms_config_web.ConfigWebApp({}, command_name="mmz")
+
+    payload = app.session_preview({"key": "claude:claude-session", "query": " hello ", "limit": 12})
+
+    assert calls["list"] == 1
+    assert calls["preview"][0]["record"]["session_id"] == "claude-session"
+    assert calls["preview"][0]["query"] == "hello"
+    assert calls["preview"][0]["limit"] == 12
+    assert payload["ok"] is True
+    assert payload["record"]["resume_command"] == "mmz resume claude:claude-session"
+    assert payload["record"]["select_model_command"] == "mmz resume --select-model claude:claude-session"
+    assert payload["items"][0]["text"] == "hello"
+
+
+def test_config_web_server_serves_session_catalog_endpoint(monkeypatch, tmp_path):
+    import mms_session_catalog
+
+    def fake_list_session_records(cli="all", query="", limit=None):
+        return [
+            {
+                "cli": "codex",
+                "session_id": "codex-session",
+                "project_path": str(tmp_path),
+                "project_name": tmp_path.name,
+                "updated_at": "2026-06-04T01:00:00+00:00",
+                "source_kind": "codex-jsonl",
+            }
+        ]
+
+    monkeypatch.setattr(mms_session_catalog, "list_session_records", fake_list_session_records)
+    app = mms_config_web.ConfigWebApp(
+        {"providers": []},
+        config_path=str(tmp_path / "config.toml"),
+        preferences_path=str(tmp_path / "preferences.toml"),
+        command_name="mmz",
+    )
+    handler = type("TestSetupWebHandler", (mms_config_web_server._SetupWebHandler,), {"app": app})
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f"http://{server.server_address[0]}:{server.server_address[1]}"
+    try:
+        req = Request(
+            f"{url}/api/session/catalog",
+            data=json.dumps({"cli": "codex"}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(req, timeout=3) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
+
+    assert payload["ok"] is True
+    assert payload["rows"][0]["resume_command"] == "mmz resume codex:codex-session"
+
+
+def test_config_web_server_serves_session_preview_endpoint(monkeypatch, tmp_path):
+    import mms_session_catalog
+
+    def fake_list_session_records(cli="all", query="", limit=None):
+        return [
+            {
+                "cli": "codex",
+                "session_id": "codex-session",
+                "project_path": str(tmp_path),
+                "project_name": tmp_path.name,
+                "source_kind": "codex-jsonl",
+                "source_path": str(tmp_path / "codex-session.jsonl"),
+            }
+        ]
+
+    def fake_preview_session_record(session_ref, *, cli="all", record=None, query="", limit=18, max_lines=20000):
+        assert session_ref == "codex-session"
+        assert cli == "codex"
+        assert record["project_name"] == tmp_path.name
+        return {
+            "ok": True,
+            "schema": "mms.session_preview.v1",
+            "session_id": session_ref,
+            "cli": cli,
+            "items": [{"role": "助手", "text": "预览内容", "line": 8}],
+            "read_only": True,
+        }
+
+    monkeypatch.setattr(mms_session_catalog, "list_session_records", fake_list_session_records)
+    monkeypatch.setattr(mms_session_catalog, "preview_session_record", fake_preview_session_record)
+    app = mms_config_web.ConfigWebApp(
+        {"providers": []},
+        config_path=str(tmp_path / "config.toml"),
+        preferences_path=str(tmp_path / "preferences.toml"),
+        command_name="mmz",
+    )
+    handler = type("TestSetupWebHandler", (mms_config_web_server._SetupWebHandler,), {"app": app})
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f"http://{server.server_address[0]}:{server.server_address[1]}"
+    try:
+        req = Request(
+            f"{url}/api/session/preview",
+            data=json.dumps({"cli": "codex", "session_id": "codex-session"}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(req, timeout=3) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
+
+    assert payload["ok"] is True
+    assert payload["items"][0]["text"] == "预览内容"
+    assert payload["record"]["resume_command"] == "mmz resume codex:codex-session"
+
+
+def test_config_web_server_skips_snapshot_for_shell_and_static_assets():
+    class NoSnapshotApp:
+        def snapshot(self):
+            raise AssertionError("snapshot should only run for data endpoints")
+
+    handler = type("TestSetupWebHandler", (mms_config_web_server._SetupWebHandler,), {"app": NoSnapshotApp()})
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f"http://{server.server_address[0]}:{server.server_address[1]}"
+    try:
+        with urlopen(f"{url}/", timeout=3) as response:
+            html_body = response.read()
+            html_type = response.headers.get("Content-Type", "")
+        with urlopen(f"{url}/static/config-web.css", timeout=3) as response:
+            css_body = response.read()
+            css_type = response.headers.get("Content-Type", "")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
+
+    assert html_type.startswith("text/html")
+    assert css_type.startswith("text/css")
+    assert b'<script src="/static/config-web.js"></script>' in html_body
+    assert b".panel" in css_body
+
+
+def test_config_web_server_send_ignores_client_disconnect():
+    class ClosedWriter:
+        def write(self, _body):
+            raise BrokenPipeError("client closed")
+
+    class HeaderClosedHandler(mms_config_web_server._SetupWebHandler):
+        def send_response(self, *_args, **_kwargs):
+            return None
+
+        def send_header(self, *_args, **_kwargs):
+            return None
+
+        def end_headers(self):
+            raise BrokenPipeError("client closed")
+
+    class BodyClosedHandler(HeaderClosedHandler):
+        def end_headers(self):
+            return None
+
+    header_closed = object.__new__(HeaderClosedHandler)
+    body_closed = object.__new__(BodyClosedHandler)
+    body_closed.wfile = ClosedWriter()
+
+    assert header_closed._send(200, b"ok", "text/plain") is False
+    assert body_closed._send(200, b"ok", "text/plain") is False
+
+
+def test_config_web_review_summary_frontend_has_policy_tabs():
+    html = _frontend_source()
+
+    assert 'data-review-tab="summary"' in html
+    assert "模型策略明细" in html
+    assert "JSON 明细" in html
+    assert "policy-change-card" in html
+    assert "capabilitySourceBadges" in html
+    assert "OpenRouter catalog" in html
+    assert "<th>来源</th>" in html
+
+
+def test_config_web_plan_ignores_implicit_provider_timezone_default(tmp_path):
+    current = {
+        "providers": [
+            {
+                "id": "demo",
+                "name": "Demo",
+                "enabled": True,
+                "role": "auto",
+                "priority": 100,
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["codex"],
+                "models_endpoint": "/models",
+            }
+        ],
+        "provider": {"default": "demo"},
+    }
+    payload = {
+        "draft": {
+            "providers": [
+                {
+                    "id": "demo",
+                    "original_id": "demo",
+                    "name": "Demo",
+                    "enabled": True,
+                    "role": "auto",
+                    "priority": 100,
+                    "claude_1m_mode": "auto",
+                    "timezone": "",
+                    "models_endpoint": "/models",
+                    "protocols": ["openai_chat_completions"],
+                    "supported_clis": ["codex"],
+                    "fallback_models": [],
+                    "extra_models": [],
+                    "hidden_models": [],
+                }
+            ]
+        }
+    }
+
+    plan = mms_config_web.build_config_plan(current, payload, config_path=str(tmp_path / "config.toml"))
+
+    provider = plan["config"]["providers"][0]
+    assert "timezone" not in provider
+    assert "通道元数据变化：demo" not in json.dumps(plan["review_summary"], ensure_ascii=False)
+
+
 def test_config_web_markdown_contains_manual_snippets(capsys):
     rc = mms_config_web.run_config_web(
         {"providers": []},
@@ -316,36 +1717,106 @@ def test_config_web_markdown_contains_manual_snippets(capsys):
 
 
 def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
-    html = mms_config_web._HTML_PAGE
+    html = _frontend_source()
 
-    assert "['source','真源状态','DB / legacy / bundle']" in html
+    assert "['source','配置源','root / DB / bundle','advanced']" in html
     assert 'data-section="source"' in html
     assert "function renderSourceStatus()" in html
     assert "status.headline" in html
     assert "consumer_bundle_status" in html
-    assert "Consumer Bundle" in html
-    assert "Promotion Plan / Human Gate" in html
+    assert "消费端 Bundle" in html
+    assert "晋级计划 / 人工确认" in html
     assert "config_v2_promotion_plan" in html
-    assert "4.0 Release Readiness" in html
+    assert "4.0 发布就绪度" in html
     assert "config_v2_release_readiness" in html
     assert "release_complete 仍为 false" in html
-    assert "stable promotion human gate" in html
-    assert "blocked requirements" in html
+    assert "stable promotion 人工确认" in html
+    assert "阻塞检查项" in html
     assert "stable backup + bundle comparison" in html
-    assert "apply 仍停在 human gate" in html
+    assert "apply 仍停在 人工确认" in html
     assert "不读 SQLite" in html
     assert "mmf config bundle --json" in html
-    assert "candidate routes" in html
-    assert "missing keys" in html
+    assert "候选 route" in html
+    assert "缺 API Key" in html
     assert "registry_v2_save_plan" in html
     assert "applyV2Preview" in html
     assert "downloadPlanJson" in html
     assert "copyApplyCommand" in html
     assert "WebUI plan JSON = “生成保存预览”的 redacted review artifact" in html
-    assert "Advanced / Recovery：plan JSON 与 CLI fallback" in html
+    assert "高级 / 恢复：plan JSON 与 CLI fallback" in html
     assert "日常只需要“生成保存预览” → “写入预览 DB + 发布”" in html
     assert "function planJsonHint(plan)" in html
     assert "function renderApplyResult(data)" in html
+    assert "function assetDraftDiff()" in html
+    assert "能力草稿" in html
+    assert 'data-section="sessionAssets"' in html
+    assert "Skill / MCP 管理" in html
+    assert "这里就是会话能力的配置入口" in html
+    assert "function renderSessionAssets()" in html
+    assert "assetPreferenceSnippet" in html
+    assert "applyAssetPrefs" in html
+    assert "/api/preferences/apply" in html
+    assert "保存偏好" in html
+    assert "assetCards" in html
+    assert "assetControlHelp" in html
+    assert "添加到 MMS 动态" in html
+    assert "MMS managed assets root" in html
+    assert "managed_root" in html
+    assert "在这里开 / 关" in html
+    assert "asset-search" in html
+    assert "asset-list" in html
+    assert "assetManagedRoots" in html
+    assert "function renderAssetManagedRoots()" in html
+    assert "当前加载来源 / 路径诊断" in html
+    assert "MMS 自带动态能力读当前包内 assets/session-assets" in html
+    assert "asset-source-diagnostic" in html
+    assert "roots.filter(Boolean)" in html
+    assert "roots.slice(0,6)" not in html
+    assert ".asset-toolbar .filterbar button.active" in html
+    assert 'aria-pressed="${active?' in html
+    assert "function assetDisableSupported(row)" in html
+    assert "全局 Skill 当前只读展示" in html
+    assert "不可在此关闭" in html
+    assert "function renderAssetRows(rows)" in html
+    assert "assetGroupOpenState" in html
+    assert "data-asset-group-details" in html
+    assert "function assetSkillFamilyHint(name)" in html
+    assert "Lark CLI 技能组" in html
+    assert "整组默认关闭" in html
+    assert "asset-group-cards" in html
+    assert "展开查看各 CLI 的 TUI 确认页能力和来源" in html
+    assert "assetConfirmMap" in html
+    assert "function renderAssetConfirmMap()" in html
+    assert "TUI 确认页对照" in html
+    assert "D / Space" in html
+    assert "assetCliOverview" in html
+    assert "asset-cli-card" in html
+    assert "function renderAssetCliOverview()" in html
+    assert "TUI 确认页同源预览" in html
+    assert "只看这个 CLI" in html
+    assert "全局来源（只读）" in html
+    assert "Tab/C/N/T/E/X/D" in html
+    assert "按开关启用" in html
+    assert "偏好关闭" in html
+    assert "Aptos" in html
+    assert ".asset-card::before" in html
+    assert "overflow-wrap: anywhere" in html
+    assert "本次未保存变化" in html
+    assert "assetPendingBar" in html
+    assert "asset-pending-bar" in html
+    assert "保存并应用" in html
+    assert "备份：复制 TOML 片段" in html
+    assert "查看已检测到的 Global / plugin 位置" in html
+    assert "asset-ops-grid" in html
+    assert "copyAssetPrefs" in html
+    assert "启动确认页仍可临时打开" in html
+    assert "打开位置" in html
+    assert "data-asset-reveal-path" in html
+    assert "/api/path/reveal" in html
+    assert "function assetPathButtons" in html
+    assert "全局继承" in html
+    assert "MMS 动态注入" in html
+    assert "高级信息：路径、触发和 key" in html
     assert "已发布，但 runtime 未就绪" in html
     assert "mmf 会读到这次保存后的最新 bundle" in html
     assert "missing key/base URL" in html
@@ -355,6 +1826,7 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "旧版“确认保存”在 mmf 中已隐藏" in html
     assert "stable legacy 走 backup + audit，preview root 走 DB candidate + latest-approved publish" in html
     assert "stable legacy 保存写入 config.toml 的 [rescue] / [vision_sidecar]" in html
+    assert "已下线的负载均衡不在本轮 WebUI 迭代范围" in html
     assert "preview root 走 DB candidate + latest-approved publish" in html
     assert "stable 写 credentials.sh；preview 写 secret backend" in html
     assert "这里会写入 config.toml 的 [rescue]" not in html
@@ -363,15 +1835,139 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "saveBtn').disabled=preview" in html
     assert "document.querySelectorAll('.legacy-save-action').forEach" in html
     assert "applyV2Preview').disabled=!preview" in html
+    assert "['settings','设置','配置台 / 账号 / 安全']" in html
+    assert 'data-section="settings"' in html
+    assert "<h2>设置工作台</h2>" in html
+    assert "先改会影响 MMS 启动的设置" in html
+    assert "默认模式只放常用设置" in html
+    assert "settings-actionbar" in html
+    assert "settings-priority-grid" not in html
+    assert "配置源 / DB root" in html
+    assert "settings-diagnostic-row" in html
+    assert "默认模式" in html
+    assert "高级模式" in html
+    assert "data-ui-mode-button" in html
+    assert "body[data-ui-mode=\"default\"] .ui-advanced-only" in html
+    assert "localStorage.getItem('mmsConfigWebUiMode')" in html
+    assert "setSection('settings')" in html
+    assert "data-settings-tab" in html
+    assert "function switchSettingsTab" in html
+    assert "Snapshot Guard" in html
+    assert "accountModuleActions" in html
+    assert "accountActionButtons" in html
+    assert "account-config-grid" in html
+    assert "sourceReport" in html
+    assert "channelReport" in html
+    assert "data-provider-form-tab" in html
+    assert "function switchProviderFormTab" in html
+    assert "基础信息" in html
+    assert "连接与协议" in html
+    assert "策略与高级" in html
+    assert "报告与确认" in html
+    assert "Family 权重覆盖（不常用）" in html
+    assert "默认继承 priority" in html
+    assert "provider-advanced" in html
+    assert "保存审计入口" in html
+    assert "自动排序用途说明" not in html
+    assert "官方账号登录说明（OAuth）" not in html
+    assert "OAuth 主流程已下线" in html
+    assert "查看已下线兼容说明" in html
+    assert "OAuth 确认" not in html
+    assert "自动排序确认" not in html
+    assert "modelInventorySummary" in html
+    assert "modelConfigResult" in html
+    assert "testListBtn" in html
+    assert "fallbackReport" in html
+    assert "settingsCommand" not in html
+    assert "MMX / WEBUI TAKEOVER MAP" not in html
+    assert "Settings moved out of TUI" not in html
+    assert "accountTable" in html
+    assert "function syncAccounts()" in html
+    assert "data-account-default" in html
+    assert "Claude 人工锁定" in html
+    assert "account_defaults:state.account_defaults" in html
+    assert "uiLanguage" in html
+    assert "saveUiLanguage" in html
+    assert "settingsGapSummary" in html
+    assert "ui:state.ui" in html
+    assert "settingsCoverage" in html
+    assert "主屏 O/P/L/S 入口覆盖" not in html
+    assert "entryAudit" not in html
+    assert "function renderEntryAudit" not in html
+    assert "Load Balance profiles" not in html
+    assert "loadBalanceTable" not in html
+    assert "function renderLoadBalance" not in html
+    assert "lbUpsert" not in html
+    assert "load_balance_status" not in html
+    assert "family_priority_overrides" in html
+    assert "function familyPriorityInputs" in html
+    assert "providerFamilyPriority" in html
+    assert "pClaude1m" in html
+    assert "pTimezone" in html
+    assert "pNote" in html
+    assert "网络策略" in html
+    assert "data-account-family" in html
+    assert "data-account-claude-1m" in html
+    assert "data-account-timezone" in html
+    assert "data-account-note" in html
+    assert "TUI ↔ WebUI 对照表" in html
+    assert "tuiMappingTable" in html
+    assert "mappingFilters" in html
+    assert "acceptancePanel" in html
+    assert "逐项验收清单" in html
+    assert "mapCheckProgress" in html
+    assert "data-map-check" in html
+    assert "function renderAcceptancePanel" in html
+    assert "function copyAcceptanceReport" in html
+    assert "function acceptanceReportText" in html
+    assert "点击证据" in html
+    assert "function renderTuiMapping" in html
+    assert "data-map-filter" in html
+    assert "data-section-jump" in html
+    assert "pDeleteConfirm" in html
+    assert "deleteProvider" in html
+    assert "function deleteCurrentProviderDraft()" in html
+    assert "删除这个通道" in html
+    assert "标记删除" in html
+    assert "保存前不会生效" in html
+    assert "pendingProviderDeletes" in html
+    assert "function undoProviderDeleteDraft" in html
+    assert "已保存 API Key 不会在这一步自动清理" in html
+    assert "maintenanceActions" not in html
+    assert "/api/settings/report" in html
+    assert "人工确认" in html
+    assert "报告 / 人工确认" in html
+    assert "版本：" in html
+    assert "当前配置 Root" in html
+    assert "要试预览 DB 请用 mmf config web" in html
+    assert "function renderGateReport" in html
+    assert "function renderProviderUsageReport" in html
+    assert "function providerModelUsageRows" in html
+    assert "当前通道使用统计" in html
+    assert "查看当前通道使用统计" in html
+    assert "payload.provider_id=current().id" in html
+    assert "不会把其他通道混进来" in html
+    assert "暂无通道使用统计" in html
+    assert "usage-model-table" in html
+    assert "usage-detail" in html
+    assert "CLI 明细（按需展开）" in html
+    assert "模型</th><th>来源</th><th>显示状态</th><th>启动次数" in html
+    assert "function copyGateCommand" in html
+    assert "data-copy-gate-command" in html
+    assert "blocked_auto_execute" in html
+    assert "requires_human_confirmation" in html
+    assert "可复制命令" in html
+    assert "人工步骤" in html
+    assert "function renderSettings()" in html
     assert "renderStatus();renderSaveControls();renderSourceStatus();" in html
-    assert "pending key" in html
+    assert "待保存 Key" in html
     assert "已输入新 key，保存前会保留（不回显）" in html
     assert "keyEl.dataset.touched='1'" in html
     assert "p.pending_api_key=true" in html
     assert "p.update_credentials=!!(updateEl&&updateEl.checked)" in html
     assert "p.api_key=$('pKey').value" not in html
     assert "data.ok&&Array.isArray(data.models)" in html
-    assert "模型拉取失败，请看测试结果" in html
+    assert "模型拉取失败，请看模型配置结果" in html
     assert "card provider-editor" in html
     assert ".provider-editor {" in html
     assert "position: sticky;" in html
@@ -380,23 +1976,40 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "function providerEntries()" in html
     assert "a.p.enabled?-1:1" in html
     assert "renderProviderList();renderTestSelectors();" in html
+    assert "function selectProvider(index)" in html
+    assert "activeProvider=next;renderProviders()" in html
+    assert "activeProvider=Number(el.dataset.i);renderAll()" not in html
     assert "['claude','codex','opencode','pi','agy']" in html
     assert "通道修改已暂存，生成保存预览后再写入" in html
-    assert "这是当前通道的模型清单，不是全局模型池" in html
-    assert "手动补充当前通道模型（extra_models" in html
-    assert "添加到补充模型库" in html
-    assert "当前通道补充模型库（extra_models）" in html
-    assert "不是待删除列表，也不是全局模型池" in html
-    assert "编辑补充模型库" in html
-    assert "从补充库移除" in html
-    assert "移除全部通道未匹配隐藏规则" in html
-    assert "未匹配隐藏规则（hidden_models）" in html
-    assert "不等于远端不存在" in html
-    assert "拉取后自动标记缺失旧 route 为待清理" in html
-    assert "移除当前通道未匹配隐藏规则" in html
+    assert "这里直接改 MMS 启动会读取的模型能力" in html
+    assert "Reasoning Effort" in html
+    assert "Think on/off" in html
+    assert "1M 上下文" in html
+    assert "拉取全部通道模型" in html
+    assert "refreshAllProviderModels" in html
+    assert "保存后不需要 [1m] 后缀" in html
+    assert "刷新能力证据入口" not in html
+    assert "打开通道 1M 设置" not in html
+    assert "不要填 `200`" in html
+    assert "手动添加当前通道模型（extra_models" in html
+    assert "添加为手动模型" in html
+    assert "restoreModelPatch" in html
+    assert "清空手动添加和隐藏" in html
+    assert "已清空" in html
+    assert "手动添加模型（extra_models）" in html
+    assert "当前通道没有手动添加模型" in html
+    assert "从手动添加中移除" in html
+    assert "清理失效隐藏规则（全部通道）" in html
+    assert "当前隐藏模型（hidden_models）" in html
+    assert "取消表格里的“显示”勾选后" in html
+    assert "高级：拉取后把缺失旧 route 标记为待清理" in html
+    assert "清理当前通道失效隐藏规则" in html
     assert "function providerEntries()" in html
     assert "a.p.enabled?-1:1" in html
     assert "renderProviderList();renderTestSelectors();" in html
+    assert "function selectProvider(index)" in html
+    assert "activeProvider=next;renderProviders()" in html
+    assert "activeProvider=Number(el.dataset.i);renderAll()" not in html
     assert "通道修改已暂存，生成保存预览后再写入" in html
 
 
@@ -405,7 +2018,7 @@ def test_config_web_allows_pi_in_supported_clis():
 
 
 def test_config_web_fetch_models_does_not_persist_to_fallback_models():
-    html = mms_config_web._HTML_PAGE
+    html = _frontend_source()
 
     assert "不会自动写入 fallback_models" in html
     assert "p.fallback_models=[...new Set(data.models)]" not in html
@@ -440,20 +2053,27 @@ def test_config_web_plan_does_not_materialize_empty_fallback_models(tmp_path):
 
 
 def test_config_web_opencode_agent_overrides_are_advanced_ui():
-    html = mms_config_web._HTML_PAGE
+    html = _frontend_source()
 
-    assert "OpenCode default profile" in html
-    assert "OpenCode Agent Roster" in html
-    assert "Order 是 priority/fallback order, not round-robin" in html
-    assert "Agent overrides" in html
-    assert "Enabled agents" in html
+    assert "OpenCode 默认 profile" in html
+    assert "OpenCode Review Host" in html
+    assert "重新启动 OpenCode 后才生效" in html
+    assert "opencodeReviewHostPrimaryPicker" in html
+    assert "opencodeReviewHostFallbackPicker" in html
+    assert "data-op-picker-filter" in html
+    assert "data-op-picker-chip-remove" in html
+    assert "data-review-host-reset" in html
+    assert "OpenCode Agent 名单" in html
+    assert "顺序表示 priority/fallback 顺序，不是 round-robin" in html
+    assert "Agent 覆盖" in html
+    assert "已启用 Agent" in html
     assert 'id="opencodeOverrideSummary"' in html
     assert 'id="opencodeAdvanced"' in html
     assert "<details" in html
-    assert "Advanced: OpenCode per-agent roster" in html
+    assert "高级：OpenCode 逐 Agent 名单" in html
     assert "只看改动项" in html
-    assert "+ Add Vision Agent" in html
-    assert "+ Add Executor Agent" in html
+    assert "+ 添加 Vision Agent" in html
+    assert "+ 添加执行 Agent" in html
     assert "全部自动" in html
     assert "['execute','执行/协调']" in html
     assert "enabledOnly=false" in html
@@ -465,6 +2085,35 @@ def test_config_web_opencode_agent_overrides_are_advanced_ui():
     assert "state.opencode.agent_models={};" in html
     assert "state.opencode.agent_roster={};" in html
     assert "session-local opencode.json" in html
+
+
+def test_config_web_opencode_picker_avoids_interactive_summary_controls():
+    html = _frontend_source()
+
+    picker_fn = html.split("function opencodeModelPicker", 1)[1].split("function bindOpencodeModelPickers", 1)[0]
+    picker_summary = picker_fn.split("</summary>", 1)[0]
+    committee_fn = html.split("function renderCommitteePresets", 1)[1].split("function renderCommitteeSummary", 1)[0]
+    committee_summary = committee_fn.split("</summary>", 1)[0]
+
+    assert "data-op-picker-chip-remove" not in picker_summary
+    assert "opencodePickerSummaryChips" in picker_summary
+    assert "model-picker-selected-actions" in picker_fn
+    assert "data-committee-reset" not in committee_summary
+    assert "committee-tier-actions" in committee_fn
+
+
+def test_config_web_opencode_picker_prioritizes_crs_and_demotes_company_channels():
+    html = _frontend_source()
+
+    assert "provider_priority" in html
+    assert "opencodePickerIsCompany" in html
+    assert "opencodePickerIsCrs" in html
+    assert "compareOpencodePickerRows" in html
+    assert "compareOpencodePickerChannels" in html
+    assert "wantedChannelKey" in html
+    assert "selectedChannels={}" in html
+    assert "channelForModel(selectedChannelMap,row.model,fallbackChannel)" in html
+    assert "rowChannelKey===wantedChannelKey" in html
 
 
 def test_config_web_snapshot_has_agent_roster_catalog():
@@ -483,6 +2132,70 @@ def test_config_web_snapshot_has_agent_roster_catalog():
         "mobius-reviewer-gpt55",
     } <= agents
     assert {row["category"] for row in catalog} >= {"执行/协调", "探索", "找茬", "Vision", "审查"}
+
+
+def test_config_web_snapshot_uses_selected_opencode_profile_catalog():
+    snapshot = mms_config_web.build_config_snapshot(
+        {
+            "providers": [],
+            "opencode": {
+                "default_profile": "committee",
+                "committee": {"selected_agents": ["committee-qwen"]},
+                "agent_roster": {
+                    "committee-qwen": {
+                        "custom": True,
+                        "model": "qwen3.7-max",
+                        "provider_id": "qwen-channel",
+                    }
+                },
+            },
+        },
+        config_path="/tmp/mms/config.toml",
+    )
+    catalog = snapshot["opencode"]["agent_catalog"]
+    qwen_row = next(row for row in catalog if row["agent"] == "committee-qwen")
+    agents = {row["agent"] for row in catalog}
+
+    assert snapshot["opencode"]["default_profile"] == "committee"
+    assert "committee-host" in agents
+    assert "committee-qwen" in agents
+    assert "committee-kimi" not in agents
+    assert qwen_row["default_models"] == ["qwen3.7-max"]
+    assert "mobius-builder-pro" not in agents
+    assert snapshot["opencode"]["agent_catalogs"]["committee"][0]["agent"] == "committee-host"
+    assert snapshot["opencode"]["agent_catalogs"]["agent"][0]["agent"] == "mobius-builder-pro"
+
+
+def test_config_web_snapshot_maps_internal_opencode_profile_ids_to_surface_ids():
+    agent_snapshot = mms_config_web.build_config_snapshot(
+        {"providers": [], "opencode": {"default_profile": "lite_pro_orchestrated"}},
+        config_path="/tmp/mms/config.toml",
+    )
+    review_snapshot = mms_config_web.build_config_snapshot(
+        {"providers": [], "opencode": {"default_profile": "review_hub"}},
+        config_path="/tmp/mms/config.toml",
+    )
+
+    assert agent_snapshot["opencode"]["default_profile"] == "agent"
+    assert review_snapshot["opencode"]["default_profile"] == "review"
+
+
+def test_config_web_snapshot_keeps_raw_and_omo_agent_catalogs_empty():
+    raw_snapshot = mms_config_web.build_config_snapshot(
+        {"providers": [], "opencode": {"default_profile": "raw"}},
+        config_path="/tmp/mms/config.toml",
+    )
+    omo_snapshot = mms_config_web.build_config_snapshot(
+        {"providers": [], "opencode": {"default_profile": "heavy_omo"}},
+        config_path="/tmp/mms/config.toml",
+    )
+
+    assert raw_snapshot["opencode"]["default_profile"] == "raw"
+    assert raw_snapshot["opencode"]["agent_catalog"] == []
+    assert raw_snapshot["opencode"]["agent_catalogs"]["raw"] == []
+    assert omo_snapshot["opencode"]["default_profile"] == "omo"
+    assert omo_snapshot["opencode"]["agent_catalog"] == []
+    assert omo_snapshot["opencode"]["agent_catalogs"]["omo"] == []
 
 
 def test_config_web_plan_noops_credential_backed_snapshot(monkeypatch, tmp_path):
@@ -530,6 +2243,206 @@ def test_config_web_plan_noops_credential_backed_snapshot(monkeypatch, tmp_path)
     assert plan["summary"]["will_write_policy"] is False
     assert plan["review_summary"]["risks"] == []
     assert plan["review_summary"]["items"][0]["kind"] == "no_change"
+
+
+def test_config_web_plan_account_default_draft_reviews_safe_non_claude_changes(tmp_path):
+    cfg = {
+        "accounts": [
+            {"id": "claude-main", "name": "Claude Main", "cli": "claude", "priority": 100},
+            {"id": "codex-a", "name": "Codex A", "cli": "codex", "priority": 50},
+            {"id": "codex-b", "name": "Codex B", "cli": "codex", "priority": 40},
+        ],
+        "account": {"defaults": {"claude": "claude-main", "codex": "codex-a"}},
+    }
+    snapshot = mms_config_web.build_config_snapshot(cfg, config_path=str(tmp_path / "config.toml"))
+    draft = {key: snapshot[key] for key in ("accounts", "account_defaults")}
+    codex_b = next(account for account in draft["accounts"] if account["id"] == "codex-b")
+    codex_b["name"] = "Codex B Edited"
+    codex_b["enabled"] = False
+    codex_b["priority"] = 120
+    codex_b["family_priority_overrides"] = {"GPT": 125}
+    codex_b["claude_1m_mode"] = "disable"
+    codex_b["timezone"] = "Asia/Tokyo"
+    codex_b["note"] = "non-claude metadata ok"
+    draft["account_defaults"]["codex"] = "codex-b"
+
+    plan = mms_config_web.build_config_plan(cfg, {"draft": draft}, config_path=str(tmp_path / "config.toml"))
+    review = plan["review_summary"]
+
+    assert plan["ok"] is True
+    assert plan["config"]["account"]["defaults"] == {"claude": "claude-main", "codex": "codex-b"}
+    after_codex_b = next(account for account in plan["config"]["accounts"] if account["id"] == "codex-b")
+    assert after_codex_b["name"] == "Codex B Edited"
+    assert after_codex_b["enabled"] is False
+    assert after_codex_b["priority"] == 120
+    assert after_codex_b["family_priority_overrides"] == {"GPT": 125}
+    assert after_codex_b["claude_1m_mode"] == "disable"
+    assert after_codex_b["timezone"] == "Asia/Tokyo"
+    assert after_codex_b["note"] == "non-claude metadata ok"
+    assert any(item["kind"] == "account_default" and item["meta"]["cli"] == "codex" for item in review["items"])
+    assert any(item["kind"] == "account_metadata" and item["meta"]["account_id"] == "codex-b" for item in review["items"])
+    assert any(risk["id"] == "account_default_changed" for risk in review["risks"])
+    assert review["counts"]["account_changes"] == 2
+
+
+def test_config_web_plan_family_priority_drafts_are_reviewed(tmp_path):
+    cfg = {
+        "provider": {"default": "demo"},
+        "providers": [
+            {
+                "id": "demo",
+                "name": "Demo",
+                "enabled": True,
+                "role": "auto",
+                "priority": 100,
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["opencode"],
+                "models_endpoint": "/models",
+                "fallback_models": ["gpt-5.5"],
+            }
+        ],
+        "accounts": [{"id": "codex-main", "name": "Codex Main", "cli": "codex", "priority": 100}],
+    }
+    snapshot = mms_config_web.build_config_snapshot(cfg, config_path=str(tmp_path / "config.toml"))
+    draft = {key: snapshot[key] for key in ("providers", "accounts", "account_defaults")}
+    draft["providers"][0]["family_priority_overrides"] = {"GPT": 145, "Qwen": 90}
+    draft["accounts"][0]["family_priority_overrides"] = {"GPT": 130}
+
+    plan = mms_config_web.build_config_plan(cfg, {"draft": draft}, config_path=str(tmp_path / "config.toml"))
+    review = plan["review_summary"]
+
+    assert plan["ok"] is True
+    provider = plan["config"]["providers"][0]
+    assert provider["family_priority_overrides"] == {"GPT": 145, "Qwen": 90}
+    assert plan["config"]["accounts"][0]["family_priority_overrides"] == {"GPT": 130}
+    assert any(item["kind"] == "provider_family_priority" for item in review["items"])
+    assert any(item["kind"] == "account_metadata" for item in review["items"])
+    assert "family_priority_overrides" in plan["diffs"]["config_toml"]
+    assert "[load_balance]" not in plan["diffs"]["config_toml"]
+
+
+def test_config_web_review_summary_provider_metadata_lists_real_fields_only(tmp_path):
+    cfg, _ = mms_core._ensure_provider_config(
+        {
+            "provider": {"default": "demo"},
+            "providers": [
+                {
+                    "id": "demo",
+                    "name": "Demo",
+                    "enabled": True,
+                    "role": "auto",
+                    "priority": 995,
+                    "protocols": ["openai_chat_completions"],
+                    "supported_clis": ["codex"],
+                    "models_endpoint": "manual",
+                }
+            ],
+        }
+    )
+    snapshot = mms_config_web.build_config_snapshot(cfg, config_path=str(tmp_path / "config.toml"))
+    draft = {key: snapshot[key] for key in ("providers", "provider_default")}
+    draft["providers"][0]["name"] = "Demo Renamed"
+
+    plan = mms_config_web.build_config_plan(cfg, {"draft": draft}, config_path=str(tmp_path / "config.toml"))
+    item = next(item for item in plan["review_summary"]["items"] if item["kind"] == "provider_metadata")
+
+    assert item["detail"] == "名称 `Demo` -> `Demo Renamed`"
+    assert item["level"] == "info"
+    assert item["meta"]["changes"][0]["field"] == "name"
+    assert "优先级 `995` -> `995`" not in item["detail"]
+
+
+def test_config_web_plan_ui_language_draft_is_reviewed(tmp_path):
+    cfg = {"ui": {"language": "zh"}}
+    plan = mms_config_web.build_config_plan(
+        cfg,
+        {"draft": {"ui": {"language": "en"}}},
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    assert plan["ok"] is True
+    assert plan["config"]["ui"]["language"] == "en"
+    assert any(item["kind"] == "ui_language" for item in plan["review_summary"]["items"])
+    assert 'language = "en"' in plan["diffs"]["config_toml"]
+
+
+def test_config_web_plan_provider_delete_draft_is_reviewed(tmp_path):
+    cfg = {
+        "provider": {"default": "first"},
+        "providers": [
+            {"id": "first", "name": "First", "models_endpoint": "/models"},
+            {"id": "second", "name": "Second", "models_endpoint": "/models"},
+        ],
+    }
+    snapshot = mms_config_web.build_config_snapshot(cfg, config_path=str(tmp_path / "config.toml"))
+    draft = {key: snapshot[key] for key in ("providers", "provider_default")}
+    draft["providers"] = [provider for provider in draft["providers"] if provider["id"] == "second"]
+    draft["provider_default"] = "second"
+
+    plan = mms_config_web.build_config_plan(cfg, {"draft": draft}, config_path=str(tmp_path / "config.toml"))
+    review = plan["review_summary"]
+
+    assert plan["ok"] is True
+    assert [provider["id"] for provider in plan["config"]["providers"]] == ["second"]
+    assert plan["config"]["provider"]["default"] == "second"
+    assert any(item["kind"] == "provider_removed" and item["provider_id"] == "first" for item in review["items"])
+    assert any(risk["id"] == "provider_removed" and risk["provider_id"] == "first" for risk in review["risks"])
+
+
+def test_config_web_plan_account_snapshot_noops_without_materializing_defaults(tmp_path):
+    cfg, _ = mms_core._ensure_provider_config({
+        "provider": {"default": "demo"},
+        "providers": [
+            {
+                "id": "demo",
+                "name": "Demo",
+                "enabled": True,
+                "role": "auto",
+                "priority": 100,
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["codex"],
+                "models_endpoint": "manual",
+            }
+        ],
+    })
+    cfg.update({
+        "accounts": [
+            {"id": "codex-a", "name": "Codex A", "cli": "codex"},
+        ],
+        "account": {"defaults": {"codex": "codex-a"}},
+    })
+    cfg["providers"][0].pop("fallback_models", None)
+    snapshot = mms_config_web.build_config_snapshot(cfg, config_path=str(tmp_path / "config.toml"))
+    draft = {key: snapshot[key] for key in ("accounts", "account_defaults")}
+
+    plan = mms_config_web.build_config_plan(cfg, {"draft": draft}, config_path=str(tmp_path / "config.toml"))
+
+    assert plan["ok"] is True
+    assert plan["summary"]["will_write_config"] is False
+    assert "priority" not in plan["config"]["accounts"][0]
+    assert "enabled" not in plan["config"]["accounts"][0]
+    assert plan["review_summary"]["items"][0]["kind"] == "no_change"
+
+
+def test_config_web_plan_blocks_claude_account_default_and_metadata_changes(tmp_path):
+    cfg = {
+        "accounts": [
+            {"id": "claude-main", "name": "Claude Main", "cli": "claude", "priority": 100},
+            {"id": "claude-alt", "name": "Claude Alt", "cli": "claude", "priority": 90},
+        ],
+        "account": {"defaults": {"claude": "claude-main"}},
+    }
+    snapshot = mms_config_web.build_config_snapshot(cfg, config_path=str(tmp_path / "config.toml"))
+    draft = {key: snapshot[key] for key in ("accounts", "account_defaults")}
+    draft["accounts"][0]["name"] = "Claude Edited"
+    draft["account_defaults"]["claude"] = "claude-alt"
+
+    plan = mms_config_web.build_config_plan(cfg, {"draft": draft}, config_path=str(tmp_path / "config.toml"))
+
+    assert plan["ok"] is False
+    assert any("Claude account" in error or "Claude 默认账号" in error for error in plan["errors"])
+    assert plan["config"]["account"]["defaults"] == {"claude": "claude-main"}
+    assert next(account for account in plan["config"]["accounts"] if account["id"] == "claude-main")["name"] == "Claude Main"
 
 
 def test_config_web_review_summary_ignores_unchanged_http_config(tmp_path):
@@ -777,6 +2690,121 @@ def test_config_web_plan_clears_empty_opencode_agent_overrides(tmp_path):
     assert any(item["kind"] == "opencode_agent_models" for item in plan["review_summary"]["items"])
 
 
+def test_config_web_snapshot_and_plan_persist_opencode_review_host(tmp_path):
+    cfg = {
+        "opencode": {
+            "review": {
+                "host": {
+                    "primary_models": ["glm-5-turbo"],
+                    "fallback_models": ["gpt-5.4"],
+                }
+            }
+        }
+    }
+    snapshot = mms_config_web.build_config_snapshot(cfg, config_path=str(tmp_path / "config.toml"))
+
+    assert snapshot["opencode"]["profiles"] == ["agent", "review", "committee", "debate", "omo", "raw"]
+    assert snapshot["opencode"]["review"]["host"] == {
+        "primary_models": ["glm-5-turbo"],
+        "fallback_models": ["gpt-5.4"],
+    }
+    assert snapshot["opencode"]["review_host_defaults"]["primary_models"][0] == "glm-5-turbo"
+
+    payload = {
+        "draft": {
+            "opencode": {
+                "default_profile": "agent",
+                "review": {
+                    "host": {
+                        "primary_models": ["qwen3.7-max", "glm-5-turbo"],
+                        "fallback_models": ["kimi-k2.6", "gpt-5.4"],
+                    }
+                },
+            }
+        }
+    }
+    plan = mms_config_web.build_config_plan(cfg, payload, config_path=str(tmp_path / "config.toml"))
+    host = plan["config"]["opencode"]["review"]["host"]
+    item = next(item for item in plan["review_summary"]["items"] if item["kind"] == "opencode_review_host")
+
+    assert host["primary_models"] == ["qwen3.7-max", "glm-5-turbo"]
+    assert host["fallback_models"] == ["kimi-k2.6", "gpt-5.4"]
+    assert item["meta"]["primary_models"] == ["qwen3.7-max", "glm-5-turbo"]
+
+    import mms_registry_cli
+
+    profile_payload = mms_registry_cli._registry_v2_profile_payload(plan["config"])
+    assert profile_payload["runtime_config"]["opencode"]["review"]["host"] == host
+
+
+def test_config_web_snapshot_exposes_committee_picker_defaults(tmp_path):
+    snapshot = mms_config_web.build_config_snapshot({}, config_path=str(tmp_path / "config.toml"))
+    presets = {row["tier"]: row for row in snapshot["opencode"]["committee_presets"]}
+
+    assert presets["fast"]["default_host_primary"] == "glm-5.2"
+    assert presets["fast"]["default_host_primary_channel"] == "direct-zai"
+    assert presets["standard"]["default_host_fallback"] == "gpt-5.5"
+    assert presets["standard"]["default_channel"] == "uscrsopenai"
+    assert presets["standard"]["default_member_channels"]["glm-5.2"] == "direct-zai"
+    assert presets["heavy"]["default_host_primary"] == "gpt-5.5"
+    assert presets["heavy"]["default_host_fallback"] == "gpt-5.4"
+    assert presets["heavy"]["default_members"][:2] == ["claude-opus-4-6-thinking", "gemini-3-flash-agent(high)"]
+    assert presets["heavy"]["default_member_channels"]["claude-opus-4-6-thinking"] == "newapi-personal-tokyo"
+    assert presets["vision"]["default_members"] == [
+        "kimi-k2.6",
+        "qwen3.6-flash",
+        "MiniMax-M3",
+        "mimo-v2.5",
+        "qwen3.7-max",
+        "gemini-3-flash-agent(high)",
+    ]
+
+
+def test_config_web_plan_persists_committee_picker_round_trip(tmp_path):
+    cfg = {"opencode": {}}
+    payload = {
+        "draft": {
+            "opencode": {
+                "committee_presets": [
+                    {
+                        "tier": "heavy",
+                        "host_primary": "gpt-5.5",
+                        "host_primary_channel": "uscrsopenai",
+                        "host_fallback": "gpt-5.4",
+                        "host_fallback_channel": "newapi-cn",
+                        "members": ["gpt-5.5", "deepseek-v4-pro"],
+                        "channel": "newapi-cn",
+                        "member_channels": {"gpt-5.5": "uscrsopenai", "deepseek-v4-pro": "newapi-cn"},
+                        "is_default": False,
+                    },
+                    {
+                        "tier": "light",
+                        "host_primary": "gpt-5.4",
+                        "members": ["gpt-5.4"],
+                        "channel": "direct",
+                        "is_default": True,
+                    },
+                ]
+            }
+        }
+    }
+
+    plan = mms_config_web.build_config_plan(cfg, payload, config_path=str(tmp_path / "config.toml"))
+    presets = plan["config"]["opencode"]["committee"]["presets"]
+
+    assert presets == {
+        "heavy": {
+            "host_primary": "gpt-5.5",
+            "host_primary_channel": "uscrsopenai",
+            "host_fallback": "gpt-5.4",
+            "host_fallback_channel": "newapi-cn",
+            "members": ["gpt-5.5", "deepseek-v4-pro"],
+            "channel": "newapi-cn",
+            "member_channels": {"gpt-5.5": "uscrsopenai", "deepseek-v4-pro": "newapi-cn"},
+        }
+    }
+
+
 def test_config_web_plan_persists_opencode_agent_roster_delta(tmp_path):
     cfg = {"opencode": {"default_profile": "lite_pro_orchestrated"}}
     payload = {
@@ -975,6 +3003,412 @@ def test_config_web_save_uses_audited_writers(monkeypatch, tmp_path):
     assert "sk-super-secret-value" not in encoded
 
 
+def test_config_web_migration_export_encrypts_credentials(monkeypatch, tmp_path):
+    pytest.importorskip("cryptography")
+    config_path = tmp_path / "config.toml"
+    preferences_path = tmp_path / "preferences.toml"
+    (tmp_path / "model-policy.json").write_text(
+        json.dumps({"version": 1, "models": {"mimo-v2.5": {"capabilities": {"context_window_tokens": 1000000}}}, "projects": {}}),
+        encoding="utf-8",
+    )
+    preferences_path.write_text(
+        '[launch]\ndisabled_clis = ["pi"]\n\n[session_surfaces.disabled]\nskills = ["lark-doc"]\n',
+        encoding="utf-8",
+    )
+    cfg = {
+        "providers": [
+            {
+                "id": "demo",
+                "name": "Demo",
+                "default_openai_base_url": "https://demo.example/v1",
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["codex"],
+                "fallback_models": ["mimo-v2.5"],
+            }
+        ],
+        "provider": {"default": "demo"},
+    }
+
+    monkeypatch.setattr(
+        mms_core,
+        "load_provider_credentials",
+        lambda provider_id="default": {
+            "base_url": "https://demo.example/v1",
+            "openai_base_url": "https://demo.example/v1",
+            "anthropic_base_url": "",
+            "api_key": "sk-migration-secret",
+            "openai_api_key": "",
+        },
+    )
+
+    result = mms_config_web.build_migration_export(
+        cfg,
+        {"include_credentials": True, "password": "password123"},
+        config_path=str(config_path),
+        preferences_path=str(preferences_path),
+        command_name="mms",
+    )
+    encoded = json.dumps(result, ensure_ascii=False)
+
+    assert result["ok"] is True
+    assert result["bundle"]["schema"] == "mms.config_migration_bundle.v1"
+    assert result["bundle"]["security"]["contains_credentials"] is True
+    assert result["bundle"]["encrypted_credentials"]["schema"] == "mms.config_migration_credentials.aesgcm.v1"
+    assert result["summary"]["credentials"] == 1
+    assert result["bundle"]["payload"]["preferences"]["launch"]["disabled_clis"] == ["pi"]
+    assert "sk-migration-secret" not in encoded
+
+
+def test_config_web_migration_export_import_uses_openssl_when_cryptography_missing(monkeypatch, tmp_path):
+    if not mms_config_web._migration_openssl_available():
+        pytest.skip("openssl is required for the no-cryptography migration fallback")
+    monkeypatch.setattr(mms_config_web, "_migration_cryptography_available", lambda: False)
+    config_path = tmp_path / "config.toml"
+    credentials_path = tmp_path / "credentials.sh"
+    preferences_path = tmp_path / "preferences.toml"
+    config_path.write_text("", encoding="utf-8")
+    preferences_path.write_text("", encoding="utf-8")
+    monkeypatch.setattr(mms_core, "_config_write_target_path", lambda: str(config_path))
+    monkeypatch.setattr(mms_core, "CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr(mms_core, "CREDENTIALS_PATH", str(credentials_path))
+    monkeypatch.setattr(mms_core, "_trigger_routes_export_after_credentials_write", lambda: None)
+    monkeypatch.setattr(mms_core, "_refresh_routes_export_for_hive", lambda *args, **kwargs: True)
+    monkeypatch.setattr(
+        mms_core,
+        "load_provider_credentials",
+        lambda provider_id="default": {
+            "base_url": "https://demo.example/v1",
+            "openai_base_url": "https://demo.example/v1",
+            "anthropic_base_url": "",
+            "api_key": "sk-openssl-migration-secret",
+            "openai_api_key": "",
+        },
+    )
+    cfg = {
+        "providers": [
+            {
+                "id": "demo",
+                "name": "Demo",
+                "default_openai_base_url": "https://demo.example/v1",
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["codex"],
+                "fallback_models": ["gpt-5.5"],
+            }
+        ],
+        "provider": {"default": "demo"},
+    }
+
+    export = mms_config_web.build_migration_export(
+        cfg,
+        {"include_credentials": True, "password": "password123"},
+        config_path=str(config_path),
+        preferences_path=str(preferences_path),
+        command_name="mms",
+    )
+    assert export["ok"] is True
+    assert export["crypto_backend"] == "openssl"
+    assert export["bundle"]["encrypted_credentials"]["schema"] == "mms.config_migration_credentials.openssl-cbc-hmac.v1"
+    assert "sk-openssl-migration-secret" not in json.dumps(export, ensure_ascii=False)
+
+    preview = mms_config_web.build_migration_import_preview(
+        {"providers": []},
+        {"bundle": export["bundle"], "password": "password123"},
+        config_path=str(config_path),
+        preferences_path=str(preferences_path),
+        command_name="mms",
+    )
+    assert preview["ok"] is True
+    assert preview["summary"]["credential_updates"] == 1
+    assert "sk-openssl-migration-secret" not in json.dumps(preview, ensure_ascii=False)
+
+    applied = mms_config_web.apply_migration_import(
+        {"providers": []},
+        {
+            "bundle": export["bundle"],
+            "password": "password123",
+            "confirm_migration": True,
+            "confirm_phrase": "导入配置",
+        },
+        config_path=str(config_path),
+        preferences_path=str(preferences_path),
+        command_name="mms",
+    )
+    assert applied["ok"] is True
+    assert "sk-openssl-migration-secret" in credentials_path.read_text(encoding="utf-8")
+    assert "sk-openssl-migration-secret" not in json.dumps(applied, ensure_ascii=False)
+
+
+def test_config_web_migration_export_reports_when_no_secret_crypto(monkeypatch, tmp_path):
+    monkeypatch.setattr(mms_config_web, "_migration_cryptography_available", lambda: False)
+    monkeypatch.setattr(mms_config_web, "_migration_openssl_available", lambda: False)
+
+    result = mms_config_web.build_migration_export(
+        {"providers": [{"id": "demo", "api_key": "sk-secret"}]},
+        {"include_credentials": True, "password": "password123"},
+        config_path=str(tmp_path / "config.toml"),
+        preferences_path=str(tmp_path / "preferences.toml"),
+        command_name="mms",
+    )
+
+    assert result["ok"] is False
+    assert result["crypto_backend"] == "none"
+    assert "openssl" in result["errors"][0]
+    assert "sk-secret" not in json.dumps(result, ensure_ascii=False)
+
+
+def test_config_web_migration_preview_merges_bundle_without_leaking_secret(tmp_path):
+    pytest.importorskip("cryptography")
+    config_path = tmp_path / "config.toml"
+    preferences_path = tmp_path / "preferences.toml"
+    (tmp_path / "model-policy.json").write_text('{"version":1,"models":{},"projects":{}}\n', encoding="utf-8")
+    preferences_path.write_text("", encoding="utf-8")
+    credential_box = mms_config_web._migration_encrypt_json(
+        {
+            "schema": "mms.config_migration_credentials_payload.v1",
+            "credentials": [
+                {
+                    "provider_id": "demo",
+                    "openai_base_url": "https://demo.example/v1",
+                    "api_key": "sk-import-secret",
+                }
+            ],
+        },
+        "password123",
+    )
+    bundle = {
+        "schema": "mms.config_migration_bundle.v1",
+        "payload": {
+            "config": {
+                "providers": [
+                    {
+                        "id": "demo",
+                        "name": "Demo",
+                        "openai_base_url": "https://demo.example/v1",
+                        "protocols": ["openai_chat_completions"],
+                        "supported_clis": ["codex"],
+                        "fallback_models": ["gpt-5.5"],
+                    }
+                ],
+                "provider": {"default": "demo"},
+                "presets": {"coding": {"cli": "codex", "model": "gpt-5.5"}},
+            },
+            "model_policy": {
+                "version": 1,
+                "models": {"gpt-5.5": {"visible": True, "capabilities": {"context_window_tokens": 1000000}}},
+                "projects": {},
+            },
+            "preferences": {"launch": {"disabled_clis": ["pi"]}},
+        },
+        "encrypted_credentials": credential_box,
+    }
+
+    preview = mms_config_web.build_migration_import_preview(
+        {"providers": [{"id": "local", "name": "Local Only"}]},
+        {"bundle": bundle, "password": "password123"},
+        config_path=str(config_path),
+        preferences_path=str(preferences_path),
+        command_name="mms",
+    )
+    encoded = json.dumps(preview, ensure_ascii=False)
+
+    assert preview["ok"] is True
+    assert preview["summary"]["providers"] == 2
+    assert preview["summary"]["credential_updates"] == 1
+    assert preview["summary"]["preferences_will_write"] is True
+    assert "provider demo" in preview["diffs"]["credentials"]
+    assert preview["config_plan"]["model_policy"]["models"]["gpt-5.5"]["capabilities"]["context_window_tokens"] == 1000000
+    assert "sk-import-secret" not in encoded
+
+
+def test_config_web_migration_apply_requires_confirmation(tmp_path):
+    bundle = {"schema": "mms.config_migration_bundle.v1", "payload": {"config": {"providers": [{"id": "demo"}]}}}
+    result = mms_config_web.apply_migration_import(
+        {"providers": []},
+        {"bundle": bundle, "confirm_migration": False},
+        config_path=str(tmp_path / "config.toml"),
+        preferences_path=str(tmp_path / "preferences.toml"),
+        command_name="mms",
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "blocked"
+    assert "确认" in result["errors"][0]
+
+
+def test_config_web_migration_apply_writes_config_credentials_preferences(monkeypatch, tmp_path):
+    pytest.importorskip("cryptography")
+    config_path = tmp_path / "config.toml"
+    credentials_path = tmp_path / "credentials.sh"
+    preferences_path = tmp_path / "preferences.toml"
+    config_path.write_text("", encoding="utf-8")
+    preferences_path.write_text("", encoding="utf-8")
+    monkeypatch.setattr(mms_core, "_config_write_target_path", lambda: str(config_path))
+    monkeypatch.setattr(mms_core, "CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr(mms_core, "CREDENTIALS_PATH", str(credentials_path))
+    monkeypatch.setattr(mms_core, "_trigger_routes_export_after_credentials_write", lambda: None)
+    monkeypatch.setattr(mms_core, "_refresh_routes_export_for_hive", lambda *args, **kwargs: True)
+    credential_box = mms_config_web._migration_encrypt_json(
+        {
+            "schema": "mms.config_migration_credentials_payload.v1",
+            "credentials": [
+                {
+                    "provider_id": "demo",
+                    "openai_base_url": "https://demo.example/v1",
+                    "api_key": "sk-import-apply-secret",
+                }
+            ],
+        },
+        "password123",
+    )
+    bundle = {
+        "schema": "mms.config_migration_bundle.v1",
+        "payload": {
+            "config": {
+                "providers": [
+                    {
+                        "id": "demo",
+                        "name": "Demo",
+                        "openai_base_url": "https://demo.example/v1",
+                        "protocols": ["openai_chat_completions"],
+                        "supported_clis": ["opencode"],
+                        "fallback_models": ["gpt-5.5"],
+                    }
+                ],
+                "provider": {"default": "demo"},
+                "presets": {"coding": {"cli": "opencode", "model": "gpt-5.5"}},
+            },
+            "model_policy": {"version": 1, "models": {"gpt-5.5": {"visible": True}}, "projects": {}},
+            "preferences": {"launch": {"disabled_clis": ["pi"]}},
+        },
+        "encrypted_credentials": credential_box,
+    }
+
+    result = mms_config_web.apply_migration_import(
+        {"providers": []},
+        {
+            "bundle": bundle,
+            "password": "password123",
+            "confirm_migration": True,
+            "confirm_phrase": "导入配置",
+        },
+        config_path=str(config_path),
+        preferences_path=str(preferences_path),
+        command_name="mms",
+    )
+    encoded = json.dumps(result, ensure_ascii=False)
+    saved_prefs = mms_core._load_toml_file(str(preferences_path))  # noqa: SLF001
+
+    assert result["ok"] is True
+    assert result["status"] == "imported"
+    assert 'id = "demo"' in config_path.read_text(encoding="utf-8")
+    assert "sk-import-apply-secret" in credentials_path.read_text(encoding="utf-8")
+    assert saved_prefs["launch"]["disabled_clis"] == ["pi"]
+    assert result["start_status"]["ready_to_work"] is True
+    assert result["start_status"]["start_command"] == "mms"
+    assert "sk-import-apply-secret" not in encoded
+
+
+def test_config_web_migration_start_status_reports_ready_and_disabled_cli(tmp_path):
+    config_path = tmp_path / "config.toml"
+    preferences_path = tmp_path / "preferences.toml"
+    preferences_path.write_text('[launch]\ndisabled_clis = ["opencode"]\n', encoding="utf-8")
+    cfg = {
+        "providers": [
+            {
+                "id": "demo",
+                "name": "Demo",
+                "api_key": "sk-ready",
+                "default_openai_base_url": "https://demo.example/v1",
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["opencode"],
+                "fallback_models": ["gpt-5.5"],
+            }
+        ],
+        "presets": {"coding": {"cli": "opencode", "model": "gpt-5.5"}},
+    }
+
+    status = mms_config_web.build_migration_start_status(
+        cfg,
+        {},
+        config_path=str(config_path),
+        preferences_path=str(preferences_path),
+        command_name="mmz1",
+    )
+
+    assert status["schema"] == "mms.config_migration_start_status.v1"
+    assert status["start_command"] == "mmz1"
+    assert status["preferred_cli"] == "opencode"
+    assert status["ready_provider_ids"] == ["demo"]
+    assert status["ready_to_work"] is False
+    assert any(item["id"] == "preferred_cli_disabled" for item in status["blockers"])
+
+
+def test_config_web_migration_start_status_ready_when_provider_is_complete(tmp_path):
+    cfg = {
+        "providers": [
+            {
+                "id": "demo",
+                "name": "Demo",
+                "api_key": "sk-ready",
+                "default_openai_base_url": "https://demo.example/v1",
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["opencode"],
+                "fallback_models": ["gpt-5.5"],
+            }
+        ],
+        "presets": {"coding": {"cli": "opencode", "model": "gpt-5.5"}},
+    }
+
+    status = mms_config_web.build_migration_start_status(
+        cfg,
+        {},
+        config_path=str(tmp_path / "config.toml"),
+        preferences_path=str(tmp_path / "preferences.toml"),
+        command_name="mmz1",
+    )
+
+    assert status["ready_to_work"] is True
+    assert status["blockers"] == []
+    assert status["copy_command"] == "mmz1"
+
+
+def test_config_web_migration_start_opens_terminal_with_sanitized_command(monkeypatch, tmp_path):
+    calls = []
+
+    class DummyPopen:
+        def __init__(self, args, **kwargs):
+            calls.append((args, kwargs))
+
+    monkeypatch.setattr(mms_config_web.sys, "platform", "darwin")
+    monkeypatch.setattr(mms_config_web.subprocess, "Popen", DummyPopen)
+    cfg = {
+        "providers": [
+            {
+                "id": "demo",
+                "api_key": "sk-ready",
+                "default_openai_base_url": "https://demo.example/v1",
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["opencode"],
+                "fallback_models": ["gpt-5.5"],
+            }
+        ]
+    }
+
+    result = mms_config_web.start_migration_work_session(
+        cfg,
+        {},
+        config_path=str(tmp_path / "config.toml"),
+        preferences_path=str(tmp_path / "preferences.toml"),
+        command_name="mmz1;rm -rf /",
+    )
+
+    assert result["ok"] is True
+    assert result["command"] == "mms"
+    osascript_calls = [args for args, _kwargs in calls if args and args[0] == "osascript"]
+    assert osascript_calls
+    assert "rm -rf" not in osascript_calls[-1][-1]
+
+
 def test_config_web_legacy_save_blocks_preview_root(tmp_path):
     config_root = tmp_path / "mms-next"
     config_path = config_root / "config.toml"
@@ -1022,6 +3456,12 @@ def test_config_web_registry_v2_apply_writes_preview_candidates_and_bundle(tmp_p
     config_path = config_root / "config.toml"
     credentials_path = config_root / "credentials.sh"
     payload = _draft_payload()
+    payload["draft"]["opencode"]["review"] = {
+        "host": {
+            "primary_models": ["mimo-v2.5"],
+            "fallback_models": ["glm-5-turbo"],
+        }
+    }
     payload["confirm_v2_preview"] = True
     payload["confirm_phrase"] = "写入预览DB"
 
@@ -1032,9 +3472,11 @@ def test_config_web_registry_v2_apply_writes_preview_candidates_and_bundle(tmp_p
     )
     encoded = json.dumps(result, ensure_ascii=False, sort_keys=True)
     router_path = config_root / "generated" / "model-routes.json"
+    profile_path = config_root / "generated" / "provider-profiles.generated.json"
     manifest_path = config_root / "generated" / "model-registry.latest-approved.json"
     secret_path = config_root / "secrets" / "webui-secrets.json"
     router = json.loads(router_path.read_text(encoding="utf-8"))
+    profile = json.loads(profile_path.read_text(encoding="utf-8"))
 
     assert result["ok"] is True
     assert result["schema"] == "mms.setup_web.registry_v2_apply_result.v1"
@@ -1047,6 +3489,12 @@ def test_config_web_registry_v2_apply_writes_preview_candidates_and_bundle(tmp_p
     assert router["source"] == "registry-preview-v2-save-candidate"
     assert router["routes"]["gpt-5.5"]["primary"]["secret_ref"] == "pending-webui:demo:api_key"
     assert router["routes"]["gpt-5.5"]["primary"]["api_key"] == "sk-super-secret-value"
+    assert profile["runtime_config"]["opencode"]["review"]["host"] == {
+        "primary_models": ["mimo-v2.5"],
+        "fallback_models": ["glm-5-turbo"],
+    }
+    snapshot = mms_config_web.build_config_snapshot({}, config_path=str(config_path), command_name="mmf")
+    assert snapshot["opencode"]["review"]["host"] == profile["runtime_config"]["opencode"]["review"]["host"]
     assert manifest_path.exists()
     assert secret_path.exists()
     assert "sk-super-secret-value" in secret_path.read_text(encoding="utf-8")
@@ -1334,6 +3782,76 @@ def test_config_web_registry_v2_apply_refreshed_provider_preserves_stale_routes_
     assert "claude-opus-4.7" not in router["routes"]
     assert cleanup["candidate"]["route_candidates"]["provider_route_count"] == 1
     assert cleanup["route_publish_guard"]["diff"]["removed_models_sample"] == ["claude-opus-4.7"]
+
+
+def test_config_web_registry_v2_apply_deleted_provider_does_not_resurrect(tmp_path):
+    config_root = tmp_path / "mms-next"
+    config_path = config_root / "config.toml"
+
+    def provider(provider_id, priority):
+        return {
+            "original_id": provider_id,
+            "id": provider_id,
+            "name": provider_id,
+            "enabled": True,
+            "role": "primary" if provider_id == "tokyo" else "fallback",
+            "priority": priority,
+            "protocols": ["anthropic_messages", "openai_chat_completions"],
+            "supported_clis": ["claude", "codex", "opencode"],
+            "models_endpoint": "manual",
+            "openai_base_url": f"https://{provider_id}.example/v1",
+            "anthropic_base_url": f"https://{provider_id}.example/v1",
+            "api_key": f"sk-{provider_id}-secret",
+            "update_credentials": True,
+            "fallback_models": ["mimo-v2.5"],
+            "extra_models": [],
+            "hidden_models": [],
+            "models": [{"id": "mimo-v2.5", "visible": True}],
+        }
+
+    first_payload = {
+        "draft": {
+            "provider_default": "tokyo",
+            "providers": [provider("tokyo", 200), provider("tencent", 100)],
+            "rescue": {},
+            "vision_sidecar": {},
+            "runtime": {"preferred_cli": "opencode", "coding_preset_model": "mimo-v2.5"},
+            "opencode": {"default_profile": "lite_pro_orchestrated", "agent_models": {}},
+        },
+        "confirm_v2_preview": True,
+        "confirm_phrase": "写入预览DB",
+    }
+    first = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "tokyo", "name": "Old"}], "provider": {"default": "tokyo"}},
+        first_payload,
+        config_path=str(config_path),
+    )
+
+    second_payload = json.loads(json.dumps(first_payload))
+    second_payload["draft"]["providers"] = [provider("tokyo", 200)]
+    second_payload["draft"]["route_scope_provider_ids"] = ["tencent"]
+    second = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "tokyo", "name": "Old"}], "provider": {"default": "tokyo"}},
+        second_payload,
+        config_path=str(config_path),
+    )
+    router = json.loads((config_root / "generated" / "model-routes.json").read_text(encoding="utf-8"))
+    snapshot = mms_config_web.build_config_snapshot(
+        {"providers": [{"id": "tokyo", "name": "Old"}], "provider": {"default": "tokyo"}},
+        config_path=str(config_path),
+        command_name="mmf",
+    )
+
+    provider_ids = {
+        leaf["provider_id"]
+        for route in router["routes"].values()
+        for leaf in [route["primary"], *(route.get("fallbacks") or [])]
+    }
+
+    assert first["ok"] is True
+    assert second["ok"] is True
+    assert provider_ids == {"tokyo"}
+    assert [item["id"] for item in snapshot["providers"]] == ["tokyo"]
 
 
 def test_config_web_registry_v2_apply_blocks_route_shrink_from_stale_small_draft(tmp_path):
@@ -1782,6 +4300,116 @@ def test_config_web_registry_v2_apply_requires_explicit_preview_confirmation(tmp
     assert not config_root.exists()
 
 
+def test_config_web_preferences_apply_uses_backup_and_audit(tmp_path):
+    config_path = tmp_path / "config.toml"
+    preferences_path = tmp_path / "preferences.toml"
+    preferences_path.write_text(
+        '[launch.defaults]\nbypass = false\n\n[assets.roots]\nweb_access = "/tmp/web"\n',
+        encoding="utf-8",
+    )
+    payload = {
+        "disabled_clis": ["pi", "agy"],
+        "disabled": {"skills": ["web-access", "claude:lark-doc"], "mcp": ["pilot"], "hooks": ["echo hi"]},
+        "assets": {"managed_enabled": True, "managed_root": str(tmp_path / "assets")},
+        "confirm_preferences": True,
+        "confirm_phrase": "保存偏好",
+        "reason": "test:asset-preferences",
+    }
+
+    plan = mms_config_web.build_preferences_plan(
+        payload,
+        config_path=str(config_path),
+        preferences_path=str(preferences_path),
+    )
+    result = mms_config_web.apply_preferences_plan(
+        payload,
+        config_path=str(config_path),
+        preferences_path=str(preferences_path),
+    )
+    saved = mms_core._load_toml_file(str(preferences_path))  # noqa: SLF001
+
+    assert plan["will_write"] is True
+    assert result["ok"] is True
+    assert result["status"] == "saved"
+    assert result["backup_path"]
+    assert (tmp_path / "config-audit.jsonl").exists()
+    assert saved["launch"]["defaults"]["bypass"] is False
+    assert saved["launch"]["disabled_clis"] == ["pi", "agy"]
+    assert saved["assets"]["roots"]["web_access"] == "/tmp/web"
+    assert saved["assets"]["managed_root"] == str(tmp_path / "assets")
+    assert saved["session_surfaces"]["disabled"]["skills"] == ["web-access", "claude:lark-doc"]
+    assert saved["session_surfaces"]["disabled"]["mcp"] == ["pilot"]
+
+
+def test_config_web_preferences_apply_has_toml_fallback_without_tomli_w(monkeypatch, tmp_path):
+    config_path = tmp_path / "config.toml"
+    preferences_path = tmp_path / "preferences.toml"
+    payload = {
+        "disabled": {"skills": ["web-access"], "mcp": ["hive"], "hooks": []},
+        "assets": {"managed_enabled": True, "managed_root": str(tmp_path / "assets")},
+        "confirm_preferences": True,
+        "confirm_phrase": "保存偏好",
+    }
+
+    monkeypatch.setattr(mms_core, "tomli_w", None)
+    monkeypatch.setattr(
+        mms_core,
+        "_atomic_write_toml",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AttributeError("'NoneType' object has no attribute 'dump'")),
+    )
+
+    result = mms_config_web.apply_preferences_plan(
+        payload,
+        config_path=str(config_path),
+        preferences_path=str(preferences_path),
+    )
+    saved = mms_core._load_toml_file(str(preferences_path))  # noqa: SLF001
+
+    assert result["ok"] is True
+    assert result["status"] == "saved"
+    assert saved["session_surfaces"]["disabled"]["skills"] == ["web-access"]
+    assert saved["session_surfaces"]["disabled"]["mcp"] == ["hive"]
+    assert saved["assets"]["managed_root"] == str(tmp_path / "assets")
+
+
+def test_config_web_preferences_apply_requires_confirmation(tmp_path):
+    result = mms_config_web.apply_preferences_plan(
+        {"disabled": {"skills": ["web-access"]}},
+        config_path=str(tmp_path / "config.toml"),
+        preferences_path=str(tmp_path / "preferences.toml"),
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "blocked"
+    assert not (tmp_path / "preferences.toml").exists()
+
+
+def test_config_web_reveal_local_path_opens_finder_without_shell(monkeypatch, tmp_path):
+    target = tmp_path / "skills" / "demo" / "SKILL.md"
+    target.parent.mkdir(parents=True)
+    target.write_text("# demo\n", encoding="utf-8")
+    calls = []
+
+    class Completed:
+        returncode = 0
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return Completed()
+
+    monkeypatch.setattr(mms_config_web.sys, "platform", "darwin")
+    monkeypatch.setattr(mms_config_web.subprocess, "run", fake_run)
+
+    result = mms_config_web.reveal_local_path({"path": str(target)})
+    blocked = mms_config_web.reveal_local_path({"path": "https://example.com/skill"})
+
+    assert result["ok"] is True
+    assert result["status"] == "opened"
+    assert calls == [(["open", "-R", str(target)], {"stdout": mms_config_web.subprocess.DEVNULL, "stderr": mms_config_web.subprocess.DEVNULL, "timeout": 5, "check": False})]
+    assert blocked["ok"] is False
+    assert blocked["status"] == "blocked"
+
+
 def test_config_web_provider_model_fetch_can_be_stubbed(monkeypatch):
     monkeypatch.setattr(
         mms_config_web,
@@ -1800,9 +4428,372 @@ def test_config_web_provider_model_fetch_can_be_stubbed(monkeypatch):
 
     assert result["ok"] is True
     assert result["models"] == ["m-a", "m-b"]
+    assert result["model_capabilities"]["m-a"]["text"] is True
+    assert isinstance(result["model_capabilities"]["m-b"], dict)
     assert result["cache_transport_evidence"]["request_path"] == "/models"
     assert "sk-secret" not in json.dumps(result, ensure_ascii=False)
 
+
+def test_config_web_model_smoke_shows_openrouter_claude_403_error(monkeypatch):
+    calls = []
+
+    class FakeResponse:
+        status_code = 403
+        text = '{"error":{"message":"model not allowed for sk-or-v1-secretvalue123456"}}'
+
+        @staticmethod
+        def json():
+            return {"error": {"message": "model not allowed for sk-or-v1-secretvalue123456", "code": 403}}
+
+    class FakeCore:
+        @staticmethod
+        def _runtime_httpx_request(method, url, **kwargs):
+            calls.append((method, url, kwargs))
+            return FakeResponse()
+
+    monkeypatch.setattr(mms_config_web, "_load_mms_core", lambda: FakeCore)
+
+    result = mms_config_web.run_model_smoke(
+        {"providers": []},
+        {
+            "provider": {
+                "id": "openrouter",
+                "protocols": ["openai_chat_completions"],
+                "openai_base_url": "https://openrouter.ai/api/v1",
+                "api_key": "sk-or-v1-secretvalue123456",
+            },
+            "model": "anthropic/claude-opus-4.8",
+            "protocol": "auto",
+        },
+    )
+
+    encoded = json.dumps(result, ensure_ascii=False)
+    assert result["ok"] is False
+    assert result["status_code"] == 403
+    assert result["protocol"] == "openai_chat_completions"
+    assert result["cache_transport_evidence"]["request_path"] == "/chat/completions"
+    assert calls[0][1] == "https://openrouter.ai/api/v1/chat/completions"
+    assert "model not allowed" in result["error"]
+    assert "OpenRouter 返回 403" in result["diagnosis"]
+    assert "sk-or-v1-secretvalue123456" not in encoded
+
+
+def test_config_web_provider_model_fetch_returns_policy_capabilities(monkeypatch, tmp_path):
+    (tmp_path / "model-policy.json").write_text(
+        json.dumps(
+            {
+                "models": {
+                    "mimo-v2.5": {
+                        "capabilities": {
+                            "one_m_context": True,
+                            "thinking": True,
+                        }
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        mms_config_web,
+        "probe_provider_models",
+        lambda provider, force_refresh=False: {
+            "models": ["mimo-v2.5"],
+            "raw_models": ["mimo-v2.5"],
+            "base_source": "remote",
+        },
+    )
+
+    result = mms_config_web.test_provider_models(
+        {"providers": []},
+        {"provider": {"id": "demo", "openai_base_url": "https://demo.example/v1", "api_key": "sk-secret"}},
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    caps = result["model_capabilities"]["mimo-v2.5"]
+    assert caps["context_window_tokens"] == 1_000_000
+    assert caps["thinking"] is True
+    assert caps["reasoning"] is True
+
+
+
+def test_config_web_capability_truth_refresh_uses_structured_source(monkeypatch, tmp_path):
+    payload = {
+        "provider": {
+            "id": "demo",
+            "models": [
+                {"id": "mimo-v2.5", "visible": True, "capabilities": {"vision": False}},
+            ],
+        },
+        "fields": ["context_window_tokens", "max_output_tokens", "vision", "tool_use", "reasoning", "thinking", "one_m_context"],
+        "refresh_sources": False,
+    }
+
+    monkeypatch.setattr(
+        mms_config_web,
+        "_load_capability_truth_payloads",
+        lambda *_args, **_kwargs: (
+            [
+                {
+                    "_source_path": "official.json",
+                    "models": [
+                        {
+                            "alias": "mimo-v2.5",
+                            "confidence": "official_exact",
+                            "official_context_window_tokens": 1_000_000,
+                            "official_max_output_tokens": 131_072,
+                            "supports_vision": True,
+                            "supports_thinking": True,
+                            "one_million_context": True,
+                            "provider_supported_parameters": ["tools", "tool_choice", "reasoning"],
+                            "evidence": [{"url": "https://example.test/models", "official": True}],
+                        }
+                    ],
+                }
+            ],
+            [],
+            [],
+        ),
+    )
+
+    result = mms_config_web.refresh_model_capability_truth(
+        {"providers": []},
+        payload,
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    assert result["ok"] is True
+    assert result["mode"] == "draft_only"
+    assert result["matched_model_count"] == 1
+    caps = result["model_capabilities"]["mimo-v2.5"]
+    assert caps["context_window_tokens"] == 1_000_000
+    assert caps["max_output_tokens"] == 131_072
+    assert caps["vision"] is True
+    assert caps["tool_use"] is True
+    assert caps["reasoning"] is True
+    assert caps["thinking"] is True
+    assert caps["one_m_context"] is True
+    assert result["model_sources"]["mimo-v2.5"]["vision"]["source_layer"] == "official"
+
+
+def test_config_web_qwen38_official_truth_keeps_unverified_specs_unknown(tmp_path):
+    payload = {
+        "provider": {
+            "id": "demo",
+            "models": [{"id": "qwen3.8-max-preview", "visible": True}],
+        },
+        "fields": [
+            "context_window_tokens",
+            "max_output_tokens",
+            "vision",
+            "tool_use",
+            "reasoning",
+            "thinking",
+            "thinking_control",
+            "one_m_context",
+        ],
+        "refresh_sources": False,
+    }
+
+    result = mms_config_web.refresh_model_capability_truth(
+        {"providers": []},
+        payload,
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    assert result["ok"] is True
+    assert result["matched_model_count"] == 1
+    caps = result["model_capabilities"]["qwen3.8-max-preview"]
+    assert caps["tool_use"] is True
+    assert caps["thinking"] is True
+    assert caps["reasoning"] is True
+    assert caps["thinking_control"]["path"] == "enable_thinking"
+    assert "context_window_tokens" not in caps
+    assert "max_output_tokens" not in caps
+    assert "vision" not in caps
+    assert "one_m_context" not in caps
+    assert result["model_sources"]["qwen3.8-max-preview"]["tool_use"]["source_layer"] == "official"
+
+
+def test_config_web_capability_refresh_can_use_openrouter_catalog(monkeypatch, tmp_path):
+    payload = {
+        "provider": {
+            "id": "demo",
+            "models": [
+                {"id": "minimax-m3[1m]", "visible": True, "capabilities": {"vision": False}},
+                {"id": "moonshotai/kimi-k3", "visible": True, "capabilities": {"vision": False}},
+            ],
+        },
+        "fields": ["context_window_tokens", "max_output_tokens", "vision", "tool_use", "reasoning", "one_m_context"],
+        "refresh_sources": False,
+        "openrouter_catalog": True,
+    }
+
+    monkeypatch.setattr(
+        mms_config_web,
+        "_load_capability_truth_payloads",
+        lambda *_args, **_kwargs: ([], [], []),
+    )
+    monkeypatch.setattr(
+        mms_config_web,
+        "_fetch_openrouter_catalog_payload",
+        lambda **_kwargs: {
+            "data": [
+                {
+                    "id": "minimax/minimax-m3",
+                    "name": "MiniMax M3",
+                    "context_length": 1048576,
+                    "architecture": {
+                        "input_modalities": ["text", "image"],
+                        "output_modalities": ["text"],
+                    },
+                    "top_provider": {
+                        "context_length": 524288,
+                        "max_completion_tokens": 512000,
+                    },
+                    "supported_parameters": ["tools", "tool_choice", "reasoning", "include_reasoning", "max_tokens"],
+                },
+                {
+                    "id": "moonshotai/kimi-k3",
+                    "name": "Kimi K3",
+                    "canonical_slug": "moonshotai/kimi-k3-20260715",
+                    "context_length": 1048576,
+                    "architecture": {
+                        "input_modalities": ["text", "image"],
+                        "output_modalities": ["text"],
+                    },
+                    "top_provider": {
+                        "context_length": 1048576,
+                        "max_completion_tokens": None,
+                    },
+                    "supported_parameters": ["tools", "tool_choice", "reasoning", "reasoning_effort", "include_reasoning", "max_tokens"],
+                }
+            ]
+        },
+    )
+
+    result = mms_config_web.refresh_model_capability_truth(
+        {"providers": []},
+        payload,
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    assert result["ok"] is True
+    assert result["source_mode"] == "openrouter_catalog"
+    assert result["matched_model_count"] == 2
+    caps = result["model_capabilities"]["minimax-m3[1m]"]
+    assert caps["context_window_tokens"] == 1048576
+    assert caps["max_output_tokens"] == 512000
+    assert caps["vision"] is True
+    assert caps["tool_use"] is True
+    assert caps["reasoning"] is True
+    assert caps["one_m_context"] is True
+    assert result["model_sources"]["minimax-m3[1m]"]["context_window_tokens"]["source_layer"] == "provider_catalog"
+    kimi_caps = result["model_capabilities"]["moonshotai/kimi-k3"]
+    assert kimi_caps["context_window_tokens"] == 1048576
+    assert "max_output_tokens" not in kimi_caps
+    assert kimi_caps["vision"] is True
+    assert kimi_caps["tool_use"] is True
+    assert kimi_caps["reasoning"] is True
+    assert kimi_caps["one_m_context"] is True
+    assert result["catalog_sources"][0]["source"] == "openrouter"
+    assert "不是厂商官方真值" in result["note"]
+
+
+def test_config_web_openrouter_refresh_does_not_fallback_to_local_snapshots(monkeypatch, tmp_path):
+    payload = {
+        "provider": {"id": "demo", "models": [{"id": "claude-opus-4-6-thinking", "visible": True}]},
+        "fields": ["context_window_tokens", "thinking"],
+        "refresh_sources": False,
+        "openrouter_catalog": True,
+    }
+
+    monkeypatch.setattr(
+        mms_config_web,
+        "_load_capability_truth_payloads",
+        lambda *_args, **_kwargs: (
+            [
+                {
+                    "_source_path": "official.json",
+                    "models": [
+                        {
+                            "alias": "claude-opus-4-6-thinking",
+                            "confidence": "official_exact",
+                            "official_context_window_tokens": 1_000_000,
+                            "supports_thinking": True,
+                        }
+                    ],
+                }
+            ],
+            [{"source": "local"}],
+            [],
+        ),
+    )
+    monkeypatch.setattr(mms_config_web, "_fetch_openrouter_catalog_payload", lambda **_kwargs: {"data": []})
+
+    result = mms_config_web.refresh_model_capability_truth(
+        {"providers": []},
+        payload,
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    assert result["ok"] is True
+    assert result["source_mode"] == "openrouter_catalog"
+    assert result["matched_model_count"] == 0
+    assert result["refresh_reports"] == []
+    assert result["unmatched_models"] == ["claude-opus-4-6-thinking"]
+
+
+def test_config_web_capability_truth_button_and_fields_are_present():
+    html = _frontend_source()
+
+    assert "refreshCapabilityTruth" in html
+    assert "refreshOpenRouterCatalog" in html
+    assert "/api/model-capabilities/refresh" in html
+    assert "data-truth-field=\"context_window_tokens\"" in html
+    assert "data-truth-field=\"vision\"" in html
+    assert "data-truth-field=\"thinking_control\"" in html
+    assert "data-truth-field=\"reasoning_effort\"" in html
+    assert "已知能力快照" in html
+    assert "OpenRouter catalog" in html
+    assert "MMF 官方数据" in html
+    assert "不是厂商官方真值" in html
+    # The catalogue never outranks the vendor's own data.
+    assert "CAPABILITY_SOURCES" in html
+    assert "mergeCapabilitySnapshots" in html
+    assert "openrouter_catalog:key==='catalog'" in html
+    assert "providerPayloadForCapabilityRefresh" in html
+    assert "fieldsForCapabilityRefresh" in html
+    assert "field!=='tool_use'" in html
+    assert "capabilityRefreshBusy" in html
+    assert "setCapabilityRefreshBusy" in html
+    assert "aria-busy" in html
+    assert "能力刷新进行中，请稍等" in html
+    assert "button.is-loading" in html
+    assert "工具（手动项）" in html
+    assert "capability_touched:true" in html
+    assert "个模型草稿" in html
+
+
+def test_config_web_max_output_tokens_are_saved_to_model_policy(tmp_path):
+    payload = _large_route_draft_payload(count=1)
+    row = payload["draft"]["providers"][0]["models"][0]
+    row["id"] = "mimo-v2.5"
+    row["visible"] = True
+    row["policy_touched"] = True
+    row["capabilities"] = {
+        "text": True,
+        "max_output_tokens": 131_072,
+    }
+
+    plan = mms_config_web.build_config_plan(
+        {"providers": []},
+        payload,
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    caps = plan["model_policy"]["models"]["mimo-v2.5"]["capabilities"]
+    assert caps["max_output_tokens"] == 131_072
 
 def test_setup_web_requests_are_guard_exempt():
     assert mms_core._is_setup_web_request(["setup"])
@@ -1810,3 +4801,335 @@ def test_setup_web_requests_are_guard_exempt():
     assert mms_core._is_config_help_request(["web"])
     assert not mms_core._config_subcommand_mutates_legacy_config(["web"])
     assert not mms_core._config_subcommand_mutates_legacy_config(["web", "--print-summary"])
+
+
+
+def test_config_web_reasoning_effort_and_control_are_saved_to_model_policy(tmp_path):
+    payload = _large_route_draft_payload(count=1)
+    row = payload["draft"]["providers"][0]["models"][0]
+    row["id"] = "glm-5.2"
+    row["visible"] = True
+    row["policy_touched"] = True
+    row["capabilities"] = {
+        "text": True,
+        "reasoning": True,
+        "thinking": True,
+        "reasoning_effort": "max",
+        "thinking_control": {
+            "supported": True,
+            "path": "CLAUDE_CODE_EFFORT_LEVEL",
+            "control_type": "CLAUDE_CODE_EFFORT_LEVEL",
+            "default": "max",
+            "allowed": ["high", "max"],
+            "map": {"xhigh": "max"},
+        },
+    }
+
+    plan = mms_config_web.build_config_plan(
+        {"providers": []},
+        payload,
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    caps = plan["model_policy"]["models"]["glm-5.2"]["capabilities"]
+    assert caps["reasoning_effort"] == "max"
+    assert caps["thinking_control"]["path"] == "CLAUDE_CODE_EFFORT_LEVEL"
+    assert caps["thinking_control"]["allowed"] == ["high", "max"]
+
+
+
+def test_config_web_mmf_official_overrides_use_provider_profiles(monkeypatch, tmp_path):
+    monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    payload = {
+        "provider": {
+            "id": "demo",
+            "models": [
+                {"id": "glm-5.2", "visible": True},
+                {"id": "gemini-3.1-pro-low", "visible": True},
+                {"id": "gpt-5.5", "visible": True},
+                {"id": "deepseek-v4-pro", "visible": True},
+                {"id": "k3", "visible": True},
+                {"id": "k3[1m]", "visible": True},
+                {"id": "kimi-k2.7-code", "visible": True},
+                {"id": "MiniMax-M3", "visible": True},
+            ],
+        },
+        "fields": [
+            "context_window_tokens",
+            "max_output_tokens",
+            "reasoning",
+            "thinking",
+            "thinking_control",
+            "reasoning_effort",
+            "one_m_context",
+            "vision",
+        ],
+        "refresh_sources": False,
+        "mmf_official_overrides": True,
+    }
+
+    result = mms_config_web.refresh_model_capability_truth(
+        {"providers": []},
+        payload,
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    assert result["ok"] is True
+    assert result["source_mode"] == "mmf_official_overrides"
+    assert result["force_apply"] is True
+    assert result["matched_model_count"] == 8
+    assert result["catalog_sources"][0]["source"] == "mmf_official_overrides"
+    assert result["model_sources"]["glm-5.2"]["context_window_tokens"]["source_name"] == "MMF 官方覆盖"
+
+    glm = result["model_capabilities"]["glm-5.2"]
+    assert glm["context_window_tokens"] == 1_000_000
+    assert glm["max_output_tokens"] == 131_072
+    assert glm["reasoning_effort"] == "max"
+
+    gpt = result["model_capabilities"]["gpt-5.5"]
+    assert gpt["context_window_tokens"] == 1_000_000
+    assert gpt["max_output_tokens"] == 128_000
+    assert gpt["vision"] is True
+
+    gemini = result["model_capabilities"]["gemini-3.1-pro-low"]
+    assert gemini["context_window_tokens"] == 1_048_576
+    assert gemini["max_output_tokens"] == 65_536
+    assert gemini["reasoning_effort"] == "low"
+    assert gemini["official_reasoning_effort"] == "high"
+
+    deepseek = result["model_capabilities"]["deepseek-v4-pro"]
+    assert deepseek["context_window_tokens"] == 1_000_000
+    assert deepseek["max_output_tokens"] == 384_000
+
+    k3 = result["model_capabilities"]["k3"]
+    assert k3["context_window_tokens"] == 262_144
+    assert k3["max_output_tokens"] == 131_072
+    assert k3["vision"] is True
+    assert k3["reasoning_effort"] == "max"
+    assert k3["thinking_control"]["path"] == "reasoning_effort"
+    assert k3["thinking_control"]["mode"] == "always_on"
+    assert k3["thinking_control"]["disable_supported"] is False
+
+    k3_one_m = result["model_capabilities"]["k3[1m]"]
+    assert k3_one_m["context_window_tokens"] == 1_048_576
+    assert k3_one_m["max_output_tokens"] == 1_048_576
+    assert k3_one_m["vision"] is True
+    assert k3_one_m["reasoning_effort"] == "max"
+
+    kimi = result["model_capabilities"]["kimi-k2.7-code"]
+    assert kimi["context_window_tokens"] == 262_144
+    assert kimi["max_output_tokens"] == 32_768
+    assert kimi["vision"] is True
+    assert kimi["thinking_control"]["mode"] == "always_on"
+    assert kimi["thinking_control"]["disable_supported"] is False
+
+    minimax = result["model_capabilities"]["MiniMax-M3"]
+    assert minimax["context_window_tokens"] == 1_000_000
+    assert minimax["max_output_tokens"] == 131_072
+    assert minimax["vision"] is True
+    assert minimax["thinking_control"]["path"] == "thinking.type"
+
+
+def test_config_web_mmf_official_overrides_support_stepfun_effort(tmp_path):
+    payload = {
+        "provider": {
+            "id": "stepfun",
+            "openai_base_url": "https://api.stepfun.com/v1",
+            "models": [
+                {"id": "step-3.7-flash", "visible": True},
+                {"id": "step-router-v1", "visible": True},
+            ],
+        },
+        "fields": [
+            "context_window_tokens",
+            "max_output_tokens",
+            "vision",
+            "reasoning",
+            "thinking",
+            "thinking_control",
+            "reasoning_effort",
+        ],
+        "refresh_sources": False,
+        "mmf_official_overrides": True,
+    }
+
+    result = mms_config_web.refresh_model_capability_truth(
+        {"providers": []},
+        payload,
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    assert result["ok"] is True
+    assert result["matched_model_count"] == 2
+    step_flash = result["model_capabilities"]["step-3.7-flash"]
+    assert step_flash["context_window_tokens"] == 262_144
+    assert step_flash["reasoning"] is True
+    assert step_flash["thinking"] is True
+    assert step_flash["vision"] is True
+    assert step_flash["thinking_control"]["path"] == "reasoning_effort"
+    assert step_flash["thinking_control"]["allowed"] == ["low", "medium", "high"]
+    assert step_flash["thinking_control"]["official_default"] == "medium"
+    assert step_flash["thinking_control"]["recommended_default"] == "high"
+    assert step_flash["reasoning_effort"] == "high"
+    assert step_flash["official_reasoning_effort"] == "medium"
+    assert step_flash["recommended_reasoning_effort"] == "high"
+
+    step_router = result["model_capabilities"]["step-router-v1"]
+    assert "context_window_tokens" not in step_router
+    assert step_router["max_output_tokens"] == 384_000
+    assert step_router["reasoning"] is True
+    assert step_router["thinking"] is True
+    assert step_router["reasoning_effort"] == "high"
+
+
+def test_config_web_mmf_official_overrides_refreshes_provider_profile_cache(monkeypatch, tmp_path):
+    import mms_provider_profiles
+
+    profile_path = tmp_path / "provider-profiles.json"
+    profile_path.write_text(json.dumps({"profiles": {}}), encoding="utf-8")
+    monkeypatch.setattr(mms_provider_profiles, "_BUILTIN_PROFILE_PATH", str(profile_path))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    mms_provider_profiles.load_provider_profiles.cache_clear()
+    assert "cache-test" not in mms_provider_profiles.load_provider_profiles().get("profiles", {})
+
+    profile_path.write_text(
+        json.dumps(
+            {
+                "profiles": {
+                    "cache-test": {
+                        "match": {"model_prefixes": ["cache-refresh-model"]},
+                        "context_windows": {"cache-refresh-model": 123456},
+                        "max_output_tokens": {"cache-refresh-model": 7890},
+                        "thinking": {"supported": True},
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = mms_config_web.refresh_model_capability_truth(
+        {"providers": []},
+        {
+            "provider": {"id": "demo", "models": [{"id": "cache-refresh-model", "visible": True}]},
+            "fields": ["context_window_tokens", "max_output_tokens", "thinking"],
+            "refresh_sources": False,
+            "mmf_official_overrides": True,
+        },
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    assert result["matched_model_count"] == 1
+    caps = result["model_capabilities"]["cache-refresh-model"]
+    assert caps["context_window_tokens"] == 123456
+    assert caps["max_output_tokens"] == 7890
+    assert caps["thinking"] is True
+
+
+
+def test_config_web_mmf_official_overrides_do_not_downgrade_openrouter_capabilities(tmp_path):
+    models = ["google/gemini-2.5-pro", "minimax/minimax-m3", "z-ai/glm-5.2"]
+    payload = {
+        "provider": {
+            "id": "openrouter",
+            "openai_base_url": "https://openrouter.ai/api/v1",
+            "models": [
+                {
+                    "id": model,
+                    "visible": True,
+                    "capabilities": {
+                        "vision": True,
+                        "tool_use": True,
+                        "reasoning": True,
+                        "thinking": True,
+                    },
+                }
+                for model in models
+            ],
+        },
+        "fields": [
+            "context_window_tokens",
+            "max_output_tokens",
+            "vision",
+            "tool_use",
+            "reasoning",
+            "thinking",
+            "thinking_control",
+            "reasoning_effort",
+            "one_m_context",
+        ],
+        "refresh_sources": False,
+        "mmf_official_overrides": True,
+    }
+
+    result = mms_config_web.refresh_model_capability_truth(
+        {"providers": []},
+        payload,
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    assert result["ok"] is True
+    assert result["matched_model_count"] == 3
+    assert result["model_capabilities"]["google/gemini-2.5-pro"]["thinking_control"]["path"] == "thinkingConfig.thinkingBudget"
+    assert result["model_capabilities"]["minimax/minimax-m3"]["max_output_tokens"] == 131_072
+    assert result["model_capabilities"]["z-ai/glm-5.2"]["reasoning_effort"] == "max"
+    for caps in result["model_capabilities"].values():
+        for field in ("vision", "tool_use", "reasoning", "thinking"):
+            assert caps.get(field) is not False
+    for change in result["changes"]:
+        assert change["after"] is not False
+
+
+def test_config_web_save_preserves_openrouter_vision_when_mmf_overlay_is_partial(tmp_path):
+    current_cfg = {
+        "providers": [
+            {
+                "id": "openrouter",
+                "name": "OpenRouter",
+                "enabled": True,
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["opencode"],
+                "openai_base_url": "https://openrouter.ai/api/v1",
+            }
+        ],
+        "provider": {"default": "openrouter"},
+    }
+    partial_mmf_caps = {
+        "reasoning": True,
+        "thinking": True,
+        "thinking_control": {"supported": True, "control_type": "thinking.type", "path": "thinking.type"},
+    }
+    payload = {
+        "draft": {
+            "provider_default": "openrouter",
+            "providers": [
+                {
+                    "id": "openrouter",
+                    "name": "OpenRouter",
+                    "enabled": True,
+                    "protocols": ["openai_chat_completions"],
+                    "supported_clis": ["opencode"],
+                    "openai_base_url": "https://openrouter.ai/api/v1",
+                    "models": [
+                        {
+                            "id": "qwen/qwen3.7-max",
+                            "visible": True,
+                            "capability_touched": True,
+                            "capabilities": {"vision": True, "tool_use": True, **partial_mmf_caps},
+                            "policy_capabilities": partial_mmf_caps,
+                        }
+                    ],
+                    "model_capabilities": {"qwen/qwen3.7-max": partial_mmf_caps},
+                }
+            ],
+        }
+    }
+
+    plan = mms_config_web.build_config_plan(current_cfg, payload, config_path=str(tmp_path / "config.toml"))
+
+    caps = plan["model_policy"]["models"]["qwen/qwen3.7-max"]["capabilities"]
+    assert caps["vision"] is True
+    assert caps["tool_use"] is True
+    assert caps["reasoning"] is True
+    assert caps["thinking"] is True

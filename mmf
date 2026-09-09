@@ -47,6 +47,11 @@ if not str(os.environ.get("MMS_CONFIG_ROOT") or "").strip():
     os.environ["MMS_CONFIG_ROOT"] = os.path.join(resolve_real_user_home(os.environ), ".config", "mms-next")
 
 argv = sys.argv[1:]
+if argv and argv[0] == "review-dispatch":
+    from mms_review_dispatch import handle_review_dispatch_command
+
+    raise SystemExit(handle_review_dispatch_command(argv[1:], command_name="mmf"))
+
 if argv and argv[0] == "preview" and (len(argv) == 1 or argv[1] in {"help", "-h", "--help"}):
     print(
         "\n".join(

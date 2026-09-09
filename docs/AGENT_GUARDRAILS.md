@@ -168,6 +168,36 @@ MMS-managed Codex launch must not repeatedly stop on `Hooks need review` in isol
 - Expected healthy state after any repair: gateway `hooks/list` has `0` `untrusted`/`modified` hooks; real `~/.codex` may only be auto-refreshed for MMS-managed hook hashes.
 - Any change to Codex hook generation, hook order, `CODEX_HOME`, or hook trust copy/write-back must run `tests/test_codex_hook_trust_contract.py` plus the targeted Codex hook trust tests.
 
+## Vision Capability Single Truth
+
+模型能不能自己读图，只有一条真值链。改动任何一环之前先读这段。
+
+`_pi_model_input_types()`（`mms_pi_support.py`）的优先级，从高到低：
+
+1. 用户自己设的：`manual_override`、`model_policy`。Web 通道模型页写的就是这一层，必须在所有 harness 生效。
+2. `_PI_MODEL_INPUT_HINTS`。只放 Pi 实测得出的结论，例如某模型经本 runner 走图片实际失败。加条目要写明依据。
+3. curated 数据：`provider_profile`、`approved_facts`。provider profiles 里的 `supports_vision` / `input_modalities` 是常规录入位置。
+4. 名称匹配兜底：`claude-` / `gpt-5` / `gemini-` 前缀、calibration reference、`mms_core._VISION_CAPABLE_MODEL_NAMES`。
+
+不允许的做法：
+
+- 在 `_pi_model_input_types` 里绕过 `caps` 直接查表，那会让用户在 Web 里的设置对 Pi 失效。
+- 把 `conservative_fallback` 当成「这个模型不支持图片」。它的含义是没有任何来源声明过。
+- 新增第五份硬编码 vision 名单。要补数据就写 provider profile。
+
+## Pi Vision Relay Contract
+
+Pi 用 `--model` 启动，扩展看不到这个参数，所以主模型能力由 mmf 在启动前算好注入：
+
+- `MMS_PI_MAIN_MODEL_VISION`：`1` 表示主模型自己能读图，扩展直接不注册 `describe_image`。`0` 表示需要中转。
+- `MMS_PI_VISION_POOL`：JSON 数组，本通道能读图的 models.json wire id。空数组表示算过了，本通道没有能读图的模型，不是「没算」。
+
+候选池就是「当前通道里能力判定为能读图的模型」，跟着用户实际配置走。不允许引入内置模型名单、优先级常量或按名字排序。池子里的模型地位相同，扩展在每次识图时随机排序，失败再依次降级。原生 pi 直接启动时没有注入变量，扩展改为扫描 models.json 里 `input` 含 `image` 的模型，同样不含写死的名字。
+
+唯一的开关是 `config.toml` 的 `[vision_sidecar] enabled`。池子只从当前通道已暴露的模型里取，不往 Pi 的模型列表里加条目。池子为空时 launcher 必须打印可见提示，不允许静默降级。
+
+改这条链路要跑 `tests/test_pi_vision_relay.py`，其中包含一条禁止硬编码模型名的断言。
+
 ## User Preferences And Human Gate
 
 `~/.config/mms/preferences.toml` 是用户偏好 allowlist 覆盖层，不是 agent 可随手写的配置文件。
@@ -177,6 +207,16 @@ MMS-managed Codex launch must not repeatedly stop on `Hooks need review` in isol
 - agents 可以读取、解释、生成 TOML snippet / manual diff，但不能自动写入真实 `~/.config/mms/**`
 - `preferences.toml` 会忽略 credentials、provider routes、account identity、proxy、OAuth、real HOME/XDG、Claude config 等非 allowlist 字段
 - 如必须写真实配置，仍走 human gate：`plan -> backup -> human double check -> audited write -> post-write human double check`
+
+## Hook / Skill Priority
+
+MMS dev channel 的动态 session assets 不应 shadow 用户全局 hook / skill。
+
+- 如果同名 global hook / skill 已存在，默认优先使用 global 版本；MMF 动态版本只能作为缺失时的 fallback。
+- xmem 是 global-only：不要在 MMS / MMF 中重新 bundle、安装、注入 xmem skill / hook / OpenCode plugin。
+- scmp / work / Feishu 防护 hook 已迁移到 mommy / state-core 约束域；不要作为 MMS session hook 单独注入。
+- NSR 暂时要求和 global 行为保持一致；修改 dev 分支 NSR 或 hook 注入逻辑时，必须检查本地 bundled payload 与 global hook/skill 的优先级和兼容性。
+- Figma / Pilot MCP 默认关闭；即使检测到已安装，也只能在显式 opt-in（例如 `MMS_ENABLE_MCP_FIGMA=1` 或 `MMS_ENABLE_MCP_PILOT=1`）时注入。
 
 ## 必须先停下来确认的情况
 
@@ -220,10 +260,42 @@ MMS-managed Codex launch must not repeatedly stop on `Hooks need review` in isol
 - 如果涉及配置或账号隔离：确认不会误写真实用户全局目录或破坏现有登录态
 - 如果涉及 fallback / resume / auth 恢复：确认失败路径不会静默切到 global OAuth，也不会把 global auth-bearing state 当作自动补救输入
 
+## Push 前 Fresh User Gate
+
+每个功能迭代准备 push 前，必须跑一次安装版/新用户视角的回归 gate，不能只依赖当前开发者机器的真实状态。
+
+- 默认命令：`python3 scripts/regression_fresh_user_gate.py`
+- 紧急小修可先跑：`python3 scripts/regression_fresh_user_gate.py --quick`，但 push 前仍要补全默认 gate，或在交付里明确说明未补全原因。
+- 查看当前完整用户路径矩阵：`python3 scripts/regression_fresh_user_gate.py --list-scenarios`
+- 每次新增能力、修复 bug、改变默认行为或改变安装/session/config/hook/resume/bridge 路径时，都必须新增或扩展回归覆盖；不能只说“手工测过”。
+- 回归覆盖必须尽量模拟完整用户路径，而不是只测 helper 函数。至少要明确覆盖哪些用户状态：fresh install、已有安装覆盖、重新安装、legacy `ccs` / dirty gateway session、旧配置残留、真实 HOME 隔离、session hook 注入、explicit resume、默认新启动。
+- 已经修过的问题必须能一一复现：如果一个 bug 来自旧状态组合（例如 `ccs` 残留、覆盖安装、hook trust、NSR `PostToolUse` 噪音、隐式 resume），修复时要把该状态组合写进 `scripts/regression_fresh_user_gate.py` 的 scenario matrix，或加入该 gate 会执行的 pytest target。
+- gate 必须清掉当前 session 注入的 `MMS_CONFIG_ROOT` / `REAL_HOME` / `ORIGINAL_HOME` / `MMS_REAL_HOME` / `XDG_CONFIG_HOME` 等环境变量，用临时 `HOME` 模拟 fresh installed user。
+- gate 至少覆盖：
+  - `mmf` fresh preview root 是否落到临时 `~/.config/mms-next`
+  - legacy dirty install / gateway session 泄漏 / retired `ccs`、`mmc` 清理
+  - 重置后可重新安装，且 `install.sh --dry-run` 重复执行不写文件
+  - NSR 只挂低频 continuation hooks，不再挂 `PermissionRequest` / `PreToolUse` / `PostToolUse`
+  - Claude 新启动不会消费项目旧 `lastSessionId`
+  - 显式 `mms resume <id>` 仍传递原生 resume 参数
+  - Codex hook trust 不重复弹确认，bounded resume/history 能安全回填
+  - installer/path smoke 不依赖开发者 worktree 私有状态
+- 若改动触及 `mms_core.py`、`mms_launchers.py`、installer、session index、config root、resume、HOME/XDG 隔离、wrapper 或 release channel，最终 handoff 必须写明 fresh-user gate 的实际结果。
+
 ## 迭代与提交隔离
 
 为了降低多 agent 共用工作树时的污染风险：
 
+- 仓库根目录是维护者的 `dev` 调度入口，必须保持 clean、最新；不要把 `.worktrees/dev` 当作多人共享的默认开发入口。
+- 根目录只用于 `git pull --ff-only`、查看状态、开 issue、记录计划、创建独立 worktree/branch。
+- 非 trivial 改动必须先有 issue，再从最新 `dev` 创建独立 worktree/branch，例如 `.worktrees/issue-14-redline-gate`；开发、验证、commit、push 都在该隔离 worktree 完成。
+- 共享 `dev` 入口不得叠加实质性改动或留下未跟踪文件；如果发现无关脏文件，不要 stage，不要清理，必须在交付中说明。
+- 每次开始开发或审查前，先对当前分支执行 `git pull --ff-only`；如果本地改动导致无法安全 pull，停止并报告阻塞原因，不要猜测本地已经最新。
+- MMF/MMS 后续问题必须先通过 issue 记录，改动通过 PR 提交，并在合并前经过 committee review。
+- agent 不得自行 merge PR，也不得绕过 committee review gate。
+- 如果 human/committee 授权 agent 执行 merge，且该 merge 对应本地 task worktree，merge 成功后必须清理关联 worktree，除非 human 明确要求保留。默认先运行 `scripts/cleanup_merged_worktree.sh <branch-or-pr>`；脚本因 dirty/unmerged/untracked/unpushed 状态拒绝时，必须保留现场并报告 blocker。
+- agent 不得自行创建 commit；只有 human 明确同意本次 commit 后才允许提交。
+- 例外：docs-only 计划/报告/committee baseline 文档，在用户要求“记录/提交/产出文档”时可默认 commit；但必须只 stage 目标文档，不能带入任何无关脏文件。
 - 一个迭代完成后，agent 必须先询问用户是否提交当前改动
 - 在用户没有明确回复前，不应默认进入下一轮实质性改动
 - 如果用户选择暂不提交，agent 在继续前应把“当前仍未提交”视为显式风险写明

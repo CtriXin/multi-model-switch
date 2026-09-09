@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import copy
 import json
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -25,6 +26,7 @@ class CapabilityBundleError(RuntimeError):
 CONSERVATIVE_CAPABILITY_FALLBACK: dict[str, Any] = {
     "context_window_tokens": 8_192,
     "max_output_tokens": 4_096,
+    "supports_vision": False,
     "supports_thinking": False,
     "thinking_control": {
         "supported": False,
@@ -48,11 +50,30 @@ CONSERVATIVE_CAPABILITY_FALLBACK: dict[str, Any] = {
 _CAPABILITY_FIELDS = (
     "context_window_tokens",
     "max_output_tokens",
+    "supports_vision",
     "supports_thinking",
     "thinking_control",
     "expected_protocol",
     "protocol_hints",
     "body_patch_aliases",
+)
+
+_PROFILE_CAPABILITY_SECTIONS = (
+    "api_formats",
+    "auth_headers",
+    "body_patches",
+    "budget",
+    "context_windows",
+    "endpoints",
+    "effort",
+    "input_modalities",
+    "max_output_tokens",
+    "model_aliases",
+    "model_overrides",
+    "output_modalities",
+    "parameter_aliases",
+    "supports_vision",
+    "thinking",
 )
 
 _CONTEXT_KEYS = (
@@ -73,6 +94,15 @@ _MAX_OUTPUT_KEYS = (
 _THINKING_KEYS = (
     "supports_thinking",
     "thinking_supported",
+    "thinking",
+    "think",
+)
+
+_VISION_KEYS = (
+    "supports_vision",
+    "vision",
+    "image_input",
+    "multimodal",
 )
 
 _PROTOCOL_KEYS = (
@@ -100,12 +130,14 @@ def load_default_approved_facts() -> dict[str, Any]:
     preview roots must not silently continue when the selected latest-approved
     bundle is missing or invalid.
     """
+    return copy.deepcopy(_load_default_approved_facts_shared())
+
+
+def _load_default_approved_facts_shared() -> dict[str, Any]:
+    """Read the cached default facts without per-call deep copy for hot paths."""
     try:
-        import mms_registry
-    except Exception:
-        return {}
-    try:
-        return mms_registry.load_latest_approved_bundle(include_secret=False).get("payloads", {}).get("capabilities") or {}
+        config_root, manifest_path, mtime_ns, size = _latest_approved_bundle_signature()
+        return _load_default_approved_facts_cached(config_root, manifest_path, mtime_ns, size)
     except Exception as exc:
         try:
             from mms_state_io import mms_config_root_mode, resolve_mms_config_dir
@@ -120,6 +152,61 @@ def load_default_approved_facts() -> dict[str, Any]:
     return {}
 
 
+def _latest_approved_bundle_signature() -> tuple[str, str, int, int]:
+    from mms_state_io import resolve_mms_config_dir
+
+    config_root = Path(resolve_mms_config_dir())
+    manifest_path = config_root / "generated" / "model-registry.latest-approved.json"
+    try:
+        stat = manifest_path.stat()
+        return str(config_root), str(manifest_path), int(stat.st_mtime_ns), int(stat.st_size)
+    except OSError:
+        return str(config_root), str(manifest_path), 0, -1
+
+
+@lru_cache(maxsize=8)
+def _load_default_approved_facts_cached(
+    config_root: str,
+    _manifest_path: str,
+    _mtime_ns: int,
+    _size: int,
+) -> dict[str, Any]:
+    import mms_registry
+
+    payload = mms_registry.load_latest_approved_bundle(
+        include_secret=False,
+        config_dir=config_root,
+    ).get("payloads", {}).get("capabilities") or {}
+    return copy.deepcopy(payload) if isinstance(payload, dict) else {}
+
+
+def clear_capability_resolver_caches() -> None:
+    """Clear process-local resolver caches; intended for tests and reload hooks."""
+    _load_default_approved_facts_cached.cache_clear()
+
+
+def load_default_model_policy() -> dict[str, Any]:
+    """Read non-secret model policy overlays from the selected config root."""
+    try:
+        from mms_state_io import resolve_mms_config_dir
+
+        config_root = Path(resolve_mms_config_dir())
+    except Exception:
+        return {}
+
+    merged: dict[str, Any] = {}
+    # Generated effective policy is what preview/DB publishes; the root policy is
+    # the human source overlay and should win if it was edited after generation.
+    for path in (
+        config_root / "generated" / "model-policy.effective.json",
+        config_root / "model-policy.json",
+    ):
+        payload = load_approved_facts(path)
+        if payload:
+            merged = _deep_merge(merged, payload)
+    return merged
+
+
 def resolve_model_capabilities(
     model_name: str,
     *,
@@ -127,17 +214,20 @@ def resolve_model_capabilities(
     provider_id: str = "",
     base_url: str = "",
     profile_id: str = "",
+    protocol: str = "",
     manual_override: Mapping[str, Any] | None = None,
     approved_facts: Mapping[str, Any] | None = None,
     approved_facts_path: str | Path | None = None,
+    model_policy: Mapping[str, Any] | None = None,
+    model_policy_path: str | Path | None = None,
     provider_profiles: Mapping[str, Any] | None = None,
     conservative_fallback: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Resolve effective model capabilities.
 
     Source order is per-field:
-    manual override > approved registry/export facts > provider profile >
-    conservative fallback.
+    manual override > model policy > approved registry/export facts >
+    provider profile > conservative fallback.
     """
     model = _clean(model_name)
     runtime_dict = dict(runtime or {})
@@ -153,17 +243,26 @@ def resolve_model_capabilities(
         provider_id=provider_id,
         base_url=base_url,
         profile_id=profile_id,
+        protocol=protocol,
         provider_profiles=provider_profiles,
     )
     _apply_source(result, profile_caps, "provider_profile")
 
     approved_payload = load_approved_facts(approved_facts_path)
     if approved_facts_path is None and approved_facts is None:
-        approved_payload = load_default_approved_facts()
+        approved_payload = _load_default_approved_facts_shared()
     if approved_facts:
         approved_payload = _deep_merge(approved_payload, dict(approved_facts))
     approved_caps = _approved_capabilities(model, approved_payload)
     _apply_source(result, approved_caps, "approved_facts")
+
+    policy_payload = load_approved_facts(model_policy_path)
+    if model_policy_path is None and model_policy is None and approved_facts is None and approved_facts_path is None:
+        policy_payload = load_default_model_policy()
+    if model_policy:
+        policy_payload = _deep_merge(policy_payload, dict(model_policy))
+    policy_caps = _policy_capabilities(model, policy_payload)
+    _apply_source(result, policy_caps, "model_policy")
 
     manual_caps = _normalize_capability_payload(dict(manual_override or {}), model_name=model)
     _apply_source(result, manual_caps, "manual_override")
@@ -193,7 +292,7 @@ def _apply_source(result: dict[str, Any], candidate: Mapping[str, Any], source: 
 def _value_present(field: str, value: Any) -> bool:
     if field in {"context_window_tokens", "max_output_tokens"}:
         return isinstance(value, int) and value > 0
-    if field == "supports_thinking":
+    if field in {"supports_thinking", "supports_vision"}:
         return isinstance(value, bool)
     if field == "expected_protocol":
         return bool(_clean(value))
@@ -263,6 +362,8 @@ def _normalize_capability_payload(payload: Mapping[str, Any], *, model_name: str
     normalized: dict[str, Any] = {}
 
     context_tokens = _first_int(payload, _CONTEXT_KEYS)
+    if context_tokens is None and payload.get("one_m_context") is True:
+        context_tokens = 1_000_000
     if context_tokens is not None:
         normalized["context_window_tokens"] = context_tokens
 
@@ -273,6 +374,10 @@ def _normalize_capability_payload(payload: Mapping[str, Any], *, model_name: str
     supports_thinking = _first_bool(payload, _THINKING_KEYS)
     if supports_thinking is not None:
         normalized["supports_thinking"] = supports_thinking
+
+    supports_vision = _first_bool(payload, _VISION_KEYS)
+    if supports_vision is not None:
+        normalized["supports_vision"] = supports_vision
 
     thinking_control = payload.get("thinking_control")
     if isinstance(thinking_control, Mapping):
@@ -455,6 +560,32 @@ def _approved_capabilities(model_name: str, approved_facts: Mapping[str, Any]) -
     return _normalize_capability_payload(fact, model_name=model_name)
 
 
+def _policy_capabilities(model_name: str, model_policy: Mapping[str, Any]) -> dict[str, Any]:
+    if not isinstance(model_policy, Mapping) or not model_policy:
+        return {}
+    models = model_policy.get("models")
+    if not isinstance(models, Mapping):
+        return {}
+    model_key = _normalize_model(model_name)
+    entry = None
+    for key, value in models.items():
+        if _normalize_model(key) == model_key and isinstance(value, Mapping):
+            entry = dict(value)
+            break
+    if not entry:
+        return {}
+    payload: dict[str, Any] = {}
+    capabilities = entry.get("capabilities")
+    if isinstance(capabilities, Mapping):
+        payload.update(dict(capabilities))
+    for key in _CONTEXT_KEYS + _MAX_OUTPUT_KEYS + _THINKING_KEYS + _VISION_KEYS + _PROTOCOL_KEYS:
+        if key in entry:
+            payload[key] = entry[key]
+    if isinstance(entry.get("protocol_hints"), Mapping):
+        payload["protocol_hints"] = dict(entry["protocol_hints"])
+    return _normalize_capability_payload(payload, model_name=model_name)
+
+
 def _lookup_approved_fact(model_name: str, payload: Mapping[str, Any]) -> dict[str, Any]:
     if _looks_like_capability_fact(payload):
         return dict(payload)
@@ -491,7 +622,7 @@ def _lookup_approved_fact(model_name: str, payload: Mapping[str, Any]) -> dict[s
 
 
 def _looks_like_capability_fact(payload: Mapping[str, Any]) -> bool:
-    known = set(_CONTEXT_KEYS + _MAX_OUTPUT_KEYS + _THINKING_KEYS + _PROTOCOL_KEYS)
+    known = set(_CONTEXT_KEYS + _MAX_OUTPUT_KEYS + _THINKING_KEYS + _VISION_KEYS + _PROTOCOL_KEYS + ("one_m_context",))
     return bool(known.intersection(payload.keys()))
 
 
@@ -510,7 +641,8 @@ def _provider_profile_capabilities(
     provider_id: str,
     base_url: str,
     profile_id: str,
-    provider_profiles: Mapping[str, Any] | None,
+    protocol: str = "",
+    provider_profiles: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     resolved_profile_id, profile = _resolve_profile(
         model_name=model_name,
@@ -518,6 +650,7 @@ def _provider_profile_capabilities(
         provider_id=provider_id,
         base_url=base_url,
         profile_id=profile_id,
+        protocol=protocol,
         provider_profiles=provider_profiles,
     )
     if not profile:
@@ -533,11 +666,20 @@ def _provider_profile_capabilities(
     if max_output_tokens is not None:
         caps["max_output_tokens"] = max_output_tokens
 
+    supports_vision = _longest_prefix_bool(_effective_section(profile, "supports_vision", model_name), model_name)
+    if supports_vision is None:
+        input_modalities = _longest_prefix_list(_effective_section(profile, "input_modalities", model_name), model_name)
+        if input_modalities:
+            normalized_modalities = {_lower(item) for item in input_modalities}
+            supports_vision = bool(normalized_modalities.intersection({"image", "video", "vision", "multimodal"}))
+    if supports_vision is not None:
+        caps["supports_vision"] = supports_vision
+
     thinking = _effective_section(profile, "thinking", model_name)
     if isinstance(thinking.get("supported"), bool):
         caps["supports_thinking"] = bool(thinking["supported"])
 
-    control = _thinking_control_from_profile(profile, model_name)
+    control = _thinking_control_from_profile(profile, model_name, protocol=protocol)
     if control:
         caps["thinking_control"] = control
 
@@ -569,7 +711,8 @@ def _resolve_profile(
     provider_id: str,
     base_url: str,
     profile_id: str,
-    provider_profiles: Mapping[str, Any] | None,
+    protocol: str = "",
+    provider_profiles: Mapping[str, Any] | None = None,
 ) -> tuple[str, dict[str, Any]]:
     if provider_profiles is None:
         return resolve_provider_profile(
@@ -578,6 +721,7 @@ def _resolve_profile(
             base_url=base_url,
             model_name=model_name,
             profile_id=profile_id,
+            protocol=protocol,
         )
     payload = dict(provider_profiles)
     profiles = payload.get("profiles") if isinstance(payload.get("profiles"), Mapping) else payload
@@ -586,7 +730,9 @@ def _resolve_profile(
 
     explicit = _clean(profile_id or runtime.get("profile") or runtime.get("provider_profile"))
     if explicit and isinstance(profiles.get(explicit), Mapping):
-        return explicit, copy.deepcopy(dict(profiles[explicit]))
+        explicit_profile = dict(profiles[explicit])
+        if _profile_has_capability_data(explicit_profile):
+            return explicit, copy.deepcopy(explicit_profile)
 
     provider = _clean(provider_id or runtime.get("id") or runtime.get("provider_id"))
     base = _clean(
@@ -611,6 +757,8 @@ def _resolve_profile(
 
 
 def _profile_match_score(profile_id: str, profile: Mapping[str, Any], *, provider_id: str, base_url: str, model_name: str) -> int:
+    if not _profile_has_capability_data(profile):
+        return 0
     match = profile.get("match") if isinstance(profile.get("match"), Mapping) else {}
     if match.get("profile_only"):
         return 0
@@ -618,21 +766,35 @@ def _profile_match_score(profile_id: str, profile: Mapping[str, Any], *, provide
     provider_l = _lower(provider_id)
     base_l = _lower(base_url)
     model_l = _normalize_model(model_name)
+    model_prefixes = [_lower(item) for item in match.get("model_prefixes") or [] if _lower(item)]
+    model_matched = any(model_l.startswith(token) for token in model_prefixes)
+    require_model_prefix = bool(match.get("require_model_prefix") or match.get("provider_base_requires_model_prefix"))
+    allow_provider_base_match = not (require_model_prefix and model_prefixes and not model_matched)
+    provider_base_matched = False
     for item in match.get("provider_id_contains") or []:
         token = _lower(item)
-        if token and token in provider_l:
+        if allow_provider_base_match and token and token in provider_l:
+            provider_base_matched = True
             score = max(score, 70)
     for item in match.get("base_url_contains") or []:
         token = _lower(item)
-        if token and token in base_l:
+        if allow_provider_base_match and token and token in base_l:
+            provider_base_matched = True
             score = max(score, 90)
-    for item in match.get("model_prefixes") or []:
-        token = _lower(item)
+    if match.get("require_provider_or_base") and not provider_base_matched:
+        return 0
+    for token in model_prefixes:
         if token and model_l.startswith(token):
             score = max(score, 50)
     if profile_id and profile_id in {provider_l, model_l}:
         score = max(score, 80)
     return score
+
+
+def _profile_has_capability_data(profile: Mapping[str, Any]) -> bool:
+    if not isinstance(profile, Mapping):
+        return False
+    return any(isinstance(profile.get(section), Mapping) and bool(profile.get(section)) for section in _PROFILE_CAPABILITY_SECTIONS)
 
 
 def _lookup_model_override(profile: Mapping[str, Any], model_name: str) -> dict[str, Any]:
@@ -677,7 +839,52 @@ def _longest_prefix_int(values: Mapping[str, Any], model_name: str) -> int | Non
     return best_value
 
 
-def _thinking_control_from_profile(profile: Mapping[str, Any], model_name: str) -> dict[str, Any]:
+def _longest_prefix_bool(values: Mapping[str, Any], model_name: str) -> bool | None:
+    model = _normalize_model(model_name)
+    best_len = 0
+    best_value: bool | None = None
+    for key, value in values.items():
+        key_l = _lower(key)
+        if not key_l or not model.startswith(key_l) or len(key_l) <= best_len:
+            continue
+        if not isinstance(value, bool):
+            continue
+        best_len = len(key_l)
+        best_value = value
+    return best_value
+
+
+def _longest_prefix_list(values: Mapping[str, Any], model_name: str) -> list[Any]:
+    model = _normalize_model(model_name)
+    best_len = 0
+    best_value: list[Any] = []
+    for key, value in values.items():
+        key_l = _lower(key)
+        if not key_l or not model.startswith(key_l) or len(key_l) <= best_len:
+            continue
+        if not isinstance(value, list):
+            continue
+        best_len = len(key_l)
+        best_value = copy.deepcopy(value)
+    return best_value
+
+
+def _profile_protocol_configs(section: Mapping[str, Any], protocol: str) -> list[Mapping[str, Any]]:
+    if not isinstance(section, Mapping):
+        return []
+    requested = _normalize_protocol_token(protocol)
+    if requested:
+        matches = [
+            config
+            for key, config in section.items()
+            if _normalize_protocol_token(key) == requested and isinstance(config, Mapping)
+        ]
+        if matches:
+            return matches
+    return [config for config in section.values() if isinstance(config, Mapping)]
+
+
+def _thinking_control_from_profile(profile: Mapping[str, Any], model_name: str, *, protocol: str = "") -> dict[str, Any]:
     thinking = _effective_section(profile, "thinking", model_name)
     if thinking.get("supported") is False:
         return {"supported": False, "control_type": "none", "path": ""}
@@ -685,9 +892,7 @@ def _thinking_control_from_profile(profile: Mapping[str, Any], model_name: str) 
     configs_by_path: dict[str, dict[str, Any]] = {}
     for section_name in ("effort", "budget"):
         section = _effective_section(profile, section_name, model_name)
-        for config in section.values():
-            if not isinstance(config, Mapping):
-                continue
+        for config in _profile_protocol_configs(section, protocol):
             path = _clean(config.get("path"))
             if path:
                 configs_by_path.setdefault(path, dict(config))
@@ -698,7 +903,9 @@ def _thinking_control_from_profile(profile: Mapping[str, Any], model_name: str) 
 
     path = _select_thinking_path(list(configs_by_path))
     if not path:
-        return _normalize_thinking_control({"supported": bool(thinking.get("supported"))})
+        if isinstance(thinking.get("supported"), bool):
+            return _normalize_thinking_control({"supported": bool(thinking.get("supported"))})
+        return {}
 
     config = configs_by_path.get(path, {})
     control = {
@@ -706,7 +913,10 @@ def _thinking_control_from_profile(profile: Mapping[str, Any], model_name: str) 
         "path": path,
         "control_type": _control_type_from_path(path),
     }
-    for key in ("allowed", "default", "map"):
+    for key in ("mode", "disable_supported"):
+        if key in thinking:
+            control[key] = copy.deepcopy(thinking[key])
+    for key in ("allowed", "default", "request_default", "official_default", "recommended_default", "map", "mode", "disable_supported"):
         if key in config:
             control[key] = copy.deepcopy(config[key])
     if _control_type_from_path(path) == "thinkingBudget":
@@ -728,8 +938,10 @@ def _thinking_patch_paths(body_patches: Mapping[str, Any]) -> list[str]:
         for patch in protocol_patches.values():
             if not isinstance(patch, Mapping):
                 continue
-            for path in patch:
+            for path, value in patch.items():
                 path_s = _clean(path)
+                if value == "__delete__":
+                    continue
                 if "thinking" in _lower(path_s) and path_s not in paths:
                     paths.append(path_s)
     return paths
@@ -741,6 +953,7 @@ def _select_thinking_path(paths: list[str]) -> str:
         "thinkingConfig.thinkingBudget",
         "thinking.type",
         "reasoning.effort",
+        "reasoning_effort",
         "output_config.effort",
         "thinking_budget",
     )

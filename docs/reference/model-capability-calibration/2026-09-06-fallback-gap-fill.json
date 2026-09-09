@@ -1,0 +1,130 @@
+{
+  "schema": "mms.model_capability_calibration.v1",
+  "generated_at": "2026-09-06T08:00:00.000Z",
+  "description": "Gap-fill calibration for models still on conservative fallback (8192/4096). Vendor-official where the vendor publishes the field; provider_catalog layer for Qwen/MiniMax where vendor pages are SPA-gated. Unknown fields stay unknown per official-source-runbook (grok-4.6 max output not published; kimi-for-coding effort is K3-only).",
+  "mms_source": "manual-official-addition",
+  "evidence_layers": {
+    "vendor_official": "official vendor docs pages, captured 2026-09-06 via browser",
+    "provider_catalog": "openrouter.ai/api/v1/models captured 2026-09-06; used only where vendor official value is not published; does not overwrite any official fact"
+  },
+  "models": [
+    {
+      "alias": "gpt-5.6-terra",
+      "routed_model_id": "gpt-5.6-terra",
+      "provider_id": "newapi-personal-tokyo",
+      "vendor": "OpenAI",
+      "confidence": "official_exact",
+      "source_layer": "vendor_official",
+      "source_urls": ["https://platform.openai.com/docs/models/gpt-5.6-terra.md"],
+      "official_context_window_tokens": 1050000,
+      "official_max_output_tokens": 128000,
+      "official_effort_tiers": ["none", "low", "medium", "high", "xhigh", "max"],
+      "notes": "doc says 1,050,000 context / 128,000 max output; effort supports none..max without 'minimal'"
+    },
+    {
+      "alias": "gpt-5.6-sol",
+      "routed_model_id": "gpt-5.6-sol",
+      "provider_id": "newapi-personal-tokyo",
+      "vendor": "OpenAI",
+      "confidence": "official_exact",
+      "source_layer": "vendor_official",
+      "source_urls": ["https://platform.openai.com/docs/models/gpt-5.6-sol.md"],
+      "official_context_window_tokens": 1050000,
+      "official_max_output_tokens": 128000,
+      "official_effort_tiers": ["none", "low", "medium", "high", "xhigh", "max"]
+    },
+    {
+      "alias": "gpt-5.6-luna",
+      "routed_model_id": "gpt-5.6-luna",
+      "provider_id": "newapi-personal-tokyo",
+      "vendor": "OpenAI",
+      "confidence": "official_exact",
+      "source_layer": "vendor_official",
+      "source_urls": ["https://platform.openai.com/docs/models/gpt-5.6-luna.md"],
+      "official_context_window_tokens": 1050000,
+      "official_max_output_tokens": 128000,
+      "official_effort_tiers": ["none", "low", "medium", "high", "xhigh", "max"]
+    },
+    {
+      "alias": "claude-opus-4-6",
+      "routed_model_id": "claude-opus-4-6",
+      "provider_id": "newapi-personal-tokyo",
+      "vendor": "Anthropic",
+      "confidence": "official_exact",
+      "source_layer": "vendor_official",
+      "source_urls": ["https://platform.claude.com/docs/en/models/opus-4-6/overview"],
+      "official_context_window_tokens": 1000000,
+      "official_max_output_tokens": 128000,
+      "notes": "model page states Context window 1M tokens, Max output 128K tokens; batches beta 300k not used as base fact"
+    },
+    {
+      "alias": "qwen3.8-max-preview",
+      "routed_model_id": "qwen3.8-max-preview",
+      "provider_id": "newapi-personal-tokyo",
+      "vendor": "Alibaba Qwen",
+      "confidence": "provider_catalog",
+      "source_layer": "provider_catalog",
+      "source_urls": ["https://openrouter.ai/api/v1/models", "https://platform.qianwenai.com/try-ai?models=qwen3.8-flash"],
+      "official_context_window_tokens": 1000000,
+      "official_max_output_tokens": 131072,
+      "notes": "aliyun console/bailian pages are SPA-gated; qwen3.8-flash official marketing states million-token context; numbers from openrouter catalog (qwen/qwen3.8-max-0902, qwen/qwen3.8-flash both 1000000/131072); upgrade to official_exact when vendor doc page is reachable"
+    },
+    {
+      "alias": "qwen3.8-flash",
+      "routed_model_id": "qwen3.8-flash",
+      "provider_id": "newapi-personal-tokyo",
+      "vendor": "Alibaba Qwen",
+      "confidence": "provider_catalog",
+      "source_layer": "provider_catalog",
+      "source_urls": ["https://openrouter.ai/api/v1/models"],
+      "official_context_window_tokens": 1000000,
+      "official_max_output_tokens": 131072
+    },
+    {
+      "alias": "qwen3.7-max",
+      "routed_model_id": "qwen3.7-max",
+      "provider_id": "newapi-personal-tokyo",
+      "vendor": "Alibaba Qwen",
+      "confidence": "provider_catalog",
+      "source_layer": "provider_catalog",
+      "source_urls": ["https://openrouter.ai/api/v1/models"],
+      "official_context_window_tokens": 1000000,
+      "official_max_output_tokens": 131072
+    },
+    {
+      "alias": "MiniMax-M2.7",
+      "routed_model_id": "MiniMax-M2.7",
+      "provider_id": "newapi-personal-tokyo",
+      "vendor": "MiniMax",
+      "confidence": "provider_catalog",
+      "source_layer": "provider_catalog",
+      "source_urls": ["https://openrouter.ai/api/v1/models"],
+      "official_context_window_tokens": 204800,
+      "official_max_output_tokens": 131072,
+      "notes": "context 204800 already in profile; only max_output 131072 added"
+    },
+    {
+      "alias": "grok-4.6",
+      "routed_model_id": "grok-4.6",
+      "provider_id": "newapi-personal-tokyo",
+      "vendor": "xAI",
+      "confidence": "official_unchanged",
+      "source_layer": "vendor_official",
+      "source_urls": ["https://docs.x.ai/docs/models/grok-4.6"],
+      "official_context_window_tokens": 500000,
+      "official_max_output_tokens": null,
+      "notes": "xAI model page publishes context 500k but no max-output figure; openrouter top_provider 450k is a provider-layer cap, NOT an official fact; max_output stays unknown per runbook"
+    },
+    {
+      "alias": "kimi-for-coding",
+      "routed_model_id": "kimi-for-coding",
+      "provider_id": "newapi-personal-tokyo",
+      "vendor": "Moonshot",
+      "confidence": "official_negative",
+      "source_layer": "vendor_official",
+      "source_urls": ["https://platform.kimi.ai/docs/guide/use-reasoning-effort"],
+      "official_effort_tiers": null,
+      "notes": "official doc scopes reasoning_effort (low/high/max) to Kimi K3 only; kimi-for-coding (K2.6 line) has no effort tiers; leaving unconfigured is correct"
+    }
+  ]
+}

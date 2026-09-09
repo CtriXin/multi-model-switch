@@ -3,26 +3,81 @@
 
 from __future__ import annotations
 
-import argparse
+import base64
 import copy
 import difflib
+import hashlib
+import hmac
 import json
 import os
 import re
+import shlex
 import shutil
-import threading
+import subprocess
+import sys
+import tempfile
 import time
 import traceback
-import webbrowser
 from datetime import datetime, timezone
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
+
+from mms_config_web_assets import _HTML_PAGE
+from mms_session_assets import build_session_assets_snapshot
+from mms_config_web_settings import (
+    _settings_action_cards,
+    _webui_capability_coverage,
+    _tui_webui_mapping,
+    _tui_webui_mapping_summary,
+    build_settings_report,
+)
+from mms_config_web_server import (
+    ConfigWebApp,
+    _SetupWebHandler,
+    _html_page,
+    run_config_web,
+    serve_config_web,
+)
+from mms_opencode_profiles import (
+    OPENCODE_COMMITTEE_TIERS,
+    OPENCODE_COMMITTEE_TIER_DEFAULTS,
+    OPENCODE_PROFILE_OPTIONS,
+    OPENCODE_REVIEW_PROFILE_ID,
+    normalize_opencode_profile_id,
+    opencode_committee_preset_config,
+    opencode_lite_pro_specs,
+    opencode_profile_selection_ids,
+    opencode_review_host_config,
+    validate_opencode_committee_tier_preset,
+)
 
 
-_SECRET_KEYS = {"api_key", "openai_api_key", "anthropic_api_key", "gateway_key", "token", "secret", "authorization"}
+_SECRET_KEYS = {"api_key", "openai_api_key", "anthropic_api_key", "gateway_key", "token", "secret", "authorization", "password", "passphrase"}
+_SENSITIVE_CONFIG_KEYS = {"home_dir", "proxy", "no_proxy"}
+_SAFE_TOKEN_COUNT_KEYS = {
+    "cache_creation_input_tokens",
+    "cache_read_input_tokens",
+    "completion_tokens",
+    "context_tokens",
+    "context_window_tokens",
+    "input_tokens",
+    "max_completion_tokens",
+    "max_context_tokens",
+    "max_output_tokens",
+    "official_context_window_tokens",
+    "official_max_output_tokens",
+    "output_tokens",
+    "output_window_tokens",
+    "prompt_tokens",
+    "total_tokens",
+    "tokens",
+}
 _ALLOWED_PROTOCOLS = ("anthropic_messages", "openai_chat_completions")
 _ALLOWED_CLIS = ("claude", "codex", "opencode", "pi", "agy")
 _ALLOWED_ROLES = ("primary", "auto", "fallback")
+_FALLBACK_MODEL_FAMILIES = ("Claude", "GPT", "Gemini", "DeepSeek", "Qwen", "Kimi", "Mimo", "MiniMax", "GLM")
 _OPENCODE_ROSTER_PRESETS = ("builder", "executor", "explore", "bughunt", "vision", "reviewer", "spec", "fixer")
 _OPENCODE_REQUIRED_BUILDER_AGENTS = {"mobius-builder-pro", "builder_primary"}
 _REGISTRY_V2_GENERATED_FILES = (
@@ -33,17 +88,26 @@ _REGISTRY_V2_GENERATED_FILES = (
     "model-capabilities.approved.json",
     "model-registry.latest-approved.json",
 )
+_MIGRATION_BUNDLE_SCHEMA = "mms.config_migration_bundle.v1"
+_MIGRATION_CREDENTIAL_BOX_AESGCM_SCHEMA = "mms.config_migration_credentials.aesgcm.v1"
+_MIGRATION_CREDENTIAL_BOX_OPENSSL_SCHEMA = "mms.config_migration_credentials.openssl-cbc-hmac.v1"
+_MIGRATION_CREDENTIAL_BOX_SCHEMA = _MIGRATION_CREDENTIAL_BOX_AESGCM_SCHEMA
 
 _KNOWN_VISION_MODELS = {
     "gpt-5.3-codex",
     "gpt-5.4",
     "gpt-5.5",
+    "k3",
+    "k3[1m]",
+    "kimi-k3",
     "k2.6",
     "k2.6-code-preview",
     "kimi-k2.5",
     "kimi-k2.6",
     "mimo-v2.5",
     "mimo-v2-omni",
+    "minimax-m2.7",
+    "minimax-m3",
     "qwen3.5-plus",
     "qwen3.6-flash",
     "qwen3.6-plus",
@@ -52,7 +116,35 @@ _KNOWN_VISION_MODELS = {
     "gemini-3.1-flash-lite-preview",
 }
 _CACHE_SENSITIVE_PREFIXES = ("qwen", "kimi", "k2.", "glm", "deepseek", "minimax", "mimo")
-_REASONING_HINTS = ("gpt-5", "o1-", "o3-", "o4-", "qwen3", "kimi-k2", "glm-5", "deepseek", "claude-opus", "claude-sonnet")
+_REASONING_HINTS = (
+    "gpt-5",
+    "o1-",
+    "o3-",
+    "o4-",
+    "qwen3",
+    "k3",
+    "kimi-k3",
+    "kimi-k2",
+    "glm-5",
+    "deepseek",
+    "claude-opus",
+    "claude-sonnet",
+    "mimo-v2.5",
+    "minimax-m2",
+    "minimax-m3",
+)
+_CAPABILITY_TRUTH_REFRESH_FIELDS = (
+    "context_window_tokens",
+    "max_output_tokens",
+    "vision",
+    "tool_use",
+    "reasoning",
+    "thinking",
+    "thinking_control",
+    "reasoning_effort",
+    "one_m_context",
+)
+_OPENROUTER_MODELS_API_URL = "https://openrouter.ai/api/v1/models"
 
 
 def _truthy(value: Any, default: bool = False) -> bool:
@@ -70,6 +162,30 @@ def _redact(value: Any) -> str:
     if len(text) <= 8:
         return "***"
     return f"{text[:3]}***{text[-3:]}"
+
+
+def _redact_inline_secrets(value: Any) -> str:
+    text = str(value or "")
+    if not text:
+        return ""
+    text = re.sub(r"Bearer\s+[A-Za-z0-9._-]+", "Bearer ***", text)
+    text = re.sub(r"\b(?:sk|sk-or-v1|sk-ant|ak)-[A-Za-z0-9._-]{12,}\b", "***", text)
+    return text
+
+
+def _is_redacted_secret_token(value: Any) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    return text in {"<redacted>", "[redacted]", "***", "****"} or "***" in text or "****" in text
+
+
+def _is_secret_like_key(key_lower: str) -> bool:
+    if key_lower in _SAFE_TOKEN_COUNT_KEYS or key_lower.endswith("_tokens"):
+        return False
+    if key_lower.startswith(("has_api_key", "missing_api_key")):
+        return False
+    return key_lower in _SECRET_KEYS or any(token in key_lower for token in ("token", "secret", "api_key"))
 
 
 def _safe_text(value: Any) -> str:
@@ -111,6 +227,22 @@ def _normalize_model_list(value: Any) -> list[str]:
     return _split_values(value)
 
 
+def _normalize_channel_map(value: Any, allowed_models: list[str] | None = None) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    allowed = {str(model or "").strip().lower() for model in (allowed_models or []) if str(model or "").strip()}
+    result: dict[str, str] = {}
+    for key, channel in value.items():
+        model = _safe_text(key)
+        route = _safe_text(channel)
+        if not model or not route:
+            continue
+        if allowed and model.lower() not in allowed:
+            continue
+        result[model] = route
+    return result
+
+
 def _normalize_choice_list(value: Any, allowed: tuple[str, ...], default: tuple[str, ...]) -> list[str]:
     values = []
     seen = set()
@@ -130,6 +262,49 @@ def _normalize_priority(value: Any, default: int = 100) -> int:
     return max(1, parsed)
 
 
+def _normalize_context_tokens(value: Any) -> int | None:
+    try:
+        parsed = int(str(value).replace("_", "").replace(",", "").strip())
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _known_model_families() -> list[str]:
+    try:
+        mms_core = _load_mms_core()
+        families = []
+        for entry in getattr(mms_core, "MODEL_FAMILIES", ()):
+            if isinstance(entry, dict):
+                family = _safe_text(entry.get("family"))
+                if family and family not in families:
+                    families.append(family)
+        return families or list(_FALLBACK_MODEL_FAMILIES)
+    except Exception:
+        return list(_FALLBACK_MODEL_FAMILIES)
+
+
+def _canonical_family_name(value: Any) -> str:
+    raw = _safe_text(value)
+    if not raw:
+        return ""
+    for family in _known_model_families():
+        if family.lower() == raw.lower():
+            return family
+    return ""
+
+
+def _normalize_family_priority_overrides(value: Any) -> dict[str, int]:
+    raw = value if isinstance(value, dict) else {}
+    result: dict[str, int] = {}
+    for family, priority in raw.items():
+        canonical = _canonical_family_name(family)
+        if not canonical:
+            continue
+        result[canonical] = _normalize_priority(priority)
+    return result
+
+
 def _sanitize_for_output(value: Any) -> Any:
     if isinstance(value, dict):
         result: dict[str, Any] = {}
@@ -138,7 +313,9 @@ def _sanitize_for_output(value: Any) -> Any:
             key_lower = key_text.lower()
             if key_lower.startswith("has_") or key_lower.endswith(("_count", "_counts")):
                 result[key_text] = child
-            elif key_lower in _SECRET_KEYS or any(token in key_lower for token in ("token", "secret", "api_key")):
+            elif key_lower in _SENSITIVE_CONFIG_KEYS:
+                result[key_text] = bool(_safe_text(child))
+            elif _is_secret_like_key(key_lower):
                 result[key_text] = _redact(child)
             else:
                 result[key_text] = _sanitize_for_output(child)
@@ -156,6 +333,31 @@ def _load_mms_core():
     import mms_core
 
     return mms_core
+
+
+def _version_info_for_snapshot(command_name: str = "mms") -> dict[str, Any]:
+    try:
+        mms_core = _load_mms_core()
+        raw = mms_core._release_version_info()  # noqa: SLF001 - read-only version metadata for WebUI chrome
+        info = dict(raw) if isinstance(raw, dict) else {}
+    except Exception as exc:
+        info = {"release": "dev", "error": f"{type(exc).__name__}: {exc}"}
+    release = _safe_text(info.get("release") or info.get("installed_version") or info.get("git_describe") or info.get("git_commit") or "dev")
+    branch = _safe_text(info.get("git_branch"))
+    commit = _safe_text(info.get("git_commit"))
+    channel = _safe_text(info.get("install_channel"))
+    track_label = _safe_text(info.get("release_track_label") or info.get("release_track_version"))
+    if branch and commit:
+        display = f"{branch}@{commit}"
+    elif channel and release:
+        display = f"{channel} {release}"
+    else:
+        display = release
+    if track_label:
+        display = f"{track_label} · {display}"
+    info["command"] = command_name
+    info["display"] = display
+    return info
 
 
 def _policy_path_for_config(config_path: str = "") -> str:
@@ -340,13 +542,22 @@ def _resolve_preview_provider_secret(
         return provider
     config_root = _config_root_for_snapshot(config_path)
     provider_id = _safe_text(provider.get("id") or provider.get("provider_id"))
+    secret_refs = _preview_secret_refs_by_provider(config_root)
+    secret_values = _preview_secret_values_by_ref(config_root)
     secret_ref = _safe_text(provider.get("secret_ref"))
-    if provider_id and not secret_ref:
-        secret_ref = _preview_secret_refs_by_provider(config_root).get(provider_id, "")
-        if secret_ref:
-            provider["secret_ref"] = secret_ref
+    replacement_ref = secret_refs.get(provider_id, "") if provider_id else ""
+    if provider_id and replacement_ref and (
+        not secret_ref or _is_redacted_secret_token(secret_ref) or not _safe_text(secret_values.get(secret_ref))
+    ):
+        secret_ref = replacement_ref
+    elif _is_redacted_secret_token(secret_ref):
+        secret_ref = ""
+    if secret_ref:
+        provider["secret_ref"] = secret_ref
+    else:
+        provider.pop("secret_ref", None)
     if secret_ref and not _safe_text(provider.get("api_key") or provider.get("openai_api_key") or provider.get("anthropic_api_key")):
-        value = _preview_secret_values_by_ref(config_root).get(secret_ref, "")
+        value = secret_values.get(secret_ref, "")
         if value:
             provider["api_key"] = value
     return provider
@@ -364,6 +575,7 @@ def _attach_preview_secret_refs(
     refs = _preview_secret_refs_by_provider(_config_root_for_snapshot(config_path))
     if not refs:
         return cfg
+    values = _preview_secret_values_by_ref(_config_root_for_snapshot(config_path))
     providers = cfg.get("providers") if isinstance(cfg.get("providers"), list) else []
     changed = False
     next_providers = []
@@ -373,8 +585,15 @@ def _attach_preview_secret_refs(
             continue
         row = dict(provider)
         provider_id = _safe_text(row.get("id") or row.get("provider_id"))
-        if provider_id and not _safe_text(row.get("secret_ref")) and refs.get(provider_id):
-            row["secret_ref"] = refs[provider_id]
+        secret_ref = _safe_text(row.get("secret_ref"))
+        replacement_ref = refs.get(provider_id, "") if provider_id else ""
+        if provider_id and replacement_ref and (
+            not secret_ref or _is_redacted_secret_token(secret_ref) or not _safe_text(values.get(secret_ref))
+        ):
+            row["secret_ref"] = replacement_ref
+            changed = True
+        elif _is_redacted_secret_token(secret_ref):
+            row.pop("secret_ref", None)
             changed = True
         next_providers.append(row)
     if changed:
@@ -424,7 +643,15 @@ def _preview_bundle_config_from_verified_files(verified_files: dict[str, Any], *
         cached_url = _preview_cached_provider_url(provider_id)
         openai_base_url = _safe_text(route_info.get("openai_base_url"))
         anthropic_base_url = _safe_text(route_info.get("anthropic_base_url"))
-        secret_ref = _safe_text(route_info.get("secret_ref") or secret_refs.get(provider_id))
+        route_secret_ref = _safe_text(route_info.get("secret_ref"))
+        backend_secret_ref = _safe_text(secret_refs.get(provider_id))
+        secret_ref = route_secret_ref or backend_secret_ref
+        if backend_secret_ref and (
+            not secret_ref or _is_redacted_secret_token(secret_ref) or not _safe_text(secret_values.get(secret_ref))
+        ):
+            secret_ref = backend_secret_ref
+        elif _is_redacted_secret_token(secret_ref):
+            secret_ref = ""
         protocols = _normalize_model_list(profile.get("protocols"))
         if cached_url:
             if not openai_base_url and "openai_chat_completions" in protocols:
@@ -456,7 +683,12 @@ def _preview_bundle_config_from_verified_files(verified_files: dict[str, Any], *
     explicit_default = _safe_text(provider_cfg.get("default") or profiles_payload.get("default_provider"))
     provider_ids = {_safe_text(item.get("id")) for item in providers}
     provider_default = explicit_default if explicit_default in provider_ids else (providers[0]["id"] if providers else "")
-    return {"providers": providers, "provider": {"default": provider_default}}
+    result: dict[str, Any] = {"providers": providers, "provider": {"default": provider_default}}
+    runtime_config = profiles_payload.get("runtime_config") if isinstance(profiles_payload.get("runtime_config"), dict) else {}
+    runtime_opencode = runtime_config.get("opencode") if isinstance(runtime_config.get("opencode"), dict) else {}
+    if runtime_opencode:
+        result["opencode"] = copy.deepcopy(runtime_opencode)
+    return result
 
 
 def _hydrate_preview_config_from_latest_bundle(
@@ -499,10 +731,14 @@ def _hydrate_preview_config_from_latest_bundle(
         if missing:
             result["providers"] = list(result.get("providers") or []) + missing
             result["_preview_bundle_profile_merged"] = True
+        if isinstance(hydrated.get("opencode"), dict):
+            result["opencode"] = copy.deepcopy(hydrated["opencode"])
         return _attach_preview_secret_refs(result, config_path=config_path, command_name=command_name)
     result = copy.deepcopy(cfg)
     result["providers"] = hydrated["providers"]
     result["provider"] = hydrated["provider"]
+    if isinstance(hydrated.get("opencode"), dict):
+        result["opencode"] = copy.deepcopy(hydrated["opencode"])
     result["_preview_bundle_hydrated"] = True
     return _attach_preview_secret_refs(result, config_path=config_path, command_name=command_name)
 
@@ -568,19 +804,88 @@ def _pretty_json(payload: dict[str, Any]) -> str:
     return json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=False) + "\n"
 
 
-def _toml_text(payload: dict[str, Any]) -> str:
+def _toml_key(key: Any) -> str:
+    text = str(key)
+    if re.fullmatch(r"[A-Za-z0-9_-]+", text):
+        return text
+    return json.dumps(text, ensure_ascii=False)
+
+
+def _toml_scalar(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int) and not isinstance(value, bool):
+        return str(value)
+    if isinstance(value, float):
+        return repr(value)
+    if isinstance(value, (list, tuple)):
+        return "[" + ", ".join(_toml_scalar(item) for item in value) + "]"
+    if value is None:
+        return '""'
+    if isinstance(value, datetime):
+        return json.dumps(value.isoformat(), ensure_ascii=False)
+    return json.dumps(str(value), ensure_ascii=False)
+
+
+def _fallback_toml_dumps(payload: dict[str, Any]) -> str:
+    lines: list[str] = []
+
+    def emit_table(mapping: dict[str, Any], prefix: list[str]) -> None:
+        scalars: list[tuple[str, Any]] = []
+        nested: list[tuple[str, dict[str, Any]]] = []
+        for key, value in mapping.items():
+            if isinstance(value, dict):
+                nested.append((str(key), value))
+            else:
+                scalars.append((str(key), value))
+
+        if prefix and scalars:
+            if lines and lines[-1] != "":
+                lines.append("")
+            lines.append("[" + ".".join(_toml_key(part) for part in prefix) + "]")
+        for key, value in scalars:
+            lines.append(f"{_toml_key(key)} = {_toml_scalar(value)}")
+        for key, value in nested:
+            emit_table(value, [*prefix, key])
+
+    emit_table(payload if isinstance(payload, dict) else {}, [])
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _toml_dumps(payload: dict[str, Any]) -> str:
     try:
         import tomli_w
 
         return tomli_w.dumps(payload)
     except Exception:
-        try:
-            mms_core = _load_mms_core()
-            if getattr(mms_core, "tomli_w", None) is not None:
-                return mms_core.tomli_w.dumps(payload)
-        except Exception:
-            pass
-    return json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+        pass
+    try:
+        mms_core = _load_mms_core()
+        writer = getattr(mms_core, "tomli_w", None)
+        if writer is not None:
+            return writer.dumps(payload)
+    except Exception:
+        pass
+    return _fallback_toml_dumps(payload)
+
+
+def _toml_text(payload: dict[str, Any]) -> str:
+    return _toml_dumps(payload)
+
+
+def _atomic_write_preferences_toml(path: str, payload: dict[str, Any]) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(prefix=os.path.basename(path) + ".", suffix=".tmp", dir=os.path.dirname(path))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(_toml_dumps(payload))
+        os.replace(temp_path, path)
+    finally:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
 
 
 def _diff_text(before: str, after: str, *, before_name: str, after_name: str) -> str:
@@ -610,25 +915,810 @@ def _provider_credentials_status(provider_id: str) -> dict[str, Any]:
     }
 
 
-def _model_capability_defaults(model_id: str, policy_entry: dict[str, Any] | None = None) -> dict[str, Any]:
+def _model_capability_defaults(
+    model_id: str,
+    policy_entry: dict[str, Any] | None = None,
+    *,
+    provider_id: str = "",
+) -> dict[str, Any]:
     model = _safe_text(model_id)
     lower = model.lower().rsplit("/", 1)[-1]
     caps = {
         "text": True,
-        "vision": lower in _KNOWN_VISION_MODELS or lower.startswith(("claude-", "sonnet-", "opus-", "haiku-", "gemini-")),
-        "tool_use": lower.startswith(("claude-", "gpt-", "o", "qwen", "kimi", "glm", "minimax", "gemini-")),
-        "reasoning": any(hint in lower for hint in _REASONING_HINTS),
-        "long_context": "1m" in lower or "long" in lower or lower.startswith(("qwen3", "kimi-k2", "gpt-5", "claude-")),
-        "cache_sensitive": lower.startswith(_CACHE_SENSITIVE_PREFIXES),
+        "vision": False,
+        "tool_use": False,
+        "reasoning": False,
+        "thinking": False,
+        "long_context": "1m" in lower or "long" in lower,
+        "cache_sensitive": False,
     }
+    try:
+        from mms_capability_resolver import resolve_model_capabilities
+
+        resolved = resolve_model_capabilities(model, provider_id=provider_id)
+        if resolved.get("supports_thinking") is True:
+            caps["thinking"] = True
+            caps["reasoning"] = True
+        if isinstance(resolved.get("thinking_control"), dict) and resolved.get("sources", {}).get("thinking_control") != "conservative_fallback":
+            caps["thinking_control"] = _truth_thinking_control(resolved["thinking_control"])
+        context_window = int(resolved.get("context_window_tokens") or 0)
+        if context_window > 0 and resolved.get("sources", {}).get("context_window_tokens") != "conservative_fallback":
+            caps["context_window_tokens"] = context_window
+        max_output = int(resolved.get("max_output_tokens") or 0)
+        if max_output > 0 and resolved.get("sources", {}).get("max_output_tokens") != "conservative_fallback":
+            caps["max_output_tokens"] = max_output
+        if context_window >= 200_000:
+            caps["long_context"] = True
+        protocol_hints = resolved.get("protocol_hints") if isinstance(resolved.get("protocol_hints"), dict) else {}
+        if protocol_hints.get("cache_sensitive_transport") is True:
+            caps["cache_sensitive"] = True
+    except Exception:
+        pass
     if isinstance(policy_entry, dict):
         policy_caps = policy_entry.get("capabilities") if isinstance(policy_entry.get("capabilities"), dict) else {}
         for key in caps:
             if key in policy_caps and isinstance(policy_caps[key], bool):
                 caps[key] = policy_caps[key]
+            if key == "thinking" and isinstance(policy_caps.get("supports_thinking"), bool):
+                caps[key] = policy_caps["supports_thinking"]
             if key == "cache_sensitive" and isinstance(policy_caps.get("cache_sensitive_transport"), bool):
                 caps[key] = policy_caps["cache_sensitive_transport"]
+        policy_context = _normalize_context_tokens(
+            policy_caps.get("context_window_tokens")
+            or policy_caps.get("max_context_tokens")
+            or policy_entry.get("context_window_tokens")
+            or policy_entry.get("max_context_tokens")
+        )
+        if not policy_context and policy_caps.get("one_m_context") is True:
+            policy_context = 1_000_000
+        if policy_context:
+            caps["context_window_tokens"] = policy_context
+            caps["long_context"] = policy_context >= 200_000
+        policy_max_output = _normalize_context_tokens(
+            policy_caps.get("max_output_tokens")
+            or policy_caps.get("official_max_output_tokens")
+            or policy_entry.get("max_output_tokens")
+            or policy_entry.get("official_max_output_tokens")
+        )
+        if policy_max_output:
+            caps["max_output_tokens"] = policy_max_output
+        if isinstance(policy_caps.get("thinking_control"), dict):
+            caps["thinking_control"] = _truth_thinking_control(policy_caps["thinking_control"])
+        if _safe_text(policy_caps.get("reasoning_effort")):
+            caps["reasoning_effort"] = _safe_text(policy_caps["reasoning_effort"])
     return caps
+
+
+def capability_truth_refresh_fields() -> list[dict[str, str]]:
+    """Fields that can be refreshed from structured capability snapshots without LLM prose parsing."""
+    labels = {
+        "context_window_tokens": ("上下文", "结构化 context window token 数"),
+        "max_output_tokens": ("输出上限", "结构化 max output token 数"),
+        "vision": ("看图", "supports_vision / input modality"),
+        "tool_use": ("工具", "结构化 supported_parameters 包含 tools/tool_choice"),
+        "reasoning": ("推理", "supports_thinking 或结构化 reasoning 参数"),
+        "thinking": ("Think", "supports_thinking / thinking_control"),
+        "thinking_control": ("Effort 控制", "结构化 thinking / effort 控制路径、默认值和可选档位"),
+        "reasoning_effort": ("默认 Effort", "模型默认 reasoning effort 档位"),
+        "one_m_context": ("1M", "one_million_context 或 context >= 1M"),
+    }
+    return [
+        {"key": key, "label": labels[key][0], "description": labels[key][1]}
+        for key in _CAPABILITY_TRUTH_REFRESH_FIELDS
+    ]
+
+
+def _truth_normalize_model_key(value: Any) -> str:
+    text = _safe_text(value).lower()
+    if not text:
+        return ""
+    # MMS used to encode long context in suffixes like [1m]; capability lookup
+    # should match the real model id now that context is configured explicitly.
+    text = re.sub(r"\[[^\]]+\]$", "", text).strip()
+    return text
+
+
+def _truth_model_index_key(value: Any) -> str:
+    text = _truth_normalize_model_key(value)
+    if "/" in text:
+        text = text.rsplit("/", 1)[-1]
+    return text
+
+
+def _truth_model_index_keys(value: Any) -> list[str]:
+    raw = _safe_text(value).lower()
+    text = _truth_normalize_model_key(value)
+    if not raw and not text:
+        return []
+    keys: list[str] = []
+    for item in (raw, text):
+        if not item:
+            continue
+        tail = item.rsplit("/", 1)[-1] if "/" in item else item
+        keys.extend([item, tail])
+    return list(dict.fromkeys(keys))
+
+
+def _truth_model_ids_from_provider(provider: dict[str, Any]) -> list[str]:
+    provider = provider if isinstance(provider, dict) else {}
+    result: list[str] = []
+    for item in provider.get("models") if isinstance(provider.get("models"), list) else []:
+        model_id = _safe_text(item.get("id") or item.get("model")) if isinstance(item, dict) else _safe_text(item)
+        if model_id:
+            result.append(model_id)
+    for key in ("fallback_models", "approved_route_models", "extra_models"):
+        result.extend(_normalize_model_list(provider.get(key)))
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for model_id in result:
+        key = model_id.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(model_id)
+    return deduped
+
+
+def _truth_int(value: Any) -> int | None:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def _truth_supported_parameters(row: dict[str, Any]) -> set[str]:
+    params: set[str] = set()
+    for value in (row.get("provider_supported_parameters"), row.get("supported_parameters")):
+        if isinstance(value, list):
+            params.update(_safe_text(item).lower() for item in value if _safe_text(item))
+    for ref in row.get("provider_catalog_references") if isinstance(row.get("provider_catalog_references"), list) else []:
+        if isinstance(ref, dict):
+            params.update(_safe_text(item).lower() for item in ref.get("supported_parameters") or [] if _safe_text(item))
+    return params
+
+
+def _truth_first_provider_ref(row: dict[str, Any]) -> dict[str, Any]:
+    refs = row.get("provider_catalog_references") if isinstance(row.get("provider_catalog_references"), list) else []
+    for ref in refs:
+        if isinstance(ref, dict):
+            return ref
+    return {}
+
+
+def _truth_evidence_urls(row: dict[str, Any]) -> list[str]:
+    urls: list[str] = []
+    for item in row.get("evidence") if isinstance(row.get("evidence"), list) else []:
+        if isinstance(item, dict) and _safe_text(item.get("url")):
+            urls.append(_safe_text(item.get("url")))
+    for ref in row.get("provider_catalog_references") if isinstance(row.get("provider_catalog_references"), list) else []:
+        if isinstance(ref, dict):
+            for key in ("source_url", "catalog_url"):
+                if _safe_text(ref.get(key)):
+                    urls.append(_safe_text(ref.get(key)))
+    return list(dict.fromkeys(urls))[:6]
+
+
+def _truth_field_source(
+    field: str,
+    row: dict[str, Any],
+    source_path: str = "",
+    *,
+    source_layer_override: str = "",
+) -> dict[str, Any]:
+    confidence = _safe_text(row.get("confidence") or "structured")
+    source_layer = _safe_text(row.get("source_layer")).lower()
+    source_name = _safe_text(row.get("source_name"))
+    checked_at = _safe_text(row.get("checked_at"))
+    if not checked_at:
+        ref = _truth_first_provider_ref(row)
+        checked_at = _safe_text(ref.get("checked_at")) if isinstance(ref, dict) else ""
+    layer = source_layer_override or source_layer or "official"
+    if not source_layer_override and (field == "tool_use" or "provider_catalog" in confidence or "openrouter" in confidence):
+        layer = "provider_catalog"
+    result = {
+        "source_layer": layer,
+        "source_name": source_name,
+        "confidence": confidence,
+        "source_path": source_path,
+        "evidence_urls": _truth_evidence_urls(row),
+    }
+    if checked_at:
+        result["checked_at"] = checked_at
+    return result
+
+
+def _truth_thinking_control(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    result: dict[str, Any] = {}
+    for key in (
+        "supported",
+        "control_type",
+        "path",
+        "default",
+        "request_default",
+        "official_default",
+        "recommended_default",
+        "numeric_budget_tokens",
+        "mode",
+        "disable_supported",
+    ):
+        if key in value:
+            result[key] = copy.deepcopy(value[key])
+    for key in ("allowed", "map"):
+        if isinstance(value.get(key), (list, dict)):
+            result[key] = copy.deepcopy(value[key])
+    return result
+
+def _truth_control_has_positive_signal(control: dict[str, Any]) -> bool:
+    if not isinstance(control, dict):
+        return False
+    if control.get("supported") is True:
+        return True
+    path = _safe_text(control.get("path"))
+    control_type = _safe_text(control.get("control_type")).lower()
+    return bool(path) or bool(control_type and control_type != "none")
+
+
+def _truth_caps_from_row(row: dict[str, Any], *, fields: set[str], source_path: str = "") -> tuple[dict[str, Any], dict[str, Any]]:
+    caps: dict[str, Any] = {}
+    sources: dict[str, Any] = {}
+
+    context = _truth_int(row.get("official_context_window_tokens") or row.get("context_window_tokens") or row.get("max_context_tokens"))
+    if context is None:
+        context = _truth_int(row.get("provider_context_window_tokens") or row.get("provider_top_context_window_tokens"))
+    if context is None:
+        ref = _truth_first_provider_ref(row)
+        top_provider = ref.get("top_provider") if isinstance(ref.get("top_provider"), dict) else {}
+        context = _truth_int(ref.get("context_length") or top_provider.get("context_length"))
+    if context and "context_window_tokens" in fields:
+        caps["context_window_tokens"] = context
+        caps["long_context"] = context >= 200_000
+        sources["context_window_tokens"] = _truth_field_source("context_window_tokens", row, source_path)
+    if context and "one_m_context" in fields:
+        caps["one_m_context"] = context >= 1_000_000
+        sources["one_m_context"] = _truth_field_source("one_m_context", row, source_path)
+
+    max_output = _truth_int(row.get("official_max_output_tokens") or row.get("max_output_tokens"))
+    if max_output is None:
+        max_output = _truth_int(row.get("provider_top_max_output_tokens"))
+    if max_output is None:
+        ref = _truth_first_provider_ref(row)
+        top_provider = ref.get("top_provider") if isinstance(ref.get("top_provider"), dict) else {}
+        max_output = _truth_int(ref.get("max_completion_tokens") or top_provider.get("max_completion_tokens"))
+    if max_output and "max_output_tokens" in fields:
+        caps["max_output_tokens"] = max_output
+        sources["max_output_tokens"] = _truth_field_source("max_output_tokens", row, source_path)
+
+    if isinstance(row.get("supports_vision"), bool) and "vision" in fields:
+        caps["vision"] = bool(row["supports_vision"])
+        sources["vision"] = _truth_field_source("vision", row, source_path)
+    elif "vision" in fields:
+        modalities = row.get("input_modalities") or row.get("modalities") or row.get("official_capabilities")
+        if isinstance(modalities, list) and any(_safe_text(item).lower() in {"image", "vision", "multimodal"} for item in modalities):
+            caps["vision"] = True
+            sources["vision"] = _truth_field_source("vision", row, source_path)
+
+    if isinstance(row.get("supports_thinking"), bool):
+        if "thinking" in fields:
+            caps["thinking"] = bool(row["supports_thinking"])
+            sources["thinking"] = _truth_field_source("thinking", row, source_path)
+        if "reasoning" in fields:
+            caps["reasoning"] = bool(row["supports_thinking"])
+            sources["reasoning"] = _truth_field_source("reasoning", row, source_path)
+    thinking_control = _truth_thinking_control(row.get("thinking_control"))
+    if thinking_control and "thinking_control" in fields:
+        caps["thinking_control"] = thinking_control
+        sources["thinking_control"] = _truth_field_source("thinking_control", row, source_path)
+        if "thinking" in fields and "thinking" not in caps:
+            caps["thinking"] = bool(thinking_control.get("supported", True))
+            sources["thinking"] = _truth_field_source("thinking", row, source_path)
+        if "reasoning" in fields and "reasoning" not in caps:
+            caps["reasoning"] = bool(thinking_control.get("supported", True))
+            sources["reasoning"] = _truth_field_source("reasoning", row, source_path)
+    effort_default = _safe_text(row.get("reasoning_effort") or row.get("reasoning_effort_default"))
+    if effort_default and "reasoning_effort" in fields:
+        caps["reasoning_effort"] = effort_default
+        sources["reasoning_effort"] = _truth_field_source("reasoning_effort", row, source_path)
+    official_effort = _safe_text(row.get("official_reasoning_effort_default"))
+    if official_effort and "reasoning_effort" in fields:
+        caps["official_reasoning_effort"] = official_effort
+        sources["official_reasoning_effort"] = _truth_field_source("official_reasoning_effort", row, source_path)
+    recommended_effort = _safe_text(row.get("recommended_reasoning_effort_default") or row.get("reasoning_effort_default"))
+    if recommended_effort and "reasoning_effort" in fields:
+        caps["recommended_reasoning_effort"] = recommended_effort
+        sources["recommended_reasoning_effort"] = _truth_field_source("recommended_reasoning_effort", row, source_path)
+
+    official_capabilities = row.get("official_capabilities") if isinstance(row.get("official_capabilities"), dict) else {}
+    if "tool_use" in fields and official_capabilities.get("function_calling") is True:
+        caps["tool_use"] = True
+        sources["tool_use"] = _truth_field_source(
+            "tool_use",
+            row,
+            source_path,
+            source_layer_override="official",
+        )
+
+    params = _truth_supported_parameters(row)
+    if "tool_use" in fields and "tool_use" not in caps and {"tools", "tool_choice", "parallel_tool_calls"}.intersection(params):
+        caps["tool_use"] = True
+        sources["tool_use"] = _truth_field_source("tool_use", row, source_path)
+    if "reasoning" in fields and {"reasoning", "reasoning_effort", "include_reasoning"}.intersection(params):
+        caps["reasoning"] = True
+        sources["reasoning"] = _truth_field_source("reasoning", row, source_path)
+
+    if isinstance(row.get("one_million_context"), bool) and "one_m_context" in fields:
+        caps["one_m_context"] = bool(row["one_million_context"])
+        if row["one_million_context"] is True and "context_window_tokens" in fields and not caps.get("context_window_tokens"):
+            caps["context_window_tokens"] = 1_000_000
+            caps["long_context"] = True
+            sources["context_window_tokens"] = _truth_field_source("context_window_tokens", row, source_path)
+        sources["one_m_context"] = _truth_field_source("one_m_context", row, source_path)
+
+    return caps, sources
+
+
+def _openrouter_model_page_url(model_id: str) -> str:
+    model = _safe_text(model_id).strip("/")
+    return f"https://openrouter.ai/{model}" if model else "https://openrouter.ai/models"
+
+
+def _openrouter_catalog_to_truth_payload(
+    payload: dict[str, Any],
+    *,
+    source_path: str = _OPENROUTER_MODELS_API_URL,
+    checked_at: str = "",
+) -> dict[str, Any]:
+    """Convert OpenRouter /models records into the same structured snapshot shape."""
+    checked = checked_at or _now_iso()
+    rows: list[dict[str, Any]] = []
+    data = payload.get("data") if isinstance(payload.get("data"), list) else []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        model_id = _safe_text(item.get("id"))
+        if not model_id:
+            continue
+        architecture = item.get("architecture") if isinstance(item.get("architecture"), dict) else {}
+        top_provider = item.get("top_provider") if isinstance(item.get("top_provider"), dict) else {}
+        pricing = item.get("pricing") if isinstance(item.get("pricing"), dict) else {}
+        params = [_safe_text(value) for value in item.get("supported_parameters") or [] if _safe_text(value)] if isinstance(item.get("supported_parameters"), list) else []
+        input_modalities = [_safe_text(value) for value in architecture.get("input_modalities") or [] if _safe_text(value)] if isinstance(architecture.get("input_modalities"), list) else []
+        output_modalities = [_safe_text(value) for value in architecture.get("output_modalities") or [] if _safe_text(value)] if isinstance(architecture.get("output_modalities"), list) else []
+        catalog_ref = {
+            "source": "openrouter",
+            "model_id": model_id,
+            "source_url": source_path,
+            "catalog_url": _openrouter_model_page_url(model_id),
+            "context_length": item.get("context_length"),
+            "max_completion_tokens": top_provider.get("max_completion_tokens"),
+            "top_provider": top_provider,
+            "architecture": architecture,
+            "input_modalities": input_modalities,
+            "output_modalities": output_modalities,
+            "supported_parameters": params,
+            "pricing": pricing,
+            "checked_at": checked,
+        }
+        rows.append(
+            {
+                "alias": model_id.rsplit("/", 1)[-1],
+                "model": model_id,
+                "model_id": model_id,
+                "model_name": _safe_text(item.get("name")),
+                "canonical_model_id": _safe_text(item.get("canonical_slug") or model_id),
+                "confidence": "provider_catalog_openrouter",
+                "source_layer": "provider_catalog",
+                "source_name": "OpenRouter catalog",
+                "provider_context_window_tokens": item.get("context_length"),
+                "provider_top_context_window_tokens": top_provider.get("context_length"),
+                "provider_top_max_output_tokens": top_provider.get("max_completion_tokens"),
+                "provider_supported_parameters": params,
+                "input_modalities": input_modalities,
+                "output_modalities": output_modalities,
+                "provider_catalog_references": [catalog_ref],
+                "evidence": [
+                    {"url": source_path, "source": "openrouter_models_api"},
+                    {"url": _openrouter_model_page_url(model_id), "source": "openrouter_model_page"},
+                ],
+            }
+        )
+    return {
+        "schema": "mms.model_capability.provider_catalog.openrouter.v1",
+        "source": "openrouter",
+        "source_layer": "provider_catalog",
+        "source_path": source_path,
+        "checked_at": checked,
+        "models": rows,
+    }
+
+
+def _fetch_openrouter_catalog_payload(*, url: str = _OPENROUTER_MODELS_API_URL, timeout: float = 20.0) -> dict[str, Any]:
+    request = Request(
+        url or _OPENROUTER_MODELS_API_URL,
+        headers={
+            "Accept": "application/json",
+            "User-Agent": "MMS-Config-Web/1.0 (+https://github.com/CtriXin/multi-model-switch)",
+        },
+    )
+    with urlopen(request, timeout=timeout) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("OpenRouter catalog payload must be a JSON object")
+    return payload
+
+
+def _latest_openrouter_catalog_payload(db: Any) -> tuple[dict[str, Any], str, str] | None:
+    try:
+        import mms_registry
+
+        row = db.execute(
+            """
+            SELECT source_path, captured_at, payload_json
+            FROM source_snapshot
+            WHERE source_kind = ?
+            ORDER BY snapshot_id DESC
+            LIMIT 1
+            """,
+            (mms_registry.OPENROUTER_MODELS_SOURCE_KIND,),
+        ).fetchone()
+    except Exception:
+        return None
+    if row is None:
+        return None
+    try:
+        payload = json.loads(str(row["payload_json"] or "{}"))
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return payload, _safe_text(row["source_path"]), _safe_text(row["captured_at"])
+
+
+def _index_truth_payload(payload: dict[str, Any], *, source_path: str = "") -> dict[str, tuple[dict[str, Any], str]]:
+    indexed: dict[str, tuple[dict[str, Any], str]] = {}
+
+    def add_row(row: dict[str, Any], fallback_key: str = "") -> None:
+        keys = [
+            row.get("alias"),
+            row.get("model"),
+            row.get("model_name"),
+            row.get("model_id"),
+            row.get("routed_model_id"),
+            row.get("canonical_model_id"),
+            fallback_key,
+        ]
+        for value in keys:
+            for key in _truth_model_index_keys(value):
+                if key and key not in indexed:
+                    indexed[key] = (row, source_path)
+
+    for row in payload.get("models") if isinstance(payload.get("models"), list) else []:
+        if isinstance(row, dict):
+            add_row(row)
+    for section_name in ("capabilities", "model_capabilities", "facts", "routes"):
+        section = payload.get(section_name)
+        if not isinstance(section, dict):
+            continue
+        for key, value in section.items():
+            if not isinstance(value, dict):
+                continue
+            row = dict(value)
+            if section_name == "routes" and isinstance(row.get("primary"), dict):
+                row = dict(row["primary"])
+            add_row(row, str(key))
+    return indexed
+
+
+def _load_capability_truth_payloads(config_path: str = "", *, refresh_sources: bool = False) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
+    payloads: list[dict[str, Any]] = []
+    refresh_reports: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    config_root = _config_root_for_snapshot(config_path)
+    try:
+        import mms_registry
+
+        db_path = mms_registry.default_registry_db_path(config_dir=config_root or None)
+        if refresh_sources:
+            try:
+                from mms_registry_cli import refresh_source_snapshots
+
+                refresh_reports.append(refresh_source_snapshots(db_path=db_path, if_due=False))
+            except Exception as exc:
+                warnings.append(f"刷新本地结构化 source snapshot 失败: {type(exc).__name__}: {exc}")
+        try:
+            db = mms_registry.open_registry(db_path)
+            try:
+                built = mms_registry.build_approved_capabilities_payload(db)
+                if built.get("models"):
+                    built["_source_path"] = str(db_path)
+                    payloads.append(built)
+                openrouter_snapshot = _latest_openrouter_catalog_payload(db)
+                if openrouter_snapshot:
+                    openrouter_payload, source_path, captured_at = openrouter_snapshot
+                    built_openrouter = _openrouter_catalog_to_truth_payload(
+                        openrouter_payload,
+                        source_path=source_path or _OPENROUTER_MODELS_API_URL,
+                        checked_at=captured_at,
+                    )
+                    if built_openrouter.get("models"):
+                        built_openrouter["_source_path"] = source_path or str(db_path)
+                        payloads.append(built_openrouter)
+            finally:
+                db.close()
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+    for path in (
+        Path(config_root) / "generated" / "model-capabilities.approved.json" if config_root else None,
+        Path(config_root) / "model-capabilities.approved.json" if config_root else None,
+    ):
+        if not path or not path.exists():
+            continue
+        payload = _load_json_file(str(path))
+        if payload:
+            payload["_source_path"] = str(path)
+            payloads.append(payload)
+
+    reference_dir = Path(__file__).resolve().parent / "docs" / "reference" / "model-capability-calibration"
+    for path in sorted(reference_dir.glob("*.json")):
+        payload = _load_json_file(str(path))
+        if payload:
+            payload["_source_path"] = str(path)
+            payloads.append(payload)
+    return payloads, refresh_reports, warnings
+
+
+def _mmf_official_overrides_payload(
+    provider: dict[str, Any],
+    model_ids: list[str],
+    *,
+    source_path: str = "",
+) -> dict[str, Any]:
+    """Build a draft-only capability payload from MMS-maintained provider profiles."""
+    checked = _now_iso()
+    source = source_path or str(Path(__file__).resolve().parent / "config" / "provider-profiles.json")
+    rows: list[dict[str, Any]] = []
+    try:
+        from mms_capability_resolver import resolve_model_capabilities
+        from mms_provider_profiles import load_provider_profiles
+        from mms_provider_profiles import profile_thinking_capabilities
+    except Exception:
+        return {
+            "schema": "mms.model_capability.mmf_official_overrides.v1",
+            "source": "mmf_official_overrides",
+            "source_layer": "official",
+            "source_path": source,
+            "checked_at": checked,
+            "models": rows,
+        }
+
+    cache_clear = getattr(load_provider_profiles, "cache_clear", None)
+    if callable(cache_clear):
+        cache_clear()
+    profiles = load_provider_profiles()
+    runtime = provider if isinstance(provider, dict) else {}
+    provider_id = _safe_text(runtime.get("id") or runtime.get("provider_id"))
+    base_url = _safe_text(runtime.get("anthropic_base_url") or runtime.get("openai_base_url") or runtime.get("base_url"))
+    for model_id in model_ids:
+        model = _safe_text(model_id)
+        if not model:
+            continue
+        try:
+            resolved = resolve_model_capabilities(
+                model,
+                runtime=runtime,
+                provider_id=provider_id,
+                base_url=base_url,
+                approved_facts={},
+                model_policy={},
+                provider_profiles=profiles,
+            )
+        except Exception:
+            continue
+        sources = resolved.get("sources") if isinstance(resolved.get("sources"), dict) else {}
+        row: dict[str, Any] = {
+            "alias": model,
+            "model": model,
+            "model_id": model,
+            "confidence": "mmf_official_profile",
+            "source_layer": "official",
+            "source_name": "MMF 官方覆盖",
+            "checked_at": checked,
+            "evidence": [{"url": source, "source": "mms_provider_profiles"}],
+        }
+        has_profile_value = False
+        if sources.get("context_window_tokens") == "provider_profile":
+            row["official_context_window_tokens"] = resolved.get("context_window_tokens")
+            has_profile_value = True
+        if sources.get("max_output_tokens") == "provider_profile":
+            row["official_max_output_tokens"] = resolved.get("max_output_tokens")
+            has_profile_value = True
+        # MMF official overlays are additive: never downgrade OpenRouter/user enabled booleans to false.
+        if sources.get("supports_vision") == "provider_profile" and resolved.get("supports_vision") is True:
+            row["supports_vision"] = resolved.get("supports_vision")
+            has_profile_value = True
+        if sources.get("supports_thinking") == "provider_profile" and resolved.get("supports_thinking") is True:
+            row["supports_thinking"] = resolved.get("supports_thinking")
+            has_profile_value = True
+        if sources.get("thinking_control") == "provider_profile" and isinstance(resolved.get("thinking_control"), dict):
+            thinking_control = _truth_thinking_control(resolved["thinking_control"])
+            if _truth_control_has_positive_signal(thinking_control):
+                row["thinking_control"] = thinking_control
+            if "thinking_control" in row:
+                control_path = _safe_text(row["thinking_control"].get("path")).lower()
+                control_type = _safe_text(row["thinking_control"].get("control_type")).lower()
+                default_effort = _safe_text(row["thinking_control"].get("default"))
+                if default_effort and ("effort" in control_path or "effort" in control_type):
+                    row["reasoning_effort_default"] = default_effort
+                has_profile_value = True
+        try:
+            profile_caps = profile_thinking_capabilities(model, runtime=runtime, provider_id=provider_id, base_url=base_url)
+        except Exception:
+            profile_caps = {}
+        effort_default = _safe_text(profile_caps.get("effort_default"))
+        if effort_default:
+            row["reasoning_effort_default"] = effort_default
+            has_profile_value = True
+        official_effort_default = _safe_text(profile_caps.get("effort_official_default"))
+        if official_effort_default:
+            row["official_reasoning_effort_default"] = official_effort_default
+            has_profile_value = True
+        recommended_effort_default = _safe_text(profile_caps.get("effort_recommended_default"))
+        if recommended_effort_default:
+            row["recommended_reasoning_effort_default"] = recommended_effort_default
+            has_profile_value = True
+        if has_profile_value:
+            rows.append(row)
+    return {
+        "schema": "mms.model_capability.mmf_official_overrides.v1",
+        "source": "mmf_official_overrides",
+        "source_layer": "official",
+        "source_path": source,
+        "checked_at": checked,
+        "models": rows,
+    }
+
+
+def refresh_model_capability_truth(
+    cfg: dict[str, Any] | None,
+    payload: dict[str, Any] | None,
+    *,
+    config_path: str = "",
+    command_name: str = "mms",
+) -> dict[str, Any]:
+    """Build draft capability updates from structured capability snapshots only.
+
+    This is intentionally a draft helper: it never writes model-policy or the
+    runtime bundle. Existing save/preview flow remains the only persistence path.
+    """
+    payload = payload if isinstance(payload, dict) else {}
+    provider = _provider_from_payload(cfg or {}, payload, config_path=config_path, command_name=command_name)
+    provider_payload = payload.get("provider") if isinstance(payload.get("provider"), dict) else {}
+    provider.update({key: value for key, value in provider_payload.items() if key in {"models", "fallback_models", "approved_route_models", "extra_models"}})
+    requested_fields = {_safe_text(item) for item in payload.get("fields") or [] if _safe_text(item)}
+    fields = requested_fields.intersection(_CAPABILITY_TRUTH_REFRESH_FIELDS) or set(_CAPABILITY_TRUTH_REFRESH_FIELDS)
+    model_ids = _normalize_model_list(payload.get("models")) or _truth_model_ids_from_provider(provider)
+    use_openrouter_catalog = _truthy(payload.get("openrouter_catalog"), False)
+    use_mmf_official = _truthy(payload.get("mmf_official_overrides"), False)
+    truth_payloads, refresh_reports, warnings = _load_capability_truth_payloads(
+        config_path,
+        refresh_sources=_truthy(payload.get("refresh_sources"), True) and not use_mmf_official,
+    )
+    # OpenRouter refresh should mean OpenRouter-only matching; the local snapshot button covers official/approved facts.
+    if use_openrouter_catalog or use_mmf_official:
+        truth_payloads = []
+        refresh_reports = []
+    catalog_sources: list[dict[str, Any]] = []
+    if use_mmf_official:
+        official_truth = _mmf_official_overrides_payload(provider, model_ids)
+        official_truth["_source_path"] = _safe_text(official_truth.get("source_path"))
+        truth_payloads.insert(0, official_truth)
+        catalog_sources.append(
+            {
+                "source": "mmf_official_overrides",
+                "source_layer": "official",
+                "transport": "local",
+                "source_path": official_truth.get("source_path"),
+                "model_count": len(official_truth.get("models") or []),
+                "checked_at": official_truth.get("checked_at"),
+                "confidence": "mmf_official_profile",
+                "note": "MMF 官方覆盖来自仓库维护的 provider-profiles，用于覆盖 OpenRouter catalog 的 provider 参考值。",
+            }
+        )
+    if use_openrouter_catalog and not use_mmf_official:
+        source_url = _safe_text(payload.get("openrouter_url") or _OPENROUTER_MODELS_API_URL)
+        try:
+            timeout = float(payload.get("openrouter_timeout") or 20.0)
+        except (TypeError, ValueError):
+            timeout = 20.0
+        timeout = max(1.0, min(timeout, 45.0))
+        try:
+            openrouter_payload = _fetch_openrouter_catalog_payload(url=source_url, timeout=timeout)
+            openrouter_truth = _openrouter_catalog_to_truth_payload(
+                openrouter_payload,
+                source_path=source_url,
+                checked_at=_now_iso(),
+            )
+            openrouter_truth["_source_path"] = source_url
+            truth_payloads.insert(0, openrouter_truth)
+            catalog_sources.append(
+                {
+                    "source": "openrouter",
+                    "source_layer": "provider_catalog",
+                    "transport": "network",
+                    "source_path": source_url,
+                    "model_count": len(openrouter_truth.get("models") or []),
+                    "checked_at": openrouter_truth.get("checked_at"),
+                    "confidence": "provider_catalog_openrouter",
+                    "note": "OpenRouter 是 provider catalog reference，不等于模型厂商官方真值。",
+                }
+            )
+        except Exception as exc:
+            warnings.append(f"读取 OpenRouter catalog 失败: {type(exc).__name__}: {exc}")
+    truth_index: dict[str, tuple[dict[str, Any], str]] = {}
+    for truth_payload in truth_payloads:
+        source_path = _safe_text(truth_payload.get("_source_path"))
+        for key, item in _index_truth_payload(truth_payload, source_path=source_path).items():
+            truth_index.setdefault(key, item)
+
+    model_capabilities: dict[str, dict[str, Any]] = {}
+    model_sources: dict[str, dict[str, Any]] = {}
+    changes: list[dict[str, Any]] = []
+    unmatched: list[str] = []
+    current_rows = {
+        _truth_model_index_key(row.get("id") or row.get("model")): row
+        for row in (provider_payload.get("models") if isinstance(provider_payload.get("models"), list) else [])
+        if isinstance(row, dict)
+    }
+
+    for model_id in model_ids:
+        keys = _truth_model_index_keys(model_id)
+        truth = next((truth_index.get(key) for key in keys if truth_index.get(key)), None)
+        if not truth:
+            unmatched.append(model_id)
+            continue
+        row, source_path = truth
+        caps, sources = _truth_caps_from_row(row, fields=fields, source_path=source_path)
+        if not caps:
+            unmatched.append(model_id)
+            continue
+        model_capabilities[model_id] = caps
+        model_sources[model_id] = sources
+        current_key = next((item_key for item_key in keys if item_key in current_rows), keys[-1] if keys else "")
+        current_caps = current_rows.get(current_key, {}).get("capabilities")
+        current_caps = current_caps if isinstance(current_caps, dict) else {}
+        for field, value in caps.items():
+            if field == "long_context":
+                continue
+            before = current_caps.get(field)
+            if before != value:
+                changes.append({"model": model_id, "field": field, "before": before, "after": value, "source": sources.get(field, {})})
+
+    return {
+        "ok": True,
+        "schema": "mms.config_web.model_capability_snapshot_refresh.v1",
+        "provider_id": provider.get("id"),
+        "mode": "draft_only",
+        "source_mode": "mmf_official_overrides" if use_mmf_official else "openrouter_catalog" if catalog_sources else "known_snapshots",
+        "fields": [field for field in _CAPABILITY_TRUTH_REFRESH_FIELDS if field in fields],
+        "field_config": capability_truth_refresh_fields(),
+        "model_count": len(model_ids),
+        "matched_model_count": len(model_capabilities),
+        "changed_field_count": len(changes),
+        "force_apply": bool(use_mmf_official),
+        "model_capabilities": model_capabilities,
+        "model_sources": model_sources,
+        "changes": changes[:200],
+        "unmatched_models": unmatched[:80],
+        "warnings": warnings,
+        "refresh_reports": refresh_reports,
+        "catalog_sources": catalog_sources,
+        "note": "只使用结构化 source snapshot、approved capabilities、MMF 官方覆盖或 provider catalog 字段；OpenRouter 是快速结构化参考源，不是厂商官方真值；结果只进入页面草稿，保存发布后才生效。",
+    }
 
 
 def _provider_derived_model_aliases(base_models: list[str], provider: dict[str, Any]) -> list[str]:
@@ -688,7 +1778,11 @@ def _provider_effective_model_rows(provider: dict[str, Any], policy_payload: dic
                 "source": model_sources.get(model_id) or "manual",
                 "visible": visible,
                 "favorite": bool(entry.get("favorite")) if isinstance(entry, dict) else False,
-                "capabilities": _model_capability_defaults(model_id, entry if isinstance(entry, dict) else {}),
+                "capabilities": _model_capability_defaults(
+                    model_id,
+                    entry if isinstance(entry, dict) else {},
+                    provider_id=provider_id,
+                ),
                 "policy_touched": False,
             }
         )
@@ -698,6 +1792,63 @@ def _provider_effective_model_rows(provider: dict[str, Any], policy_payload: dic
 def _provider_stale_hidden_models(provider: dict[str, Any], model_rows: list[dict[str, Any]]) -> list[str]:
     current_ids = {str(row.get("id") or "").strip() for row in model_rows if isinstance(row, dict)}
     return [model for model in _normalize_model_list(provider.get("hidden_models")) if model not in current_ids]
+
+
+def _usage_summary(runtime_kind: str, runtime_id: str) -> dict[str, Any]:
+    """Best-effort local usage summary for WebUI display only."""
+    runtime_id = _safe_text(runtime_id)
+    if not runtime_id:
+        return {"launches": 0, "last_used_at": ""}
+    try:
+        mms_core = _load_mms_core()
+        launches, last_used_at = mms_core._usage_summary_for_runtime(runtime_kind, runtime_id)  # noqa: SLF001 - read-only UI summary
+        return {"launches": int(launches or 0), "last_used_at": _safe_text(last_used_at)}
+    except Exception:
+        return {"launches": 0, "last_used_at": ""}
+
+
+def _runtime_usage_rows(runtime_kind: str, runtime_id: str) -> list[dict[str, Any]]:
+    """Mirror the TUI local usage table without exposing unrelated usage.json data."""
+    runtime_id = _safe_text(runtime_id)
+    if not runtime_id:
+        return []
+
+    def count_value(value: Any) -> int:
+        try:
+            return max(0, int(value or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    try:
+        mms_core = _load_mms_core()
+        rows = mms_core._usage_rows_for_runtime(runtime_kind, runtime_id)  # noqa: SLF001 - read-only UI report
+    except Exception:
+        return []
+    result: list[dict[str, Any]] = []
+    for item in rows if isinstance(rows, list) else []:
+        if not isinstance(item, dict):
+            continue
+        models = item.get("models") if isinstance(item.get("models"), dict) else {}
+        model_usage = [
+            {"model": _safe_text(model), "launches": count_value(count)}
+            for model, count in sorted(models.items(), key=lambda pair: count_value(pair[1]), reverse=True)
+            if _safe_text(model)
+        ]
+        top_models = model_usage[:8]
+        result.append(
+            {
+                "cli": _safe_text(item.get("cli")),
+                "runtime_kind": _safe_text(item.get("runtime_kind") or runtime_kind),
+                "id": _safe_text(item.get("id") or runtime_id),
+                "name": _safe_text(item.get("name")),
+                "launches": count_value(item.get("launches")),
+                "last_model": _safe_text(item.get("last_model")),
+                "last_used_at": _safe_text(item.get("last_used_at")),
+                "top_models": top_models,
+                "model_usage": model_usage,
+            }
+        )
+    return result
 
 
 def _provider_summary(provider: dict[str, Any], *, policy_payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -737,6 +1888,12 @@ def _provider_summary(provider: dict[str, Any], *, policy_payload: dict[str, Any
         "enabled": provider.get("enabled", True) is not False,
         "role": _safe_text(provider.get("role") or "auto"),
         "priority": provider.get("priority", 100),
+        "family_priority_overrides": _normalize_family_priority_overrides(provider.get("family_priority_overrides")),
+        "claude_1m_mode": _safe_text(provider.get("claude_1m_mode") or "auto") or "auto",
+        "proxy_configured": bool(_safe_text(provider.get("proxy"))),
+        "no_proxy_configured": bool(_safe_text(provider.get("no_proxy"))),
+        "timezone": _safe_text(provider.get("timezone")),
+        "note": _safe_text(provider.get("note")),
         "models_endpoint": _safe_text(provider.get("models_endpoint") or "/models"),
         "protocols": [str(item) for item in protocols if item],
         "supported_clis": [str(item) for item in supported_clis if item],
@@ -758,6 +1915,8 @@ def _provider_summary(provider: dict[str, Any], *, policy_payload: dict[str, Any
         "stale_hidden_models": _provider_stale_hidden_models(provider, model_rows),
         "model_count": len(dict.fromkeys(row["id"] for row in model_rows)),
         "models": model_rows,
+        "usage": _usage_summary("provider", provider_id),
+        "usage_rows": _runtime_usage_rows("provider", provider_id),
     }
 
 
@@ -777,6 +1936,290 @@ def _sanitized_mapping(payload: Any) -> dict[str, Any]:
         else:
             result[normalized] = value
     return result
+
+
+def _account_summary(account: dict[str, Any], *, defaults: dict[str, Any] | None = None) -> dict[str, Any]:
+    account = account if isinstance(account, dict) else {}
+    defaults = defaults if isinstance(defaults, dict) else {}
+    account_id = _safe_text(account.get("id"))
+    cli_name = _safe_text(account.get("cli"))
+    is_default = bool(cli_name and defaults.get(cli_name) == account_id)
+    auth_mode = _safe_text(account.get("auth_mode") or account.get("mode") or "oauth")
+    is_claude = cli_name == "claude"
+    return {
+        "id": account_id,
+        "name": _safe_text(account.get("name") or account_id),
+        "cli": cli_name,
+        "enabled": account.get("enabled", True) is not False,
+        "priority": _normalize_priority(account.get("priority", 100)),
+        "family_priority_overrides": _normalize_family_priority_overrides(account.get("family_priority_overrides")),
+        "claude_1m_mode": _safe_text(account.get("claude_1m_mode") or "auto") or "auto",
+        "auth_mode": auth_mode,
+        "is_default": is_default,
+        "default_label": cli_name.upper() if is_default else "备选",
+        "home_dir_configured": bool(_safe_text(account.get("home_dir"))),
+        "proxy_configured": bool(_safe_text(account.get("proxy"))),
+        "no_proxy_configured": bool(_safe_text(account.get("no_proxy"))),
+        "timezone": _safe_text(account.get("timezone")),
+        "note": _safe_text(account.get("note")),
+        "status": "configured",
+        "is_claude_human_only": is_claude,
+        "webui_write_policy": "claude_human_only_locked" if is_claude else "draft_review_confirmed_save",
+        "usage": _usage_summary("account", account_id),
+        "usage_rows": _runtime_usage_rows("account", account_id),
+    }
+
+
+def _account_defaults(cfg: dict[str, Any]) -> dict[str, str]:
+    account_cfg = cfg.get("account") if isinstance(cfg.get("account"), dict) else {}
+    raw_defaults = account_cfg.get("defaults") if isinstance(account_cfg.get("defaults"), dict) else account_cfg
+    result: dict[str, str] = {}
+    if isinstance(raw_defaults, dict):
+        for cli, account_id in raw_defaults.items():
+            cli_name = _safe_text(cli).lower()
+            value = _safe_text(account_id)
+            if cli_name and value:
+                result[cli_name] = value
+    return result
+
+
+def _account_summaries(cfg: dict[str, Any]) -> list[dict[str, Any]]:
+    defaults = _account_defaults(cfg)
+    rows = []
+    for account in cfg.get("accounts") if isinstance(cfg.get("accounts"), list) else []:
+        if isinstance(account, dict):
+            rows.append(_account_summary(account, defaults=defaults))
+    return sorted(
+        rows,
+        key=lambda item: (
+            0 if item.get("is_default") else 1,
+            item.get("cli") or "",
+            item.get("name") or item.get("id") or "",
+        ),
+    )
+
+
+def _account_by_id(cfg: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    accounts = cfg.get("accounts") if isinstance(cfg.get("accounts"), list) else []
+    return {
+        _safe_text(account.get("id")): account
+        for account in accounts
+        if isinstance(account, dict) and _safe_text(account.get("id"))
+    }
+
+
+def _account_review_fields(account: dict[str, Any] | None) -> dict[str, Any]:
+    account = account if isinstance(account, dict) else {}
+    return {
+        "name": _safe_text(account.get("name")),
+        "enabled": account.get("enabled", True) is not False,
+        "priority": _normalize_priority(account.get("priority", 100)),
+        "family_priority_overrides": _normalize_family_priority_overrides(account.get("family_priority_overrides")),
+        "claude_1m_mode": _safe_text(account.get("claude_1m_mode") or "auto") or "auto",
+        "timezone": _safe_text(account.get("timezone")),
+        "note": _safe_text(account.get("note")),
+    }
+
+
+def _copy_existing_account(existing: dict[str, Any], account_payload: dict[str, Any]) -> dict[str, Any]:
+    account = copy.deepcopy(existing) if isinstance(existing, dict) else {}
+    if "name" in account_payload:
+        name = _safe_text(account_payload.get("name"))
+        current_name = _safe_text(account.get("name") or account.get("id"))
+        if name and name != current_name:
+            account["name"] = name
+    if "enabled" in account_payload:
+        enabled = _truthy(account_payload.get("enabled"), True)
+        if enabled != (account.get("enabled", True) is not False):
+            account["enabled"] = enabled
+    if "priority" in account_payload:
+        priority = _normalize_priority(account_payload.get("priority"), _normalize_priority(account.get("priority", 100)))
+        if priority != _normalize_priority(account.get("priority", 100)):
+            account["priority"] = priority
+    if "family_priority_overrides" in account_payload:
+        overrides = _normalize_family_priority_overrides(account_payload.get("family_priority_overrides"))
+        if overrides:
+            account["family_priority_overrides"] = overrides
+        else:
+            account.pop("family_priority_overrides", None)
+    if "claude_1m_mode" in account_payload:
+        mode = _safe_text(account_payload.get("claude_1m_mode") or "auto")
+        normalized = mode if mode in {"auto", "enable", "disable"} else "auto"
+        if normalized != "auto" or "claude_1m_mode" in account:
+            account["claude_1m_mode"] = normalized
+        else:
+            account.pop("claude_1m_mode", None)
+    if "timezone" in account_payload:
+        timezone_name = _safe_text(account_payload.get("timezone"))
+        if timezone_name:
+            account["timezone"] = timezone_name
+        else:
+            account.pop("timezone", None)
+    if "note" in account_payload:
+        note = _safe_text(account_payload.get("note"))
+        if note:
+            account["note"] = note
+        else:
+            account.pop("note", None)
+    return account
+
+
+def _apply_account_draft(
+    *,
+    current_cfg: dict[str, Any],
+    next_cfg: dict[str, Any],
+    draft: dict[str, Any],
+    errors: list[str],
+    warnings: list[str],
+) -> None:
+    has_accounts_payload = isinstance(draft.get("accounts"), list)
+    has_defaults_payload = isinstance(draft.get("account_defaults"), dict)
+    if not has_accounts_payload and not has_defaults_payload:
+        return
+
+    current_accounts = current_cfg.get("accounts") if isinstance(current_cfg.get("accounts"), list) else []
+    existing_by_id = _account_by_id(current_cfg)
+    next_accounts = copy.deepcopy(current_accounts)
+    next_by_id = _account_by_id({"accounts": next_accounts})
+
+    if has_accounts_payload:
+        seen_payload_ids: set[str] = set()
+        for item in draft.get("accounts") or []:
+            if not isinstance(item, dict):
+                continue
+            account_id = _safe_text(item.get("original_id") or item.get("id"))
+            if not account_id:
+                continue
+            if account_id in seen_payload_ids:
+                errors.append(f"账号 ID 重复: {account_id}")
+                continue
+            seen_payload_ids.add(account_id)
+            existing = existing_by_id.get(account_id)
+            if not existing:
+                errors.append(f"账号 {account_id} 不在当前配置中；WebUI 当前不创建新账号。")
+                continue
+            updated = _copy_existing_account(existing, item)
+            if _safe_text(existing.get("cli")).lower() == "claude" and _mapping_digest(_account_review_fields(existing)) != _mapping_digest(_account_review_fields(updated)):
+                errors.append(f"Claude account `{account_id}` 是 human-only；WebUI 当前只允许查看和生成 review，不会保存 Claude account 编辑。")
+                continue
+            next_by_id[account_id] = updated
+
+        next_accounts = [next_by_id.get(_safe_text(account.get("id")), account) for account in next_accounts if isinstance(account, dict)]
+        next_cfg["accounts"] = next_accounts
+
+    if has_defaults_payload:
+        defaults = _account_defaults(current_cfg)
+        payload_defaults = draft.get("account_defaults") if isinstance(draft.get("account_defaults"), dict) else {}
+        accounts_after = _account_by_id({"accounts": next_cfg.get("accounts") if isinstance(next_cfg.get("accounts"), list) else current_accounts})
+        for cli, raw_account_id in payload_defaults.items():
+            cli_name = _safe_text(cli).lower()
+            if cli_name not in _ALLOWED_CLIS:
+                warnings.append(f"账号默认 CLI 不支持: {cli_name}")
+                continue
+            account_id = _safe_text(raw_account_id)
+            before_default = defaults.get(cli_name, "")
+            if cli_name == "claude" and before_default != account_id:
+                errors.append("Claude 默认账号是 human-only；WebUI 当前不会保存 Claude account default 变化。")
+                continue
+            if not account_id:
+                defaults.pop(cli_name, None)
+                continue
+            account = accounts_after.get(account_id)
+            if not account:
+                errors.append(f"默认账号 {cli_name} -> {account_id} 不存在。")
+                continue
+            if _safe_text(account.get("cli")).lower() != cli_name:
+                errors.append(f"默认账号 {cli_name} -> {account_id} 的 CLI 不匹配。")
+                continue
+            defaults[cli_name] = account_id
+        if defaults:
+            next_cfg["account"] = {"defaults": defaults}
+        else:
+            next_cfg.pop("account", None)
+
+
+def _load_balance_summary(cfg: dict[str, Any] | None) -> dict[str, Any]:
+    section = (cfg or {}).get("load_balance") if isinstance(cfg, dict) else {}
+    section = section if isinstance(section, dict) else {}
+    profiles = section.get("profiles") if isinstance(section.get("profiles"), dict) else {}
+    rows: list[dict[str, Any]] = []
+    for name, profile in profiles.items():
+        if not isinstance(profile, dict):
+            continue
+        profile_name = _safe_text(name)
+        slots: dict[str, dict[str, str]] = {}
+        for slot_name in ("heavy", "medium", "light"):
+            raw_slot = profile.get(slot_name)
+            if isinstance(raw_slot, dict):
+                slots[slot_name] = {
+                    "model": _safe_text(raw_slot.get("model") or raw_slot.get("model_id")),
+                    "provider_id": _safe_text(raw_slot.get("provider_id") or raw_slot.get("provider")),
+                }
+            else:
+                slots[slot_name] = {"model": _safe_text(raw_slot), "provider_id": ""}
+        rows.append(
+            {
+                "name": profile_name,
+                "label": _safe_text(profile.get("label") or profile_name),
+                "is_default": profile_name == _safe_text(section.get("default")),
+                "slots": slots,
+            }
+        )
+    rows.sort(key=lambda item: (not bool(item.get("is_default")), str(item.get("name") or "")))
+    return {
+        "schema": "mms.setup_web.load_balance_summary.v1",
+        "default_profile": _safe_text(section.get("default")),
+        "profile_count": len(rows),
+        "profiles": rows,
+        "write_policy": "deprecated_read_only_compat",
+        "history_write_policy": "deprecated_no_webui_iteration",
+        "note": "load_balance 已下线；WebUI 仅保留旧配置只读摘要，不再提供编辑入口。",
+    }
+
+
+def _normalize_load_balance_draft(value: Any, *, errors: list[str] | None = None) -> dict[str, Any]:
+    payload = value if isinstance(value, dict) else {}
+    raw_profiles = payload.get("profiles") if isinstance(payload.get("profiles"), list) else []
+    profiles: dict[str, Any] = {}
+    for item in raw_profiles:
+        if not isinstance(item, dict):
+            continue
+        name = _slug(item.get("name") or item.get("label"), "")
+        if not name:
+            if errors is not None:
+                errors.append("load_balance profile 缺少 name。")
+            continue
+        if name in profiles:
+            if errors is not None:
+                errors.append(f"load_balance profile 重复: {name}")
+            continue
+        profile: dict[str, Any] = {"label": _safe_text(item.get("label") or name), "slots": ["heavy", "medium", "light"]}
+        slots = item.get("slots") if isinstance(item.get("slots"), dict) else {}
+        for slot_name in ("heavy", "medium", "light"):
+            slot = slots.get(slot_name) if isinstance(slots, dict) else {}
+            if not isinstance(slot, dict):
+                slot = {"model": slot}
+            model = _safe_text(slot.get("model") or slot.get("model_id"))
+            provider_id = _safe_text(slot.get("provider_id") or slot.get("provider"))
+            if not model:
+                continue
+            slot_payload = {"model": model}
+            if provider_id:
+                slot_payload["provider"] = provider_id
+            profile[slot_name] = slot_payload
+        if "heavy" not in profile:
+            if errors is not None:
+                errors.append(f"load_balance profile `{name}` 缺少 heavy model。")
+            continue
+        profiles[name] = profile
+    default_name = _slug(payload.get("default_profile") or payload.get("default"), "")
+    if default_name and default_name not in profiles:
+        if errors is not None:
+            errors.append(f"load_balance.default `{default_name}` 不存在。")
+        default_name = ""
+    if not default_name and profiles:
+        default_name = next(iter(profiles))
+    return {"default": default_name, "profiles": profiles} if profiles else {}
 
 
 def _normalize_agent_model_overrides(value: Any) -> dict[str, dict[str, str]]:
@@ -801,9 +2244,146 @@ def _normalize_agent_model_overrides(value: Any) -> dict[str, dict[str, str]]:
     return result
 
 
+def _normalize_opencode_review_host(value: Any) -> dict[str, list[str]]:
+    if isinstance(value, dict) and "opencode" in value:
+        cfg = value
+    elif isinstance(value, dict) and ("review" in value or "review_host" in value):
+        cfg = {"opencode": value}
+    elif isinstance(value, dict):
+        cfg = {"opencode": {"review": {"host": value}}}
+    else:
+        cfg = {}
+    normalized = opencode_review_host_config(cfg)
+    return {
+        "primary_models": list(normalized.get("primary_models") or []),
+        "fallback_models": list(normalized.get("fallback_models") or []),
+    }
+
+
+def _opencode_review_host_defaults() -> dict[str, list[str]]:
+    specs = {str(spec.get("key") or ""): spec for spec in opencode_lite_pro_specs(OPENCODE_REVIEW_PROFILE_ID)}
+    return {
+        "primary_models": list(specs.get("builder_primary", {}).get("models") or []),
+        "fallback_models": list(specs.get("builder_fallback", {}).get("models") or []),
+    }
+
+
+def _normalize_opencode_committee_presets(opencode_cfg: dict[str, Any]) -> list[dict[str, Any]]:
+    """Expose the 5 committee tiers with resolved {host, members, channel} for the web UI.
+
+    Each row merges user config `opencode.committee.presets.{tier}` over the
+    built-in defaults. `is_default` marks tiers whose resolved value still equals
+    the built-in default (no user override). Read-only display data; the frontend
+    persists edits into `state.opencode.committee.presets[tier]`.
+    """
+    rows: list[dict[str, Any]] = []
+    for tier in OPENCODE_COMMITTEE_TIERS:
+        resolved = opencode_committee_preset_config({"opencode": opencode_cfg or {}}, tier)
+        builtin = OPENCODE_COMMITTEE_TIER_DEFAULTS.get(tier, {})
+        members = list(resolved.get("members") or [])
+        default_members = list(builtin.get("members") or [])
+        member_channels = _normalize_channel_map(resolved.get("member_channels"), members)
+        default_member_channels = _normalize_channel_map(builtin.get("member_channels"), default_members)
+        host_primary_channel = resolved.get("host_primary_channel") or resolved.get("channel") or "direct"
+        host_fallback_channel = resolved.get("host_fallback_channel") or resolved.get("channel") or "direct"
+        default_host_primary_channel = builtin.get("host_primary_channel") or builtin.get("channel") or "direct"
+        default_host_fallback_channel = builtin.get("host_fallback_channel") or builtin.get("channel") or "direct"
+        user_value = None
+        if isinstance(opencode_cfg, dict):
+            committee = opencode_cfg.get("committee") if isinstance(opencode_cfg.get("committee"), dict) else {}
+            presets = committee.get("presets") if isinstance(committee.get("presets"), dict) else {}
+            if isinstance(presets.get(tier), dict):
+                user_value = presets.get(tier)
+        is_default = (
+            (resolved.get("host_primary") or "") == (builtin.get("host_primary") or "")
+            and (resolved.get("host_fallback") or "") == (builtin.get("host_fallback") or "")
+            and members == default_members
+            and (resolved.get("channel") or "direct") == (builtin.get("channel") or "direct")
+            and host_primary_channel == default_host_primary_channel
+            and host_fallback_channel == default_host_fallback_channel
+            and member_channels == default_member_channels
+        )
+        rows.append(
+            {
+                "tier": tier,
+                "host_primary": resolved.get("host_primary") or "",
+                "host_fallback": resolved.get("host_fallback") or "",
+                "members": members,
+                "channel": resolved.get("channel") or "direct",
+                "host_primary_channel": host_primary_channel,
+                "host_fallback_channel": host_fallback_channel,
+                "member_channels": member_channels,
+                "is_default": is_default,
+                "user_value": user_value,
+                "default_host_primary": builtin.get("host_primary") or "",
+                "default_host_fallback": builtin.get("host_fallback") or "",
+                "default_members": default_members,
+                "default_channel": builtin.get("channel") or "direct",
+                "default_host_primary_channel": default_host_primary_channel,
+                "default_host_fallback_channel": default_host_fallback_channel,
+                "default_member_channels": default_member_channels,
+            }
+        )
+    return rows
+
+
+def _normalize_opencode_committee_presets_input(payload: dict[str, Any], errors: list[str]) -> dict[str, dict[str, Any]]:
+    """Convert the frontend committee_presets list into a `{tier: {host, members, channel}}` config dict.
+
+    Rows flagged `is_default` (or with no host/members) are dropped so the config
+    only records explicit user overrides. Invalid rows append an error message.
+    """
+    result: dict[str, dict[str, Any]] = {}
+    raw = payload.get("committee_presets")
+    items = raw if isinstance(raw, list) else []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        tier = _safe_text(item.get("tier"))
+        if tier not in OPENCODE_COMMITTEE_TIERS:
+            continue
+        if _truthy(item.get("is_default"), False):
+            continue
+        members = _normalize_model_list(item.get("members"))
+        host_primary = _safe_text(item.get("host_primary"))
+        host_fallback = _safe_text(item.get("host_fallback"))
+        preset = {
+            "host_primary": host_primary,
+            "host_fallback": host_fallback,
+            "members": members,
+            "channel": _safe_text(item.get("channel")) or "direct",
+            "host_primary_channel": _safe_text(item.get("host_primary_channel")) if host_primary else "",
+            "host_fallback_channel": _safe_text(item.get("host_fallback_channel")) if host_fallback else "",
+            "member_channels": _normalize_channel_map(item.get("member_channels"), members),
+        }
+        preset = {key: value for key, value in preset.items() if value}
+        for message in validate_opencode_committee_tier_preset(tier, preset):
+            errors.append(f"committee 档位 {tier}: {message}")
+        if preset:
+            result[tier] = preset
+    return result
+
+
+def _opencode_surface_profile_id(value: Any, *, default: str = "agent") -> str:
+    raw = _safe_text(value)
+    if not raw:
+        return default
+    canonical = normalize_opencode_profile_id(raw)
+    for option in OPENCODE_PROFILE_OPTIONS:
+        option_id = _safe_text(option.get("id"))
+        option_profile = normalize_opencode_profile_id(option.get("profile_id") or option_id)
+        if raw == option_id or canonical == option_profile:
+            return option_id
+    return default
+
+
 def _opencode_agent_preset(agent_id: str, category: str = "") -> str:
     text = _safe_text(agent_id).lower()
     category = _safe_text(category).lower()
+    if text == "committee-host":
+        return "builder"
+    if text.startswith("committee-") or "委员会" in category:
+        return "reviewer"
     if "vision" in text or category == "vision":
         return "vision"
     if "bughunt" in text or "找茬" in category:
@@ -901,23 +2481,78 @@ def _strip_empty_provider_model_lists(cfg: dict[str, Any]) -> dict[str, Any]:
     return cfg
 
 
-def _opencode_agent_catalog(profile_id: str = "agent") -> list[dict[str, Any]]:
+def _opencode_committee_catalog_from_config(opencode_cfg: dict[str, Any], existing_agents: set[str]) -> list[dict[str, Any]]:
+    """Expose configured committee members without baking model families into the profile."""
+    if not isinstance(opencode_cfg, dict):
+        return []
+    committee = opencode_cfg.get("committee") if isinstance(opencode_cfg.get("committee"), dict) else {}
+    roster = opencode_cfg.get("agent_roster") if isinstance(opencode_cfg.get("agent_roster"), dict) else {}
+    selected_agents = [
+        _safe_text(agent)
+        for agent in (committee.get("selected_agents") if isinstance(committee.get("selected_agents"), list) else [])
+    ]
+    if not selected_agents:
+        selected_agents = [
+            _safe_text(agent)
+            for agent in roster
+            if _safe_text(agent).startswith("committee-") and _safe_text(agent) not in {"committee-host", "committee-host-pro"}
+        ]
+    if not selected_agents:
+        for model in _normalize_model_list(committee.get("models")):
+            slug = re.sub(r"[^a-z0-9]+", "-", model.lower()).strip("-")
+            if slug:
+                selected_agents.append(f"committee-{slug}")
+
+    rows: list[dict[str, Any]] = []
+    for agent in selected_agents:
+        if not agent or agent in existing_agents or agent in {"committee-host", "committee-host-pro"}:
+            continue
+        entry = roster.get(agent) if isinstance(roster.get(agent), dict) else {}
+        model = _safe_text(entry.get("model"))
+        if not model and agent.startswith("committee-"):
+            model = agent.removeprefix("committee-")
+        rows.append(
+            {
+                "agent": agent,
+                "route_key": f"custom_{agent}",
+                "category": "委员会",
+                "preset": _opencode_agent_preset(agent, "委员会"),
+                "priority": 1000 + len(rows) * 10,
+                "default_models": [model] if model else [],
+                "fallback_allowed": False,
+                "custom": True,
+            }
+        )
+        existing_agents.add(agent)
+    return rows
+
+
+def _opencode_agent_catalog(profile_id: str = "agent", opencode_cfg: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    surface_profile = _opencode_surface_profile_id(profile_id, default="agent")
+    if surface_profile in {"raw", "omo"}:
+        return []
     try:
         mms_core = _load_mms_core()
         specs = mms_core._opencode_lite_pro_specs(profile_id)  # noqa: SLF001 - setup UI mirrors launcher roster
     except Exception:
         specs = ()
     rows = []
+    seen_agents = set()
     for spec in specs:
         if not isinstance(spec, dict):
             continue
         agent = _safe_text(spec.get("agent"))
-        if not agent:
+        if not agent or agent in seen_agents:
             continue
+        seen_agents.add(agent)
         key = _safe_text(spec.get("key"))
         models = _normalize_model_list(spec.get("models"))
         category = "执行/协调"
-        if "explore" in agent:
+        if agent == "committee-host":
+            category = "执行/协调"
+        elif agent.startswith("committee-"):
+            category = "委员会"
+        elif "explore" in agent:
             category = "探索"
         elif "bughunt" in agent:
             category = "找茬"
@@ -938,6 +2573,8 @@ def _opencode_agent_catalog(profile_id: str = "agent") -> list[dict[str, Any]]:
                 "fallback_allowed": spec.get("gpt_fallback", True) is not False,
             }
         )
+    if surface_profile == "committee":
+        rows.extend(_opencode_committee_catalog_from_config(opencode_cfg or {}, seen_agents))
     return rows
 
 
@@ -957,20 +2594,30 @@ def build_config_snapshot(
     provider_rows = [_provider_summary(item, policy_payload=policy_payload) for item in providers if isinstance(item, dict)]
     vision_sidecar = cfg.get("vision_sidecar") if isinstance(cfg.get("vision_sidecar"), dict) else {}
     rescue = cfg.get("rescue") if isinstance(cfg.get("rescue"), dict) else {}
+    ui_cfg = cfg.get("ui") if isinstance(cfg.get("ui"), dict) else {}
     provider_default = _safe_text((cfg.get("provider") if isinstance(cfg.get("provider"), dict) else {}).get("default"))
     presets = cfg.get("presets") if isinstance(cfg.get("presets"), dict) else {}
     coding_preset = presets.get("coding") if isinstance(presets.get("coding"), dict) else {}
     opencode_cfg = cfg.get("opencode") if isinstance(cfg.get("opencode"), dict) else {}
     opencode_agent_models = _normalize_agent_model_overrides(opencode_cfg.get("agent_models") or opencode_cfg.get("agent_model_overrides"))
-    opencode_profile = _safe_text(opencode_cfg.get("default_profile") or "agent")
-    opencode_agent_catalog = _opencode_agent_catalog("agent")
+    opencode_profile = _opencode_surface_profile_id(opencode_cfg.get("default_profile") or "agent")
+    opencode_profiles = opencode_profile_selection_ids()
+    opencode_agent_catalogs = {
+        profile: _opencode_agent_catalog(profile, opencode_cfg=opencode_cfg)
+        for profile in opencode_profiles
+    }
+    opencode_agent_catalog = opencode_agent_catalogs.get(opencode_profile) or _opencode_agent_catalog(opencode_profile, opencode_cfg=opencode_cfg)
     opencode = {
         "default_profile": opencode_profile,
         "recommended_profile": "agent",
-        "profiles": ["agent", "omo", "raw"],
+        "profiles": opencode_profiles,
+        "review": {"host": _normalize_opencode_review_host(opencode_cfg)},
+        "review_host_defaults": _opencode_review_host_defaults(),
+        "committee_presets": _normalize_opencode_committee_presets(opencode_cfg),
         "agent_models": opencode_agent_models,
-        "agent_roster": _normalize_opencode_agent_roster(opencode_cfg.get("agent_roster"), profile_id="agent"),
+        "agent_roster": _normalize_opencode_agent_roster(opencode_cfg.get("agent_roster"), profile_id=opencode_profile),
         "agent_catalog": opencode_agent_catalog,
+        "agent_catalogs": opencode_agent_catalogs,
         "roster_presets": list(_OPENCODE_ROSTER_PRESETS),
         "vision_agents": ["mobius-vision-mimo", "mobius-vision-kimi", "mobius-vision-qwen"],
         "executor": "mobius-executor-gpt54",
@@ -985,10 +2632,12 @@ def build_config_snapshot(
         recommendations.append("建议先设置 rescue fallback model，失败时可以稳定交接。")
     if not any(row.get("anthropic_base_url") for row in provider_rows):
         recommendations.append("CN / dual-protocol 模型建议保留 Anthropic /v1/messages 路径，避免 cache 退化。")
+    tui_webui_mapping = _tui_webui_mapping()
     return {
         "schema": "mms.setup_web.snapshot.v2",
         "mode": "interactive_audited_save",
         "command": command_name,
+        "version_info": _version_info_for_snapshot(command_name),
         "setup_flow": build_setup_flow(),
         "test_contracts": build_test_contracts(),
         "paths": {
@@ -998,8 +2647,23 @@ def build_config_snapshot(
         },
         "providers": provider_rows,
         "provider_default": provider_default or (provider_rows[0]["id"] if provider_rows else ""),
+        "model_families": _known_model_families(),
+        "accounts": _account_summaries(cfg),
+        "account_defaults": _account_defaults(cfg),
+        "account_write_policy": {
+            "status": "draft_review_confirmed_save",
+            "claude": "human_only_locked",
+            "allowed_fields": ["name", "enabled", "priority", "family_priority_overrides", "timezone", "note", "claude_1m_mode", "default_non_claude"],
+            "blocked_fields": ["login", "remove", "rename/home_dir", "proxy", "no_proxy", "claude_default", "claude_metadata"],
+        },
+        "settings_actions": _settings_action_cards(),
+        "webui_capability_coverage": _webui_capability_coverage(),
+        "tui_webui_mapping": tui_webui_mapping,
+        "tui_webui_mapping_summary": _tui_webui_mapping_summary(tui_webui_mapping),
+        "load_balance": _load_balance_summary(cfg),
         "vision_sidecar": _sanitized_mapping(vision_sidecar),
         "rescue": _sanitized_mapping(rescue),
+        "ui": {"language": _safe_text(ui_cfg.get("language") or "zh") or "zh"},
         "runtime": {
             "preferred_cli": _safe_text(coding_preset.get("cli") or "opencode"),
             "coding_preset_model": _safe_text(coding_preset.get("model")),
@@ -1014,6 +2678,12 @@ def build_config_snapshot(
         "consumer_bundle_status": _consumer_bundle_status_for_snapshot(config_path, command_name=command_name),
         "config_v2_promotion_plan": _config_v2_promotion_plan_for_snapshot(config_path, command_name=command_name),
         "config_v2_release_readiness": _config_v2_release_readiness_for_snapshot(config_path, command_name=command_name),
+        "session_assets": build_session_assets_snapshot(
+            cfg,
+            config_path=config_path,
+            preferences_path=preferences_path,
+            command_name=command_name,
+        ),
         "references": build_reference_cards(),
         "recommendations": recommendations,
         "snippets": build_config_snippets(),
@@ -1078,6 +2748,11 @@ mms opencode-smoke --profile agent --health-summary
         "text": true,
         "vision": true,
         "tool_use": true,
+        "reasoning": true,
+        "thinking": true,
+        "supports_thinking": true,
+        "one_m_context": true,
+        "context_window_tokens": 1000000,
         "cache_sensitive_transport": true
       }
     },
@@ -1157,9 +2832,16 @@ def build_setup_flow() -> list[dict[str, Any]]:
         {
             "id": "runtime",
             "title": "6. 运行默认值",
-            "summary": "设置 preferred CLI、coding preset 和 OpenCode Multi-Agent profile。",
+            "summary": "设置 首选 CLI、coding preset 和 OpenCode Multi-Agent profile。",
             "fields": ["preferred_cli", "opencode_profile", "executor", "reviewer", "explore", "vision_agents"],
             "actions": ["preview_launch", "save_audited"],
+        },
+        {
+            "id": "session_assets",
+            "title": "7. Session 能力面板",
+            "summary": "区分 MMS dynamic 与 Global/inherited 的 skills、MCP、hooks，并可单独保存 preferences.toml 偏好。",
+            "fields": ["cli", "kind", "origin", "path", "disable_key", "default_state"],
+            "actions": ["filter_by_cli", "filter_by_origin", "save_preferences", "copy_preferences_snippet"],
         },
     ]
 
@@ -1203,12 +2885,17 @@ def build_reference_cards() -> list[dict[str, str]]:
         {
             "title": "用户偏好 allowlist",
             "path": "docs/MMS_USER_PREFERENCES.md",
-            "summary": "哪些日常偏好适合 preferences.toml，哪些真实配置必须 human gate。",
+            "summary": "哪些日常偏好适合 preferences.toml，哪些真实配置必须 人工确认。",
         },
         {
             "title": "OpenCode Lite Pro",
             "path": "docs/OPENCODE_LITE_LAUNCHER.md",
             "summary": "OpenSpec Multi、GPT executor、国产只读 explore/bug-hunt 的当前策略。",
+        },
+        {
+            "title": "Session assets / preferences",
+            "path": "docs/MMS_USER_PREFERENCES.md",
+            "summary": "解释 MMS dynamic skills/MCP/hooks、global config 边界和 preferences.toml allowlist。",
         },
         {
             "title": "能力校准快照",
@@ -1261,7 +2948,7 @@ def build_setup_markdown(snapshot: dict[str, Any]) -> str:
     lines.extend(["", "## Vision Sidecar", "", "```toml", snippets.get("vision_sidecar", ""), "```"])
     lines.extend(["", "## Rescue Fallback", "", "```toml", snippets.get("rescue", ""), "```"])
     lines.extend(["", "## Model Visibility And Capability Policy", "", "```json", snippets.get("model_policy", ""), "```"])
-    lines.extend(["", "## Preferred CLI", "", "```toml", snippets.get("preferred_cli", ""), "```"])
+    lines.extend(["", "## 首选 CLI", "", "```toml", snippets.get("preferred_cli", ""), "```"])
     lines.extend(["", "## OpenCode", "", "```bash", snippets.get("opencode", ""), "```"])
     recommendations = snapshot.get("recommendations") or []
     if recommendations:
@@ -1277,6 +2964,976 @@ def build_setup_markdown(snapshot: dict[str, Any]) -> str:
         ]
     )
     return "\n".join(lines).strip() + "\n"
+
+
+def _migration_cryptography_available() -> bool:
+    try:
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # noqa: F401
+
+        return True
+    except Exception:
+        return False
+
+
+def _migration_openssl_available() -> bool:
+    return bool(shutil.which("openssl"))
+
+
+def _migration_secret_crypto_backend() -> str:
+    if _migration_cryptography_available():
+        return "cryptography"
+    if _migration_openssl_available():
+        return "openssl"
+    return "none"
+
+
+def _migration_crypto_available() -> bool:
+    return _migration_secret_crypto_backend() != "none"
+
+
+def _migration_derive_key(password: str, salt: bytes, *, iterations: int) -> bytes:
+    return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations, dklen=32)
+
+
+def _migration_encrypt_json_aesgcm(payload: dict[str, Any], password: str) -> dict[str, Any]:
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    iterations = 220_000
+    salt = os.urandom(16)
+    nonce = os.urandom(12)
+    key = _migration_derive_key(password, salt, iterations=iterations)
+    plaintext = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ciphertext = AESGCM(key).encrypt(nonce, plaintext, _MIGRATION_BUNDLE_SCHEMA.encode("utf-8"))
+    return {
+        "schema": _MIGRATION_CREDENTIAL_BOX_AESGCM_SCHEMA,
+        "algorithm": "AES-256-GCM",
+        "kdf": "PBKDF2-HMAC-SHA256",
+        "iterations": iterations,
+        "salt_b64": base64.b64encode(salt).decode("ascii"),
+        "nonce_b64": base64.b64encode(nonce).decode("ascii"),
+        "ciphertext_b64": base64.b64encode(ciphertext).decode("ascii"),
+        "plaintext_schema": "mms.config_migration_credentials_payload.v1",
+    }
+
+
+def _migration_decrypt_json_aesgcm(box: dict[str, Any], password: str) -> dict[str, Any]:
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    iterations = int(box.get("iterations") or 0)
+    if iterations < 100_000:
+        raise ValueError("迁移包凭据 KDF 强度过低，已拒绝导入。")
+    salt = base64.b64decode(str(box.get("salt_b64") or ""))
+    nonce = base64.b64decode(str(box.get("nonce_b64") or ""))
+    ciphertext = base64.b64decode(str(box.get("ciphertext_b64") or ""))
+    key = _migration_derive_key(password, salt, iterations=iterations)
+    plaintext = AESGCM(key).decrypt(nonce, ciphertext, _MIGRATION_BUNDLE_SCHEMA.encode("utf-8"))
+    payload = json.loads(plaintext.decode("utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("迁移包凭据解密后不是对象。")
+    return payload
+
+
+def _migration_openssl_passfile(password: str) -> str:
+    fd, path = tempfile.mkstemp(prefix="mms-migration-pass-", text=False)
+    try:
+        os.chmod(path, 0o600)
+        os.write(fd, password.encode("utf-8"))
+        os.close(fd)
+        fd = -1
+        return path
+    except Exception:
+        try:
+            if fd >= 0:
+                os.close(fd)
+        finally:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        raise
+
+
+def _migration_run_openssl_enc(data: bytes, password: str, *, decrypt: bool, iterations: int) -> bytes:
+    openssl = shutil.which("openssl")
+    if not openssl:
+        raise ValueError("当前 Python 环境缺少 cryptography，且找不到 openssl，不能处理加密 API Key。")
+    passfile = _migration_openssl_passfile(password)
+    try:
+        cmd = [
+            openssl,
+            "enc",
+            "-aes-256-cbc",
+            "-pbkdf2",
+            "-iter",
+            str(iterations),
+            "-md",
+            "sha256",
+            "-salt",
+            "-pass",
+            f"file:{passfile}",
+        ]
+        if decrypt:
+            cmd.insert(2, "-d")
+        proc = subprocess.run(cmd, input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    finally:
+        try:
+            os.unlink(passfile)
+        except OSError:
+            pass
+    if proc.returncode != 0:
+        detail = proc.stderr.decode("utf-8", errors="replace").strip().splitlines()
+        message = detail[-1] if detail else "openssl enc failed"
+        raise ValueError(f"OpenSSL 加密后备失败：{message}")
+    return proc.stdout
+
+
+def _migration_openssl_mac_payload(box: dict[str, Any]) -> bytes:
+    fields = {
+        "schema": _safe_text(box.get("schema")),
+        "algorithm": _safe_text(box.get("algorithm")),
+        "kdf": _safe_text(box.get("kdf")),
+        "iterations": int(box.get("iterations") or 0),
+        "mac_salt_b64": _safe_text(box.get("mac_salt_b64")),
+        "ciphertext_b64": _safe_text(box.get("ciphertext_b64")),
+        "plaintext_schema": _safe_text(box.get("plaintext_schema")),
+        "aad": _MIGRATION_BUNDLE_SCHEMA,
+    }
+    return json.dumps(fields, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _migration_encrypt_json_openssl(payload: dict[str, Any], password: str) -> dict[str, Any]:
+    iterations = 220_000
+    mac_salt = os.urandom(16)
+    plaintext = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ciphertext = _migration_run_openssl_enc(plaintext, password, decrypt=False, iterations=iterations)
+    box = {
+        "schema": _MIGRATION_CREDENTIAL_BOX_OPENSSL_SCHEMA,
+        "algorithm": "AES-256-CBC+HMAC-SHA256",
+        "kdf": "OpenSSL-PBKDF2-HMAC-SHA256 + PBKDF2-HMAC-SHA256-MAC",
+        "iterations": iterations,
+        "mac_salt_b64": base64.b64encode(mac_salt).decode("ascii"),
+        "ciphertext_b64": base64.b64encode(ciphertext).decode("ascii"),
+        "plaintext_schema": "mms.config_migration_credentials_payload.v1",
+    }
+    mac_key = _migration_derive_key(password, mac_salt, iterations=iterations)
+    box["hmac_b64"] = base64.b64encode(
+        hmac.new(mac_key, _migration_openssl_mac_payload(box), hashlib.sha256).digest()
+    ).decode("ascii")
+    return box
+
+
+def _migration_decrypt_json_openssl(box: dict[str, Any], password: str) -> dict[str, Any]:
+    iterations = int(box.get("iterations") or 0)
+    if iterations < 100_000:
+        raise ValueError("迁移包凭据 KDF 强度过低，已拒绝导入。")
+    mac_salt = base64.b64decode(str(box.get("mac_salt_b64") or ""))
+    ciphertext = base64.b64decode(str(box.get("ciphertext_b64") or ""))
+    expected = base64.b64decode(str(box.get("hmac_b64") or ""))
+    mac_key = _migration_derive_key(password, mac_salt, iterations=iterations)
+    actual = hmac.new(mac_key, _migration_openssl_mac_payload(box), hashlib.sha256).digest()
+    if not expected or not hmac.compare_digest(actual, expected):
+        raise ValueError("迁移密码错误或凭据已损坏。")
+    plaintext = _migration_run_openssl_enc(ciphertext, password, decrypt=True, iterations=iterations)
+    payload = json.loads(plaintext.decode("utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("迁移包凭据解密后不是对象。")
+    return payload
+
+
+def _migration_encrypt_json(payload: dict[str, Any], password: str) -> dict[str, Any]:
+    backend = _migration_secret_crypto_backend()
+    if backend == "cryptography":
+        return _migration_encrypt_json_aesgcm(payload, password)
+    if backend == "openssl":
+        return _migration_encrypt_json_openssl(payload, password)
+    raise ValueError("当前 Python 环境缺少 cryptography，且找不到 openssl，不能导出包含 API Key 的加密迁移包。")
+
+
+def _migration_decrypt_json(box: dict[str, Any], password: str) -> dict[str, Any]:
+    if not isinstance(box, dict):
+        raise ValueError("迁移包凭据格式不受支持。")
+    schema = box.get("schema")
+    if schema == _MIGRATION_CREDENTIAL_BOX_AESGCM_SCHEMA:
+        if not _migration_cryptography_available():
+            raise ValueError("这个迁移包使用 AES-GCM，需要当前 Python 环境安装 cryptography 才能解密。")
+        return _migration_decrypt_json_aesgcm(box, password)
+    if schema == _MIGRATION_CREDENTIAL_BOX_OPENSSL_SCHEMA:
+        if not _migration_openssl_available():
+            raise ValueError("这个迁移包使用 OpenSSL 后备加密；当前环境找不到 openssl，不能解密。")
+        return _migration_decrypt_json_openssl(box, password)
+    raise ValueError("迁移包凭据格式不受支持。")
+
+
+def _migration_config_from_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+    provider_rows = snapshot.get("providers") if isinstance(snapshot.get("providers"), list) else []
+    providers: list[dict[str, Any]] = []
+    for row in provider_rows:
+        if not isinstance(row, dict):
+            continue
+        provider_id = _safe_text(row.get("id"))
+        if not provider_id:
+            continue
+        provider = {
+            "id": provider_id,
+            "name": _safe_text(row.get("name") or provider_id),
+            "enabled": row.get("enabled", True) is not False,
+            "role": _safe_text(row.get("role") or "auto"),
+            "priority": _normalize_priority(row.get("priority", 100)),
+            "family_priority_overrides": _normalize_family_priority_overrides(row.get("family_priority_overrides")),
+            "claude_1m_mode": _safe_text(row.get("claude_1m_mode") or "auto") or "auto",
+            "timezone": _safe_text(row.get("timezone")),
+            "note": _safe_text(row.get("note")),
+            "models_endpoint": _safe_text(row.get("models_endpoint") or "/models"),
+            "protocols": [str(item) for item in (row.get("protocols") or []) if item],
+            "supported_clis": [str(item) for item in (row.get("supported_clis") or []) if item],
+            "openai_base_url": _safe_text(row.get("openai_base_url") or row.get("effective_openai_base_url")),
+            "anthropic_base_url": _safe_text(row.get("anthropic_base_url") or row.get("effective_anthropic_base_url")),
+            "fallback_models": _normalize_model_list(row.get("approved_route_models") or row.get("fallback_models")),
+            "extra_models": _normalize_model_list(row.get("extra_models")),
+            "hidden_models": _normalize_model_list(row.get("hidden_models")),
+            "models": [],
+        }
+        model_rows = []
+        for model_row in row.get("models") if isinstance(row.get("models"), list) else []:
+            if not isinstance(model_row, dict):
+                continue
+            model_id = _safe_text(model_row.get("id") or model_row.get("model"))
+            if not model_id or _safe_text(model_row.get("source")) == "derived_alias":
+                continue
+            model_rows.append(
+                {
+                    "id": model_id,
+                    "source": _safe_text(model_row.get("source") or "migration"),
+                    "visible": model_row.get("visible", True) is not False,
+                    "favorite": model_row.get("favorite") is True,
+                }
+            )
+        if model_rows:
+            provider["models"] = model_rows
+        else:
+            provider.pop("models", None)
+        providers.append({key: value for key, value in provider.items() if value not in ("", {}, [])})
+
+    raw_config: dict[str, Any] = {}
+    if providers:
+        raw_config["providers"] = providers
+    provider_default = _safe_text(snapshot.get("provider_default"))
+    if provider_default:
+        raw_config["provider"] = {"default": provider_default}
+    for key in ("rescue", "vision_sidecar", "ui", "opencode"):
+        value = snapshot.get(key)
+        if isinstance(value, dict) and value:
+            raw_config[key] = _sanitize_for_output(value)
+    runtime = snapshot.get("runtime") if isinstance(snapshot.get("runtime"), dict) else {}
+    if runtime:
+        coding: dict[str, Any] = {}
+        preferred_cli = _safe_text(runtime.get("preferred_cli"))
+        coding_model = _safe_text(runtime.get("coding_preset_model"))
+        if preferred_cli:
+            coding["cli"] = preferred_cli
+        if coding_model:
+            coding["model"] = coding_model
+        if coding:
+            raw_config["presets"] = {"coding": coding}
+    return raw_config
+
+
+def _migration_payload_config_from_cfg(cfg: dict[str, Any], *, config_path: str = "", preferences_path: str = "", command_name: str = "mms") -> dict[str, Any]:
+    snapshot = build_config_snapshot(cfg, config_path=config_path, preferences_path=preferences_path, command_name=command_name)
+    exported = _migration_config_from_snapshot(snapshot)
+    for key in ("load_balance",):
+        value = cfg.get(key) if isinstance(cfg.get(key), dict) else {}
+        if value:
+            exported[key] = _sanitize_for_output(value)
+    return exported
+
+
+def _migration_preferences_payload(config_path: str = "", preferences_path: str = "") -> dict[str, Any]:
+    target_path = _preferences_target_path(config_path=config_path, preferences_path=preferences_path)
+    prefs = _load_preferences_raw(target_path)
+    payload: dict[str, Any] = {}
+    launch = prefs.get("launch") if isinstance(prefs.get("launch"), dict) else {}
+    disabled_clis = _normalize_model_list(launch.get("disabled_clis"))
+    if disabled_clis:
+        payload.setdefault("launch", {})["disabled_clis"] = disabled_clis
+    session_surfaces = prefs.get("session_surfaces") if isinstance(prefs.get("session_surfaces"), dict) else {}
+    disabled = session_surfaces.get("disabled") if isinstance(session_surfaces.get("disabled"), dict) else {}
+    normalized_disabled: dict[str, list[str]] = {}
+    for key in ("skills", "mcp", "hooks"):
+        values = _normalize_model_list(disabled.get(key))
+        if values:
+            normalized_disabled[key] = values
+    if normalized_disabled:
+        payload["session_surfaces"] = {"disabled": normalized_disabled}
+    assets = prefs.get("assets") if isinstance(prefs.get("assets"), dict) else {}
+    managed_root = _safe_text(assets.get("managed_root"))
+    if managed_root:
+        payload["assets"] = {"managed_root": managed_root}
+    return payload
+
+
+def _migration_collect_credentials(cfg: dict[str, Any]) -> list[dict[str, str]]:
+    providers = cfg.get("providers") if isinstance(cfg.get("providers"), list) else []
+    mms_core = _load_mms_core()
+    credentials: list[dict[str, str]] = []
+    for provider in providers:
+        if not isinstance(provider, dict):
+            continue
+        provider_id = _safe_text(provider.get("id"))
+        if not provider_id:
+            continue
+        try:
+            raw = mms_core.load_provider_credentials(provider_id)
+        except Exception:
+            raw = {}
+        api_key = _safe_text(raw.get("api_key") or provider.get("api_key"))
+        openai_api_key = _safe_text(raw.get("openai_api_key") or provider.get("openai_api_key"))
+        if not api_key and not openai_api_key:
+            continue
+        openai_base = _safe_text(raw.get("openai_base_url") or raw.get("base_url") or provider.get("default_openai_base_url") or provider.get("openai_base_url") or provider.get("base_url"))
+        anthropic_base = _safe_text(raw.get("anthropic_base_url") or provider.get("default_anthropic_base_url") or provider.get("anthropic_base_url"))
+        credentials.append(
+            {
+                "provider_id": provider_id,
+                "base_url": (openai_base or anthropic_base).rstrip("/"),
+                "openai_base_url": openai_base.rstrip("/"),
+                "anthropic_base_url": anthropic_base.rstrip("/"),
+                "api_key": api_key or openai_api_key,
+                "openai_api_key": openai_api_key,
+            }
+        )
+    return credentials
+
+
+def build_migration_export(
+    current_cfg: dict[str, Any] | None,
+    payload: dict[str, Any] | None,
+    *,
+    config_path: str = "",
+    preferences_path: str = "",
+    command_name: str = "mms",
+) -> dict[str, Any]:
+    payload = payload if isinstance(payload, dict) else {}
+    cfg = copy.deepcopy(current_cfg) if isinstance(current_cfg, dict) else {}
+    cfg = _hydrate_preview_config_from_latest_bundle(cfg, config_path=config_path, command_name=command_name)
+    include_credentials = _truthy(payload.get("include_credentials") or payload.get("include_secrets"), False)
+    password = _safe_text(payload.get("password") or payload.get("passphrase"))
+    warnings = [
+        "OAuth / Claude / Codex 原生登录态不会进入迁移包；另一台机器仍需人工登录原生 CLI。",
+        "Claude account、proxy/no_proxy、home_dir 等 human-only 配置不会被自动迁移。",
+    ]
+    policy_path = _policy_path_for_config(config_path)
+    bundle: dict[str, Any] = {
+        "schema": _MIGRATION_BUNDLE_SCHEMA,
+        "created_at": _now_iso(),
+        "source": {
+            "command": command_name,
+            "version": _version_info_for_snapshot(command_name),
+            "config_root": _config_root_for_snapshot(config_path),
+            "config_path": os.path.abspath(os.path.expanduser(config_path)) if config_path else "",
+            "preferences_path": os.path.abspath(os.path.expanduser(preferences_path)) if preferences_path else "",
+        },
+        "security": {
+            "contains_credentials": False,
+            "credential_box": "none",
+            "oauth_state": "excluded",
+            "native_cli_auth": "excluded",
+            "redaction": "api_key/password/token fields are never stored in payload",
+        },
+        "payload": {
+            "config": _migration_payload_config_from_cfg(cfg, config_path=config_path, preferences_path=preferences_path, command_name=command_name),
+            "model_policy": _load_json_file(policy_path),
+            "preferences": _migration_preferences_payload(config_path=config_path, preferences_path=preferences_path),
+        },
+        "warnings": warnings,
+    }
+    credential_count = 0
+    if include_credentials:
+        crypto_backend = _migration_secret_crypto_backend()
+        if len(password) < 8:
+            return {
+                "ok": False,
+                "schema": "mms.config_migration_export_result.v1",
+                "status": "blocked",
+                "errors": ["包含 API Key 的迁移包必须输入至少 8 位迁移密码。"],
+                "crypto_available": _migration_crypto_available(),
+                "crypto_backend": crypto_backend,
+            }
+        if crypto_backend == "none":
+            return {
+                "ok": False,
+                "schema": "mms.config_migration_export_result.v1",
+                "status": "blocked",
+                "errors": ["当前 Python 环境缺少 cryptography，且找不到 openssl，不能导出包含 API Key 的加密迁移包。"],
+                "crypto_available": False,
+                "crypto_backend": crypto_backend,
+            }
+        credentials = _migration_collect_credentials(cfg)
+        credential_count = len(credentials)
+        credential_payload = {
+            "schema": "mms.config_migration_credentials_payload.v1",
+            "created_at": _now_iso(),
+            "credentials": credentials,
+        }
+        try:
+            encrypted_credentials = _migration_encrypt_json(credential_payload, password)
+        except Exception as exc:
+            return {
+                "ok": False,
+                "schema": "mms.config_migration_export_result.v1",
+                "status": "blocked",
+                "errors": [f"API Key 加密失败：{type(exc).__name__}: {exc}"],
+                "crypto_available": _migration_crypto_available(),
+                "crypto_backend": crypto_backend,
+            }
+        bundle["encrypted_credentials"] = encrypted_credentials
+        bundle["security"]["contains_credentials"] = bool(credentials)
+        bundle["security"]["credential_box"] = (
+            "encrypted-aesgcm"
+            if encrypted_credentials.get("schema") == _MIGRATION_CREDENTIAL_BOX_AESGCM_SCHEMA
+            else "encrypted-openssl-cbc-hmac"
+        )
+        bundle["security"]["credential_crypto_backend"] = crypto_backend
+    model_policy = (bundle.get("payload") or {}).get("model_policy") if isinstance(bundle.get("payload"), dict) else {}
+    summary = {
+        "providers": len((bundle.get("payload", {}).get("config", {}).get("providers") if isinstance(bundle.get("payload"), dict) else []) or []),
+        "policy_models": len((model_policy.get("models") if isinstance(model_policy, dict) else {}) or {}),
+        "preferences": bool((bundle.get("payload") or {}).get("preferences")),
+        "credentials": credential_count,
+        "encrypted_credentials": include_credentials,
+    }
+    bundle["summary"] = summary
+    return {
+        "ok": True,
+        "schema": "mms.config_migration_export_result.v1",
+        "status": "ready",
+        "bundle": bundle,
+        "summary": summary,
+        "crypto_available": _migration_crypto_available(),
+        "crypto_backend": _migration_secret_crypto_backend(),
+        "filename": f"mms-config-migration-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.json",
+    }
+
+
+def _parse_migration_bundle(payload: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    raw = payload.get("bundle") or payload.get("migration_bundle") or payload.get("text") or payload.get("raw")
+    errors: list[str] = []
+    bundle: Any = {}
+    if isinstance(raw, dict):
+        bundle = raw
+    elif isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            errors.append("请先粘贴或上传迁移包 JSON。")
+        else:
+            try:
+                bundle = json.loads(text)
+            except json.JSONDecodeError as exc:
+                errors.append(f"迁移包 JSON 解析失败：{exc}")
+    else:
+        errors.append("请提供迁移包 JSON。")
+    if not isinstance(bundle, dict):
+        errors.append("迁移包必须是 JSON 对象。")
+        bundle = {}
+    if bundle and bundle.get("schema") != _MIGRATION_BUNDLE_SCHEMA:
+        errors.append(f"迁移包 schema 不支持：{bundle.get('schema') or '-'}")
+    return bundle, errors
+
+
+def _migration_decrypted_credentials(bundle: dict[str, Any], password: str) -> tuple[list[dict[str, str]], list[str], list[str]]:
+    warnings: list[str] = []
+    errors: list[str] = []
+    box = bundle.get("encrypted_credentials") if isinstance(bundle.get("encrypted_credentials"), dict) else {}
+    if not box:
+        return [], warnings, errors
+    if not password:
+        errors.append("这个迁移包包含加密 API Key；请输入迁移密码后再预览或导入。")
+        return [], warnings, errors
+    try:
+        payload = _migration_decrypt_json(box, password)
+    except Exception as exc:
+        errors.append(f"迁移密码错误或凭据已损坏：{type(exc).__name__}: {exc}")
+        return [], warnings, errors
+    credentials = payload.get("credentials") if isinstance(payload.get("credentials"), list) else []
+    result: list[dict[str, str]] = []
+    for item in credentials:
+        if not isinstance(item, dict):
+            continue
+        provider_id = _safe_text(item.get("provider_id"))
+        api_key = _safe_text(item.get("api_key"))
+        openai_api_key = _safe_text(item.get("openai_api_key"))
+        if not provider_id or (not api_key and not openai_api_key):
+            continue
+        result.append(
+            {
+                "provider_id": provider_id,
+                "base_url": _safe_text(item.get("base_url")).rstrip("/"),
+                "openai_base_url": _safe_text(item.get("openai_base_url")).rstrip("/"),
+                "anthropic_base_url": _safe_text(item.get("anthropic_base_url")).rstrip("/"),
+                "api_key": api_key or openai_api_key,
+                "openai_api_key": openai_api_key,
+            }
+        )
+    if not result:
+        warnings.append("迁移包声明了加密凭据，但没有可导入的 provider API Key。")
+    return result, warnings, errors
+
+
+def _safe_local_command_name(command_name: str = "mms") -> str:
+    command = _safe_text(command_name or "mms") or "mms"
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", command):
+        return "mms"
+    return command
+
+
+def _migration_start_status_from_snapshot(snapshot: dict[str, Any], *, command_name: str = "mms", disabled_clis_override: list[str] | None = None) -> dict[str, Any]:
+    command = _safe_local_command_name(command_name)
+    providers = [item for item in (snapshot.get("providers") if isinstance(snapshot.get("providers"), list) else []) if isinstance(item, dict)]
+    enabled = [item for item in providers if item.get("enabled", True) is not False]
+    missing_key = [_safe_text(item.get("id")) for item in enabled if not item.get("has_api_key")]
+    missing_url = [
+        _safe_text(item.get("id"))
+        for item in enabled
+        if not _safe_text(item.get("openai_base_url") or item.get("anthropic_base_url") or item.get("effective_openai_base_url") or item.get("effective_anthropic_base_url"))
+    ]
+    missing_models = [_safe_text(item.get("id")) for item in enabled if int(item.get("model_count") or 0) <= 0]
+    ready_providers = [
+        _safe_text(item.get("id"))
+        for item in enabled
+        if item.get("has_api_key")
+        and int(item.get("model_count") or 0) > 0
+        and _safe_text(item.get("openai_base_url") or item.get("anthropic_base_url") or item.get("effective_openai_base_url") or item.get("effective_anthropic_base_url"))
+    ]
+    source_status = snapshot.get("model_source_status") if isinstance(snapshot.get("model_source_status"), dict) else {}
+    root = source_status.get("root") if isinstance(source_status.get("root"), dict) else {}
+    bundle = source_status.get("generated_bundle") if isinstance(source_status.get("generated_bundle"), dict) else {}
+    preview_root = root.get("mode") == "preview"
+    bundle_verified = bool(bundle.get("verified"))
+    bundle_runtime_ready = bundle.get("runtime_ready") is True
+    runtime = snapshot.get("runtime") if isinstance(snapshot.get("runtime"), dict) else {}
+    preferred_cli = _safe_text(runtime.get("preferred_cli") or "opencode")
+    coding_model = _safe_text(runtime.get("coding_preset_model"))
+    disabled_clis = list(disabled_clis_override or [])
+    if not disabled_clis:
+        session_assets = snapshot.get("session_assets") if isinstance(snapshot.get("session_assets"), dict) else {}
+        cli_visibility = session_assets.get("cli_visibility") if isinstance(session_assets.get("cli_visibility"), dict) else {}
+        disabled_clis = _normalize_model_list(cli_visibility.get("disabled"))
+    blockers: list[dict[str, Any]] = []
+    if not enabled:
+        blockers.append({"id": "no_enabled_provider", "label": "没有启用通道", "detail": "请先导入或启用至少一个 provider。"})
+    if missing_key:
+        blockers.append({"id": "missing_api_key", "label": "缺少 API Key", "detail": "这些通道没有 Key，无法直接开始工作。", "providers": missing_key})
+    if missing_url:
+        blockers.append({"id": "missing_base_url", "label": "缺少 Base URL", "detail": "这些通道没有 OpenAI/Anthropic Base URL。", "providers": missing_url})
+    if missing_models:
+        blockers.append({"id": "missing_models", "label": "缺少模型", "detail": "这些通道没有可用模型，请拉取或手动添加模型。", "providers": missing_models})
+    if preview_root and not bundle_verified:
+        blockers.append({"id": "bundle_not_verified", "label": "预览 Bundle 未验证", "detail": "preview root 需要 latest-approved bundle 验证通过后更稳。"})
+    if preferred_cli in disabled_clis:
+        blockers.append({"id": "preferred_cli_disabled", "label": "首选 CLI 已默认关闭", "detail": f"{preferred_cli} 在 preferences 中被关闭；启动后请换 CLI 或先打开。"})
+    provider_ready = bool(bundle_runtime_ready if preview_root else ready_providers)
+    ready_to_work = provider_ready and preferred_cli not in disabled_clis
+    start_command = command
+    return {
+        "schema": "mms.config_migration_start_status.v1",
+        "ready_to_work": ready_to_work,
+        "start_command": start_command,
+        "copy_command": start_command,
+        "preferred_cli": preferred_cli,
+        "coding_model": coding_model,
+        "command_name": command,
+        "target_mode": _safe_text(root.get("mode") or ("preview" if preview_root else "stable")),
+        "config_root": _safe_text(root.get("config_root") or source_status.get("config_root") or _config_root_for_snapshot(snapshot.get("paths", {}).get("config") if isinstance(snapshot.get("paths"), dict) else "")),
+        "terminal_launch_available": sys.platform == "darwin",
+        "provider_count": len(providers),
+        "enabled_provider_count": len(enabled),
+        "ready_provider_ids": ready_providers,
+        "missing_api_key_provider_ids": missing_key,
+        "missing_base_url_provider_ids": missing_url,
+        "missing_model_provider_ids": missing_models,
+        "preview_bundle": {
+            "verified": bundle_verified,
+            "runtime_ready": bundle_runtime_ready,
+            "status": _safe_text(bundle.get("status")),
+            "missing_api_key_count": int(bundle.get("router_missing_api_key_count") or 0),
+            "missing_base_url_count": int(bundle.get("router_missing_base_url_count") or 0),
+        },
+        "blockers": blockers,
+        "notes": [
+            "按钮只启动当前 MMS 命令，不会迁移 OAuth / Claude / Codex 原生登录态。",
+            "如果 API Key 已随加密迁移包导入，通常可以直接打开终端运行。",
+        ],
+    }
+
+
+def build_migration_start_status(
+    current_cfg: dict[str, Any] | None,
+    payload: dict[str, Any] | None = None,
+    *,
+    config_path: str = "",
+    preferences_path: str = "",
+    command_name: str = "mms",
+) -> dict[str, Any]:
+    del payload
+    snapshot = build_config_snapshot(current_cfg, config_path=config_path, preferences_path=preferences_path, command_name=command_name)
+    prefs = _load_preferences_raw(_preferences_target_path(config_path=config_path, preferences_path=preferences_path))
+    launch = prefs.get("launch") if isinstance(prefs.get("launch"), dict) else {}
+    disabled_clis = _normalize_model_list(launch.get("disabled_clis"))
+    return _migration_start_status_from_snapshot(snapshot, command_name=command_name, disabled_clis_override=disabled_clis)
+
+
+def start_migration_work_session(
+    current_cfg: dict[str, Any] | None,
+    payload: dict[str, Any] | None = None,
+    *,
+    config_path: str = "",
+    preferences_path: str = "",
+    command_name: str = "mms",
+) -> dict[str, Any]:
+    payload = payload if isinstance(payload, dict) else {}
+    status = build_migration_start_status(current_cfg, payload, config_path=config_path, preferences_path=preferences_path, command_name=command_name)
+    command = _safe_text(status.get("start_command") or _safe_local_command_name(command_name))
+    cwd = os.getcwd()
+    shell_command = f"cd {shlex.quote(cwd)} && {command}"
+    if sys.platform != "darwin":
+        return {
+            "ok": False,
+            "schema": "mms.config_migration_start_result.v1",
+            "status": "unsupported_platform",
+            "errors": ["当前系统不支持从 WebUI 自动打开终端；可以复制启动命令手动运行。"],
+            "command": command,
+            "shell_command": shell_command,
+            "start_status": status,
+        }
+    script = f'tell application "Terminal" to activate\ntell application "Terminal" to do script {json.dumps(shell_command)}'
+    try:
+        subprocess.Popen(["osascript", "-e", script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "schema": "mms.config_migration_start_result.v1",
+            "status": "failed",
+            "errors": [f"打开终端失败：{type(exc).__name__}: {exc}"],
+            "command": command,
+            "shell_command": shell_command,
+            "start_status": status,
+        }
+    return {
+        "ok": True,
+        "schema": "mms.config_migration_start_result.v1",
+        "status": "started",
+        "command": command,
+        "shell_command": shell_command,
+        "cwd": cwd,
+        "start_status": status,
+    }
+
+
+def _migration_provider_payload(provider: dict[str, Any]) -> dict[str, Any]:
+    provider_id = _safe_text(provider.get("id"))
+    result = {
+        "id": provider_id,
+        "original_id": provider_id,
+        "name": _safe_text(provider.get("name") or provider_id),
+        "enabled": provider.get("enabled", True) is not False,
+        "role": _safe_text(provider.get("role") or "auto"),
+        "priority": _normalize_priority(provider.get("priority", 100)),
+        "family_priority_overrides": _normalize_family_priority_overrides(provider.get("family_priority_overrides")),
+        "claude_1m_mode": _safe_text(provider.get("claude_1m_mode") or "auto") or "auto",
+        "timezone": _safe_text(provider.get("timezone")),
+        "note": _safe_text(provider.get("note")),
+        "models_endpoint": _safe_text(provider.get("models_endpoint") or "/models"),
+        "protocols": [str(item) for item in (provider.get("protocols") or []) if item],
+        "supported_clis": [str(item) for item in (provider.get("supported_clis") or []) if item],
+        "openai_base_url": _safe_text(provider.get("openai_base_url") or provider.get("default_openai_base_url") or provider.get("base_url")),
+        "anthropic_base_url": _safe_text(provider.get("anthropic_base_url") or provider.get("default_anthropic_base_url")),
+        "fallback_models": _normalize_model_list(provider.get("fallback_models") or provider.get("approved_route_models")),
+        "extra_models": _normalize_model_list(provider.get("extra_models")),
+        "hidden_models": _normalize_model_list(provider.get("hidden_models")),
+    }
+    models = []
+    for row in provider.get("models") if isinstance(provider.get("models"), list) else []:
+        if isinstance(row, dict):
+            model_id = _safe_text(row.get("id") or row.get("model"))
+            if model_id:
+                models.append({"id": model_id, "visible": row.get("visible", True) is not False})
+        else:
+            model_id = _safe_text(row)
+            if model_id:
+                models.append({"id": model_id, "visible": True})
+    if models:
+        result["models"] = models
+    return {key: value for key, value in result.items() if value not in ("", {}, [])}
+
+
+def _migration_preferences_apply_payload(bundle: dict[str, Any]) -> dict[str, Any]:
+    prefs = ((bundle.get("payload") or {}).get("preferences") if isinstance(bundle.get("payload"), dict) else {}) or {}
+    prefs = prefs if isinstance(prefs, dict) else {}
+    launch = prefs.get("launch") if isinstance(prefs.get("launch"), dict) else {}
+    session_surfaces = prefs.get("session_surfaces") if isinstance(prefs.get("session_surfaces"), dict) else {}
+    assets = prefs.get("assets") if isinstance(prefs.get("assets"), dict) else {}
+    return {
+        "disabled_clis": _normalize_model_list(launch.get("disabled_clis")),
+        "disabled": (session_surfaces.get("disabled") if isinstance(session_surfaces.get("disabled"), dict) else {}) or {},
+        "assets": {
+            "managed_enabled": bool(_safe_text(assets.get("managed_root"))),
+            "managed_root": _safe_text(assets.get("managed_root")),
+        },
+    }
+
+
+def _migration_draft_from_bundle(current_cfg: dict[str, Any], bundle: dict[str, Any], credentials: list[dict[str, str]], *, config_path: str = "") -> dict[str, Any]:
+    policy_payload = _load_json_file(_policy_path_for_config(config_path))
+    current_providers = {
+        _safe_text(row.get("id")): _migration_provider_payload(row)
+        for row in [_provider_summary(item, policy_payload=policy_payload) for item in current_cfg.get("providers", []) if isinstance(item, dict)]
+        if _safe_text(row.get("id"))
+    }
+    payload = bundle.get("payload") if isinstance(bundle.get("payload"), dict) else {}
+    config = payload.get("config") if isinstance(payload.get("config"), dict) else {}
+    incoming_providers = config.get("providers") if isinstance(config.get("providers"), list) else []
+    for provider in incoming_providers:
+        if not isinstance(provider, dict):
+            continue
+        normalized = _migration_provider_payload(provider)
+        provider_id = _safe_text(normalized.get("id"))
+        if provider_id:
+            current_providers[provider_id] = normalized
+    for update in credentials:
+        provider_id = _safe_text(update.get("provider_id"))
+        if not provider_id:
+            continue
+        provider = current_providers.setdefault(provider_id, {"id": provider_id, "name": provider_id, "enabled": True})
+        provider["update_credentials"] = True
+        provider["api_key"] = _safe_text(update.get("api_key"))
+        provider["openai_api_key"] = _safe_text(update.get("openai_api_key"))
+        if _safe_text(update.get("openai_base_url")):
+            provider["openai_base_url"] = _safe_text(update.get("openai_base_url"))
+        if _safe_text(update.get("anthropic_base_url")):
+            provider["anthropic_base_url"] = _safe_text(update.get("anthropic_base_url"))
+        if not _safe_text(provider.get("openai_base_url")) and not _safe_text(provider.get("anthropic_base_url")) and _safe_text(update.get("base_url")):
+            provider["openai_base_url"] = _safe_text(update.get("base_url"))
+
+    draft: dict[str, Any] = {"providers": list(current_providers.values())}
+    provider_default = _safe_text((config.get("provider") if isinstance(config.get("provider"), dict) else {}).get("default"))
+    if provider_default:
+        draft["provider_default"] = provider_default
+    for key in ("rescue", "vision_sidecar", "ui", "opencode", "load_balance"):
+        value = config.get(key) if isinstance(config.get(key), dict) else {}
+        if value:
+            draft[key] = value
+    presets = config.get("presets") if isinstance(config.get("presets"), dict) else {}
+    coding = presets.get("coding") if isinstance(presets.get("coding"), dict) else {}
+    runtime: dict[str, Any] = {}
+    if _safe_text(coding.get("cli")):
+        runtime["preferred_cli"] = _safe_text(coding.get("cli"))
+    if _safe_text(coding.get("model")):
+        runtime["coding_preset_model"] = _safe_text(coding.get("model"))
+    if runtime:
+        draft["runtime"] = runtime
+    model_policy = payload.get("model_policy") if isinstance(payload.get("model_policy"), dict) else {}
+    if model_policy:
+        draft["model_policy_import"] = model_policy
+    return draft
+
+
+def _merge_model_policy_import(policy_before: dict[str, Any], incoming: Any) -> dict[str, Any]:
+    if not isinstance(incoming, dict) or not incoming:
+        return policy_before
+    original = copy.deepcopy(policy_before) if isinstance(policy_before, dict) else {}
+    policy = copy.deepcopy(policy_before) if isinstance(policy_before, dict) else {}
+    policy.setdefault("version", incoming.get("version") if isinstance(incoming.get("version"), int) else 1)
+    policy.setdefault("description", "User-maintained model visibility and preference policy. MMS never stores provider secrets here.")
+    for section in ("models", "projects"):
+        src = incoming.get(section) if isinstance(incoming.get(section), dict) else {}
+        if not src:
+            continue
+        dst = policy.setdefault(section, {})
+        if not isinstance(dst, dict):
+            dst = {}
+            policy[section] = dst
+        for key, value in src.items():
+            key_text = _safe_text(key)
+            if not key_text:
+                continue
+            dst[key_text] = _sanitize_for_output(value)
+    if _mapping_digest(policy) != _mapping_digest(original):
+        policy["updated_at"] = _now_iso()
+    elif isinstance(original, dict) and "updated_at" in original:
+        policy["updated_at"] = original["updated_at"]
+    return policy
+
+
+def _build_migration_import_plan(
+    current_cfg: dict[str, Any] | None,
+    payload: dict[str, Any] | None,
+    *,
+    config_path: str = "",
+    preferences_path: str = "",
+    command_name: str = "mms",
+) -> dict[str, Any]:
+    payload = payload if isinstance(payload, dict) else {}
+    current_cfg = copy.deepcopy(current_cfg) if isinstance(current_cfg, dict) else {}
+    current_cfg = _hydrate_preview_config_from_latest_bundle(current_cfg, config_path=config_path, command_name=command_name)
+    bundle, parse_errors = _parse_migration_bundle(payload)
+    warnings = [
+        "导入不会迁移 OAuth / Claude / Codex 原生登录态；只处理 WebUI 可审计配置、model-policy、preferences 和可选加密 API Key。",
+        "导入采用 merge 策略：同 ID provider 覆盖，当前机器独有 provider 默认保留。",
+    ]
+    credentials: list[dict[str, str]] = []
+    if not parse_errors:
+        credentials, cred_warnings, cred_errors = _migration_decrypted_credentials(bundle, _safe_text(payload.get("password") or payload.get("passphrase")))
+        warnings.extend(cred_warnings)
+        parse_errors.extend(cred_errors)
+    if parse_errors:
+        return {
+            "ok": False,
+            "schema": "mms.config_migration_import_plan.v1",
+            "status": "blocked",
+            "errors": parse_errors,
+            "warnings": warnings,
+        }
+    draft = _migration_draft_from_bundle(current_cfg, bundle, credentials, config_path=config_path)
+    config_plan = build_config_plan(current_cfg, {"draft": draft}, config_path=config_path, preferences_path=preferences_path, include_secrets=True, command_name=command_name)
+    pref_payload = _migration_preferences_apply_payload(bundle)
+    pref_plan = build_preferences_plan(pref_payload, config_path=config_path, preferences_path=preferences_path)
+    ok = bool(config_plan.get("ok") and pref_plan.get("ok"))
+    errors = list(config_plan.get("errors") or [])
+    summary = {
+        "providers": (config_plan.get("summary") or {}).get("providers", 0),
+        "credential_updates": len(credentials),
+        "policy_models": (config_plan.get("summary") or {}).get("policy_models", 0),
+        "preferences_will_write": bool(pref_plan.get("will_write")),
+        "target_root": _config_root_for_snapshot(config_path),
+        "target_mode": (_model_source_status_for_snapshot(config_path, command_name=command_name).get("root") or {}).get("mode", ""),
+    }
+    return {
+        "ok": ok,
+        "schema": "mms.config_migration_import_plan.v1",
+        "status": "planned" if ok else "blocked",
+        "errors": errors,
+        "warnings": [*warnings, *(config_plan.get("warnings") or [])],
+        "bundle_summary": bundle.get("summary") if isinstance(bundle.get("summary"), dict) else {},
+        "summary": summary,
+        "draft": draft,
+        "config_plan": config_plan,
+        "preferences_payload": pref_payload,
+        "preferences_plan": pref_plan,
+        "diffs": {
+            "config_toml": (config_plan.get("diffs") or {}).get("config_toml", ""),
+            "model_policy_json": (config_plan.get("diffs") or {}).get("model_policy_json", ""),
+            "credentials": (config_plan.get("diffs") or {}).get("credentials", ""),
+            "preferences_toml": pref_plan.get("diff", ""),
+        },
+    }
+
+
+def build_migration_import_preview(
+    current_cfg: dict[str, Any] | None,
+    payload: dict[str, Any] | None,
+    *,
+    config_path: str = "",
+    preferences_path: str = "",
+    command_name: str = "mms",
+) -> dict[str, Any]:
+    plan = _build_migration_import_plan(
+        current_cfg,
+        payload,
+        config_path=config_path,
+        preferences_path=preferences_path,
+        command_name=command_name,
+    )
+    return _sanitize_for_output(plan)
+
+
+def apply_migration_import(
+    current_cfg: dict[str, Any] | None,
+    payload: dict[str, Any] | None,
+    *,
+    config_path: str = "",
+    preferences_path: str = "",
+    command_name: str = "mms",
+) -> dict[str, Any]:
+    payload = payload if isinstance(payload, dict) else {}
+    if not _truthy(payload.get("confirm_migration"), False):
+        return {"ok": False, "schema": "mms.config_migration_import_result.v1", "status": "blocked", "errors": ["导入前必须勾选确认导入。"]}
+    if _safe_text(payload.get("confirm_phrase")) != "导入配置":
+        return {"ok": False, "schema": "mms.config_migration_import_result.v1", "status": "blocked", "errors": ["确认文字必须输入：导入配置"]}
+    reason = _safe_text(payload.get("reason")) or "setup-web-ui:migration-import"
+    plan = _build_migration_import_plan(
+        current_cfg,
+        payload,
+        config_path=config_path,
+        preferences_path=preferences_path,
+        command_name=command_name,
+    )
+    if not plan.get("ok"):
+        return {
+            "ok": False,
+            "schema": "mms.config_migration_import_result.v1",
+            "status": "blocked",
+            "errors": plan.get("errors") or [],
+            "warnings": plan.get("warnings") or [],
+            "plan": _sanitize_for_output(plan),
+        }
+    draft = plan.get("draft") if isinstance(plan.get("draft"), dict) else {}
+    if _is_preview_config_root(config_path, command_name=command_name):
+        config_result = apply_registry_v2_preview_plan(
+            current_cfg,
+            {
+                "draft": draft,
+                "confirm_v2_preview": True,
+                "confirm_phrase": "写入预览DB",
+                "reason": reason,
+            },
+            config_path=config_path,
+            preferences_path=preferences_path,
+        )
+    else:
+        config_result = apply_config_plan(
+            current_cfg,
+            {
+                "draft": draft,
+                "confirm_save": True,
+                "confirm_phrase": "保存配置",
+                "reason": reason,
+            },
+            config_path=config_path,
+            preferences_path=preferences_path,
+        )
+    preferences_result: dict[str, Any] = {"ok": True, "status": "no_change"}
+    pref_plan = plan.get("preferences_plan") if isinstance(plan.get("preferences_plan"), dict) else {}
+    if config_result.get("ok") and pref_plan.get("will_write"):
+        pref_payload = dict(plan.get("preferences_payload") if isinstance(plan.get("preferences_payload"), dict) else {})
+        pref_payload.update(
+            {
+                "confirm_preferences": True,
+                "confirm_phrase": "保存偏好",
+                "reason": f"{reason}:preferences",
+            }
+        )
+        preferences_result = apply_preferences_plan(pref_payload, config_path=config_path, preferences_path=preferences_path)
+    ok = bool(config_result.get("ok") and preferences_result.get("ok"))
+    applied_cfg = ((plan.get("config_plan") or {}).get("config") if isinstance(plan.get("config_plan"), dict) else {}) or current_cfg
+    start_status = build_migration_start_status(
+        applied_cfg if isinstance(applied_cfg, dict) else current_cfg,
+        {},
+        config_path=config_path,
+        preferences_path=preferences_path,
+        command_name=command_name,
+    )
+    return _sanitize_for_output(
+        {
+            "ok": ok,
+            "schema": "mms.config_migration_import_result.v1",
+            "status": "imported" if ok else "failed",
+            "summary": plan.get("summary") or {},
+            "warnings": plan.get("warnings") or [],
+            "config_result": config_result,
+            "preferences_result": preferences_result,
+            "start_status": start_status,
+        }
+    )
 
 
 def _extract_draft(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1307,6 +3964,7 @@ def _copy_existing_provider(
     provider_payload: dict[str, Any],
     *,
     preserve_model_rows: bool = False,
+    force_model_rows: bool = False,
     clear_fallback_models: bool = False,
 ) -> dict[str, Any]:
     provider = dict(existing or {})
@@ -1317,6 +3975,33 @@ def _copy_existing_provider(
     role = _safe_text(provider_payload.get("role") or provider.get("role") or "auto").lower()
     provider["role"] = role if role in _ALLOWED_ROLES else "auto"
     provider["priority"] = _normalize_priority(provider_payload.get("priority", provider.get("priority", 100)))
+    if "family_priority_overrides" in provider_payload:
+        overrides = _normalize_family_priority_overrides(provider_payload.get("family_priority_overrides"))
+        if overrides:
+            provider["family_priority_overrides"] = overrides
+        else:
+            provider.pop("family_priority_overrides", None)
+    if "claude_1m_mode" in provider_payload:
+        mode = _safe_text(provider_payload.get("claude_1m_mode") or "auto")
+        normalized = mode if mode in {"auto", "enable", "disable"} else "auto"
+        if normalized != "auto" or "claude_1m_mode" in provider:
+            provider["claude_1m_mode"] = normalized
+        else:
+            provider.pop("claude_1m_mode", None)
+    if "timezone" in provider_payload:
+        timezone_name = _safe_text(provider_payload.get("timezone"))
+        if timezone_name:
+            provider["timezone"] = timezone_name
+        else:
+            provider.pop("timezone", None)
+    if "note" in provider_payload:
+        note = _safe_text(provider_payload.get("note"))
+        if note:
+            provider["note"] = note
+        elif "note" in provider:
+            provider["note"] = ""
+        else:
+            provider.pop("note", None)
     provider["protocols"] = _normalize_choice_list(provider_payload.get("protocols"), _ALLOWED_PROTOCOLS, _ALLOWED_PROTOCOLS)
     provider["supported_clis"] = _normalize_choice_list(provider_payload.get("supported_clis"), _ALLOWED_CLIS, ("claude", "codex", "opencode"))
     endpoint = _safe_text(provider_payload.get("models_endpoint") or provider.get("models_endpoint") or "/models")
@@ -1345,6 +4030,12 @@ def _copy_existing_provider(
             anthropic_base = ""
     else:
         anthropic_base = _safe_text(provider.get("default_anthropic_base_url") or provider.get("anthropic_base_url"))
+    # Approved-bundle providers carry the concrete URL as well as defaults.
+    # Keep that higher-precedence field coherent with an explicit editor change.
+    if "openai_base_url" in provider and "openai_base_url" in provider_payload:
+        provider["openai_base_url"] = openai_base.rstrip("/")
+    if "anthropic_base_url" in provider and "anthropic_base_url" in provider_payload:
+        provider["anthropic_base_url"] = anthropic_base.rstrip("/")
     if openai_base:
         provider["default_openai_base_url"] = openai_base.rstrip("/")
     elif "default_openai_base_url" in provider:
@@ -1362,11 +4053,38 @@ def _copy_existing_provider(
     provider["hidden_models"] = _normalize_model_list(provider_payload.get("hidden_models"))
     if preserve_model_rows:
         route_rows = _route_model_rows_from_payload(provider_payload)
-        if route_rows:
+        configured_model_ids = set(provider["fallback_models"]) | set(provider["extra_models"])
+        has_route_only_rows = any(row["id"] not in configured_model_ids for row in route_rows)
+        existing_has_models = isinstance(provider.get("models"), list)
+        if route_rows and (force_model_rows or has_route_only_rows or existing_has_models):
             provider["models"] = route_rows
-        else:
+        elif force_model_rows or existing_has_models:
             provider.pop("models", None)
     return provider
+
+
+def _strip_implicit_provider_timezone_defaults(
+    next_cfg: dict[str, Any],
+    providers_payload: list[dict[str, Any]],
+) -> dict[str, Any]:
+    payload_by_id: dict[str, dict[str, Any]] = {}
+    for payload in providers_payload:
+        if not isinstance(payload, dict):
+            continue
+        for key in (_safe_text(payload.get("id")), _safe_text(payload.get("original_id"))):
+            if key:
+                payload_by_id[key] = payload
+    for provider in next_cfg.get("providers") if isinstance(next_cfg.get("providers"), list) else []:
+        if not isinstance(provider, dict):
+            continue
+        payload = payload_by_id.get(_safe_text(provider.get("id")))
+        if not payload or "timezone" not in payload:
+            continue
+        # mms_core normalization materializes Asia/Singapore as the implicit
+        # default. Keep it out of persisted WebUI drafts unless the user typed it.
+        if not _safe_text(payload.get("timezone")):
+            provider.pop("timezone", None)
+    return next_cfg
 
 
 def _build_model_policy_from_draft(policy_before: dict[str, Any], draft: dict[str, Any]) -> dict[str, Any]:
@@ -1379,11 +4097,78 @@ def _build_model_policy_from_draft(policy_before: dict[str, Any], draft: dict[st
         models = {}
         policy["models"] = models
     providers = draft.get("providers") if isinstance(draft.get("providers"), list) else []
+
+    def sanitize_capability_source(value: Any) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            return {}
+        result: dict[str, Any] = {}
+        for key in ("source_layer", "source_name", "confidence", "source_path", "checked_at"):
+            text = _safe_text(value.get(key))
+            if text:
+                result[key] = text
+        urls = value.get("evidence_urls") if isinstance(value.get("evidence_urls"), list) else []
+        clean_urls = [_safe_text(item) for item in urls if _safe_text(item)]
+        if clean_urls:
+            result["evidence_urls"] = list(dict.fromkeys(clean_urls))[:6]
+        return result
+
+    def capability_value(entry: dict[str, Any], field: str) -> Any:
+        caps = entry.get("capabilities") if isinstance(entry.get("capabilities"), dict) else {}
+        return caps.get(field)
+
+    def capability_changed(before_entry: dict[str, Any], after_entry: dict[str, Any], field: str) -> bool:
+        return _mapping_digest({"value": capability_value(before_entry, field)}) != _mapping_digest({"value": capability_value(after_entry, field)})
+
+    def source_for_field(source_map: dict[str, Any], field: str) -> dict[str, Any]:
+        if not isinstance(source_map, dict):
+            return {}
+        source = source_map.get(field)
+        if source is None and field == "supports_thinking":
+            source = source_map.get("thinking")
+        if source is None and field == "cache_sensitive_transport":
+            source = source_map.get("cache_sensitive")
+        if source is None and field == "long_context":
+            source = source_map.get("context_window_tokens") or source_map.get("one_m_context")
+        if source is None and field == "thinking_control":
+            source = source_map.get("reasoning_effort")
+        return sanitize_capability_source(source)
+
+    def positive_capability_overlays(value: Any) -> dict[str, Any]:
+        """Keep positive catalog facts when a later partial overlay omits them."""
+        if not isinstance(value, dict):
+            return {}
+        result: dict[str, Any] = {}
+        for key in (
+            "vision",
+            "tool_use",
+            "reasoning",
+            "thinking",
+            "supports_thinking",
+            "one_m_context",
+            "long_context",
+            "cache_sensitive",
+            "cache_sensitive_transport",
+        ):
+            if value.get(key) is True:
+                result[key] = True
+        for key in ("context_window_tokens", "max_context_tokens", "max_output_tokens", "official_max_output_tokens"):
+            tokens = _normalize_context_tokens(value.get(key))
+            if tokens:
+                result[key] = tokens
+        for key in ("reasoning_effort", "official_reasoning_effort", "recommended_reasoning_effort"):
+            text = _safe_text(value.get(key))
+            if text:
+                result[key] = text
+        if isinstance(value.get("thinking_control"), dict):
+            result["thinking_control"] = _truth_thinking_control(value["thinking_control"])
+        return result
+
     for provider in providers:
         if not isinstance(provider, dict):
             continue
         hidden = set(_normalize_model_list(provider.get("hidden_models")))
         caps_map = dict(provider.get("model_capabilities") if isinstance(provider.get("model_capabilities"), dict) else {})
+        source_map = dict(provider.get("model_capability_sources") if isinstance(provider.get("model_capability_sources"), dict) else {})
         rows = provider.get("models") if isinstance(provider.get("models"), list) else []
         for row in rows:
             if not isinstance(row, dict):
@@ -1392,9 +4177,27 @@ def _build_model_policy_from_draft(policy_before: dict[str, Any], draft: dict[st
             if not model_id:
                 continue
             touched = row.get("policy_touched") is True or row.get("touched") is True
-            if not touched:
+            capability_touched = row.get("capability_touched") is True or row.get("capabilities_touched") is True
+            if not touched and not capability_touched:
                 continue
-            caps_map.setdefault(model_id, row.get("capabilities") if isinstance(row.get("capabilities"), dict) else {})
+            row_policy_caps = row.get("policy_capabilities") if isinstance(row.get("policy_capabilities"), dict) else None
+            if row_policy_caps is not None:
+                existing_caps = caps_map.get(model_id) if isinstance(caps_map.get(model_id), dict) else {}
+                row_caps = row.get("capabilities") if isinstance(row.get("capabilities"), dict) else {}
+                preserved_caps = positive_capability_overlays(row_caps) if existing_caps else {}
+                caps_map[model_id] = {
+                    **existing_caps,
+                    **preserved_caps,
+                    **row_policy_caps,
+                }
+            else:
+                caps_map.setdefault(model_id, row.get("capabilities") if isinstance(row.get("capabilities"), dict) else {})
+            if capability_touched and not touched:
+                if isinstance(row.get("capability_sources"), dict):
+                    source_map[model_id] = row.get("capability_sources")
+                continue
+            if isinstance(row.get("capability_sources"), dict):
+                source_map[model_id] = row.get("capability_sources")
             if model_id in hidden or row.get("visible") is False:
                 entry = models.setdefault(model_id, {})
                 if isinstance(entry, dict):
@@ -1417,15 +4220,76 @@ def _build_model_policy_from_draft(policy_before: dict[str, Any], draft: dict[st
             if not isinstance(entry, dict):
                 entry = {}
                 models[model_id] = entry
+            before_entry_for_sources = copy.deepcopy(entry)
             cap_payload = entry.setdefault("capabilities", {})
             if not isinstance(cap_payload, dict):
                 cap_payload = {}
                 entry["capabilities"] = cap_payload
-            for key in ("text", "vision", "tool_use", "reasoning", "long_context"):
+            for key in ("text", "vision", "tool_use", "reasoning", "thinking", "long_context"):
                 if isinstance(caps.get(key), bool):
                     cap_payload[key] = bool(caps[key])
+            if isinstance(caps.get("one_m_context"), bool):
+                cap_payload["one_m_context"] = bool(caps["one_m_context"])
+            if isinstance(caps.get("thinking"), bool):
+                cap_payload["supports_thinking"] = bool(caps["thinking"])
+            if caps.get("text") is False:
+                entry["visible"] = False
             if isinstance(caps.get("cache_sensitive"), bool):
                 cap_payload["cache_sensitive_transport"] = bool(caps["cache_sensitive"])
+            if "context_window_tokens" in caps or "max_context_tokens" in caps or caps.get("one_m_context") is True:
+                context_tokens = _normalize_context_tokens(
+                    caps.get("context_window_tokens") or caps.get("max_context_tokens") or (1_000_000 if caps.get("one_m_context") is True else None)
+                )
+                if context_tokens:
+                    cap_payload["context_window_tokens"] = context_tokens
+                    cap_payload["long_context"] = context_tokens >= 200_000
+            if "max_output_tokens" in caps or "official_max_output_tokens" in caps:
+                max_output_tokens = _normalize_context_tokens(caps.get("max_output_tokens") or caps.get("official_max_output_tokens"))
+                if max_output_tokens:
+                    cap_payload["max_output_tokens"] = max_output_tokens
+            if isinstance(caps.get("thinking_control"), dict):
+                control = _truth_thinking_control(caps["thinking_control"])
+                if control:
+                    cap_payload["thinking_control"] = control
+            if _safe_text(caps.get("reasoning_effort")):
+                cap_payload["reasoning_effort"] = _safe_text(caps.get("reasoning_effort")).lower()
+            elif caps.get("reasoning_effort") == "":
+                # Explicit reset removes only the user's effort override. Other
+                # capability facts and preference fields remain untouched.
+                cap_payload.pop("reasoning_effort", None)
+                entry.pop("reasoning_effort", None)
+                if isinstance(entry.get("capability_sources"), dict):
+                    entry["capability_sources"].pop("reasoning_effort", None)
+            if _safe_text(caps.get("official_reasoning_effort")):
+                cap_payload["official_reasoning_effort"] = _safe_text(caps.get("official_reasoning_effort")).lower()
+            if _safe_text(caps.get("recommended_reasoning_effort")):
+                cap_payload["recommended_reasoning_effort"] = _safe_text(caps.get("recommended_reasoning_effort")).lower()
+            per_model_sources = source_map.get(model_id) if isinstance(source_map.get(model_id), dict) else {}
+            if per_model_sources:
+                source_payload = entry.get("capability_sources") if isinstance(entry.get("capability_sources"), dict) else {}
+                source_payload = dict(source_payload)
+                for field in (
+                    "text",
+                    "vision",
+                    "tool_use",
+                    "reasoning",
+                    "thinking",
+                    "supports_thinking",
+                    "one_m_context",
+                    "long_context",
+                    "context_window_tokens",
+                    "max_output_tokens",
+                    "thinking_control",
+                    "reasoning_effort",
+                    "official_reasoning_effort",
+                    "recommended_reasoning_effort",
+                    "cache_sensitive_transport",
+                ):
+                    source = source_for_field(per_model_sources, field)
+                    if source and capability_changed(before_entry_for_sources, entry, field):
+                        source_payload[field] = source
+                if source_payload:
+                    entry["capability_sources"] = source_payload
     def comparable(payload: dict[str, Any]) -> dict[str, Any]:
         copy_payload = copy.deepcopy(payload) if isinstance(payload, dict) else {}
         copy_payload.pop("updated_at", None)
@@ -1498,6 +4362,31 @@ def _build_review_summary(
             "provider_id": provider_id,
         })
 
+    def field_changes(before: dict[str, Any], after: dict[str, Any], labels: dict[str, str]) -> list[dict[str, Any]]:
+        changes: list[dict[str, Any]] = []
+        for key in labels:
+            before_value = before.get(key)
+            after_value = after.get(key)
+            if _mapping_digest({key: before_value}) == _mapping_digest({key: after_value}):
+                continue
+            changes.append({"field": key, "label": labels[key], "before": before_value, "after": after_value})
+        return changes
+
+    def display_value(value: Any) -> str:
+        if value in (None, ""):
+            return "-"
+        if isinstance(value, bool):
+            return "是" if value else "否"
+        if isinstance(value, (dict, list)):
+            return json.dumps(value, ensure_ascii=False, sort_keys=True)
+        return str(value)
+
+    def change_detail(changes: list[dict[str, Any]]) -> str:
+        return "；".join(
+            f"{item['label']} `{display_value(item.get('before'))}` -> `{display_value(item.get('after'))}`"
+            for item in changes
+        )
+
     for provider_id in sorted(after_ids - before_ids):
         add_item("provider_added", "新增通道", f"`{provider_id}` 将被加入配置。", provider_id=provider_id)
     for provider_id in sorted(before_ids - after_ids):
@@ -1510,11 +4399,110 @@ def _build_review_summary(
         add_item("default_provider", "默认通道变化", f"`{before_default or '-'}` -> `{after_default or '-'}`", level="warn")
         add_risk("default_provider_changed", "默认通道变化", "默认 provider 改变会影响后续新 session 的默认路由。", provider_id=after_default)
 
+    before_accounts = _account_by_id(current_cfg)
+    after_accounts = _account_by_id(next_cfg)
+    before_account_defaults = _account_defaults(current_cfg)
+    after_account_defaults = _account_defaults(next_cfg)
+    account_change_count = 0
+    for cli_name in sorted(set(before_account_defaults) | set(after_account_defaults)):
+        before_account = before_account_defaults.get(cli_name, "")
+        after_account = after_account_defaults.get(cli_name, "")
+        if before_account == after_account:
+            continue
+        account_change_count += 1
+        level = "danger" if cli_name == "claude" else "warn"
+        add_item(
+            "account_default",
+            f"默认账号变化：{cli_name}",
+            f"`{before_account or '-'}` -> `{after_account or '-'}`",
+            level=level,
+            meta={"cli": cli_name, "before": before_account, "after": after_account},
+        )
+        add_risk(
+            "claude_account_human_gate" if cli_name == "claude" else "account_default_changed",
+            "默认账号变化",
+            "Claude account default 属于 human-only，WebUI 当前不会保存。" if cli_name == "claude" else f"`{cli_name}` 后续新 session 会默认使用 `{after_account or '-'}`。",
+            level=level,
+        )
+    for account_id in sorted(set(before_accounts) & set(after_accounts)):
+        before_account = before_accounts.get(account_id, {})
+        after_account = after_accounts.get(account_id, {})
+        if _mapping_digest(_account_review_fields(before_account)) == _mapping_digest(_account_review_fields(after_account)):
+            continue
+        account_change_count += 1
+        cli_name = _safe_text(after_account.get("cli") or before_account.get("cli")).lower()
+        level = "danger" if cli_name == "claude" else "warn"
+        add_item(
+            "account_metadata",
+            f"账号元数据变化：{account_id}",
+            f"name/enabled/priority/family/timezone/claude_1m/note 将更新；CLI: `{cli_name or '-'}`。",
+            level=level,
+            meta={"account_id": account_id, "cli": cli_name},
+        )
+        if cli_name == "claude":
+            add_risk(
+                "claude_account_human_gate",
+                "Claude account human-only",
+                "Claude account metadata 属于 human-only，WebUI 当前不会保存。",
+                level="danger",
+            )
+
     hidden_removed_total = 0
     hidden_added_total = 0
     for provider_id in sorted(after_ids):
         before = before_providers.get(provider_id, {})
         after = after_providers[provider_id]
+        before_meta = {
+            "name": _safe_text(before.get("name") or provider_id),
+            "enabled": before.get("enabled", True) is not False,
+            "role": _safe_text(before.get("role") or "auto"),
+            "priority": _normalize_priority(before.get("priority", 100)),
+            "claude_1m_mode": _safe_text(before.get("claude_1m_mode") or "auto") or "auto",
+            "timezone": _safe_text(before.get("timezone")),
+            "note": _safe_text(before.get("note")),
+        }
+        after_meta = {
+            "name": _safe_text(after.get("name") or provider_id),
+            "enabled": after.get("enabled", True) is not False,
+            "role": _safe_text(after.get("role") or "auto"),
+            "priority": _normalize_priority(after.get("priority", 100)),
+            "claude_1m_mode": _safe_text(after.get("claude_1m_mode") or "auto") or "auto",
+            "timezone": _safe_text(after.get("timezone")),
+            "note": _safe_text(after.get("note")),
+        }
+        meta_labels = {
+            "name": "名称",
+            "enabled": "启用",
+            "role": "角色",
+            "priority": "优先级",
+            "claude_1m_mode": "Claude 1M",
+            "timezone": "时区",
+            "note": "备注",
+        }
+        meta_changes = field_changes(before_meta, after_meta, meta_labels)
+        if provider_id in before_ids and meta_changes:
+            important_fields = {item["field"] for item in meta_changes}.intersection({"enabled", "role", "priority", "claude_1m_mode"})
+            add_item(
+                "provider_metadata",
+                f"通道元数据变化：{provider_id}",
+                change_detail(meta_changes),
+                provider_id=provider_id,
+                level="warn" if important_fields else "info",
+                meta={"before": before_meta, "after": after_meta, "changes": meta_changes},
+            )
+        before_family = _normalize_family_priority_overrides(before.get("family_priority_overrides"))
+        after_family = _normalize_family_priority_overrides(after.get("family_priority_overrides"))
+        if _mapping_digest(before_family) != _mapping_digest(after_family):
+            changed = sorted(set(before_family) | set(after_family))
+            detail = "；".join(f"{family}: `{before_family.get(family, '-')}` -> `{after_family.get(family, '-')}`" for family in changed)
+            add_item(
+                "provider_family_priority",
+                f"Family 权重变化：{provider_id}",
+                detail,
+                provider_id=provider_id,
+                level="warn",
+                meta={"before": before_family, "after": after_family},
+            )
         before_urls = _provider_urls(before)
         after_urls = _provider_urls(after)
         if provider_id in before_ids:
@@ -1572,10 +4560,31 @@ def _build_review_summary(
                 provider_id=provider_id,
             )
 
+    ui_before = current_cfg.get("ui") if isinstance(current_cfg.get("ui"), dict) else {}
+    ui_after = next_cfg.get("ui") if isinstance(next_cfg.get("ui"), dict) else {}
+    if _safe_text(ui_before.get("language") or "zh") != _safe_text(ui_after.get("language") or "zh"):
+        add_item(
+            "ui_language",
+            "界面语言变化",
+            f"`{_safe_text(ui_before.get('language') or 'zh')}` -> `{_safe_text(ui_after.get('language') or 'zh')}`",
+        )
+
     rescue_before = current_cfg.get("rescue") if isinstance(current_cfg.get("rescue"), dict) else {}
     rescue_after = next_cfg.get("rescue") if isinstance(next_cfg.get("rescue"), dict) else {}
     if _mapping_digest(rescue_before) != _mapping_digest(rescue_after):
         add_item("rescue", "Rescue fallback 变化", f"`{_safe_text(rescue_before.get('fallback_model')) or '-'}` -> `{_safe_text(rescue_after.get('fallback_model')) or '-'}`")
+
+    lb_before = current_cfg.get("load_balance") if isinstance(current_cfg.get("load_balance"), dict) else {}
+    lb_after = next_cfg.get("load_balance") if isinstance(next_cfg.get("load_balance"), dict) else {}
+    if _mapping_digest(lb_before) != _mapping_digest(lb_after):
+        before_profiles = (lb_before.get("profiles") if isinstance(lb_before.get("profiles"), dict) else {}) or {}
+        after_profiles = (lb_after.get("profiles") if isinstance(lb_after.get("profiles"), dict) else {}) or {}
+        add_item(
+            "load_balance",
+            "Load balance profile 变化",
+            f"default `{_safe_text(lb_before.get('default')) or '-'}` -> `{_safe_text(lb_after.get('default')) or '-'}`；profiles {len(before_profiles)} -> {len(after_profiles)}。",
+            level="warn",
+        )
 
     vision_before = current_cfg.get("vision_sidecar") if isinstance(current_cfg.get("vision_sidecar"), dict) else {}
     vision_after = next_cfg.get("vision_sidecar") if isinstance(next_cfg.get("vision_sidecar"), dict) else {}
@@ -1588,6 +4597,20 @@ def _build_review_summary(
     opencode_after = next_cfg.get("opencode") if isinstance(next_cfg.get("opencode"), dict) else {}
     if _safe_text(opencode_before.get("default_profile")) != _safe_text(opencode_after.get("default_profile")):
         add_item("opencode_profile", "OpenCode profile 变化", f"`{_safe_text(opencode_before.get('default_profile')) or '-'}` -> `{_safe_text(opencode_after.get('default_profile')) or '-'}`")
+    before_review_host = _normalize_opencode_review_host(opencode_before)
+    after_review_host = _normalize_opencode_review_host(opencode_after)
+    if _mapping_digest(before_review_host) != _mapping_digest(after_review_host):
+        primary = after_review_host.get("primary_models") or []
+        fallback = after_review_host.get("fallback_models") or []
+        add_item(
+            "opencode_review_host",
+            "OpenCode Review host 变化",
+            f"primary `{', '.join(primary) or '-'}`；fallback `{', '.join(fallback) or '-'}`",
+            meta={
+                "primary_models": primary,
+                "fallback_models": fallback,
+            },
+        )
     before_agents = _normalize_agent_model_overrides(opencode_before.get("agent_models") or opencode_before.get("agent_model_overrides"))
     after_agents = _normalize_agent_model_overrides(opencode_after.get("agent_models") or opencode_after.get("agent_model_overrides"))
     if _mapping_digest(before_agents) != _mapping_digest(after_agents):
@@ -1660,16 +4683,187 @@ def _build_review_summary(
             level="warn",
         )
 
-    policy_before_models = policy_before.get("models") if isinstance(policy_before.get("models"), dict) else {}
-    policy_after_models = policy_after.get("models") if isinstance(policy_after.get("models"), dict) else {}
-    if _mapping_digest({"models": policy_before_models}) != _mapping_digest({"models": policy_after_models}):
-        changed_models = sorted(set(policy_before_models) ^ set(policy_after_models))
-        common_changed = sorted(
-            model for model in (set(policy_before_models) & set(policy_after_models))
-            if _mapping_digest(policy_before_models.get(model)) != _mapping_digest(policy_after_models.get(model))
+    policy_field_labels = {
+        "visible": "显示",
+        "favorite": "置顶",
+        "capabilities.text": "文本",
+        "capabilities.vision": "看图",
+        "capabilities.tool_use": "工具",
+        "capabilities.reasoning": "推理",
+        "capabilities.thinking": "Think",
+        "capabilities.one_m_context": "1M",
+        "capabilities.long_context": "长上下文",
+        "capabilities.context_window_tokens": "上下文",
+        "capabilities.max_output_tokens": "输出上限",
+        "capabilities.thinking_control": "Effort 控制",
+        "capabilities.reasoning_effort": "默认 Effort",
+        "capabilities.cache_sensitive": "缓存",
+        "capabilities.cache_sensitive_transport": "缓存传输",
+        "capabilities.supports_thinking": "支持 Think",
+    }
+
+    def policy_value_display(value: Any) -> str:
+        if value is None:
+            return "未写入配置"
+        if isinstance(value, int) and value >= 1000:
+            if value >= 1_000_000 and value % 1_000_000 == 0:
+                return f"{value // 1_000_000}M"
+            if value >= 100_000 and value % 1000 == 0:
+                return f"{value // 1000}K"
+        return display_value(value)
+
+    def policy_flat(entry: Any) -> dict[str, Any]:
+        if not isinstance(entry, dict):
+            return {}
+        flat: dict[str, Any] = {}
+        for key in ("visible", "favorite"):
+            if key in entry:
+                flat[key] = entry.get(key)
+        caps = entry.get("capabilities") if isinstance(entry.get("capabilities"), dict) else {}
+        for key in sorted(caps):
+            flat[f"capabilities.{key}"] = caps.get(key)
+        for key in sorted(entry):
+            if key in {"visible", "favorite", "capabilities", "capability_sources"}:
+                continue
+            flat[key] = entry.get(key)
+        return flat
+
+    def policy_source_label(source: Any) -> str:
+        if not isinstance(source, dict):
+            return ""
+        name = _safe_text(source.get("source_name"))
+        layer = _safe_text(source.get("source_layer")).lower()
+        confidence = _safe_text(source.get("confidence")).lower()
+        if name:
+            return name
+        if "openrouter" in confidence:
+            return "OpenRouter catalog"
+        if layer == "provider_catalog":
+            return "Provider catalog"
+        if layer == "official":
+            return "官方 / 已确认"
+        if layer == "manual":
+            return "手动调整"
+        return layer or ""
+
+    def policy_source_for_field(entry: Any, field: str) -> dict[str, Any]:
+        if not isinstance(entry, dict):
+            return {}
+        sources = entry.get("capability_sources") if isinstance(entry.get("capability_sources"), dict) else {}
+        key = field.replace("capabilities.", "", 1)
+        source = sources.get(key)
+        if source is None and key == "supports_thinking":
+            source = sources.get("thinking")
+        if source is None and key == "long_context":
+            source = sources.get("context_window_tokens") or sources.get("one_m_context")
+        if source is None and key == "cache_sensitive_transport":
+            source = sources.get("cache_sensitive")
+        source = source if isinstance(source, dict) else {}
+        label = policy_source_label(source)
+        result = _sanitize_for_output(source) if source else {}
+        if label:
+            result["label"] = label
+        return result
+
+    def policy_change_rows(before_entry: Any, after_entry: Any) -> list[dict[str, Any]]:
+        before_flat = policy_flat(before_entry)
+        after_flat = policy_flat(after_entry)
+        rows: list[dict[str, Any]] = []
+        for field in sorted(set(before_flat) | set(after_flat)):
+            before_value = before_flat.get(field)
+            after_value = after_flat.get(field)
+            if _mapping_digest({field: before_value}) == _mapping_digest({field: after_value}):
+                continue
+            source = policy_source_for_field(after_entry, field)
+            rows.append(
+                {
+                    "field": field,
+                    "label": policy_field_labels.get(field, field),
+                    "before": before_value,
+                    "after": after_value,
+                    "before_label": policy_value_display(before_value),
+                    "after_label": policy_value_display(after_value),
+                    "source": source,
+                    "source_label": source.get("label", ""),
+                }
+            )
+        return rows
+
+    def build_policy_changes() -> dict[str, Any]:
+        policy_before_models = policy_before.get("models") if isinstance(policy_before.get("models"), dict) else {}
+        policy_after_models = policy_after.get("models") if isinstance(policy_after.get("models"), dict) else {}
+        rows: list[dict[str, Any]] = []
+        added = sorted(set(policy_after_models) - set(policy_before_models), key=str.lower)
+        removed = sorted(set(policy_before_models) - set(policy_after_models), key=str.lower)
+        common = sorted(set(policy_before_models) & set(policy_after_models), key=str.lower)
+        for model in added:
+            changes = policy_change_rows({}, policy_after_models.get(model))
+            rows.append(
+                {
+                    "model": model,
+                    "action": "added",
+                    "action_label": "新增",
+                    "changed_fields": [item["field"] for item in changes],
+                    "changes": changes,
+                    "summary": "；".join(f"{item['label']} `{item['after_label']}`" for item in changes[:8]) or "新增条目",
+                    "before": {},
+                    "after": _sanitize_for_output(policy_after_models.get(model)),
+                }
+            )
+        for model in removed:
+            changes = policy_change_rows(policy_before_models.get(model), {})
+            rows.append(
+                {
+                    "model": model,
+                    "action": "removed",
+                    "action_label": "移除",
+                    "changed_fields": [item["field"] for item in changes],
+                    "changes": changes,
+                    "summary": "将移除该 model-policy 条目",
+                    "before": _sanitize_for_output(policy_before_models.get(model)),
+                    "after": {},
+                }
+            )
+        for model in common:
+            changes = policy_change_rows(policy_before_models.get(model), policy_after_models.get(model))
+            if not changes:
+                continue
+            rows.append(
+                {
+                    "model": model,
+                    "action": "updated",
+                    "action_label": "修改",
+                    "changed_fields": [item["field"] for item in changes],
+                    "changes": changes,
+                    "summary": "；".join(f"{item['label']} `{item['before_label']}` -> `{item['after_label']}`" for item in changes[:8]),
+                    "before": _sanitize_for_output(policy_before_models.get(model)),
+                    "after": _sanitize_for_output(policy_after_models.get(model)),
+                }
+            )
+        rows.sort(key=lambda item: ({"updated": 0, "added": 1, "removed": 2}.get(str(item.get("action")), 9), str(item.get("model") or "").lower()))
+        return {
+            "schema": "mms.setup_web.model_policy_changes.v1",
+            "total": len(rows),
+            "added": len(added),
+            "removed": len(removed),
+            "updated": len([item for item in rows if item.get("action") == "updated"]),
+            "items": rows,
+        }
+
+    model_policy_changes = build_policy_changes()
+    if model_policy_changes["total"]:
+        add_item(
+            "model_policy",
+            "模型能力/偏好策略变化",
+            f"将更新 {model_policy_changes['total']} 个 model-policy 条目：修改 {model_policy_changes['updated']}，新增 {model_policy_changes['added']}，移除 {model_policy_changes['removed']}。",
+            meta={
+                "total": model_policy_changes["total"],
+                "updated": model_policy_changes["updated"],
+                "added": model_policy_changes["added"],
+                "removed": model_policy_changes["removed"],
+                "models": [item["model"] for item in model_policy_changes["items"][:80]],
+            },
         )
-        total = len(changed_models) + len(common_changed)
-        add_item("model_policy", "模型能力/偏好策略变化", f"将更新 {total} 个 model-policy 条目。")
 
     if not items:
         add_item("no_change", "没有配置变化", "当前草稿与已加载配置一致。")
@@ -1683,9 +4877,12 @@ def _build_review_summary(
             "hidden_removed": hidden_removed_total,
             "hidden_added": hidden_added_total,
             "credential_updates": len(credential_updates),
+            "account_changes": account_change_count,
+            "model_policy_changes": model_policy_changes["total"],
         },
         "items": items,
         "risks": risks,
+        "model_policy_changes": model_policy_changes,
     }
 
 
@@ -1746,7 +4943,9 @@ def build_config_plan(
     providers_payload = draft.get("providers") if isinstance(draft.get("providers"), list) else []
     existing_by_id = {str(item.get("id") or ""): item for item in current_cfg.get("providers", []) if isinstance(item, dict)}
     preserve_model_rows = _is_preview_config_root(config_path, command_name=command_name)
+    route_scope_provider_ids = _route_scope_provider_ids_from_payload(payload or {})
     route_refresh_provider_ids = _route_refresh_provider_ids_from_payload(payload or {})
+    touched_route_provider_ids = set(route_scope_provider_ids) | set(route_refresh_provider_ids)
     refreshed_provider_ids = set(route_refresh_provider_ids)
     next_providers: list[dict[str, Any]] = []
     credential_updates: list[dict[str, str]] = []
@@ -1762,6 +4961,7 @@ def build_config_plan(
             existing_by_id.get(original_id),
             provider_payload,
             preserve_model_rows=preserve_model_rows,
+            force_model_rows=original_id in touched_route_provider_ids or provider_id in touched_route_provider_ids,
             clear_fallback_models=preserve_model_rows and (original_id in refreshed_provider_ids or provider_id in refreshed_provider_ids),
         )
         next_providers.append(provider)
@@ -1773,15 +4973,17 @@ def build_config_plan(
                 errors.append(f"通道 {provider['id']} 勾选了更新凭据，但 API Key 为空。")
             if not openai_base and not anthropic_base:
                 errors.append(f"通道 {provider['id']} 勾选了更新凭据，但 URL 为空。")
-            credential_updates.append(
-                {
-                    "provider_id": provider["id"],
-                    "base_url": (openai_base or anthropic_base).rstrip("/"),
-                    "openai_base_url": openai_base.rstrip("/"),
-                    "anthropic_base_url": anthropic_base.rstrip("/"),
-                    "api_key": api_key if include_secrets else _redact(api_key),
-                }
-            )
+            credential_update = {
+                "provider_id": provider["id"],
+                "base_url": (openai_base or anthropic_base).rstrip("/"),
+                "openai_base_url": openai_base.rstrip("/"),
+                "anthropic_base_url": anthropic_base.rstrip("/"),
+                "api_key": api_key if include_secrets else _redact(api_key),
+            }
+            openai_api_key = _safe_text(provider_payload.get("openai_api_key"))
+            if openai_api_key:
+                credential_update["openai_api_key"] = openai_api_key if include_secrets else _redact(openai_api_key)
+            credential_updates.append(credential_update)
         if provider.get("anthropic_base_url") and "anthropic_messages" not in provider.get("protocols", []):
             warnings.append(f"通道 {provider['id']} 填了 Anthropic URL，但 protocols 未包含 anthropic_messages。")
         if provider.get("openai_base_url") and "openai_chat_completions" not in provider.get("protocols", []):
@@ -1812,6 +5014,24 @@ def build_config_plan(
     if next_providers:
         next_cfg["provider"] = {"default": provider_default or str(next_providers[0].get("id"))}
 
+    _apply_account_draft(
+        current_cfg=current_cfg,
+        next_cfg=next_cfg,
+        draft=draft,
+        errors=errors,
+        warnings=warnings,
+    )
+
+    ui_payload = draft.get("ui") if isinstance(draft.get("ui"), dict) else {}
+    if "language" in ui_payload:
+        language = _safe_text(ui_payload.get("language") or "zh").lower()
+        if language not in {"zh", "en"}:
+            errors.append("ui.language 只支持 zh 或 en。")
+        else:
+            ui_cfg = dict(next_cfg.get("ui") if isinstance(next_cfg.get("ui"), dict) else {})
+            ui_cfg["language"] = language
+            next_cfg["ui"] = ui_cfg
+
     rescue_payload = draft.get("rescue") if isinstance(draft.get("rescue"), dict) else {}
     if rescue_payload:
         rescue = dict(next_cfg.get("rescue") if isinstance(next_cfg.get("rescue"), dict) else {})
@@ -1832,6 +5052,13 @@ def build_config_plan(
             next_cfg["rescue"] = rescue
         else:
             next_cfg.pop("rescue", None)
+
+    if isinstance(draft.get("load_balance"), dict):
+        load_balance = _normalize_load_balance_draft(draft.get("load_balance"), errors=errors)
+        if load_balance:
+            next_cfg["load_balance"] = load_balance
+        else:
+            next_cfg.pop("load_balance", None)
 
     vision_payload = draft.get("vision_sidecar") if isinstance(draft.get("vision_sidecar"), dict) else {}
     if vision_payload:
@@ -1857,7 +5084,7 @@ def build_config_plan(
     preferred_cli = _safe_text(runtime_payload.get("preferred_cli"))
     if preferred_cli:
         if preferred_cli not in _ALLOWED_CLIS:
-            errors.append(f"preferred CLI 不支持: {preferred_cli}")
+            errors.append(f"首选 CLI 不支持: {preferred_cli}")
         else:
             presets = dict(next_cfg.get("presets") if isinstance(next_cfg.get("presets"), dict) else {})
             coding = dict(presets.get("coding") if isinstance(presets.get("coding"), dict) else {})
@@ -1871,14 +5098,53 @@ def build_config_plan(
                 next_cfg["presets"] = presets
 
     opencode_payload = draft.get("opencode") if isinstance(draft.get("opencode"), dict) else {}
-    default_profile = _safe_text(opencode_payload.get("default_profile"))
+    raw_default_profile = _safe_text(opencode_payload.get("default_profile"))
+    default_profile = _opencode_surface_profile_id(raw_default_profile, default="") if raw_default_profile else ""
+    review_host = _normalize_opencode_review_host(opencode_payload)
     agent_model_overrides = _normalize_agent_model_overrides(opencode_payload.get("agent_models") or opencode_payload.get("agent_model_overrides"))
-    agent_roster = _normalize_opencode_agent_roster(opencode_payload.get("agent_roster"), profile_id="agent")
-    if default_profile or "agent_models" in opencode_payload or "agent_model_overrides" in opencode_payload or "agent_roster" in opencode_payload:
+    agent_roster_profile = default_profile or _opencode_surface_profile_id(
+        (next_cfg.get("opencode") if isinstance(next_cfg.get("opencode"), dict) else {}).get("default_profile") or "agent"
+    )
+    agent_roster = _normalize_opencode_agent_roster(opencode_payload.get("agent_roster"), profile_id=agent_roster_profile)
+    opencode_payload_touched = (
+        default_profile
+        or "agent_models" in opencode_payload
+        or "agent_model_overrides" in opencode_payload
+        or "agent_roster" in opencode_payload
+        or "review" in opencode_payload
+        or "review_host" in opencode_payload
+        or "committee_presets" in opencode_payload
+    )
+    if opencode_payload_touched:
         opencode_cfg = dict(next_cfg.get("opencode") if isinstance(next_cfg.get("opencode"), dict) else {})
         current_default_profile = _safe_text(opencode_cfg.get("default_profile"))
         if default_profile and (current_default_profile or default_profile != "agent"):
             opencode_cfg["default_profile"] = default_profile
+        if review_host["primary_models"] or review_host["fallback_models"]:
+            review_cfg = dict(opencode_cfg.get("review") if isinstance(opencode_cfg.get("review"), dict) else {})
+            review_cfg["host"] = {key: models for key, models in review_host.items() if models}
+            opencode_cfg["review"] = review_cfg
+            opencode_cfg.pop("review_host", None)
+        elif "review" in opencode_payload or "review_host" in opencode_payload:
+            review_cfg = dict(opencode_cfg.get("review") if isinstance(opencode_cfg.get("review"), dict) else {})
+            review_cfg.pop("host", None)
+            if review_cfg:
+                opencode_cfg["review"] = review_cfg
+            else:
+                opencode_cfg.pop("review", None)
+            opencode_cfg.pop("review_host", None)
+        if "committee_presets" in opencode_payload:
+            committee_presets = _normalize_opencode_committee_presets_input(opencode_payload, errors)
+            committee_cfg = dict(opencode_cfg.get("committee") if isinstance(opencode_cfg.get("committee"), dict) else {})
+            if committee_presets:
+                committee_cfg["presets"] = committee_presets
+                opencode_cfg["committee"] = committee_cfg
+            else:
+                committee_cfg.pop("presets", None)
+                if committee_cfg:
+                    opencode_cfg["committee"] = committee_cfg
+                else:
+                    opencode_cfg.pop("committee", None)
         if agent_model_overrides:
             opencode_cfg["agent_models"] = agent_model_overrides
             opencode_cfg.pop("agent_model_overrides", None)
@@ -1905,6 +5171,7 @@ def build_config_plan(
             "projects": {},
         }
     policy_after = _build_model_policy_from_draft(policy_before, draft)
+    policy_after = _merge_model_policy_import(policy_after, draft.get("model_policy_import"))
 
     try:
         mms_core = _load_mms_core()
@@ -1912,14 +5179,16 @@ def build_config_plan(
             next_cfg, _ = mms_core._ensure_provider_config(next_cfg)  # noqa: SLF001 - reuse existing normalization
     except Exception:
         pass
+    next_cfg = _strip_implicit_provider_timezone_defaults(next_cfg, providers_payload)
     next_cfg = _strip_empty_provider_model_lists(next_cfg)
 
     before_config_text = _toml_text(_sanitize_for_output(current_cfg))
     after_config_text = _toml_text(_sanitize_for_output(next_cfg))
     before_policy_text = _pretty_json(_sanitize_for_output(policy_before))
     after_policy_text = _pretty_json(_sanitize_for_output(policy_after))
+    config_changed = _mapping_digest(current_cfg) != _mapping_digest(next_cfg)
     diffs = {
-        "config_toml": _diff_text(before_config_text, after_config_text, before_name="config.toml(before)", after_name="config.toml(after)"),
+        "config_toml": _diff_text(before_config_text, after_config_text, before_name="config.toml(before)", after_name="config.toml(after)") if config_changed else "",
         "model_policy_json": _diff_text(before_policy_text, after_policy_text, before_name="model-policy.json(before)", after_name="model-policy.json(after)"),
         "credentials": "\n".join(
             f"credential update: provider {item['provider_id']} (secret hidden; stable credentials.sh / preview secret backend)"
@@ -1941,7 +5210,7 @@ def build_config_plan(
         "errors": errors,
         "warnings": warnings,
         "expected_bundle_revision": _expected_bundle_revision_from_payload(payload or {}),
-        "route_scope_provider_ids": _route_scope_provider_ids_from_payload(payload or {}),
+        "route_scope_provider_ids": route_scope_provider_ids,
         "route_refresh_provider_ids": route_refresh_provider_ids,
         "paths": {
             "config": config_path,
@@ -1960,7 +5229,7 @@ def build_config_plan(
             config_payload=next_cfg,
             policy_payload=policy_after,
             expected_bundle_revision=_expected_bundle_revision_from_payload(payload or {}),
-            route_scope_provider_ids=_route_scope_provider_ids_from_payload(payload or {}),
+            route_scope_provider_ids=route_scope_provider_ids,
             route_refresh_provider_ids=route_refresh_provider_ids,
         ),
         "summary": summary,
@@ -2246,6 +5515,7 @@ def _save_provider_credentials_audited(update: dict[str, str], *, config_path: s
             update.get("api_key", ""),
             openai_base_url=update.get("openai_base_url", ""),
             anthropic_base_url=update.get("anthropic_base_url", ""),
+            openai_api_key=update.get("openai_api_key") if "openai_api_key" in update else None,
         )
         after_sha1 = mms_core._sha1_file(target_path)  # noqa: SLF001
         _append_audit(
@@ -2284,6 +5554,293 @@ def _write_model_policy_audited(policy_path: str, payload: dict[str, Any], *, co
             function="setup_web_save_model_policy",
         )
     return {"target_path": os.path.abspath(policy_path), "backup_path": backup_path, "bak_path": _bak_path_for_backup(backup_path)}
+
+
+def _preferences_target_path(*, config_path: str = "", preferences_path: str = "") -> str:
+    preferences_path = _safe_text(preferences_path)
+    if preferences_path:
+        return os.path.abspath(os.path.expanduser(preferences_path))
+    if config_path:
+        return os.path.join(os.path.dirname(os.path.abspath(config_path)), "preferences.toml")
+    mms_core = _load_mms_core()
+    paths = getattr(mms_core, "PREFERENCES_PATHS", None)
+    if isinstance(paths, list) and paths:
+        return os.path.abspath(os.path.expanduser(str(paths[0])))
+    return os.path.abspath(os.path.expanduser("~/.config/mms/preferences.toml"))
+
+
+def _preferences_lock_path(*, config_path: str = "", preferences_path: str = "") -> str:
+    if config_path:
+        return os.path.abspath(config_path)
+    target = _preferences_target_path(config_path=config_path, preferences_path=preferences_path)
+    return os.path.join(os.path.dirname(target), "config.toml")
+
+
+def _load_preferences_raw(path: str) -> dict[str, Any]:
+    if not os.path.exists(path):
+        return {}
+    mms_core = _load_mms_core()
+    try:
+        loaded = mms_core._load_toml_file(path)  # noqa: SLF001
+    except Exception:
+        loaded = {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _normalize_asset_preferences_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
+    payload = payload if isinstance(payload, dict) else {}
+    disabled = payload.get("disabled")
+    if not isinstance(disabled, dict):
+        disabled = ((payload.get("session_surfaces") or {}).get("disabled") if isinstance(payload.get("session_surfaces"), dict) else {})
+    launch_payload = payload.get("launch") if isinstance(payload.get("launch"), dict) else {}
+    disabled_clis_raw = payload.get("disabled_clis")
+    if disabled_clis_raw is None:
+        disabled_clis_raw = launch_payload.get("disabled_clis")
+    assets = payload.get("assets") if isinstance(payload.get("assets"), dict) else {}
+    mms_core = _load_mms_core()
+    sanitize_disabled = getattr(mms_core, "_sanitize_disabled_session_surfaces", None)
+    if callable(sanitize_disabled):
+        disabled_clean = sanitize_disabled(disabled)
+    else:
+        disabled_clean = {}
+    sanitize_disabled_clis = getattr(mms_core, "_sanitize_disabled_clis", None)
+    if callable(sanitize_disabled_clis):
+        disabled_clis = sanitize_disabled_clis(disabled_clis_raw)
+    else:
+        disabled_clis = []
+    normalized: dict[str, Any] = {"session_surfaces": {"disabled": disabled_clean}, "assets": {}, "launch": {}}
+    if disabled_clis_raw is not None:
+        normalized["launch"]["disabled_clis"] = disabled_clis
+    if "managed_enabled" in assets:
+        normalized["assets"]["managed_enabled"] = _truthy(assets.get("managed_enabled"), default=True)
+    managed_root = _safe_text(assets.get("managed_root"))
+    if managed_root:
+        normalized["assets"]["managed_root"] = os.path.abspath(os.path.expanduser(managed_root))
+    return normalized
+
+
+def _merge_asset_preferences(current: dict[str, Any], asset_preferences: dict[str, Any]) -> dict[str, Any]:
+    result = copy.deepcopy(current) if isinstance(current, dict) else {}
+    incoming_launch = asset_preferences.get("launch") if isinstance(asset_preferences.get("launch"), dict) else {}
+    if "disabled_clis" in incoming_launch:
+        launch = result.get("launch") if isinstance(result.get("launch"), dict) else {}
+        launch["disabled_clis"] = copy.deepcopy(incoming_launch.get("disabled_clis") or [])
+        result["launch"] = launch
+
+    session_surfaces = result.get("session_surfaces") if isinstance(result.get("session_surfaces"), dict) else {}
+    disabled = ((asset_preferences.get("session_surfaces") or {}).get("disabled") if isinstance(asset_preferences.get("session_surfaces"), dict) else {})
+    session_surfaces["disabled"] = copy.deepcopy(disabled) if isinstance(disabled, dict) else {}
+    result["session_surfaces"] = session_surfaces
+
+    assets = result.get("assets") if isinstance(result.get("assets"), dict) else {}
+    incoming_assets = asset_preferences.get("assets") if isinstance(asset_preferences.get("assets"), dict) else {}
+    for key in ("managed_enabled", "managed_root"):
+        if key in incoming_assets:
+            assets[key] = incoming_assets[key]
+    result["assets"] = assets
+    return result
+
+
+def build_preferences_plan(
+    payload: dict[str, Any] | None,
+    *,
+    config_path: str = "",
+    preferences_path: str = "",
+) -> dict[str, Any]:
+    payload = payload if isinstance(payload, dict) else {}
+    target_path = _preferences_target_path(config_path=config_path, preferences_path=preferences_path)
+    current = _load_preferences_raw(target_path)
+    asset_preferences = _normalize_asset_preferences_payload(payload)
+    next_prefs = _merge_asset_preferences(current, asset_preferences)
+    before_text = _toml_text(current)
+    after_text = _toml_text(next_prefs)
+    diff_text = _diff_text(before_text, after_text, before_name="preferences.toml(before)", after_name="preferences.toml(after)")
+    disabled = ((asset_preferences.get("session_surfaces") or {}).get("disabled") or {}) if isinstance(asset_preferences.get("session_surfaces"), dict) else {}
+    disabled_clis = ((asset_preferences.get("launch") or {}).get("disabled_clis") or []) if isinstance(asset_preferences.get("launch"), dict) else []
+    return {
+        "ok": True,
+        "schema": "mms.setup_web.preferences_plan.v1",
+        "status": "planned",
+        "target_path": target_path,
+        "exists": os.path.exists(target_path),
+        "will_write": bool(diff_text),
+        "diff": diff_text,
+        "preferences": next_prefs,
+        "summary": {
+            "disabled_clis": len(disabled_clis),
+            "skills": len(disabled.get("skills") or []),
+            "mcp": len(disabled.get("mcp") or []),
+            "hooks": len(disabled.get("hooks") or []),
+            "managed_root": ((asset_preferences.get("assets") or {}).get("managed_root") if isinstance(asset_preferences.get("assets"), dict) else ""),
+        },
+    }
+
+
+def _copy_preferences_backup(target_path: str, *, lock_path: str) -> str:
+    mms_core = _load_mms_core()
+    backup_root = mms_core._config_backup_root(lock_path)  # noqa: SLF001
+    backup_dir = os.path.join(backup_root, f"preferences-write-{mms_core._local_now_slug()}")  # noqa: SLF001
+    os.makedirs(backup_dir, exist_ok=True)
+    if os.path.exists(target_path):
+        backup_path = os.path.join(backup_dir, os.path.basename(target_path))
+        shutil.copy2(target_path, backup_path)
+        shutil.copy2(target_path, f"{backup_path}.bak")
+        return backup_path
+    marker_path = os.path.join(backup_dir, f"{os.path.basename(target_path) or 'preferences.toml'}.missing")
+    with open(marker_path, "w", encoding="utf-8") as handle:
+        handle.write(f"missing before preferences write: {target_path}\n")
+    os.chmod(marker_path, 0o600)
+    return marker_path
+
+
+def apply_preferences_plan(
+    payload: dict[str, Any] | None,
+    *,
+    config_path: str = "",
+    preferences_path: str = "",
+) -> dict[str, Any]:
+    payload = payload if isinstance(payload, dict) else {}
+    if not _truthy(payload.get("confirm_preferences"), False):
+        return {"ok": False, "schema": "mms.setup_web.preferences_save_result.v1", "status": "blocked", "errors": ["保存 Skill/MCP 偏好前必须勾选确认。"]}
+    if _safe_text(payload.get("confirm_phrase")) != "保存偏好":
+        return {"ok": False, "schema": "mms.setup_web.preferences_save_result.v1", "status": "blocked", "errors": ["确认文字必须输入：保存偏好"]}
+    plan = build_preferences_plan(payload, config_path=config_path, preferences_path=preferences_path)
+    if not plan.get("will_write"):
+        return {
+            "ok": True,
+            "schema": "mms.setup_web.preferences_save_result.v1",
+            "status": "no_change",
+            "target_path": plan.get("target_path"),
+            "summary": plan.get("summary") or {},
+            "message": "preferences.toml 已是当前 Skill/MCP 偏好。",
+        }
+
+    mms_core = _load_mms_core()
+    target_path = str(plan.get("target_path") or "")
+    lock_path = _preferences_lock_path(config_path=config_path, preferences_path=preferences_path)
+    reason = _safe_text(payload.get("reason")) or "setup-web-ui:asset-preferences"
+    with mms_core._locked_config_write(lock_path):  # noqa: SLF001
+        before_sha1 = mms_core._sha1_file(target_path)  # noqa: SLF001
+        backup_path = _copy_preferences_backup(target_path, lock_path=lock_path)
+        _atomic_write_preferences_toml(target_path, plan["preferences"])
+        try:
+            os.chmod(target_path, 0o600)
+        except OSError:
+            pass
+        after_sha1 = mms_core._sha1_file(target_path)  # noqa: SLF001
+        _append_audit(
+            config_path=lock_path,
+            target_path=target_path,
+            backup_path=backup_path,
+            reason=reason,
+            before_sha1=before_sha1,
+            after_sha1=after_sha1,
+            function="setup_web_save_preferences",
+        )
+    return {
+        "ok": True,
+        "schema": "mms.setup_web.preferences_save_result.v1",
+        "status": "saved",
+        "target_path": target_path,
+        "backup_path": backup_path,
+        "bak_path": _bak_path_for_backup(backup_path),
+        "summary": plan.get("summary") or {},
+        "diff": plan.get("diff") or "",
+        "audit_tail": _latest_audit_rows(lock_path),
+    }
+
+
+def _expand_reveal_path(raw_path: Any) -> str:
+    path = _safe_text(raw_path)
+    if not path or "\x00" in path or "\n" in path or "\r" in path or "://" in path:
+        return ""
+    if path.startswith("~"):
+        try:
+            mms_core = _load_mms_core()
+            real_home = mms_core.resolve_real_user_home()
+        except Exception:
+            real_home = os.path.expanduser("~")
+        if path == "~":
+            path = real_home
+        elif path.startswith("~/"):
+            path = os.path.join(real_home, path[2:])
+        else:
+            path = os.path.expanduser(path)
+    else:
+        path = os.path.expanduser(path)
+    if not os.path.isabs(path):
+        path = os.path.abspath(path)
+    return path
+
+
+def reveal_local_path(payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Reveal a local file/folder from the local WebUI without shell execution."""
+    payload = payload if isinstance(payload, dict) else {}
+    target_path = _expand_reveal_path(payload.get("path"))
+    if not target_path:
+        return {
+            "ok": False,
+            "schema": "mms.setup_web.reveal_path_result.v1",
+            "status": "blocked",
+            "errors": ["只能打开本地文件或目录路径。"],
+        }
+
+    exists = os.path.exists(target_path)
+    reveal_path = target_path if exists else os.path.dirname(target_path)
+    if not reveal_path or not os.path.exists(reveal_path):
+        return {
+            "ok": False,
+            "schema": "mms.setup_web.reveal_path_result.v1",
+            "status": "missing",
+            "path": target_path,
+            "errors": ["路径和父目录都不存在，无法打开。"],
+        }
+
+    if sys.platform == "darwin":
+        command = ["open", reveal_path] if os.path.isdir(target_path) else ["open", "-R", reveal_path]
+    elif sys.platform.startswith("win"):
+        command = ["explorer", reveal_path if os.path.isdir(target_path) else f"/select,{reveal_path}"]
+    else:
+        folder = reveal_path if os.path.isdir(reveal_path) else os.path.dirname(reveal_path)
+        opener = shutil.which("xdg-open")
+        if not opener:
+            return {
+                "ok": False,
+                "schema": "mms.setup_web.reveal_path_result.v1",
+                "status": "blocked",
+                "path": target_path,
+                "errors": ["当前系统未找到 xdg-open，无法自动打开文件夹。"],
+            }
+        command = [opener, folder]
+
+    try:
+        result = subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5, check=False)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "schema": "mms.setup_web.reveal_path_result.v1",
+            "status": "error",
+            "path": target_path,
+            "errors": [str(exc)],
+        }
+
+    if result.returncode != 0:
+        return {
+            "ok": False,
+            "schema": "mms.setup_web.reveal_path_result.v1",
+            "status": "error",
+            "path": target_path,
+            "errors": [f"打开路径失败，退出码 {result.returncode}。"],
+        }
+    return {
+        "ok": True,
+        "schema": "mms.setup_web.reveal_path_result.v1",
+        "status": "opened",
+        "path": target_path,
+        "opened_path": reveal_path,
+        "exists": exists,
+        "kind": "directory" if os.path.isdir(target_path) else ("file" if exists else "parent"),
+    }
 
 
 def apply_config_plan(
@@ -2580,6 +6137,25 @@ def probe_provider_models(provider: dict[str, Any], *, force_refresh: bool = Fal
     return mms_core._probe_models(provider, emit_output=False, force_refresh=force_refresh)  # noqa: SLF001
 
 
+def _probe_request_path(probe: dict[str, Any], provider: dict[str, Any]) -> str:
+    attempts = probe.get("attempts")
+    if isinstance(attempts, list) and attempts:
+        chosen = None
+        for item in attempts:
+            if not (isinstance(item, dict) and item.get("url")):
+                continue
+            if str(item.get("status", "")).startswith("ok"):
+                chosen = item
+                break
+            if chosen is None:
+                chosen = item
+        if chosen:
+            parsed_path = urlparse(str(chosen["url"])).path
+            if parsed_path:
+                return parsed_path
+    return provider.get("models_endpoint") or "/models"
+
+
 def test_provider_models(
     cfg: dict[str, Any],
     payload: dict[str, Any],
@@ -2593,10 +6169,21 @@ def test_provider_models(
         probe = probe_provider_models(provider, force_refresh=_truthy(payload.get("force_refresh"), True))
         latency_ms = int((time.time() - started) * 1000)
         models = _normalize_model_list(probe.get("models") or [])
+        policy_payload = _load_json_file(_policy_path_for_config(config_path))
+        policy_models = policy_payload.get("models") if isinstance(policy_payload.get("models"), dict) else {}
+        model_capabilities = {
+            model_id: _model_capability_defaults(
+                model_id,
+                policy_models.get(model_id) if isinstance(policy_models.get(model_id), dict) else {},
+                provider_id=_safe_text(provider.get("id")),
+            )
+            for model_id in models
+        }
         return {
             "ok": not bool(probe.get("error")),
             "provider_id": provider.get("id"),
             "models": models,
+            "model_capabilities": model_capabilities,
             "raw_models": _normalize_model_list(probe.get("raw_models") or models),
             "model_count": len(models),
             "base_source": probe.get("base_source") or "remote",
@@ -2609,7 +6196,7 @@ def test_provider_models(
                 "schema": "cache_transport_evidence.v1",
                 "provider_id": provider.get("id"),
                 "request_url": probe.get("working_url") or provider.get("openai_base_url") or provider.get("anthropic_base_url") or "",
-                "request_path": provider.get("models_endpoint") or "/models",
+                "request_path": _probe_request_path(probe, provider),
                 "protocol": "openai_chat_completions" if "openai_chat_completions" in provider.get("protocols", []) else "anthropic_messages",
             },
         }
@@ -2629,6 +6216,62 @@ def _join_anthropic_messages_url(base_url: str) -> str:
     if not base:
         return ""
     return base + ("/messages" if base.endswith("/v1") else "/v1/messages")
+
+
+def _response_json_and_text(response: Any) -> tuple[Any, str]:
+    try:
+        data = response.json()
+    except Exception:
+        data = None
+    text = _safe_text(getattr(response, "text", ""))
+    if not text and data is not None:
+        try:
+            text = json.dumps(_sanitize_for_output(data), ensure_ascii=False)
+        except Exception:
+            text = str(data)
+    return data, _redact_inline_secrets(text)
+
+
+def _model_smoke_error_preview(data: Any, text: str) -> str:
+    candidates: list[str] = []
+    if isinstance(data, dict):
+        error = data.get("error")
+        if isinstance(error, dict):
+            for key in ("message", "detail", "code", "type"):
+                value = _safe_text(error.get(key))
+                if value:
+                    candidates.append(value)
+        elif error:
+            candidates.append(_safe_text(error))
+        for key in ("message", "detail", "error_description"):
+            value = _safe_text(data.get(key))
+            if value:
+                candidates.append(value)
+        if not candidates:
+            try:
+                candidates.append(json.dumps(_sanitize_for_output(data), ensure_ascii=False))
+            except Exception:
+                candidates.append(str(data))
+    if not candidates and text:
+        candidates.append(text)
+    return _redact_inline_secrets(" · ".join(item for item in candidates if item))[:500]
+
+
+def _model_smoke_diagnosis(provider: dict[str, Any], model: str, protocol: str, status_code: int) -> str:
+    provider_id = _safe_text(provider.get("id")).lower()
+    model_lower = model.lower()
+    if (
+        status_code == 403
+        and provider_id == "openrouter"
+        and protocol == "openai_chat_completions"
+        and (model_lower.startswith("anthropic/") or "claude" in model_lower)
+    ):
+        return "OpenRouter 返回 403：模型存在，但当前 key/account 可能没有该 Anthropic/Claude 模型权限，或 OpenRouter route/provider 被限制；当前通道未配置 anthropic_base_url，所以 auto 走的是 /chat/completions。"
+    if status_code == 404:
+        return "上游返回 404：优先检查 model id 是否是该 provider 当前可用的精确 ID。"
+    if status_code == 401:
+        return "上游返回 401：优先检查 API Key 是否正确、是否已保存到当前预览配置。"
+    return ""
 
 
 def run_model_smoke(
@@ -2669,7 +6312,7 @@ def run_model_smoke(
                 timeout=30,
             )
             status_code = int(getattr(response, "status_code", 0) or 0)
-            data = response.json()
+            data, response_text = _response_json_and_text(response)
             content = data.get("content") if isinstance(data, dict) else None
             preview = ""
             if isinstance(content, list) and content:
@@ -2677,6 +6320,7 @@ def run_model_smoke(
                 if isinstance(first, dict):
                     preview = _safe_text(first.get("text"))
             preview = preview or _safe_text(data.get("text") if isinstance(data, dict) else "")
+            error_preview = "" if 200 <= status_code < 300 else _model_smoke_error_preview(data, response_text)
             request_path = "/v1/messages" if "/v1/messages" in url else "/messages"
         else:
             api_key = _safe_text(provider.get("openai_api_key") or provider.get("api_key"))
@@ -2698,23 +6342,28 @@ def run_model_smoke(
                 timeout=30,
             )
             status_code = int(getattr(response, "status_code", 0) or 0)
-            data = response.json()
+            data, response_text = _response_json_and_text(response)
             choices = data.get("choices") if isinstance(data, dict) else None
             preview = ""
             if isinstance(choices, list) and choices:
                 message = choices[0].get("message") if isinstance(choices[0], dict) else {}
                 if isinstance(message, dict):
                     preview = _safe_text(message.get("content"))
+            error_preview = "" if 200 <= status_code < 300 else _model_smoke_error_preview(data, response_text)
             request_path = "/chat/completions"
         latency_ms = int((time.time() - started) * 1000)
+        ok = 200 <= status_code < 300
+        diagnosis = "" if ok else _model_smoke_diagnosis(provider, model, protocol, status_code)
         return {
-            "ok": 200 <= status_code < 300,
+            "ok": ok,
             "status_code": status_code,
             "provider_id": provider.get("id"),
             "model": model,
             "protocol": protocol,
             "latency_ms": latency_ms,
-            "response_preview": preview[:500],
+            "response_preview": (preview or error_preview)[:500],
+            "error": "" if ok else error_preview,
+            "diagnosis": diagnosis,
             "cache_transport_evidence": {
                 "schema": "cache_transport_evidence.v1",
                 "provider_id": provider.get("id"),
@@ -2727,1300 +6376,3 @@ def run_model_smoke(
         }
     except Exception as exc:
         return {"ok": False, "provider_id": provider.get("id"), "model": model, "protocol": protocol, "error": str(exc), "trace": traceback.format_exc(limit=3)}
-
-
-_HTML_PAGE = r"""<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MMS 配置中心</title>
-  <style>
-    :root {
-      --bg:      oklch(97% 0.004 250);
-      --surface: oklch(100% 0 0);
-      --fg:      oklch(16% 0.015 250);
-      --muted:   oklch(50% 0.015 250);
-      --border:  oklch(88% 0.008 250);
-      --accent:  oklch(54% 0.16 155);
-
-      --ok:      oklch(55% 0.14 145);
-      --warn:    oklch(68% 0.11 80);
-      --danger:  oklch(55% 0.18 25);
-
-      --accent-soft:  color-mix(in oklch, var(--accent) 10%, transparent);
-      --accent-hover: color-mix(in oklch, var(--accent) 80%, black);
-      --fg-soft:      color-mix(in oklch, var(--fg) 5%, transparent);
-      --fg-ghost:     color-mix(in oklch, var(--fg) 8%, transparent);
-      --ok-soft:      color-mix(in oklch, var(--ok) 12%, transparent);
-      --warn-soft:    color-mix(in oklch, var(--warn) 12%, transparent);
-      --danger-soft:  color-mix(in oklch, var(--danger) 12%, transparent);
-
-      --shadow-sm: 0 1px 2px oklch(0% 0 0 / 0.04);
-      --shadow:    0 1px 3px oklch(0% 0 0 / 0.06), 0 1px 2px oklch(0% 0 0 / 0.04);
-      --shadow-md: 0 4px 6px -1px oklch(0% 0 0 / 0.05), 0 2px 4px -2px oklch(0% 0 0 / 0.04);
-      --shadow-lg: 0 10px 15px -3px oklch(0% 0 0 / 0.05), 0 4px 6px -4px oklch(0% 0 0 / 0.03);
-
-      --font-body: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
-      --font-mono: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, Menlo, monospace;
-
-      --radius:    10px;
-      --radius-lg: 14px;
-      --radius-xl: 18px;
-
-      --gap-xs: 6px;
-      --gap-sm: 10px;
-      --gap-md: 16px;
-      --gap-lg: 24px;
-      --gap-xl: 32px;
-    }
-
-    *, *::before, *::after { box-sizing: border-box; }
-    html { -webkit-text-size-adjust: 100%; }
-    body {
-      margin: 0;
-      background: var(--bg);
-      color: var(--fg);
-      font-family: var(--font-body);
-      font-size: 14px;
-      line-height: 1.55;
-      text-rendering: optimizeLegibility;
-      -webkit-font-smoothing: antialiased;
-      min-height: 100vh;
-    }
-    img, svg { display: block; max-width: 100%; }
-    a { color: inherit; text-decoration: none; }
-    button { font: inherit; cursor: pointer; }
-    p { text-wrap: pretty; margin: 0; }
-    h1, h2, h3, h4 { text-wrap: balance; margin: 0; }
-    pre { margin: 0; }
-
-    /* ===== Header ===== */
-    header {
-      padding: 24px clamp(18px, 4vw, 56px) 16px;
-      display: grid;
-      grid-template-columns: 1.5fr .5fr;
-      gap: 20px;
-      align-items: end;
-      border-bottom: 1px solid var(--border);
-      background: var(--surface);
-    }
-    h1 {
-      font-size: clamp(26px, 3.5vw, 42px);
-      line-height: 1.15;
-      letter-spacing: -0.025em;
-      font-weight: 700;
-      color: var(--fg);
-    }
-    .lead {
-      color: var(--muted);
-      font-size: 14px;
-      line-height: 1.6;
-      max-width: 560px;
-      margin-top: 6px;
-    }
-    .statusbar {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      justify-content: flex-end;
-    }
-
-    /* ===== Shell layout ===== */
-    .shell {
-      display: grid;
-      grid-template-columns: 260px 1fr;
-      gap: 28px;
-      padding: 24px clamp(18px, 4vw, 56px) 48px;
-      max-width: 1440px;
-      margin: 0 auto;
-    }
-    .side {
-      position: sticky;
-      top: 20px;
-      align-self: start;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-lg);
-      padding: 10px;
-      box-shadow: var(--shadow-sm);
-    }
-    .content {
-      display: grid;
-      gap: 24px;
-    }
-
-    /* ===== Sidebar nav ===== */
-    .navbtn {
-      width: 100%;
-      border: 0;
-      background: transparent;
-      text-align: left;
-      border-radius: var(--radius);
-      padding: 10px 12px;
-      margin: 3px 0;
-      cursor: pointer;
-      color: var(--fg);
-      font-size: 14px;
-      font-weight: 500;
-      transition: all .15s ease;
-      display: flex;
-      flex-direction: column;
-      gap: 1px;
-    }
-    .navbtn:hover {
-      background: var(--fg-soft);
-    }
-    .navbtn.active {
-      background: var(--accent);
-      color: #fff;
-      box-shadow: var(--shadow-sm);
-    }
-    .navbtn small {
-      display: block;
-      font-size: 11.5px;
-      font-weight: 400;
-      color: var(--muted);
-      margin-top: 1px;
-    }
-    .navbtn.active small { color: rgba(255,255,255,0.82); }
-
-    /* ===== Panels ===== */
-    .panel {
-      border: 1px solid var(--border);
-      border-radius: var(--radius-lg);
-      background: var(--surface);
-      padding: 28px;
-      box-shadow: var(--shadow-sm);
-      transition: box-shadow .2s ease;
-    }
-    .panel:hover {
-      box-shadow: var(--shadow);
-    }
-    .panel h2 {
-      font-size: 18px;
-      font-weight: 700;
-      margin-bottom: 4px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .panel > p:first-of-type {
-      color: var(--muted);
-      font-size: 13.5px;
-      line-height: 1.6;
-      margin-bottom: 22px;
-    }
-    .panel h3 {
-      font-size: 15px;
-      font-weight: 600;
-      margin-bottom: 12px;
-      color: var(--fg);
-    }
-
-    /* ===== Cards ===== */
-    .card {
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      background: var(--bg);
-      padding: 18px;
-      transition: border-color .15s ease, box-shadow .15s ease;
-    }
-    .card:hover {
-      border-color: color-mix(in oklch, var(--accent) 20%, var(--border));
-    }
-
-    /* ===== Grid system ===== */
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(12, 1fr);
-      gap: 14px;
-    }
-    .span4 { grid-column: span 4; }
-    .span5 { grid-column: span 5; }
-    .span6 { grid-column: span 6; }
-    .span7 { grid-column: span 7; }
-    .span8 { grid-column: span 8; }
-    .span12 { grid-column: span 12; }
-
-    /* ===== Forms ===== */
-    label {
-      display: block;
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--muted);
-      margin: 0 0 6px;
-      letter-spacing: 0.01em;
-    }
-    input, select, textarea {
-      width: 100%;
-      border: 1.5px solid var(--border);
-      background: var(--surface);
-      border-radius: var(--radius);
-      padding: 10px 12px;
-      font: inherit;
-      font-size: 14px;
-      color: var(--fg);
-      transition: border-color .15s ease, box-shadow .15s ease, outline .15s ease;
-    }
-    input:hover, select:hover, textarea:hover {
-      border-color: color-mix(in oklch, var(--fg) 25%, var(--border));
-    }
-    input:focus, select:focus, textarea:focus {
-      outline: none;
-      border-color: var(--accent);
-      box-shadow: 0 0 0 3px var(--accent-soft);
-    }
-    textarea {
-      min-height: 88px;
-      resize: vertical;
-      font-family: var(--font-mono);
-      font-size: 13px;
-      line-height: 1.55;
-    }
-    select { cursor: pointer; }
-    input[type="password"] { font-family: var(--font-mono); }
-
-    /* ===== Checkbox groups ===== */
-    .checks {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
-    .check {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      border: 1.5px solid var(--border);
-      border-radius: 999px;
-      padding: 7px 13px;
-      background: var(--surface);
-      font-size: 13px;
-      cursor: pointer;
-      transition: border-color .15s ease, background .15s ease;
-      user-select: none;
-    }
-    .check:hover {
-      border-color: color-mix(in oklch, var(--accent) 30%, var(--border));
-      background: var(--accent-soft);
-    }
-    .check input {
-      width: auto;
-      cursor: pointer;
-      accent-color: var(--accent);
-      margin: 0;
-    }
-
-    /* ===== Buttons ===== */
-    button, .button {
-      border: 0;
-      border-radius: 999px;
-      padding: 9px 17px;
-      background: var(--accent);
-      color: #fff;
-      font-weight: 600;
-      cursor: pointer;
-      text-decoration: none;
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 14px;
-      transition: background .15s ease, transform .06s ease, box-shadow .15s ease;
-      box-shadow: var(--shadow-sm);
-    }
-    button:hover, .button:hover {
-      background: var(--accent-hover);
-      box-shadow: var(--shadow);
-    }
-    button:active, .button:active { transform: translateY(1px); }
-    button.secondary, .button.secondary {
-      background: var(--fg-ghost);
-      color: var(--fg);
-      box-shadow: none;
-    }
-    button.secondary:hover, .button.secondary:hover {
-      background: var(--fg-soft);
-    }
-    button.ghost, .button.ghost {
-      background: transparent;
-      color: var(--fg);
-      border: 1.5px solid var(--border);
-      box-shadow: none;
-    }
-    button.ghost:hover, .button.ghost:hover {
-      border-color: var(--fg);
-      background: var(--fg-soft);
-    }
-    button.danger, .button.danger { background: var(--danger); }
-    button.danger:hover, .button.danger:hover {
-      background: color-mix(in oklch, var(--danger) 82%, black);
-    }
-    button:disabled, .button:disabled { opacity: .45; cursor: not-allowed; }
-
-    .btns {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      margin-top: 12px;
-      align-items: center;
-    }
-
-    /* ===== Provider list ===== */
-    .provider-list { display: grid; gap: 6px; }
-    .provider-item {
-      border: 1.5px solid var(--border);
-      border-radius: var(--radius);
-      padding: 12px 14px;
-      background: var(--surface);
-      cursor: pointer;
-      font-size: 13px;
-      transition: all .15s ease;
-    }
-    .provider-item:hover {
-      border-color: color-mix(in oklch, var(--accent) 30%, var(--border));
-      box-shadow: var(--shadow-sm);
-    }
-    .provider-item.active {
-      outline: none;
-      border-color: var(--accent);
-      background: var(--accent-soft);
-      box-shadow: 0 0 0 1px var(--accent);
-    }
-    .provider-item strong {
-      display: block;
-      font-size: 14px;
-      font-weight: 600;
-      margin-bottom: 2px;
-    }
-
-    /* ===== Channel layout: sidebar + main ===== */
-    .channel-layout {
-      display: grid;
-      grid-template-columns: 260px 1fr;
-      gap: 20px;
-      align-items: start;
-    }
-    .channel-sidebar {
-      position: sticky;
-      top: 20px;
-      max-height: calc(100vh - 120px);
-      overflow: auto;
-      scrollbar-gutter: stable;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-    .channel-sidebar .btns {
-      margin-top: 4px;
-      flex-shrink: 0;
-    }
-    .channel-main {
-      display: flex;
-      flex-direction: column;
-      gap: 24px;
-      min-width: 0;
-    }
-    .channel-main .provider-editor {
-      position: static;
-      max-height: none;
-      overflow: visible;
-      align-self: stretch;
-    }
-
-    /* ===== Provider tabs ===== */
-    .provider-tabs {
-      display: flex;
-      gap: 2px;
-      border-bottom: 1.5px solid var(--border);
-      margin-bottom: 4px;
-      padding: 0 2px;
-    }
-    .tab-btn {
-      background: transparent;
-      border: 0;
-      border-bottom: 2.5px solid transparent;
-      padding: 10px 16px;
-      font-size: 14px;
-      font-weight: 500;
-      color: var(--muted);
-      cursor: pointer;
-      transition: all .15s ease;
-      border-radius: var(--radius) var(--radius) 0 0;
-      box-shadow: none;
-      margin-bottom: -1.5px;
-    }
-    .tab-btn:hover {
-      color: var(--fg);
-      background: var(--fg-soft);
-    }
-    .tab-btn.active {
-      color: var(--accent);
-      border-bottom-color: var(--accent);
-      background: var(--accent-soft);
-    }
-    .tab-panel {
-      display: none;
-      animation: fadeIn .2s ease both;
-    }
-    .tab-panel.active {
-      display: block;
-    }
-
-    .model-section {
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-    }
-    .model-section h3 {
-      font-size: 18px;
-      font-weight: 700;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .model-section > p {
-      color: var(--muted);
-      font-size: 13.5px;
-      line-height: 1.6;
-    }
-
-    /* ===== Pills ===== */
-    .pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      border: 1px solid var(--border);
-      border-radius: 999px;
-      padding: 5px 11px;
-      background: var(--surface);
-      font-size: 12px;
-      color: var(--muted);
-      box-shadow: var(--shadow-sm);
-    }
-    .pill.ok {
-      color: var(--ok);
-      border-color: var(--ok-soft);
-      background: var(--ok-soft);
-    }
-    .pill.warn {
-      color: var(--warn);
-      border-color: var(--warn-soft);
-      background: var(--warn-soft);
-    }
-
-    /* ===== Tags ===== */
-    .tag {
-      display: inline-block;
-      border-radius: 999px;
-      background: var(--accent-soft);
-      color: var(--accent);
-      padding: 3px 9px;
-      font-size: 11px;
-      font-weight: 600;
-      margin: 2px;
-      letter-spacing: 0.01em;
-    }
-    .tag.off {
-      background: var(--fg-soft);
-      color: var(--muted);
-      font-weight: 500;
-    }
-
-    /* ===== Tables ===== */
-    .table-wrap {
-      overflow: auto;
-      border: 1.5px solid var(--border);
-      border-radius: var(--radius);
-      background: var(--surface);
-      box-shadow: var(--shadow-sm);
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      min-width: 860px;
-      font-size: 13px;
-    }
-    th, td {
-      padding: 10px 12px;
-      text-align: left;
-      border-bottom: 1px solid var(--border);
-    }
-    th {
-      position: sticky;
-      top: 0;
-      background: var(--bg);
-      z-index: 1;
-      font-weight: 600;
-      font-size: 11px;
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-    }
-    td input[type="checkbox"] {
-      width: auto;
-      cursor: pointer;
-      accent-color: var(--accent);
-    }
-    tbody tr {
-      transition: background .1s ease;
-    }
-    tbody tr:hover {
-      background: var(--fg-soft);
-    }
-
-    /* ===== Chips ===== */
-    .chips {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-    }
-    .chip {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      border: 1.5px solid var(--border);
-      border-radius: 999px;
-      padding: 5px 11px;
-      background: var(--surface);
-      font-size: 12px;
-      transition: border-color .15s ease;
-    }
-    .chip:hover {
-      border-color: color-mix(in oklch, var(--accent) 25%, var(--border));
-    }
-    .chip button {
-      padding: 0 4px;
-      background: transparent;
-      color: var(--muted);
-      border: 0;
-      cursor: pointer;
-      font-size: 15px;
-      line-height: 1;
-      border-radius: 4px;
-      box-shadow: none;
-    }
-    .chip button:hover { color: var(--danger); }
-
-    /* ===== Result / Diff blocks ===== */
-    .result, .diff {
-      white-space: pre-wrap;
-      font-family: var(--font-mono);
-      font-size: 12px;
-      line-height: 1.6;
-      background: var(--bg);
-      border: 1.5px solid var(--border);
-      border-radius: var(--radius);
-      padding: 18px;
-      max-height: 420px;
-      overflow: auto;
-      color: var(--fg);
-      box-shadow: inset var(--shadow-sm);
-    }
-    .diff { max-height: 320px; }
-
-    /* ===== OpenCode metrics ===== */
-    .oc-summary {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 12px;
-      margin-top: 14px;
-    }
-    .oc-metric {
-      border: 1.5px solid var(--border);
-      border-radius: var(--radius);
-      background: var(--surface);
-      padding: 16px;
-      text-align: center;
-      transition: border-color .15s ease, box-shadow .15s ease;
-    }
-    .oc-metric:hover {
-      border-color: color-mix(in oklch, var(--accent) 20%, var(--border));
-      box-shadow: var(--shadow-sm);
-    }
-    .oc-metric strong {
-      display: block;
-      font-size: 22px;
-      color: var(--fg);
-      margin: 6px 0;
-      font-weight: 700;
-      font-variant-numeric: tabular-nums;
-    }
-    .oc-metric .muted { font-size: 11px; }
-    .oc-metric .mono {
-      font-size: 11px;
-      color: var(--muted);
-    }
-
-    .oc-advanced {
-      border: 1.5px dashed var(--border);
-      border-radius: var(--radius);
-      padding: 18px;
-      background: var(--bg);
-      transition: border-color .15s ease;
-    }
-    .oc-advanced:hover {
-      border-color: color-mix(in oklch, var(--accent) 25%, var(--border));
-    }
-    .oc-advanced summary {
-      cursor: pointer;
-      font-weight: 600;
-      color: var(--fg);
-      font-size: 14px;
-      user-select: none;
-    }
-    .oc-advanced summary::marker { color: var(--muted); }
-
-    .oc-order-note {
-      border-left: 3px solid var(--accent);
-      background: var(--accent-soft);
-      border-radius: 0 var(--radius) var(--radius) 0;
-      padding: 12px 16px;
-      margin: 14px 0;
-      color: var(--fg);
-      font-size: 13px;
-      line-height: 1.6;
-    }
-    .oc-enabled {
-      width: auto;
-      cursor: pointer;
-      accent-color: var(--accent);
-    }
-
-    /* ===== Filter bar ===== */
-    .filterbar {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-      flex-wrap: wrap;
-      margin: 14px 0;
-    }
-    .filterbar button {
-      background: var(--fg-ghost);
-      color: var(--fg);
-      box-shadow: none;
-      font-size: 13px;
-      padding: 7px 13px;
-    }
-    .filterbar button.active {
-      background: var(--accent);
-      color: #fff;
-      box-shadow: var(--shadow-sm);
-    }
-
-    /* ===== Empty / default helpers ===== */
-    .empty-row {
-      padding: 22px;
-      color: var(--muted);
-      text-align: center;
-      font-size: 14px;
-    }
-    .default-route {
-      max-width: 300px;
-      white-space: normal;
-      font-size: 12px;
-      color: var(--muted);
-    }
-
-    /* ===== Toast ===== */
-    .toast {
-      position: fixed;
-      bottom: 28px;
-      right: 28px;
-      padding: 14px 22px;
-      background: var(--fg);
-      color: var(--surface);
-      border-radius: var(--radius-lg);
-      opacity: 0;
-      transform: translateY(16px) scale(0.96);
-      transition: opacity .35s cubic-bezier(.4,0,.2,1), transform .35s cubic-bezier(.4,0,.2,1);
-      pointer-events: none;
-      z-index: 100;
-      font-size: 14px;
-      font-weight: 500;
-      box-shadow: var(--shadow-lg);
-      max-width: 400px;
-      word-break: break-word;
-    }
-    .toast.show {
-      opacity: 1;
-      transform: translateY(0) scale(1);
-    }
-
-    /* ===== Utilities ===== */
-    .muted {
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.5;
-    }
-    .mono {
-      font-family: var(--font-mono);
-      font-size: 12px;
-      font-variant-numeric: tabular-nums;
-    }
-    .hide { display: none !important; }
-
-    /* ===== Section entrance animation ===== */
-    [data-section] {
-      animation: fadeIn .25s ease both;
-    }
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(8px); }
-      to   { opacity: 1; transform: translateY(0); }
-    }
-
-    /* ===== Responsive ===== */
-    @media (max-width: 980px) {
-      header { grid-template-columns: 1fr; }
-      .statusbar { justify-content: flex-start; }
-      .shell { grid-template-columns: 1fr; padding: 16px; }
-      .side, .provider-editor {
-        position: relative;
-        top: auto;
-        max-height: none;
-        overflow: visible;
-      }
-      .channel-layout { grid-template-columns: 1fr; }
-      .channel-sidebar {
-        position: relative;
-        top: auto;
-        max-height: none;
-        overflow: visible;
-      }
-      .span4, .span5, .span6, .span7, .span8, .span12 { grid-column: span 12; }
-      .oc-summary { grid-template-columns: 1fr 1fr; }
-      .panel { padding: 20px; }
-    }
-  </style>
-</head>
-<body>
-<header>
-  <div>
-    <h1>MMS 配置中心</h1>
-    <p class="lead">不是展示页：这里可以配置通道、拉取模型、隐藏/补充模型、标记能力、测试模型、设置 fallback。保存前先预览；stable legacy 走 backup + audit，preview root 走 DB candidate + latest-approved publish。</p>
-  </div>
-  <div class="statusbar" id="statusbar"><span class="pill warn">加载中</span></div>
-</header>
-<div class="shell">
-  <aside class="side" id="nav"></aside>
-  <main class="content">
-    <section class="panel" data-section="source">
-      <h2>真源状态</h2>
-      <p>只读汇总当前 config root、registry DB、legacy import 冲突和 latest-approved bundle 校验状态。</p>
-      <div class="grid" id="sourceStatus"></div>
-    </section>
-
-
-    <!-- 通道配置 -->
-    <section class="panel" data-section="channel">
-      <h2>通道配置</h2>
-      <p>先建通道：内部 ID、显示名、OpenAI/Anthropic URL、API Key、协议和模型列表接口。Key 只会通过 POST 发送，不会回显。</p>
-      <div class="channel-layout">
-        <div class="channel-sidebar">
-          <div class="provider-list" id="providerList"></div>
-          <div class="btns">
-            <button id="addProvider" class="secondary">+ 添加通道</button>
-            <button id="duplicateProvider" class="ghost">复制当前</button>
-          </div>
-        </div>
-        <div class="channel-main">
-          <div class="provider-tabs">
-            <button class="tab-btn active" data-tab="config" onclick="switchProviderTab('config')">通道配置</button>
-            <button class="tab-btn" data-tab="models" onclick="switchProviderTab('models')">模型配置</button>
-          </div>
-          <div class="tab-panel active" data-tab-panel="config">
-            <div class="card provider-editor" id="providerForm"></div>
-          </div>
-          <div class="tab-panel" data-tab-panel="models">
-            <div class="model-section">
-              <p class="muted">这是当前通道的模型清单，不是全局模型池。手动补充会写入当前通道的 extra_models；取消勾选「显示」会写入当前通道的 hidden_models。</p>
-              <div class="card">
-                <div class="btns">
-                  <button id="fetchModels">拉取当前通道模型</button>
-                  <button id="testList" class="secondary">测试 /models</button>
-                  <label class="check"><input id="autoStaleCleanupOnFetch" type="checkbox"><span>拉取后自动标记缺失旧 route 为待清理（本页临时）</span></label>
-                  <input id="modelSearch" placeholder="搜索模型" style="max-width:260px">
-                </div>
-                <label style="margin-top:14px">手动补充当前通道模型（extra_models，逗号或换行分隔）</label>
-                <textarea id="manualModels" placeholder="例如：gpt-5.5, qwen3.6-plus, K2.6"></textarea>
-                <div class="btns">
-                  <button id="addManualModels" class="secondary">添加到补充模型库</button>
-                  <button id="clearHidden" class="ghost">取消当前通道全部隐藏</button>
-                  <button id="clearAllStaleHidden" class="ghost">移除全部通道未匹配隐藏规则</button>
-                </div>
-              </div>
-              <div id="modelChips" class="card"></div>
-              <div class="card" id="staleHiddenBox"></div>
-              <div class="table-wrap"><table id="modelTable"></table></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- 模型测试 -->
-    <section class="panel" data-section="test">
-      <h2>模型测试</h2>
-      <p>支持模型列表 smoke、指定模型 ping/pong 和简单 chat。结果会显示脱敏 request_url/request_path evidence。</p>
-      <div class="grid">
-        <div class="card span5">
-          <label>测试通道</label><select id="testProvider"></select>
-          <label>测试模型</label><select id="testModel"></select>
-          <label>协议</label>
-          <select id="testProtocol">
-            <option value="auto">auto</option>
-            <option value="anthropic_messages">anthropic_messages</option>
-            <option value="openai_chat_completions">openai_chat_completions</option>
-          </select>
-          <label>Prompt</label>
-          <textarea id="testPrompt">只回复 pong</textarea>
-          <div class="btns">
-            <button id="testModelBtn">Ping 模型</button>
-            <button id="chatTestBtn" class="secondary">Simple chat</button>
-          </div>
-        </div>
-        <div class="card span7">
-          <div class="result" id="testResult">暂无测试结果</div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Fallback -->
-    <section class="panel" data-section="fallback">
-      <h2>Fallback 设置</h2>
-      <p>stable legacy 保存写入 config.toml 的 [rescue] / [vision_sidecar]；preview root 保存为 DB candidate 并随 latest-approved bundle 发布。</p>
-      <div class="grid">
-        <div class="card span6">
-          <h3>Rescue fallback</h3>
-          <label>fallback_model</label>
-          <input id="rescueModel" placeholder="deepseek-v4-flash">
-          <label>fallback_cli</label>
-          <select id="rescueCli">
-            <option value="">不指定</option>
-            <option>codex</option>
-            <option>claude</option>
-            <option>opencode</option>
-            <option>agy</option>
-          </select>
-          <div class="check" style="margin-top:10px">
-            <input id="rescueHot" type="checkbox"><span>开启 hot_fallback_enabled</span>
-          </div>
-        </div>
-        <div class="card span6">
-          <h3>Vision sidecar</h3>
-          <div class="check">
-            <input id="visionEnabled" type="checkbox"><span>启用 vision sidecar</span>
-          </div>
-          <label>provider_id</label>
-          <select id="visionProvider"></select>
-          <label>model</label>
-          <select id="visionModel"></select>
-          <p class="muted">模型下拉优先显示当前通道中标记为 vision/multimodal 的模型；当前值不在列表时会保留为「当前配置值」。</p>
-          <label>候选列表</label>
-          <div id="visionCandidates" class="grid"></div>
-          <div class="btns">
-            <button id="addVisionCandidate" class="secondary">+ 添加 vision 候选</button>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- 运行默认值 -->
-    <section class="panel" data-section="runtime">
-      <h2>运行默认值</h2>
-      <p>Preferred CLI 会写入 presets.coding.cli；OpenCode profile 和 agent roster 会写入 [opencode]，launcher 会生成 session-local opencode.json；不会写全局 OpenCode 配置。</p>
-      <div class="grid">
-        <div class="card span5">
-          <label>preferred CLI</label>
-          <select id="preferredCli">
-            <option>opencode</option>
-            <option>codex</option>
-            <option>claude</option>
-            <option>agy</option>
-          </select>
-          <label>coding preset model（可选）</label>
-          <input id="codingModel" placeholder="gpt-5.5">
-        </div>
-        <div class="card span7">
-          <label>OpenCode default profile</label>
-          <select id="opencodeProfile">
-            <option>agent</option>
-            <option>omo</option>
-            <option>raw</option>
-          </select>
-          <p class="muted">推荐：5.5 总控/终审，5.4 长跑 executor，国产模型用于 explore / bug-hunt / vision。逐 agent 固定模型放在 Advanced，不作为默认必填项。</p>
-        </div>
-        <div class="card span12">
-          <h3>OpenCode Agent Roster</h3>
-          <p class="muted">默认使用 Lite Pro 自动路线；这里管理哪些 agent 进入 session-local opencode.json。Order 是 priority/fallback order, not round-robin。</p>
-          <div class="oc-summary" id="opencodeOverrideSummary"></div>
-          <div class="oc-order-note">
-            Lean 默认只开关键链路；Balanced 适合日常；Deep 再启用第二意见。国产模型适合 explore / bughunt / vision，不默认做最终裁决。
-          </div>
-          <details class="oc-advanced" id="opencodeAdvanced">
-            <summary>Advanced: OpenCode per-agent roster</summary>
-            <div class="filterbar" id="opencodeAgentFilters"></div>
-            <div class="table-wrap"><table id="opencodeAgents"></table></div>
-          </details>
-        </div>
-      </div>
-    </section>
-
-    <!-- 保存 / 审计 -->
-    <section class="panel" data-section="save">
-      <h2>保存 / 审计</h2>
-      <p id="saveModeLead">保存前先生成 diff。preview root 走 DB candidate + latest-approved publish；stable legacy 使用 audited writer：lock、backup、audit log。API Key 不会出现在 diff 或响应里。</p>
-      <div class="grid">
-        <div class="card span5">
-          <p class="muted" id="saveModeHint"></p>
-          <div class="btns">
-            <button id="previewPlan">生成保存预览</button>
-            <button id="applyV2Preview" class="secondary">写入预览 DB + 发布</button>
-            <button id="saveBtn" class="danger legacy-save-action">确认保存</button>
-          </div>
-          <details class="oc-advanced" id="advancedPlanTools" style="margin-top:14px">
-            <summary>Advanced / Recovery：plan JSON 与 CLI fallback</summary>
-            <p class="muted">WebUI plan JSON = “生成保存预览”的 redacted review artifact；下载 JSON 不含明文 key。CLI apply 是无 WebUI 时的 fallback，不是日常主流程。</p>
-            <div class="btns">
-              <button id="downloadPlanJson" class="ghost">下载 plan JSON</button>
-              <button id="copyApplyCommand" class="ghost">复制 CLI apply 命令</button>
-            </div>
-          </details>
-          <div class="check" style="margin-top:12px">
-            <input id="confirmSave" type="checkbox"><span>我已检查摘要、风险和 diff，同意执行所选写入</span>
-          </div>
-          <label id="confirmPhraseLabel" style="margin-top:12px">输入确认文字</label>
-          <input id="confirmPhrase" placeholder="保存配置 或 写入预览DB">
-          <label>保存原因 / audit reason</label>
-          <input id="saveReason" value="setup-web-ui:interactive-save">
-          <p class="muted" id="saveCompatibilityNote">stable legacy 走 backup + audit，preview root 走 DB candidate + latest-approved publish。</p>
-        </div>
-        <div class="card span7">
-          <div class="result" id="saveResult">尚未生成预览</div>
-        </div>
-        <div class="card span12">
-          <h3>保存摘要</h3>
-          <div id="reviewSummary">
-            <p class="muted">点击“生成保存预览”后，这里会先用人话列出 URL、隐藏模型、fallback、OpenCode 和风险变化。</p>
-          </div>
-        </div>
-        <div class="span12">
-          <h3 style="margin-bottom:8px">Raw diff / 审计详情</h3>
-          <div class="diff" id="diffBox">点击“生成保存预览”</div>
-        </div>
-      </div>
-    </section>
-
-    <!-- 本地参考 -->
-    <section class="panel" data-section="refs">
-      <h2>本地参考</h2>
-      <p>这些是当前配置页面使用的本地参考入口；联网查最新厂商文档应作为后续显式动作，不在保存时自动外连。</p>
-      <div class="grid" id="refsGrid"></div>
-    </section>
-  </main>
-</div>
-<div class="toast" id="toast"></div>
-<script>
-const sections=[
-  ['source','真源状态','DB / legacy / bundle'],
-  ['channel','通道配置','URL / Key / 协议 / 模型'],
-  ['test','模型测试','ping / chat smoke'],
-  ['fallback','Fallback','rescue / vision'],
-  ['runtime','运行默认值','preferred CLI / OpenCode'],
-  ['save','保存审计','diff / backup / audit'],
-  ['refs','本地参考','配置契约 / docs']
-];
-let state=null; let activeProvider=0; let activeProviderTab='config'; let lastPlan=null; let opencodeAgentFilter="all"; let opencodeOnlyOverridden=false; let editingExtraModels=false; let touchedProviders=new Set(); let staleCleanupProviders=new Set();
-const $=id=>document.getElementById(id);
-function toast(msg){const el=$('toast');el.textContent=msg;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),3600)}
-async function api(path,body){const res=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});const data=await res.json();if(!res.ok){data.ok=false;data.http_status=res.status;data.error=data.error||res.statusText}return data}
-function current(){return state.providers[activeProvider]}
-function touchProvider(id){if(id)touchedProviders.add(id)}
-function setSection(id){document.querySelectorAll('[data-section]').forEach(el=>el.classList.toggle('hide',el.dataset.section!==id));document.querySelectorAll('.navbtn').forEach(el=>el.classList.toggle('active',el.dataset.id===id))}
-function switchProviderTab(tab){activeProviderTab=tab;document.querySelectorAll('.provider-tabs .tab-btn').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));document.querySelectorAll('.tab-panel').forEach(p=>p.classList.toggle('active',p.dataset.tabPanel===tab))}
-function renderNav(){ $('nav').innerHTML=sections.map(([id,title,sub])=>`<button class="navbtn" data-id="${id}">${title}<small>${sub}</small></button>`).join(''); document.querySelectorAll('.navbtn').forEach(b=>b.onclick=()=>setSection(b.dataset.id)); setSection('source') }
-function renderStatus(){const providers=state.providers||[];const root=(state.model_source_status||{}).root||{};$('statusbar').innerHTML=`<span class="pill ok">${state.mode}</span><span class="pill">${escapeHtml(root.mode||'stable')}</span><span class="pill">通道 ${providers.length}</span><span class="pill">config: ${escapeHtml(state.paths.config||'-')}</span><span class="pill">policy: ${state.policy_summary.model_count} models</span>`}
-function escapeHtml(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
-function renderSaveControls(){const root=(state.model_source_status||{}).root||{};const preview=root.mode==='preview';const hasPlan=!!lastPlan;const modeName=preview?'MMF preview / DB truth':'MMS stable / legacy compatibility';if($('saveModeHint')){$('saveModeHint').innerHTML=preview?'当前是 <strong>mmf + ~/.config/mms-next</strong>：日常只需要“生成保存预览” → “写入预览 DB + 发布”。':'当前是 <strong>mms stable</strong>：使用 legacy audited save，仍会 backup + audit。'}if($('saveModeLead')){$('saveModeLead').textContent=preview?'保存前先生成 diff。写入只落到当前 preview root 的 DB candidate，并发布 latest-approved bundle；API Key 不会出现在 diff 或响应里。':'保存前先生成 diff。stable legacy 使用 audited writer：lock、backup、audit log；API Key 不会出现在 diff 或响应里。'}if($('confirmPhraseLabel')){$('confirmPhraseLabel').textContent=preview?'输入确认文字：写入预览DB':'输入确认文字：保存配置'}if($('confirmPhrase')){$('confirmPhrase').placeholder=preview?'写入预览DB':'保存配置'}if($('saveCompatibilityNote')){$('saveCompatibilityNote').textContent=preview?'旧版“确认保存”在 mmf 中已隐藏；下载 JSON / CLI apply 只在 Advanced / Recovery 里作为 fallback。':'stable legacy 保存写入 config.toml / credentials.sh / model-policy，并保留 backup + audit；preview DB 发布请用 mmf。'}document.querySelectorAll('.legacy-save-action').forEach(el=>el.classList.toggle('hide',preview));if($('saveBtn')){$('saveBtn').disabled=preview;$('saveBtn').title=preview?'MMF preview 已隐藏 legacy save，请使用写入预览 DB + 发布':''}if($('applyV2Preview')){$('applyV2Preview').classList.toggle('hide',!preview);$('applyV2Preview').disabled=!preview;$('applyV2Preview').title=preview?modeName:'Stable root 不能写 preview DB，请用 mmf preview root'}if($('advancedPlanTools')){$('advancedPlanTools').open=false}if($('downloadPlanJson')){$('downloadPlanJson').disabled=!hasPlan;$('downloadPlanJson').title=hasPlan?'下载 redacted plan JSON；不含明文 API Key':'请先生成保存预览'}if($('copyApplyCommand')){$('copyApplyCommand').disabled=!hasPlan;$('copyApplyCommand').title=hasPlan?'复制 mmf config apply-plan 命令':'请先生成保存预览'}}
-function renderSourceStatus(){
-  const box=$('sourceStatus');if(!box)return;
-  const status=state.model_source_status||{};
-  const consumer=state.consumer_bundle_status||{};
-  const promotion=state.config_v2_promotion_plan||{};
-  const readiness=state.config_v2_release_readiness||{};
-  const root=status.root||consumer.root||{};
-  const db=status.registry_db||{};
-  const legacy=status.legacy_import||{};
-  const candidates=legacy.candidates||db.legacy_import_candidates||{};
-  const bundle=status.generated_bundle||{};
-  const revisions=consumer.component_revisions||{};
-  const rules=consumer.consumer_rules||[];
-  const consumerFiles=consumer.files||{};
-  const counts=db.counts||{};
-  const safety=promotion.promotion_safety||{};
-  const backup=promotion.stable_backup_plan||{};
-  const compare=promotion.bundle_comparison||{};
-  const comparePreview=compare.preview||{};
-  const compareStable=compare.stable||{};
-  const readinessNext=readiness.next_action||{};
-  const readinessBlocked=Array.isArray(readiness.blocked_requirements)?readiness.blocked_requirements:[];
-  const readinessReqs=Array.isArray(readiness.requirements)?readiness.requirements:[];
-  const readinessOk=readiness.ready_for_human_gate?'ok':'warn';
-  const okBundle=bundle.verified?'ok':'warn';
-  const okConsumer=consumer.verified?'ok':'warn';
-  const okPromotion=promotion.ready_for_human_review?'ok':'warn';
-  const ready=bundle.runtime_ready===true?'ready':bundle.runtime_ready===false?'not ready':'unknown';
-  const bundleCommand=(root.command||state.command||'mms')==='mmf'?'mmf config bundle --json':'mms config bundle --json';
-  box.innerHTML=`<div class="card span6"><h3>Root</h3><p class="mono">${escapeHtml(root.config_root||status.config_root||consumer.config_root||'-')}</p><p class="muted">${escapeHtml(status.headline||'-')}</p><span class="tag ${status.ready?'':'off'}">${escapeHtml(status.status||'unknown')}</span><span class="tag">${escapeHtml(root.command||state.command||'-')}</span><span class="tag">${escapeHtml(root.mode||'-')}</span><span class="tag">${escapeHtml(root.root_source||'-')}</span></div><div class="card span6"><h3>Registry DB</h3><p class="mono">${escapeHtml(db.path||'-')}</p><span class="tag ${db.status==='ok'?'':'off'}">${escapeHtml(db.status||'missing')}</span><span class="tag">sources ${counts.source_snapshot||0}</span><span class="tag">facts ${counts.model_fact||0}</span><span class="tag">routes ${counts.provider_route||0}</span></div><div class="card span6"><h3>Legacy Import</h3><p class="muted">${escapeHtml(legacy.next_action||'-')}</p><span class="tag">providers ${legacy.provider_count||0}</span><span class="tag ${legacy.conflict_count?'off':''}">conflicts ${legacy.conflict_count||0}</span><span class="tag ${candidates.status==='imported'?'':'off'}">candidates ${escapeHtml(candidates.status||'not_imported')}</span><span class="tag">candidate routes ${candidates.provider_route_count||0}</span></div><div class="card span6"><h3>Latest Approved Bundle</h3><p class="mono">${escapeHtml(bundle.manifest_path||'-')}</p><span class="tag ${okBundle==='ok'?'':'off'}">${escapeHtml(bundle.status||'missing')}</span><span class="tag">verified ${bundle.verified?'yes':'no'}</span><span class="tag ${bundle.runtime_ready===true?'':'off'}">runtime ${ready}</span><span class="tag">missing keys ${bundle.router_missing_api_key_count||0}</span><span class="tag">files ${bundle.file_count||0}</span></div><div class="card span12"><h3>Consumer Bundle</h3><p class="mono">${escapeHtml(consumer.consumer_entrypoint||bundle.manifest_path||'-')}</p><p class="muted">${escapeHtml((rules.length?rules.join(' · '):'下游只读 latest-approved manifest；不读 SQLite；不混合不同 revision。'))}</p><span class="tag ${okConsumer==='ok'?'':'off'}">${escapeHtml(consumer.status||'missing')}</span><span class="tag">verified ${consumer.verified?'yes':'no'}</span><span class="tag">bundle ${escapeHtml(revisions.bundle||'-')}</span><span class="tag">route ${escapeHtml(revisions.route||'-')}</span><span class="tag">policy ${escapeHtml(revisions.policy||'-')}</span><span class="tag">profile ${escapeHtml(revisions.profile||'-')}</span><span class="tag">files ${Object.keys(consumerFiles).length}</span><p class="muted">CLI: <span class="mono">${escapeHtml(bundleCommand)}</span></p></div><div class="card span12"><h3>Promotion Plan / Human Gate</h3><p class="muted">stable backup + bundle comparison 是只读审查；apply 仍停在 human gate。</p><span class="tag ${okPromotion==='ok'?'':'off'}">${escapeHtml(promotion.status||'not_ready')}</span><span class="tag">review ${promotion.ready_for_human_review?'ready':'not ready'}</span><span class="tag">apply ${promotion.apply_enabled?'enabled':'disabled'}</span><span class="tag">stable ${escapeHtml(safety.stable_write_policy||'human_only')}</span><span class="tag">backup ${backup.requires_backup_before_apply?'required':'unknown'}</span><span class="tag">would backup ${backup.would_create_backup?'yes':'no'}</span><span class="tag">bundle comparison ${escapeHtml(compare.comparison_status||'-')}</span><p class="muted">preview ${escapeHtml(comparePreview.bundle_revision||comparePreview.status||'-')} → stable ${escapeHtml(compareStable.bundle_revision||compareStable.status||'-')}</p></div><div class="card span12"><h3>4.0 Release Readiness</h3><p class="muted">只读 audit：证明自动检查已到 stable promotion human gate；release_complete 仍为 false。</p><span class="tag ${readinessOk==='ok'?'':'off'}">${escapeHtml(readiness.result||'NOT_READY')}</span><span class="tag">status ${escapeHtml(readiness.status||'not_ready')}</span><span class="tag">release complete ${readiness.release_complete?'yes':'no'}</span><span class="tag">human gate ${readiness.ready_for_human_gate?'ready':'not ready'}</span><span class="tag">blocked ${readinessBlocked.length}</span><span class="tag">requirements ${readinessReqs.filter(r=>r&&r.ok).length}/${readinessReqs.length}</span><span class="tag">blocker ${escapeHtml(readiness.completion_blocker||'-')}</span><p class="muted">blocked requirements: ${escapeHtml(readinessBlocked.length?readinessBlocked.join(', '):'-')}</p><p class="muted">next: <span class="mono">${escapeHtml(readinessNext.command||readinessNext.label||'-')}</span></p></div><div class="card span12"><h3>Raw Status</h3><div class="result">${escapeHtml(JSON.stringify({model_source_status:status,consumer_bundle_status:consumer,config_v2_promotion_plan:promotion,config_v2_release_readiness:readiness},null,2))}</div></div>`
-}
-function providerEntries(){return (state.providers||[]).map((p,i)=>({p,i})).sort((a,b)=>{if(!!a.p.enabled!==!!b.p.enabled)return a.p.enabled?-1:1;return a.i-b.i})}
-function renderProviderList(){const list=$('providerList');list.innerHTML=providerEntries().map(({p,i})=>{const keyTag=p.api_key?'<span class="tag">pending key</span>':(p.has_api_key?'<span class="tag">key set</span>':'<span class="tag off">no key</span>');return `<div class="provider-item ${i===activeProvider?'active':''}" data-i="${i}"><strong>${escapeHtml(p.name||p.id)}</strong><span class="muted mono">${escapeHtml(p.id)}</span><br>${p.enabled?'<span class="tag">enabled</span>':'<span class="tag off">disabled</span>'}${keyTag}<span class="tag">${p.models?.length||0} models</span></div>`}).join('');document.querySelectorAll('.provider-item').forEach(el=>el.onclick=()=>{activeProvider=Number(el.dataset.i);renderAll()})}
-function renderProviders(){renderProviderList();renderProviderForm();renderTestSelectors();renderModelTable();}
-function checks(name,values,allowed){values=values||[];return `<div class="checks">${allowed.map(v=>`<label class="check"><input type="checkbox" name="${name}" value="${v}" ${values.includes(v)?'checked':''}><span>${v}</span></label>`).join('')}</div>`}
-function checkedValues(name){return [...document.querySelectorAll(`input[name="${name}"]:checked`)].map(x=>x.value)}
-function renderProviderForm(){const p=current(); if(!p){$('providerForm').innerHTML='<p>暂无通道</p>';return} const pendingKey=!!p.api_key;const keyPlaceholder=pendingKey?'已输入新 key，保存前会保留（不回显）':(p.has_api_key?'已保存；输入新 key 才会覆盖':'sk-...');$('providerForm').innerHTML=`<div class="grid"><div class="span6"><label>内部 ID</label><input id="pId" value="${escapeHtml(p.id)}"></div><div class="span6"><label>显示名</label><input id="pName" value="${escapeHtml(p.name)}"></div><div class="span4"><label>状态</label><select id="pEnabled"><option value="true" ${p.enabled?'selected':''}>启用</option><option value="false" ${!p.enabled?'selected':''}>禁用</option></select></div><div class="span4"><label>role</label><select id="pRole">${['primary','auto','fallback'].map(v=>`<option ${p.role===v?'selected':''}>${v}</option>`).join('')}</select></div><div class="span4"><label>priority</label><input id="pPriority" type="number" value="${escapeHtml(p.priority||100)}"></div><div class="span6"><label>OpenAI base URL</label><input id="pOpenAI" value="${escapeHtml(p.openai_base_url||'')}" placeholder="https://.../v1"></div><div class="span6"><label>Anthropic base URL</label><input id="pAnthropic" value="${escapeHtml(p.anthropic_base_url||'')}" placeholder="https://.../v1 或 /anthropic"></div><div class="span6"><label>API Key（留空不更新）</label><input id="pKey" type="password" placeholder="${escapeHtml(keyPlaceholder)}"></div><div class="span6"><label>models_endpoint</label><input id="pModelsEndpoint" value="${escapeHtml(p.models_endpoint||'/models')}" placeholder="/models 或 manual"></div><div class="span12"><label>protocols</label>${checks('pProtocols',p.protocols,['anthropic_messages','openai_chat_completions'])}</div><div class="span12"><label>supported CLIs</label>${checks('pClis',p.supported_clis,['claude','codex','opencode','pi','agy'])}</div><div class="span12 check"><input id="pUpdateCreds" type="checkbox" ${p.update_credentials?'checked':''}><span>保存时更新凭据（stable 写 credentials.sh；preview 写 secret backend；需要填写 API Key）</span></div><div class="span12 check"><input id="pDefault" type="checkbox" ${state.provider_default===p.id?'checked':''}><span>设为默认 provider</span></div></div><div class="btns"><button id="saveProviderForm">保存通道修改</button></div>`;bindProviderForm()}
-function bindProviderForm(){['pId','pName','pEnabled','pRole','pPriority','pOpenAI','pAnthropic','pModelsEndpoint'].forEach(id=>$(id).oninput=syncProvider);const keyEl=$('pKey');keyEl.oninput=()=>{keyEl.dataset.touched='1';syncProvider()};$('pUpdateCreds').onchange=syncProvider;$('pDefault').onchange=()=>{syncProvider(); if($('pDefault').checked) state.provider_default=current().id; renderProviders();};document.querySelectorAll('input[name="pProtocols"],input[name="pClis"]').forEach(x=>x.onchange=syncProvider);const save=$('saveProviderForm');if(save)save.onclick=()=>{syncProvider();setSection('save');toast('通道修改已暂存，生成保存预览后再写入')}}
-function syncProvider(){const p=current(); if(!p)return; const old=p.id;touchProvider(old);const keyEl=$('pKey');const updateEl=$('pUpdateCreds');p.id=$('pId').value.trim()||p.id;if(p.id!==old){touchedProviders.delete(old);touchProvider(p.id)}p.name=$('pName').value.trim()||p.id;p.enabled=$('pEnabled').value==='true';p.role=$('pRole').value;p.priority=Number($('pPriority').value||100);p.openai_base_url=$('pOpenAI').value.trim();p.anthropic_base_url=$('pAnthropic').value.trim();p.models_endpoint=$('pModelsEndpoint').value.trim()||'/models';p.protocols=checkedValues('pProtocols');p.supported_clis=checkedValues('pClis');const keyText=keyEl?keyEl.value.trim():'';const keyTouched=keyEl?.dataset?.touched==='1';if(keyText){p.api_key=keyText;p.pending_api_key=true;p.has_api_key=true;if(updateEl)updateEl.checked=true}else if(keyTouched){p.api_key='';p.pending_api_key=false}p.update_credentials=!!(updateEl&&updateEl.checked);if(state.provider_default===old)state.provider_default=p.id;renderProviderList();renderTestSelectors();}
-function derivedAliases(base,p){const ids=(base||[]).map(x=>String(x||''));const tails=ids.map(id=>id.toLowerCase().split('/').pop());const aliases=[];if(tails.some(id=>id.startsWith('claude-sonnet-4-')||id.startsWith('claude-sonnet-4.')))aliases.push('claude-sonnet-4-6');if(tails.some(id=>id.startsWith('claude-opus-4-')||id.startsWith('claude-opus-4.')))aliases.push('claude-opus-4-6');const ident=String([p?.id,p?.name,p?.label,p?.provider_profile].filter(Boolean).join(' ')).toLowerCase();const anthropic=String(p?.anthropic_base_url||p?.default_anthropic_base_url||'').toLowerCase();if((anthropic.includes('xiaomimimo.com')||ident.includes('mimo')||ident.includes('xiaomi'))&&!ident.includes('openrouter')){['mimo-v2.5-pro','mimo-v2.5'].forEach(id=>{if(ids.includes(id)&&!ids.includes(`${id}[1m]`))aliases.push(`${id}[1m]`)})}return aliases}
-function providerModels(p){p=p||{};const map=new Map();const hiddenLower=new Set((p.hidden_models||[]).map(x=>String(x||'').toLowerCase()));const baseRows=(p.models||[]).filter(r=>r&&r.id&&r.source!=='hidden');baseRows.forEach(r=>map.set(r.id,{...r,visible:r.visible!==false&&!hiddenLower.has(String(r.id).toLowerCase()),capabilities:{...(r.capabilities||{})}}));if(!baseRows.length){(p.fallback_models||[]).forEach(id=>{if(!map.has(id))map.set(id,{id,source:'fallback',visible:!hiddenLower.has(String(id).toLowerCase()),favorite:false,capabilities:defaultCaps(id)})})}const baseIds=[...map.keys()];derivedAliases(baseIds.filter(id=>!hiddenLower.has(String(id).toLowerCase())),p).forEach(id=>{if(!map.has(id))map.set(id,{id,source:'derived_alias',visible:!hiddenLower.has(String(id).toLowerCase()),favorite:false,capabilities:defaultCaps(id)})});(p.extra_models||[]).forEach(id=>{if(!map.has(id))map.set(id,{id,source:'extra',visible:!hiddenLower.has(String(id).toLowerCase()),favorite:false,capabilities:defaultCaps(id)})});(p.hidden_models||[]).forEach(id=>{[...map.keys()].forEach(key=>{if(String(key).toLowerCase()===String(id).toLowerCase())map.get(key).visible=false})});return [...map.values()].sort((a,b)=>a.id.localeCompare(b.id))}
-function defaultCaps(id){const l=String(id||'').toLowerCase();return {text:true,vision:['mimo-v2.5','mimo-v2-omni','k2.6','k2.6-code-preview','kimi-k2.5','qwen3.6-plus','qwen3.6-flash','qwen3.5-plus'].includes(l)||l.startsWith('claude-')||l.startsWith('gemini-'),tool_use:/^(claude|gpt|o|qwen|kimi|glm|minimax|gemini)/.test(l),reasoning:/gpt-5|qwen3|kimi-k2|glm-5|deepseek|claude/.test(l),long_context:/1m|long|qwen3|kimi-k2|gpt-5|claude/.test(l),cache_sensitive:/^(qwen|kimi|k2\.|glm|deepseek|minimax|mimo)/.test(l)}}
-function providerCurrentIds(p){return new Set(providerModels(p).map(r=>r.id))}
-function staleHiddenModels(p){const ids=providerCurrentIds(p);return [...new Set([...(p.stale_hidden_models||[]),...(p.hidden_models||[]).filter(id=>!ids.has(id))])]}
-function cleanupStaleHidden(p){const stale=staleHiddenModels(p);const doomed=new Set(stale);p.hidden_models=(p.hidden_models||[]).filter(x=>!doomed.has(x));p.stale_hidden_models=[];return stale.length}
-function cleanupAllStaleHidden(){let total=0;(state.providers||[]).forEach(p=>{total+=cleanupStaleHidden(p)});renderProviders();toast(total?`已移除 ${total} 条未匹配隐藏规则`:'没有需要移除的未匹配隐藏规则')}
-function staleRouteModels(p){const approved=(p.approved_route_models&&p.approved_route_models.length?p.approved_route_models:(p.fallback_models||[]));const remote=new Set((p.models||[]).filter(r=>r&&r.id).map(r=>String(r.id)));const extras=new Set((p.extra_models||[]).map(x=>String(x)));return [...new Set(approved.filter(id=>id&&!remote.has(String(id))&&!extras.has(String(id))))]}
-function renderStaleRouteBox(p){const box=$('staleRouteBox');if(!box)return;const stale=staleRouteModels(p);if(!stale.length){box.innerHTML='<strong>缺失旧 route</strong><p class="muted">当前没有“本地已批准但本次拉取未返回”的旧 route。</p>';return}const armed=staleCleanupProviders.has(p.id);box.innerHTML=`<strong>缺失旧 route（默认保留）</strong><p class="muted">这些模型在本地已批准 routes 里，但不在当前拉取到的模型列表里。默认不会删除；如果勾选“拉取后自动标记”，本页后续拉取会自动标记清理。避免上游 /models 抖动或 New API 临时关闭导致下游模型被清空。</p><div class="chips">${stale.slice(0,24).map(m=>`<span class="chip">${escapeHtml(m)}</span>`).join('')}${stale.length>24?`<span class="chip">+${stale.length-24}</span>`:''}</div><div class="btns"><button id="armStaleRouteCleanup" class="ghost">${armed?'已标记：保存时清理这些旧 route':'显式标记保存时清理这些旧 route'}</button></div>`;$('armStaleRouteCleanup').onclick=()=>{staleCleanupProviders.add(p.id);touchProvider(p.id);renderStaleRouteBox(p);toast(`已标记 ${p.id}：下次写入预览 DB 会清理 ${stale.length} 条缺失旧 route`)}}
-function visibleModelsForProvider(providerId,{visionFirst=false,includeHidden=false,enabledOnly=false}={}){let rows=[];(state.providers||[]).forEach(p=>{if(providerId&&p.id!==providerId)return;if(enabledOnly&&p.enabled===false)return;providerModels(p).forEach(r=>{if(!includeHidden&&r.visible===false)return;rows.push({...r,provider_id:p.id,provider_name:p.name||p.id,capabilities:{...(r.capabilities||defaultCaps(r.id))}})})});const seen=new Set();rows=rows.filter(r=>{const key=(providerId?'':r.provider_id+'::')+r.id;if(seen.has(key))return false;seen.add(key);return true});rows.sort((a,b)=>{const av=!!(a.capabilities||{}).vision,bv=!!(b.capabilities||{}).vision;if(visionFirst&&av!==bv)return av?-1:1;return (a.provider_id+' '+a.id).localeCompare(b.provider_id+' '+b.id)});return rows}
-function providerOptions(selected,{blankLabel='请选择通道',auto=false,enabledOnly=false}={}){const opts=[];const providers=providerEntries().filter(({p})=>!enabledOnly||p.enabled||p.id===selected);if(auto)opts.push(`<option value="" ${!selected?'selected':''}>自动选择 provider</option>`);else opts.push(`<option value="" ${!selected?'selected':''}>${escapeHtml(blankLabel)}</option>`);opts.push(...providers.map(({p})=>{const disabled=p.enabled?'':' [disabled 当前配置值]';return `<option value="${escapeHtml(p.id)}" ${p.id===selected?'selected':''}>${escapeHtml(p.name||p.id)} / ${escapeHtml(p.id)}${disabled}</option>`}));if(selected&&!state.providers.some(p=>p.id===selected))opts.push(`<option value="${escapeHtml(selected)}" selected>当前配置值：${escapeHtml(selected)}</option>`);return opts.join('')}
-function modelOptionValue(providerId,row){return providerId?row.id:`${row.provider_id}::${row.id}`}
-function decodeModelSelection(value,currentProvider){const text=String(value||'');if(!text)return{provider_id:currentProvider||'',model:''};const marker='::';if(text.includes(marker)){const [provider_id,...rest]=text.split(marker);return{provider_id,model:rest.join(marker)}}return{provider_id:currentProvider||'',model:text}}
-function modelOptions(providerId,selected,{visionFirst=false,auto=false,defaultModels=[],enabledOnly=false,selectedProvider=''}={}){const rows=visibleModelsForProvider(providerId,{visionFirst,enabledOnly});let opts=[];if(auto)opts.push(`<option value="" ${!selected?'selected':''}>自动路线${defaultModels.length?'：'+escapeHtml(defaultModels.join(' / ')):''}</option>`);else opts.push(`<option value="" ${!selected?'selected':''}>请选择模型</option>`);let matched=false;opts.push(...rows.map(r=>{const value=modelOptionValue(providerId,r);const label=providerId?r.id:`${r.provider_id} / ${r.id}`;const tag=(r.capabilities||{}).vision?' [vision]':'';const isSelected=providerId?r.id===selected:((selectedProvider&&r.provider_id===selectedProvider&&r.id===selected)||(!selectedProvider&&r.id===selected));if(isSelected)matched=true;return `<option value="${escapeHtml(value)}" ${isSelected?'selected':''}>${escapeHtml(label)}${tag}</option>`}));if(selected&&!matched)opts.push(`<option value="${escapeHtml(selected)}" selected>当前配置值：${escapeHtml(selected)}</option>`);return opts.join('')}
-function renderStaleHiddenBox(p){const stale=staleHiddenModels(p);const box=$('staleHiddenBox');if(!box)return;if(!stale.length){box.innerHTML='<strong>未匹配隐藏规则（hidden_models）</strong><p class="muted">当前没有“暂时匹配不到模型行”的隐藏规则。</p>';return}box.innerHTML=`<strong>未匹配隐藏规则（hidden_models）</strong><p class="muted">这些只是当前通道 hidden_models 里的隐藏规则，暂时没有匹配到当前模型行；不等于远端不存在，也不等于 route 待删除。移除后如果模型仍在远端或 approved routes 里，会重新显示出来。</p><div class="chips">${stale.map(m=>`<span class="chip">${escapeHtml(m)} <button data-stale-rm="${escapeHtml(m)}">移除记录</button></span>`).join('')}</div><div class="btns"><button id="clearStaleHidden" class="ghost">移除当前通道未匹配隐藏规则</button></div>`;document.querySelectorAll('[data-stale-rm]').forEach(b=>b.onclick=()=>{p.hidden_models=(p.hidden_models||[]).filter(x=>x!==b.dataset.staleRm);p.stale_hidden_models=(p.stale_hidden_models||[]).filter(x=>x!==b.dataset.staleRm);renderModelTable()});$('clearStaleHidden').onclick=()=>{const count=cleanupStaleHidden(p);renderModelTable();toast(count?`已移除 ${count} 条当前通道未匹配隐藏规则`:'没有需要移除的未匹配隐藏规则')}}
-function renderModelTable(){const p=current(); if(!p)return;const q=($('modelSearch')?.value||'').toLowerCase();const rows=providerModels(p).filter(r=>r.id.toLowerCase().includes(q));const extras=p.extra_models||[];$('modelChips').innerHTML=`<strong>当前通道补充模型库（extra_models）</strong><p class="muted">这些模型是手动补充到当前 provider 的可用模型，会参与当前通道路由；不是待删除列表，也不是全局模型池。</p><div class="chips">${extras.length?extras.map(m=>`<span class="chip">${escapeHtml(m)}${editingExtraModels?` <button data-rm-extra="${escapeHtml(m)}">从补充库移除</button>`:''}</span>`).join(''):'<span class="muted">当前通道暂无手动补充模型。</span>'}</div><div class="btns"><button id="toggleExtraEdit" class="ghost">${editingExtraModels?'完成编辑':'编辑补充模型库'}</button></div><div id="staleRouteBox"></div>`;$('toggleExtraEdit').onclick=()=>{editingExtraModels=!editingExtraModels;renderModelTable()};document.querySelectorAll('[data-rm-extra]').forEach(b=>b.onclick=()=>{p.extra_models=extras.filter(x=>x!==b.dataset.rmExtra);toast(`已从当前通道补充模型库移除 ${b.dataset.rmExtra}`);renderModelTable()});renderStaleRouteBox(p);renderStaleHiddenBox(p);$('modelTable').innerHTML=`<thead><tr><th>显示</th><th>模型</th><th>来源</th><th>收藏</th><th>text</th><th>vision</th><th>tool</th><th>reason</th><th>long</th><th>cache</th></tr></thead><tbody>${rows.map(r=>{const c=r.capabilities||{};return `<tr><td><input type="checkbox" data-model="${escapeHtml(r.id)}" data-field="visible" ${r.visible?'checked':''}></td><td class="mono">${escapeHtml(r.id)}</td><td><span class="tag ${r.visible?'':'off'}">${escapeHtml(r.source||'manual')}</span></td><td><input type="checkbox" data-model="${escapeHtml(r.id)}" data-field="favorite" ${r.favorite?'checked':''}></td>${['text','vision','tool_use','reasoning','long_context','cache_sensitive'].map(k=>`<td><input type="checkbox" data-model="${escapeHtml(r.id)}" data-cap="${k}" ${c[k]?'checked':''}></td>`).join('')}</tr>`}).join('')}</tbody>`;document.querySelectorAll('#modelTable input').forEach(x=>x.onchange=onModelToggle);renderTestSelectors();renderFallback();renderRuntime()}
-function onModelToggle(e){const p=current();const model=e.target.dataset.model;let row=providerModels(p).find(r=>r.id===model)||{id:model,source:'hidden',visible:!(p.hidden_models||[]).includes(model),favorite:false,capabilities:defaultCaps(model)};row.policy_touched=true;if(e.target.dataset.field==='visible'){row.visible=e.target.checked;p.hidden_models=e.target.checked?(p.hidden_models||[]).filter(x=>x!==model):[...(p.hidden_models||[]).filter(x=>x!==model),model]}else if(e.target.dataset.field==='favorite'){row.favorite=e.target.checked}else if(e.target.dataset.cap){row.capabilities=row.capabilities||{};row.capabilities[e.target.dataset.cap]=e.target.checked}p.model_capabilities=p.model_capabilities||{};p.model_capabilities[model]=row.capabilities;p.models=(p.models||[]).filter(r=>r.id!==model).concat(row);renderTestSelectors();renderFallback();renderRuntime()}
-function renderTestSelectors(){const tp=$('testProvider');if(!tp)return;tp.innerHTML=providerEntries().map(({p,i})=>`<option value="${i}">${escapeHtml(p.name||p.id)}${p.enabled?'':' [disabled]'}</option>`).join('');tp.value=String(activeProvider);tp.onchange=()=>{activeProvider=Number(tp.value);renderAll()};const models=providerModels(current()||{});$('testModel').innerHTML=models.map(r=>`<option>${escapeHtml(r.id)}</option>`).join('')}
-function syncFallback(){state.rescue=state.rescue||{};state.rescue.fallback_model=$('rescueModel').value.trim();state.rescue.fallback_cli=$('rescueCli').value;state.rescue.hot_fallback_enabled=$('rescueHot').checked;state.vision_sidecar=state.vision_sidecar||{};state.vision_sidecar.enabled=$('visionEnabled').checked;state.vision_sidecar.provider_id=$('visionProvider').value.trim();state.vision_sidecar.model=$('visionModel').value.trim();state.vision_sidecar.candidates=[...document.querySelectorAll('[data-vision-candidate]')].map(row=>({provider_id:row.querySelector('[data-vc-provider]').value.trim(),model:row.querySelector('[data-vc-model]').value.trim()})).filter(x=>x.provider_id&&x.model)}
-function bindVisionCandidateRow(row){const provider=row.querySelector('[data-vc-provider]');const model=row.querySelector('[data-vc-model]');provider.onchange=()=>{model.innerHTML=modelOptions(provider.value,'',{visionFirst:true});syncFallback()};model.onchange=syncFallback;row.querySelector('[data-vc-remove]').onclick=()=>{row.remove();syncFallback()}}
-function renderVisionCandidates(candidates){const wrap=$('visionCandidates');wrap.innerHTML=(candidates||[]).map((item,i)=>{const provider=item.provider_id||item.provider||'';const model=item.model||item.vision_model||'';return `<div class="grid span12" data-vision-candidate="1"><div class="span5"><label>候选 ${i+1} provider</label><select data-vc-provider>${providerOptions(provider,{blankLabel:'请选择通道'})}</select></div><div class="span5"><label>候选 ${i+1} model</label><select data-vc-model>${modelOptions(provider,model,{visionFirst:true})}</select></div><div class="span2"><label>&nbsp;</label><button class="ghost" data-vc-remove>移除</button></div></div>`}).join('');document.querySelectorAll('[data-vision-candidate]').forEach(bindVisionCandidateRow)}
-function renderFallback(){const r=state.rescue||{},v=state.vision_sidecar||{};$('rescueModel').value=r.fallback_model||'';$('rescueCli').value=r.fallback_cli||'';$('rescueHot').checked=!!r.hot_fallback_enabled;$('visionEnabled').checked=v.enabled!==false;const provider=v.provider_id||v.provider||'';const model=v.model||v.vision_model||'';$('visionProvider').innerHTML=providerOptions(provider,{blankLabel:'请选择 vision 通道'});$('visionProvider').value=provider;$('visionModel').innerHTML=modelOptions(provider,model,{visionFirst:true});$('visionModel').value=model;renderVisionCandidates(v.candidates||[]);['rescueModel','rescueCli','rescueHot','visionEnabled','visionModel'].forEach(id=>$(id).oninput=syncFallback);$('visionProvider').onchange=()=>{$('visionModel').innerHTML=modelOptions($('visionProvider').value,'',{visionFirst:true});syncFallback()};$('rescueHot').onchange=syncFallback;$('visionEnabled').onchange=syncFallback;$('addVisionCandidate').onclick=()=>{const provider=(state.providers[0]||{}).id||'';const model=(visibleModelsForProvider(provider,{visionFirst:true})[0]||{}).id||'';const list=[...(state.vision_sidecar?.candidates||[]),{provider_id:provider,model:model}];state.vision_sidecar=state.vision_sidecar||{};state.vision_sidecar.candidates=list;renderVisionCandidates(list);syncFallback()}}
-function opencodeOverrides(){state.opencode=state.opencode||{};state.opencode.agent_models=state.opencode.agent_models||{};return state.opencode.agent_models}
-function opencodeRoster(){state.opencode=state.opencode||{};state.opencode.agent_roster=state.opencode.agent_roster||{};return state.opencode.agent_roster}
-function opencodeOverrideEntries(){const overrides=opencodeOverrides();return Object.entries(overrides).filter(([,v])=>v&&v.model)}
-function opencodeDefaults(){const map={};(state.opencode.agent_catalog||[]).forEach((row,i)=>{map[row.agent]={enabled:true,preset:row.preset||categoryPreset(row.category),priority:row.priority||((i+1)*10),custom:false}});return map}
-function categoryPreset(category){const c=String(category||'');if(c==='Vision')return 'vision';if(c==='探索')return 'explore';if(c==='找茬')return 'bughunt';if(c==='审查')return 'reviewer';if(c==='执行')return 'executor';return 'builder'}
-function rosterEntry(agent,row={}){const defaults=opencodeDefaults();return {...(defaults[agent]||{enabled:true,preset:row.preset||categoryPreset(row.category),priority:999,custom:!!row.custom}),...(opencodeRoster()[agent]||{})}}
-function setOpencodeOverride(agent,provider,model){const overrides=opencodeOverrides();if(model){overrides[agent]={model};if(provider)overrides[agent].provider_id=provider}else{delete overrides[agent]}}
-function persistRosterEntry(agent,row,patch={}){const roster=opencodeRoster();const defaults=opencodeDefaults();const base=rosterEntry(agent,row);const next={...base,...patch};const def=defaults[agent]||{};const providerMeaningful=!!next.provider_id&&(!!next.model||!!next.custom);const keep=!!next.custom||next.enabled===false||next.preset!==def.preset||Number(next.priority||0)!==Number(def.priority||0)||providerMeaningful||!!next.model||!!next.description||!!next.prompt;if(!keep){delete roster[agent];return}const payload={preset:next.preset||row.preset||categoryPreset(row.category),enabled:next.enabled!==false,priority:Number(next.priority||def.priority||999)};if(next.custom)payload.custom=true;if(providerMeaningful)payload.provider_id=next.provider_id;if(next.model)payload.model=next.model;if(next.description)payload.description=next.description;if(next.prompt)payload.prompt=next.prompt;roster[agent]=payload}
-function setRosterEnabled(agent,row,enabled){persistRosterEntry(agent,row,{enabled})}
-function opencodeAllRows(){const base=(state.opencode.agent_catalog||[]).map(row=>({...row,custom:false}));const seen=new Set(base.map(row=>row.agent));Object.entries(opencodeRoster()).forEach(([agent,entry])=>{if(seen.has(agent))return;base.push({agent,route_key:agent,category:presetLabel(entry.preset),preset:entry.preset||'explore',priority:entry.priority||999,default_models:[],custom:true})});return base.sort((a,b)=>Number(rosterEntry(a.agent,a).priority||999)-Number(rosterEntry(b.agent,b).priority||999)||a.agent.localeCompare(b.agent))}
-function presetLabel(preset){return {builder:'执行/协调',executor:'执行',explore:'探索',bughunt:'找茬',vision:'Vision',reviewer:'审查',spec:'Spec',fixer:'执行'}[preset]||preset||'custom'}
-function customAgentId(preset){const existing=new Set(opencodeAllRows().map(row=>row.agent));let i=1;let id='';do{id=`mobius-${preset}-custom-${i++}`}while(existing.has(id));return id}
-function addCustomAgent(preset){const agent=customAgentId(preset);opencodeRoster()[agent]={enabled:true,custom:true,preset,priority:900+Object.keys(opencodeRoster()).length};renderOpencodeAgents();toast(`已添加 ${agent}`)}
-function syncRuntime(){state.runtime=state.runtime||{};state.opencode=state.opencode||{};state.runtime.preferred_cli=$('preferredCli').value;state.runtime.coding_preset_model=$('codingModel').value.trim();state.opencode.default_profile=$('opencodeProfile').value;state.opencode.agent_models=Object.fromEntries(opencodeOverrideEntries());state.opencode.agent_roster={...opencodeRoster()}}
-function renderOpencodeSummary(){const box=$('opencodeOverrideSummary');if(!box)return;const rows=opencodeAllRows();const enabled=rows.filter(row=>rosterEntry(row.agent,row).enabled!==false).length;const count=opencodeOverrideEntries().length;const custom=rows.filter(row=>rosterEntry(row.agent,row).custom).length;const profile=state.opencode.default_profile||'agent';box.innerHTML=`<div class="oc-metric"><span class="muted">Profile</span><strong>${escapeHtml(profile)}</strong><span class="mono">Lite Pro Roster</span></div><div class="oc-metric"><span class="muted">Enabled agents</span><strong>${enabled}/${rows.length}</strong><span class="mono">进入 session-local opencode.json</span></div><div class="oc-metric"><span class="muted">Agent overrides</span><strong>${count}/${rows.length}</strong><span class="mono">Auto 不写 agent_models</span></div><div class="oc-metric"><span class="muted">Custom agents</span><strong>${custom}</strong><span class="mono">按 preset 继承 prompt/permission</span></div>`}
-function opencodeFilterMatches(row,overridden){const entry=rosterEntry(row.agent,row);if(opencodeOnlyOverridden&&!overridden&&entry.enabled!==false&&!entry.custom)return false;if(opencodeAgentFilter==='all')return true;if(opencodeAgentFilter==='enabled')return entry.enabled!==false;if(opencodeAgentFilter==='custom')return !!entry.custom;if(opencodeAgentFilter==='execute')return ['builder','executor','fixer','spec'].includes(entry.preset)||String(row.category||'').startsWith('执行');if(opencodeAgentFilter==='explore')return entry.preset==='explore'||row.category==='探索';if(opencodeAgentFilter==='bughunt')return entry.preset==='bughunt'||row.category==='找茬';if(opencodeAgentFilter==='vision')return entry.preset==='vision'||row.category==='Vision';if(opencodeAgentFilter==='review')return entry.preset==='reviewer'||row.category==='审查';return true}
-function renderOpencodeFilters(){const wrap=$('opencodeAgentFilters');if(!wrap)return;const filters=[['all','全部'],['enabled','已启用'],['custom','自定义'],['execute','执行/协调'],['explore','探索'],['bughunt','找茬'],['vision','Vision'],['review','审查']];wrap.innerHTML=`${filters.map(([id,label])=>`<button class="ghost ${opencodeAgentFilter===id?'active':''}" data-oc-filter="${id}">${label}</button>`).join('')}<label class="check"><input id="ocOnlyOverridden" type="checkbox" ${opencodeOnlyOverridden?'checked':''}><span>只看改动项</span></label><button class="ghost" data-oc-add="vision">+ Add Vision Agent</button><button class="ghost" data-oc-add="executor">+ Add Executor Agent</button><button class="ghost" data-oc-add="explore">+ Add Explore Agent</button><button class="ghost" id="ocClearAll">全部自动</button>`;document.querySelectorAll('[data-oc-filter]').forEach(btn=>btn.onclick=()=>{opencodeAgentFilter=btn.dataset.ocFilter;renderOpencodeAgents()});document.querySelectorAll('[data-oc-add]').forEach(btn=>btn.onclick=()=>addCustomAgent(btn.dataset.ocAdd));$('ocOnlyOverridden').onchange=()=>{opencodeOnlyOverridden=$('ocOnlyOverridden').checked;renderOpencodeAgents()};$('ocClearAll').onclick=()=>{state.opencode.agent_models={};state.opencode.agent_roster={};syncRuntime();renderOpencodeAgents();toast('OpenCode roster 已恢复默认自动路线')}}
-function renderOpencodeAgents(){const table=$('opencodeAgents');if(!table)return;const overrides=opencodeOverrides();renderOpencodeSummary();renderOpencodeFilters();const rows=opencodeAllRows();const visible=rows.filter(row=>{const entry=rosterEntry(row.agent,row);const overridden=!!(overrides[row.agent]&&overrides[row.agent].model)||entry.enabled===false||entry.custom;return opencodeFilterMatches(row,overridden)});const presetOptions=(selected)=>['builder','executor','explore','bughunt','vision','reviewer','spec','fixer'].map(p=>`<option value="${p}" ${p===selected?'selected':''}>${p}</option>`).join('');const body=visible.length?visible.map(row=>{const entry=rosterEntry(row.agent,row);const ov=overrides[row.agent]||{};const provider=ov.provider_id||entry.provider_id||'';const model=ov.model||entry.model||'';const enabled=entry.enabled!==false;const changed=!!model||!enabled||!!entry.custom;return `<tr data-oc-agent="${escapeHtml(row.agent)}"><td><input class="oc-enabled" type="checkbox" data-oc-enabled ${enabled?'checked':''} ${row.agent==='mobius-builder-pro'?'disabled':''}></td><td class="mono">${escapeHtml(row.agent)}<br><span class="muted">${escapeHtml(row.route_key)}</span>${entry.custom?'<br><span class="tag">custom</span>':''}${changed?'<span class="tag">changed</span>':''}</td><td><select data-oc-preset ${entry.custom?'':'disabled'}>${presetOptions(entry.preset)}</select></td><td><input data-oc-priority type="number" value="${escapeHtml(entry.priority||999)}" style="max-width:86px"></td><td><select data-oc-provider>${providerOptions(provider,{auto:true,enabledOnly:true})}</select></td><td><select data-oc-model>${modelOptions(provider,model,{auto:true,defaultModels:row.default_models||[],visionFirst:(entry.preset==='vision'||row.category==='Vision'),enabledOnly:true,selectedProvider:provider})}</select></td><td class="mono default-route">${escapeHtml((row.default_models||[]).join(' / ')||'preset auto')}</td><td><button class="ghost" data-oc-reset>自动</button></td></tr>`}).join(''):'<tr><td colspan="8" class="empty-row">没有匹配的 agent</td></tr>';table.innerHTML=`<thead><tr><th>启用</th><th>Agent</th><th>Preset</th><th>Priority</th><th>Provider</th><th>Model</th><th>Default</th><th></th></tr></thead><tbody>${body}</tbody>`;document.querySelectorAll('[data-oc-agent]').forEach(tr=>{const agent=tr.dataset.ocAgent;const row=visible.find(r=>r.agent===agent);const entry=rosterEntry(agent,row);tr.querySelector('[data-oc-enabled]').onchange=(e)=>{setRosterEnabled(agent,row,e.target.checked);renderOpencodeSummary()};tr.querySelector('[data-oc-preset]').onchange=(e)=>{persistRosterEntry(agent,row,{preset:e.target.value});renderOpencodeAgents()};tr.querySelector('[data-oc-priority]').oninput=(e)=>{persistRosterEntry(agent,row,{priority:Number(e.target.value)});renderOpencodeSummary()};tr.querySelector('[data-oc-provider]').onchange=(e)=>{const sel=e.target;const modelSel=tr.querySelector('[data-oc-model]');modelSel.innerHTML=modelOptions(sel.value,modelSel.value,{auto:true,defaultModels:row.default_models||[],visionFirst:(entry.preset==='vision'||row.category==='Vision'),enabledOnly:true,selectedProvider:sel.value});setOpencodeOverride(agent,sel.value,tr.querySelector('[data-oc-model]').value);syncRuntime();renderOpencodeSummary()};tr.querySelector('[data-oc-model]').onchange=(e)=>{setOpencodeOverride(agent,tr.querySelector('[data-oc-provider]').value,e.target.value);syncRuntime();renderOpencodeSummary()};tr.querySelector('[data-oc-reset]').onclick=()=>{const roster=opencodeRoster();delete roster[agent];const overrides=opencodeOverrides();delete overrides[agent];syncRuntime();renderOpencodeAgents();toast(`${agent} 已恢复默认`)}})}
-function renderRuntime(){state.runtime=state.runtime||{};state.opencode=state.opencode||{};$('preferredCli').value=state.runtime.preferred_cli||'opencode';$('codingModel').value=state.runtime.coding_preset_model||'';$('opencodeProfile').value=state.opencode.default_profile||'agent';$('preferredCli').oninput=syncRuntime;$('codingModel').oninput=syncRuntime;$('opencodeProfile').oninput=()=>{syncRuntime();renderOpencodeSummary()};renderOpencodeAgents()}
-function renderRefs(){ $('refsGrid').innerHTML=(state.references||[]).map(r=>`<div class="card span6"><h3>${escapeHtml(r.title)}</h3><p>${escapeHtml(r.summary)}</p><p class="mono">${escapeHtml(r.path)}</p></div>`).join('') }
-function levelLabel(level){return level==='danger'?'高风险':(level==='warn'?'注意':'信息')}
-function planJsonHint(plan){const v2=plan?.registry_v2_save_plan||{};const planJson=v2.plan_json||{};const apply=v2.apply_plan||{};if(!planJson.name&&!apply.cli_apply_command)return '';return `<h4>Plan JSON / apply-plan</h4><p class="muted">${escapeHtml(planJson.note||'Plan JSON 是保存预览的 review artifact。')}</p><p><span class="tag">${escapeHtml(planJson.name||'webui-plan.json')}</span> <span class="tag ${planJson.redacted?'off':''}">secrets ${planJson.redacted?'redacted':'included'}</span></p><p class="mono">${escapeHtml(apply.cli_apply_command||'')}</p>`}
-function renderApplyResult(data){const blockers=data.runtime_blockers||{};const next=data.next_action||{};const publish=data.publish||{};const verify=data.verify||{};const ready=data.runtime_ready===true;const notReady=data.runtime_ready===false;const errs=Array.isArray(data.errors)?data.errors:[data.error||'unknown error'];const title=!data.ok?'写入被阻止':(ready?'已发布，可直接给 mmf 使用':'已发布，但 runtime 未就绪');const detail=!data.ok?errs.join('；'):(ready?'latest-approved bundle 已验证，mmf 会读到这次保存后的最新 bundle。':'latest-approved bundle 已发布且已验证；mmf 会读到最新 bundle，但缺 key/base URL/模型 route 的条目不能正常启动。');$('saveResult').innerHTML=`<div><p><span class="tag ${data.ok&&!notReady?'':'off'}">${escapeHtml(title)}</span> <span class="tag">${escapeHtml(data.status||'-')}</span></p><p class="muted">${escapeHtml(detail)}</p><p><span class="tag">manifest ${verify.verified?'verified':'not verified'}</span><span class="tag ${ready?'':'off'}">runtime ${ready?'ready':notReady?'not ready':'unknown'}</span><span class="tag">missing keys ${blockers.missing_api_key_count||0}</span><span class="tag">missing base URL ${blockers.missing_base_url_count||0}</span><span class="tag">provider routes ${blockers.provider_route_count||publish.provider_route_count||0}</span></p>${next.label?`<p><strong>下一步</strong>：${escapeHtml(next.label)}</p>`:''}<details><summary>Raw JSON</summary><pre class="mono">${escapeHtml(JSON.stringify(data,null,2))}</pre></details></div>`}
-function renderReviewSummary(plan){const review=plan?.review_summary||{};const counts=review.counts||{};const risks=review.risks||[];const items=review.items||[];const riskHtml=risks.length?`<h4>风险提示</h4><div>${risks.map(r=>`<p><span class="tag ${r.level==='danger'?'off':''}">${escapeHtml(levelLabel(r.level))}</span> <strong>${escapeHtml(r.title)}</strong> ${escapeHtml(r.detail)}</p>`).join('')}</div>`:'<p><span class="tag">无高风险提示</span></p>';const itemHtml=items.length?items.map(item=>`<p><span class="tag ${item.level==='danger'?'off':''}">${escapeHtml(levelLabel(item.level))}</span> <strong>${escapeHtml(item.title)}</strong> ${escapeHtml(item.detail)}</p>`).join(''):'<p class="muted">没有检测到配置变化。</p>';$('reviewSummary').innerHTML=`<div class="chips"><span class="chip">变化 ${counts.items||0}</span><span class="chip">风险 ${counts.risks||0}</span><span class="chip">移除隐藏记录 ${counts.hidden_removed||0}</span><span class="chip">凭据更新 ${counts.credential_updates||0}</span></div>${riskHtml}<h4>将要写入的变化</h4>${itemHtml}${planJsonHint(plan)}`}
-function currentBundleRevision(){return state?.consumer_bundle_status?.component_revisions?.bundle||state?.consumer_bundle_status?.manifest?.bundle_revision||state?.model_source_status?.generated_bundle?.component_revisions?.bundle||state?.model_source_status?.generated_bundle?.manifest?.bundle_revision||''}
-function draft(){syncProvider();syncFallback();syncRuntime();return JSON.parse(JSON.stringify({providers:state.providers,provider_default:state.provider_default,rescue:state.rescue,vision_sidecar:state.vision_sidecar,runtime:state.runtime,opencode:state.opencode,expected_bundle_revision:currentBundleRevision(),route_scope_provider_ids:[...touchedProviders],route_refresh_provider_ids:[...staleCleanupProviders]}))}
-function renderAll(){renderStatus();renderSaveControls();renderSourceStatus();renderProviders();renderFallback();renderRuntime();renderRefs()}
-async function load(){const res=await fetch('/api/state');state=await res.json();state.providers=state.providers||[];renderNav();renderAll();}
-$('addProvider').onclick=()=>{state.providers.push({id:`provider-${state.providers.length+1}`,original_id:'',name:'新通道',enabled:true,role:'auto',priority:100,models_endpoint:'/models',protocols:['anthropic_messages','openai_chat_completions'],supported_clis:['claude','codex','opencode'],openai_base_url:'',anthropic_base_url:'',api_key:'',update_credentials:false,fallback_models:[],extra_models:[],hidden_models:[],models:[]});activeProvider=state.providers.length-1;renderAll()}
-$('duplicateProvider').onclick=()=>{const p=JSON.parse(JSON.stringify(current()));p.id=p.id+'-copy';p.original_id='';p.name=p.name+' Copy';p.api_key='';p.pending_api_key=false;p.update_credentials=false;p.has_api_key=false;state.providers.push(p);activeProvider=state.providers.length-1;renderAll()}
-$('modelSearch').oninput=renderModelTable;$('addManualModels').onclick=()=>{const p=current();const vals=$('manualModels').value.split(/[\n,]/).map(x=>x.trim()).filter(Boolean);p.extra_models=[...new Set([...(p.extra_models||[]),...vals])];p.hidden_models=(p.hidden_models||[]).filter(x=>!vals.includes(x));$('manualModels').value='';renderModelTable();toast(`已添加 ${vals.length} 个模型`)};$('clearHidden').onclick=()=>{current().hidden_models=[];renderModelTable()};$('clearAllStaleHidden').onclick=cleanupAllStaleHidden
-$('fetchModels').onclick=async()=>{syncProvider();const data=await api('/api/provider/models',{provider:current(),force_refresh:true});if(data.ok&&Array.isArray(data.models)){const p=current();if(!p.approved_route_models||!p.approved_route_models.length){p.approved_route_models=(p.models||[]).filter(r=>r&&r.id&&r.source!=='derived_alias').map(r=>r.id)}p.models=data.models.map(id=>({id,source:data.base_source||'remote',visible:!(p.hidden_models||[]).includes(id),favorite:false,capabilities:defaultCaps(id)}));touchProvider(p.id);if($('autoStaleCleanupOnFetch')?.checked&&staleRouteModels(p).length){staleCleanupProviders.add(p.id)}renderModelTable();$('testResult').textContent=JSON.stringify(data,null,2);toast(staleCleanupProviders.has(p.id)?`拉取到 ${data.models.length} 个模型；已自动标记缺失旧 route 清理`:`拉取到 ${data.models.length} 个模型；不会自动写入 fallback_models；缺失旧 route 默认保留`)}else{$('testResult').textContent=JSON.stringify(data,null,2);toast(data.error||'模型拉取失败，请看测试结果')}}
-$('testList').onclick=async()=>{$('testResult').textContent=JSON.stringify(await api('/api/provider/test',{provider:current(),force_refresh:true}),null,2);setSection('test')}
-$('testModelBtn').onclick=async()=>{$('testResult').textContent='测试中...';const data=await api('/api/model/test',{provider:state.providers[Number($('testProvider').value)],model:$('testModel').value,protocol:$('testProtocol').value,prompt:$('testPrompt').value});$('testResult').textContent=JSON.stringify(data,null,2)}
-$('chatTestBtn').onclick=async()=>{$('testResult').textContent='测试中...';const data=await api('/api/chat/test',{provider:state.providers[Number($('testProvider').value)],model:$('testModel').value,protocol:$('testProtocol').value,prompt:$('testPrompt').value});$('testResult').textContent=JSON.stringify(data,null,2)}
-$('previewPlan').onclick=async()=>{const data=await api('/api/plan',{draft:draft()});lastPlan=data;renderSaveControls();renderReviewSummary(data);$('saveResult').textContent=JSON.stringify({ok:data.ok,summary:data.summary,registry_v2_save_plan:data.registry_v2_save_plan,warnings:data.warnings,errors:data.errors,risks:data.review_summary?.risks},null,2);$('diffBox').textContent=[data.diffs?.config_toml,data.diffs?.model_policy_json,data.diffs?.credentials].filter(Boolean).join('\n')||'没有配置变化';toast(data.ok?'预览已生成':'预览有错误')}
-function currentApplyCommand(){return lastPlan?.registry_v2_save_plan?.apply_plan?.cli_apply_command||'./mmf config apply-plan --plan-json <webui-plan.json> --apply --confirm-preview-apply --json'}
-$('downloadPlanJson').onclick=()=>{if(!lastPlan){toast('请先生成保存预览');return}const blob=new Blob([JSON.stringify(lastPlan,null,2)+'\n'],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=lastPlan?.registry_v2_save_plan?.plan_json?.name||'webui-plan.json';document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);toast('已下载 redacted plan JSON')}
-$('copyApplyCommand').onclick=async()=>{const cmd=currentApplyCommand();try{await navigator.clipboard.writeText(cmd);toast('已复制 CLI apply 命令')}catch(_err){$('saveResult').textContent=cmd;toast('无法访问剪贴板，命令已显示在结果框')}}
-$('applyV2Preview').onclick=async()=>{const data=await api('/api/registry-v2/apply',{draft:draft(),confirm_v2_preview:$('confirmSave').checked,confirm_phrase:$('confirmPhrase').value,reason:$('saveReason').value});renderApplyResult(data);toast(data.ok?(data.runtime_ready===false?'已发布但 runtime 未就绪：请看 missing key/base URL':'预览 DB 已写入并发布，mmf 会读最新 bundle'):'预览 DB 写入被阻止'); if(data.ok){const res=await fetch('/api/state');state=await res.json();touchedProviders=new Set();staleCleanupProviders=new Set();renderAll();}}
-$('saveBtn').onclick=async()=>{const data=await api('/api/save',{draft:draft(),confirm_save:$('confirmSave').checked,confirm_phrase:$('confirmPhrase').value,reason:$('saveReason').value});$('saveResult').textContent=JSON.stringify(data,null,2);toast(data.ok?'保存完成，已写入 audit':'保存被阻止'); if(data.ok){const res=await fetch('/api/state');state=await res.json();touchedProviders=new Set();staleCleanupProviders=new Set();renderAll();}}
-load().catch(err=>{document.body.innerHTML='<pre style="padding:30px;color:var(--danger);font-family:var(--font-mono)">'+escapeHtml(err.stack||err.message)+'</pre>'})
-</script>
-</body>
-</html>"""
-
-
-def _html_page(_snapshot: dict[str, Any]) -> bytes:
-    return _HTML_PAGE.encode("utf-8")
-
-
-class ConfigWebApp:
-    def __init__(self, cfg: dict[str, Any] | None, *, config_path: str = "", preferences_path: str = "", command_name: str = "mms") -> None:
-        self.cfg = copy.deepcopy(cfg) if isinstance(cfg, dict) else {}
-        self.config_path = config_path
-        self.preferences_path = preferences_path
-        self.command_name = command_name
-        self.lock = threading.Lock()
-
-    def snapshot(self) -> dict[str, Any]:
-        with self.lock:
-            return build_config_snapshot(self.cfg, config_path=self.config_path, preferences_path=self.preferences_path, command_name=self.command_name)
-
-    def plan(self, payload: dict[str, Any]) -> dict[str, Any]:
-        with self.lock:
-            return build_config_plan(self.cfg, payload, config_path=self.config_path, preferences_path=self.preferences_path, command_name=self.command_name)
-
-    def save(self, payload: dict[str, Any]) -> dict[str, Any]:
-        with self.lock:
-            result = apply_config_plan(self.cfg, payload, config_path=self.config_path, preferences_path=self.preferences_path)
-            if result.get("ok"):
-                plan = build_config_plan(self.cfg, payload, config_path=self.config_path, preferences_path=self.preferences_path, command_name=self.command_name)
-                self.cfg = plan.get("config") if isinstance(plan.get("config"), dict) else self.cfg
-            return result
-
-    def registry_v2_apply(self, payload: dict[str, Any]) -> dict[str, Any]:
-        with self.lock:
-            result = apply_registry_v2_preview_plan(self.cfg, payload, config_path=self.config_path, preferences_path=self.preferences_path)
-            if result.get("ok"):
-                plan = build_config_plan(self.cfg, payload, config_path=self.config_path, preferences_path=self.preferences_path, command_name=self.command_name)
-                self.cfg = plan.get("config") if isinstance(plan.get("config"), dict) else self.cfg
-            return result
-
-    def provider_test(self, payload: dict[str, Any]) -> dict[str, Any]:
-        with self.lock:
-            return test_provider_models(self.cfg, payload, config_path=self.config_path, command_name=self.command_name)
-
-    def model_test(self, payload: dict[str, Any], *, chat: bool = False) -> dict[str, Any]:
-        with self.lock:
-            return run_model_smoke(self.cfg, payload, chat=chat, config_path=self.config_path, command_name=self.command_name)
-
-
-class _SetupWebHandler(BaseHTTPRequestHandler):
-    app: ConfigWebApp | None = None
-
-    def log_message(self, *_args: Any) -> None:
-        return
-
-    def _send(self, status: int, body: bytes, content_type: str) -> None:
-        self.send_response(status)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(body)
-
-    def _read_json(self) -> dict[str, Any]:
-        length = int(self.headers.get("Content-Length") or 0)
-        raw = self.rfile.read(length) if length else b"{}"
-        try:
-            payload = json.loads(raw.decode("utf-8"))
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"invalid json: {exc}") from exc
-        return payload if isinstance(payload, dict) else {}
-
-    def do_GET(self) -> None:
-        app = self.app
-        if app is None:
-            self._send(*_json_response({"error": "app not initialized"}, status=500))
-            return
-        path = self.path.split("?", 1)[0]
-        snapshot = app.snapshot()
-        if path in {"/", "/index.html"}:
-            self._send(200, _html_page(snapshot), "text/html; charset=utf-8")
-            return
-        if path in {"/api/state", "/api/snapshot"}:
-            self._send(*_json_response(snapshot))
-            return
-        if path == "/api/references":
-            self._send(*_json_response({"references": build_reference_cards()}))
-            return
-        if path == "/setup.md":
-            self._send(200, build_setup_markdown(snapshot).encode("utf-8"), "text/markdown; charset=utf-8")
-            return
-        self._send(404, b"not found\n", "text/plain; charset=utf-8")
-
-    def do_POST(self) -> None:
-        app = self.app
-        if app is None:
-            self._send(*_json_response({"error": "app not initialized"}, status=500))
-            return
-        path = self.path.split("?", 1)[0]
-        try:
-            payload = self._read_json()
-            if path == "/api/provider/models" or path == "/api/provider/test":
-                self._send(*_json_response(app.provider_test(payload)))
-                return
-            if path == "/api/model/test":
-                self._send(*_json_response(app.model_test(payload, chat=False)))
-                return
-            if path == "/api/chat/test":
-                self._send(*_json_response(app.model_test(payload, chat=True)))
-                return
-            if path == "/api/plan":
-                self._send(*_json_response(app.plan(payload)))
-                return
-            if path == "/api/save":
-                result = app.save(payload)
-                self._send(*_json_response(result, status=200 if result.get("ok") else 400))
-                return
-            if path == "/api/registry-v2/apply":
-                result = app.registry_v2_apply(payload)
-                self._send(*_json_response(result, status=200 if result.get("ok") else 400))
-                return
-            self._send(404, b"not found\n", "text/plain; charset=utf-8")
-        except Exception as exc:
-            self._send(*_json_response({"ok": False, "error": str(exc), "trace": traceback.format_exc(limit=5)}, status=500))
-
-
-def serve_config_web(app_or_snapshot: ConfigWebApp | dict[str, Any], *, host: str, port: int, open_browser: bool = True) -> str:
-    if isinstance(app_or_snapshot, ConfigWebApp):
-        app = app_or_snapshot
-    else:
-        app = ConfigWebApp({}, command_name="mms")
-    handler = type("MMSSetupWebHandler", (_SetupWebHandler,), {"app": app})
-    server = ThreadingHTTPServer((host, int(port)), handler)
-    actual_host, actual_port = server.server_address[:2]
-    url = f"http://{actual_host}:{actual_port}/"
-    thread = threading.Thread(target=server.serve_forever, daemon=True, name="mms-setup-web")
-    thread.start()
-    print(f"MMS 配置 WebUI: {url}")
-    print("交互配置页面已启动；保存前会要求 diff + 明确确认。按 Ctrl-C 停止。")
-    if open_browser:
-        try:
-            webbrowser.open(url)
-        except Exception:
-            pass
-    try:
-        thread.join()
-    except KeyboardInterrupt:
-        print("\nStopping MMS setup WebUI.")
-    finally:
-        server.shutdown()
-        server.server_close()
-    return url
-
-
-def run_config_web(
-    cfg: dict[str, Any] | None,
-    argv: list[str] | None = None,
-    *,
-    command_name: str = "mms",
-    config_path: str = "",
-    preferences_path: str = "",
-) -> int:
-    parser = argparse.ArgumentParser(prog=f"{command_name} config web", description="Start the local interactive MMS configuration WebUI")
-    parser.add_argument("--host", default="127.0.0.1", help="Bind host; default 127.0.0.1")
-    parser.add_argument("--port", type=int, default=0, help="Bind port; default 0 chooses a free port")
-    parser.add_argument("--no-open", action="store_true", help="Do not open the browser automatically")
-    parser.add_argument("--print-summary", action="store_true", help="Print redacted setup JSON and exit")
-    parser.add_argument("--print-markdown", action="store_true", help="Print setup markdown and exit")
-    args = parser.parse_args(argv or [])
-    app = ConfigWebApp(cfg, config_path=config_path, preferences_path=preferences_path, command_name=command_name)
-    snapshot = app.snapshot()
-    if args.print_summary:
-        print(json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=True))
-        return 0
-    if args.print_markdown:
-        print(build_setup_markdown(snapshot), end="")
-        return 0
-    serve_config_web(app, host=args.host, port=args.port, open_browser=not args.no_open)
-    return 0

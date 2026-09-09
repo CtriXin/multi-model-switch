@@ -1,0 +1,48 @@
+{
+  "schema": "mms.model_capability_calibration.v1",
+  "generated_at": "2026-09-02T08:35:00.000Z",
+  "description": "xAI Grok 4.6 official capability calibration, added for the Grok Coding route (NewAPI -> CRS/CPA grok, SuperGrok OAuth). All facts from docs.x.ai official pages captured 2026-09-02.",
+  "mms_source": "manual-official-addition",
+  "models": [
+    {
+      "alias": "grok-4.6",
+      "routed_model_id": "grok-4.6",
+      "provider_id": "newapi-personal-tokyo",
+      "vendor": "xAI",
+      "canonical_model_id": "grok-4.6",
+      "alias_status": "official_exact",
+      "confidence": "official_exact",
+      "official_context_window_tokens": 500000,
+      "official_max_output_tokens": null,
+      "supports_vision": null,
+      "supports_thinking": true,
+      "one_million_context": false,
+      "one_million_request_format": null,
+      "expected_protocol": "openai_chat_completions",
+      "current_mms_context_window_tokens": null,
+      "thinking_control": {
+        "control_type": "parameter",
+        "path": "reasoning_effort",
+        "allowed_values": ["low", "medium", "high", "xhigh"],
+        "default": "high",
+        "disable_supported": false
+      },
+      "evidence": [
+        {
+          "url": "https://docs.x.ai/docs/models",
+          "official": true
+        },
+        {
+          "url": "https://docs.x.ai/developers/model-capabilities/text/reasoning",
+          "official": true
+        }
+      ],
+      "notes": "Context 500k tokens per docs.x.ai models page. reasoning_effort parameter supports low/medium/high(default)/xhigh; xhigh is grok-4.6-only. Reasoning cannot be disabled (always-on). supports_vision intentionally null (not confirmed on official pages captured today; do not invent). Served via SuperGrok subscription OAuth through CLIProxyAPI grok instance; upstream reports model id grok-4.6-build.",
+      "pricing": {
+        "prompt_usd_per_million": 2.0,
+        "completion_usd_per_million": 6.0,
+        "note": "API list price from docs.x.ai; subscription route (SuperGrok) does not bill per token."
+      }
+    }
+  ]
+}

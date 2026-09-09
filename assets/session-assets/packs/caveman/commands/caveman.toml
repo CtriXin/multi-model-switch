@@ -1,0 +1,2 @@
+description = "Switch caveman intensity level (lite/full/ultra/wenyan)"
+prompt = "Switch to caveman {{args}} mode. If no level specified, use lite. Respond terse like smart caveman — no filler/hedging. Keep full sentences. Technical terms exact. Code unchanged."

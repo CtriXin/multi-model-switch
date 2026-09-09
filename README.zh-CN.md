@@ -1,5 +1,8 @@
 # Multi-Model Switch（MMS）
 
+> **MMS Pilot 是 MMS 的本地 Web 客户端，从 v4 起随安装包分发。** 安装后运行 `mms web --open` 打开。会话仍通过原有 MMS 启动链交给本机 Pi 执行，浏览器只是交互入口。[安装与使用](docs/mms-web/GETTING-STARTED.md) · [功能与边界](docs/mms-web/FEATURES.md) · [首版说明](docs/mms-web/RELEASE-v4.0.0.md) · [产品方向](docs/mms-web/NEXT-PHASE.md)。已有 CLI 启动能力全部保留。
+
+
 [主 README](./README.md) · [English README](./README.en.md)
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
@@ -16,10 +19,33 @@
 - **一个地方管理模型来源**：provider、account、route、fallback、thinking、vision、cache-sensitive transport 都在启动前可见。
 - **隔离但可恢复**：Claude/Codex session 使用 MMS 管理的 HOME / config seed，减少污染真实全局配置，同时保留 resume。
 - **Web UI 配配置**：不想手写 TOML 时，用 `mmf config web` 添加通道、拉模型、隐藏噪音模型、预览保存计划。
-- **按 session 注入能力包**：Caveman、CodeGraph、token-saver、TOON、xmem、Web automation bundle 等能力默认是 session-local，不改你的全局 hook。
+- **按 session 注入能力包**：Caveman、CodeGraph、token-saver、TOON、Web automation bundle 等能力默认是 session-local，不改你的全局 hook。
 - **诊断优先**：在怀疑模型之前，先看 route、协议、cache、API Key、请求路径和 runtime exposure。
 
-MMS 不是新的 chat 客户端。`chat`、`discuss` 和高上下文 helper 现在只作为 maintenance-only 表面；主线是把本地 coding CLI 启动、路由、隔离和诊断做好。
+MMS Pilot 是原 launcher 的可视交互入口。`chat`、`discuss` 和高上下文 helper 现在只作为 maintenance-only 表面；主线是把本地 coding CLI 启动、路由、隔离和诊断做好。
+
+## MMS Pilot：本地 Web 客户端
+
+**产品名固定为 MMS Pilot。** 命令入口不变，仍然是 `mms web`、独立的 `mms-web`，macOS 上还有 `~/.mms/MMS Pilot.command`。旧的 `MMS Web.command` 会在升级时被移除，避免 `~/.mms` 里留下两个一样的启动器。
+
+Pilot 和 `mmf config web` 是两个不同的页面，不要混：
+
+| | 打开方式 | 用来做什么 |
+|---|---|---|
+| MMS Pilot | `mms web --open` | 日常干活：开会话、选模型和通道、管工作文件夹、看执行过程和产出 |
+| 配置 Web UI | `mmf config web` | 配置：加通道、拉模型列表、隐藏噪音模型、生成保存预览并发布 |
+
+Pilot 当前的 harness 是 Pi。Claude、Codex、OpenCode、agy 仍从 MMS CLI 启动，尚未接入 Pilot 的统一会话。
+
+v4 各版累积下来的能力：
+
+- **会话**：连续对话、恢复、停止、分叉、归档、导出，会话内切换模型与通道且保留上下文。
+- **模型能力**：按模型设置默认 effort、上下文长度和能否读图，每一项都标明当前值来自哪里，与 MMF 目录不一致时可以一键填回目录值。
+- **工作区**：侧栏管理工作文件夹的排序、重命名和移除，会话行支持复制 ID、重命名、分叉、导出与归档。
+- **成果与资料**：预览和比较记录下来的产出，管理项目资料并记录每轮实际提交的上下文来源。
+- **外观**：设置是弹窗；主题可跟随系统，主题色、界面/等宽/中文字体和字号都能实时改，只列出本机真的装了的字体。
+
+边界：只监听本机地址，没有远程多用户认证，配置隔离不等于文件系统 sandbox。要给别人用，让对方在自己机器上安装并使用自己的模型服务。
 
 ## 版本通道：Stable / Dev / Canary
 
@@ -33,42 +59,60 @@ MMS 不是新的 chat 客户端。`chat`、`discuss` 和高上下文 helper 现�
 
 分支约定见 [`docs/RELEASE_CHANNELS.md`](docs/RELEASE_CHANNELS.md)。除非人类明确要求改 release/channel contract，否则不要再重命名、重映射或混用这些关系。当前过渡期：`main` 会和 `dev` 同步一段时间；等 Stable 追到当前能力后，`main` 固定为 Stable/default，不再当日常 Dev 使用。开发过程中发现的 bug 会先修复，再进入 Stable。
 
+v4.0.0 是 MMS Pilot 的首个大版本，之后 4.x 沿 Dev 继续推进。下列 3.x 轨道为此前分支发布历史，不代表 v4 已晋级各分支：Stable/Main `3.4.z`、Dev `3.5.z`、Canary `3.6.z`。`z` 是各 channel 内的 release 计数：单 commit release 就 `z+1`，复合多个已验证 commits 的 release 也只 bump 一次；未 tag 的日常小步 commit 继续用 git hash 追踪。
+
 当前本机维护者命令已固定：`mms` 是 public installed copy，只用于公开版本复现；`mmd` 指 stable worktree；`mmf` 指 dev worktree；`mmg` 指 canary worktree；`mmm` 指 main worktree。`mmf` / `mmg` 都使用 `~/.config/mms-next` preview DB root。重新生成本机命令用 `scripts/link_local_channel_commands.sh`。
+
+## 维护者开发入口
+
+维护者默认从仓库根目录进入 MMS，且根目录应 checkout `dev` 并保持干净、最新。`.worktrees/*` 只用于具体 issue/PR 的隔离施工，不再把 `.worktrees/dev` 当作多人共享的默认开发入口。
+
+标准循环：
+
+1. 进入仓库根目录，确认当前分支是 `dev`。
+2. 执行 `git pull --ff-only`，保持 `dev` 最新且干净。
+3. 先开 issue，并把计划写进 issue 或对应计划文档。
+4. 从最新 `dev` 创建独立 worktree/branch，例如 `.worktrees/issue-14-redline-gate`。
+5. 在独立 worktree 中开发、验证、commit、push。
+6. 提 PR 到 `dev`，由 committee 审核。
+7. committee/human 同意后 merge；根目录 `dev` 再 fast-forward 到最新，进入下一轮。
+
+除非人类明确要求直接在 `dev` 根入口编辑，否则 agent 不得在共享 `dev` 入口叠加实质性改动或留下未跟踪文件。docs-only 计划/报告类改动在用户要求“记录/提交/产出文档”时可以默认 commit，但必须只 stage 目标文档，不能带入任何无关脏文件。
 
 ## 安装 / 升级
 
-> 默认 UI 语言是中文；如果要英文，加 `--lang en`。
-
-### Stable：推荐给普通用户
+在新电脑上打开终端，粘贴这一条：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel stable --write-shell-rc
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash
 ```
 
-### Dev：推荐给你的两台工作机保持同状态
+装完会问一句要不要打开 MMS Web。回车即可，浏览器自动弹出，服务在后台运行，安装进程随即退出。在页面里添加 provider 和 API Key 就能开始对话。
+
+安装过程不问任何会影响安装内容的问题，默认走 stable 通道并把 `~/.local/bin` 写进 shell PATH。默认 UI 语言是中文，要英文加 `--lang en`。
+
+<details>
+<summary>其他安装方式</summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel dev --write-shell-rc
+# 需要最新修复的开发用户
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash -s -- --channel dev
+
+# 只给测试机
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash -s -- --channel canary
+
+# 固定到某个 release 或分支
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash -s -- --ref v4.2.1
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash -s -- --ref main
+
+# 不打开 Web 端，也不改 shell 配置（CI、脚本）
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash -s -- --no-launch-web --no-shell-rc
+
+# 装完直接打开，不询问
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash -s -- --launch-web
 ```
 
-### Canary：只给测试机或专门试新功能的 session
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel canary --write-shell-rc
-```
-
-### 固定到某个 release 或分支
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref v3.3.1
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref main
-```
-
-### 全新电脑顺手安装 CLI
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel dev --install-cli claude,codex,opencode --write-shell-rc
-```
+</details>
 
 安装器默认会：
 
@@ -102,9 +146,11 @@ mmm -> Main worktree          # main 过渡观察入口，默认 ~/.config/mms
 
 当前本机用 `scripts/link_local_channel_commands.sh` 把 5 个命令写到 `~/.local/bin`。另一台家里工作机如果要和白天电脑保持一致，建议同样准备 dev/canary/stable/main worktree 后运行这个脚本；如果只是普通用户安装，仍使用公开 `mms` 安装命令。
 
-## Web UI 教程：从通道到模型可见性
+启动更新提醒默认只提醒、手动确认更新：`mmg` 每次启动检查，`mmf` / `mmm` 每日检查，`mmd` 每周检查，`mms` 每日只提示 public installed copy。手动运行 `mmf update` / `mmg update` / `mmd update` / `mmm update` 时只允许 clean worktree fast-forward；dirty 或分叉会拒绝。
 
-Web UI 是现在最适合做教程的入口，比 TUI 更容易截图和解释。注意：`mmf` / `mmg` 都是 preview DB 入口，所以预览 DB 保存跟 `~/.config/mms-next` workflow 绑定；如果你打开的是 `mms config web`，保存页会显示 `保存配置`，这是 stable/current root 的 legacy audited save；要看到 `写入预览 DB + 发布`，请启动：
+## 配置 Web UI 教程：从通道到模型可见性
+
+这一节讲的是 `mmf config web` 的配置页面，不是 MMS Pilot。配置 Web UI 是现在最适合做教程的入口，比 TUI 更容易截图和解释。注意：`mmf` / `mmg` 都是 preview DB 入口，所以预览 DB 保存跟 `~/.config/mms-next` workflow 绑定；如果你打开的是 `mms config web`，保存页会显示 `保存配置`，这是 stable/current root 的 legacy audited save；要看到 `写入预览 DB + 发布`，请启动：
 
 ```bash
 mmf config web
@@ -125,13 +171,17 @@ mmf config web
 ## 快速使用
 
 ```bash
+mms web --open              # 打开 MMS Pilot
 mms                         # 交互式启动器
 mms claude                  # 启动 Claude
 mms codex                   # 启动 Codex
 mms opencode --profile agent
+mms opencode --profile review
 mms --provider <id> codex
 mms --account <id> claude
 ```
+
+OpenCode Review 推荐直接走 `mms` TUI：选 `OpenCode` -> `Review`，在 reviewer 模型页用 Space 勾选、Enter 启动；这次选择会自动写入 `[opencode.review].models`，下次自动预选。`--review-models` 仍保留给脚本/高级用户。
 
 只导出环境变量，不立即启动：
 
@@ -183,24 +233,33 @@ caveman_level = "light" # light | standard | full
 | CodeGraph | 内建 passive skill | 优先用 symbol graph 做代码定位、callers/callees、impact 分析 |
 | token-saver | 内建 | 长日志/测试输出/diff 存 ref + snippet；`token-gain` / `mms-gain` 看节省估算 |
 | TOON | 内建 | 压缩 agent-facing JSON / status / handoff |
-| xmem | 内建 skill；可选全局 CLI | 跨项目 truth card / recall |
 | Web automation bundle | 内建 | `weber` router + `web-access` 登录态 Chrome + `agent-browser` headless |
-| NSR | 内建，默认开启 | MMS-managed Claude/Codex hook guard / closeout |
+| NSR | 显式 `/nsr` 手动工作循环 | 沿用原 task 推进；不注册 Stop/compact hook、不跨 session 续跑 |
 | ECC / OMC | 可选安装 | Claude agent pack；启动确认页显式选择 |
+| Figma / Pilot MCP | 检测到也默认关闭 | 需要时用 `MMS_ENABLE_MCP_FIGMA=1` / `MMS_ENABLE_MCP_PILOT=1` 显式开启 |
 
-可选全局安装示例：
+xmem 改为 global-only：MMS / MMF 不再 bundle、安装或注入 xmem skill/hook/plugin；如果全局 agent 目录里有 xmem，就由全局版本自己生效，避免 dev channel 复制出低版本。
+
+NSR、Map、CodeGraph 的自动 hook 已退出默认路径。旧 `nsr-*-hook`、`nsr-stop-wrapper.py`、Map/CodeGraph auto-index wrapper 保留为 no-op，不读取或删除现有 marker，不同步索引。显式 `/nsr`、`nsrctl`、Map 与 CodeGraph CLI 仍可使用。MMS 在合并旧 managed hooks 后也过滤自有退休入口；旧 runtime 的 NSR toggle 不会恢复自动 hook。
+
+安装器只提供全局注册的只读清理计划。需要清理已存在注册时，使用 [`mms_hook_retirement.py`](mms_hook_retirement.py) 明确指定 `--file`；默认只输出 locator/hash。`--apply` 另要求审阅时 SHA256 和私有 backup 目录，且只删除精确自有入口。它不处理 MMS generated session/config；旧 session 可通过激活 shared no-op wrapper 停止自动行为。
+
+全局 Superset terminal 注册可使用 `hooks/owned-superset-notify.sh`：先检查原 app 已使用的 `SUPERSET_TAB_ID`，无 owner 时不读取 stdin、不通知；有 owner 时委托原 `~/.superset/hooks/notify.sh`，保留 app 的直接 Mastra 路径。此 wrapper 不证明 app 上游模板已修改；app 升级若重建全局注册，需要重新检查精确命令。
+
+Figma 和 Pilot MCP 不再默认注入；即使检测到已安装 plugin/server，也需要用 `MMS_ENABLE_MCP_FIGMA=1`、`MMS_ENABLE_FIGMA_MCP=1`、`MMS_ENABLE_MCP_PILOT=1` 或 `MMS_ENABLE_PILOT_MCP=1` 显式 opt-in。
+
+安装器不再提供可选包。RTK、BrainKeeper、Map、CodeGraph、全局 token-saver、全局 TOON、ops-env-safe、ECC 与 OMC 的安装路径已移除；对应的 `--install-*` 参数会打印一条提示后忽略。token-saver、TOON、web-access、weber、agent-browser 仍作为内建 session assets 随 MMS 提供。
+
+从旧版本升级时，仅将有 MMS 专属标记的 wrapper/命令、明确指向当前 MMS vendor 的 Skill 链接和安装目录内的旧 agent packs 移入 `~/.mms/retired-backup.*`，保留原文件供恢复。同名自定义 Skills、全局 hooks/MCP 设置及真实配置目录不自动修改，也不卸载第三方程序。全局退休 hook 可按上面的只读清理计划另行检查。想单独整理 MMS 条目而不重装：
 
 ```bash
-bash install.sh --install-codegraph
-bash install.sh --install-token-saver
-bash install.sh --install-toon
-bash install.sh --install-xmem
+bash install.sh --cleanup-retired-packs
 ```
 
-CodeGraph 初始化提示：
+安装过程零交互：不再询问 UI 语言，也不再逐项确认可选包。`pi` 是必装项，pilot web 端依赖它；缺失的 `claude` / `codex` / `opencode` 会自动补装，已安装的保持不动。需要精确控制时仍可用 `--install-cli`：
 
-```text
-找出当前工作区下所有 git repo；没有 .codegraph 就执行 codegraph init -i，已有 .codegraph 就执行 codegraph sync；跳过 node_modules/vendor/build；最后汇总失败列表。
+```bash
+bash install.sh --install-cli claude,codex
 ```
 
 ## 安全原则
@@ -214,7 +273,10 @@ CodeGraph 初始化提示：
 
 ## 更多文档
 
-- [`docs/WEB_UI_QUICKSTART.md`](docs/WEB_UI_QUICKSTART.md)
+- [`docs/mms-web/GETTING-STARTED.md`](docs/mms-web/GETTING-STARTED.md) — MMS Pilot 安装与使用
+- [`docs/mms-web/FEATURES.md`](docs/mms-web/FEATURES.md) — MMS Pilot 功能与交互边界
+- [`docs/mms-web/API.md`](docs/mms-web/API.md) — MMS Pilot 本地 API v1
+- [`docs/WEB_UI_QUICKSTART.md`](docs/WEB_UI_QUICKSTART.md) — 配置 Web UI
 - [`docs/RELEASE_CHANNELS.md`](docs/RELEASE_CHANNELS.md)
 - [`docs/MMS_USER_PREFERENCES.md`](docs/MMS_USER_PREFERENCES.md)
 - [`docs/MODEL_CONFIG_CONTRACT.md`](docs/MODEL_CONFIG_CONTRACT.md)

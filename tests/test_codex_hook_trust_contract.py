@@ -145,7 +145,7 @@ def test_contract_codex_upgrade_refreshes_current_hook_hashes(monkeypatch, tmp_p
                             "hooks": [
                                 {
                                     "type": "command",
-                                    "command": "/usr/bin/python3 /Users/xin/scmp-ops/scripts/scmp_hook.py --host codex --event PreToolUse",
+                                    "command": "bash /tmp/mms/hooks/nsr-codex-hook.sh",
                                 }
                             ],
                         }
@@ -175,7 +175,7 @@ def test_contract_codex_upgrade_refreshes_current_hook_hashes(monkeypatch, tmp_p
                 "sourcePath": str(hooks_path),
                 "key": managed_key,
                 "currentHash": "sha256:fresh-managed",
-                "command": "/usr/bin/python3 /Users/xin/scmp-ops/scripts/scmp_hook.py --host codex --event PreToolUse",
+                "command": "bash /tmp/mms/hooks/nsr-codex-hook.sh",
             },
             {
                 "sourcePath": str(hooks_path),

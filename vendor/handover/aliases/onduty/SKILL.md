@@ -1,44 +1,26 @@
 ---
 name: onduty
-description: Codex `$onduty` / fresh-session resume entry. 开工、换机、fresh session 时，从 repo-local continuity 恢复可执行上下文。
+description: 读取本地任务交接记录，核实当前文件和进度后继续工作；没有记录时明确说明。
+disable-model-invocation: true
 ---
 
-# Onduty Alias
+# 继续上次
 
-Use this alias when the user types `$onduty`, `/onduty`, or asks to resume from continuity.
+用户明确选择本能力或要求继续上次时使用。用户要求评估或修改这个 skill 时，不执行交接。
 
-## Required Behavior
+## 当前任务优先
 
-1. Resolve the helper from the installed skill alias, not from a
-   machine-specific absolute path:
-   - Preferred: use `<directory-containing-this-SKILL.md>/onduty`.
-   - If the skill directory is not visible, find an installed alias wrapper
-     under `${MMS_REAL_HOME:-}`, `${REAL_HOME:-}`, `${ORIGINAL_HOME:-}`, or
-     `$HOME`: `.agents/skills/onduty/onduty`,
-     `.claude/skills/onduty/onduty`, `.codex/skills/onduty/onduty`,
-     `.config/opencode/skills/onduty/onduty`, or
-     `.opencode/skills/onduty/onduty`.
-   - Never run a developer-machine path such as `/Users/xin/...`.
-2. From the current repo root, run:
+- 用户当前指令与项目规则优先。若已有 Stride 或其他任务记录，沿用同一个任务、实际 workspace、证据与下一步；本 skill 不要求安装 Stride，不另建任务或第二套进度。
+- 没有任务系统时，使用实际工作目录内的 `.agent.local/continuity/`。先读已有记录；只更新自己的任务文件。新记录用 `checkpoints/<时间>-<会话标识>.md` 唯一文件名，内容注明实际路径。旧 active/pickup/lifeboat 只用于找到原任务，不迁移或删除历史。
+- 从对话、工具 workdir、改动文件推断实际工作目录。只对存在的 Git repo 读 status/diff；普通文件夹同样可用。标识或模型信息不知道就注明未知，不编造。
+- 只保存完成事实、验证结果、未完成事项、关键决定、风险、证据路径和下一步。不要复制全部聊天、API Key、环境变量或凭据。
+- 本地进度文件不自动加入 Git，不替用户提交、合并、发布或同步到云端。
+- 不安装全局命令，不启用 hooks，不自动调用 BrainKeeper/BKC、Hive、Moebius、Claude 或其他 Agent。旧 scripts 仅兼容入口，本流程无需调用。
+- 保存的是任务说明与证据，不是进程快照。不得停止会话、结束后台任务、重启 Pilot，或承诺换机后原进程继续运行。
 
-```bash
-"<onduty-skill-dir>/onduty" --root "<actual-repo-root>"
-```
+## 执行
 
-3. If the user launched from repo A but asks to continue work that belongs to repo B/C, switch to the actual repo/root and pass `--root`.
-4. Read Start Here, Active Pointer, Pickup Snapshot, Recent Checkpoints, Git Status, and Diff Stat.
-5. Also read the Lifeboat / BKC Backup section if present; it is the lightweight fallback when native resume or BrainKeeper session lookup is stale.
-6. Give the user one conclusion first: where to continue now.
-7. If several active checkpoints exist, present them as choices and recommend one when evidence is clear.
-8. Do not ask for old chat. Old chat is not the source of truth.
-
-## Rules
-
-- Default input is `.agent.local/continuity/`; legacy `.ai/plan` requires `--layout legacy-ai-plan`.
-- For Codex, `$onduty` is the preferred explicit trigger.
-- For Claude/OpenCode, `/onduty` may route through the skill alias; legacy command symlinks are cleaned to avoid duplicate entries.
-- Root ownership follows actual target repo/root, not the session launch folder.
-- Open archive/checkpoint history only for old decision/debug provenance.
-- If git is dirty, inspect diff before editing.
-- Default `onduty` is lite: do not run native resume or full transcript replay unless the user explicitly asks.
-- `--no-lifeboat` hides fallback refs only; it does not delete anything.
+1. 优先读当前任务系统的任务与交接；否则在实际工作文件夹 `.agent.local/continuity/` 内找到已有 pickup/active 指向的记录，或按时间浏览 checkpoints。只为必要的决策追溯读取历史。
+2. 对照实际文件、Git 状态（如果有）、运行情况与记录。文件移动、版本变化或验证过期时先指出差异，不能把旧结论当现况。
+3. 有多个无法辨别的任务时，用任务名问一个简短问题；没有记录时明确说明，并请用户描述想继续的工作。不得凭空编造进度、恢复进程或宣称已原生续接。
+4. 简述继续的位置，然后执行已有授权范围内的下一步；检查成功后更新同一任务。

@@ -232,6 +232,16 @@ Provider profiles are MMS-owned declarative source data. They are used for:
       "visible": true,
       "favorite": false,
       "tier": "secondary",
+      "capabilities": {
+        "text": true,
+        "vision": true,
+        "tool_use": true,
+        "reasoning": true,
+        "thinking": true,
+        "supports_thinking": true,
+        "one_m_context": true,
+        "context_window_tokens": 1000000
+      },
       "hide_in": ["hive"],
       "show_in": ["mms", "agent-soul"],
       "downgrade_to": "mimo-v2.5"
@@ -258,6 +268,21 @@ but route export must not overwrite human policy entries. A project can use
 `default_visible: false` plus `allowed_models` as a compact whitelist; consumers
 must treat every other Router model as hidden for that project. `hidden_models`
 and `disabled_models` are explicit deny overlays.
+Per-model `capabilities.context_window_tokens` is the user-owned override for
+runtime/statusline context size; it should be preferred over model-name suffixes
+such as `[1m]` while preserving those suffixes as legacy compatibility aliases.
+`capabilities.one_m_context=true` is a UI shortcut that materializes as
+`context_window_tokens=1000000`. `capabilities.text`, `vision`, `tool_use`,
+`reasoning`, and `thinking` are user-owned capability hints: `text=false` hides
+the model from normal launch lists, `vision=true` makes it eligible for vision
+surfaces, `reasoning=true` maps to the TUI Reasoning Effort affordance, and
+`thinking=true` / `supports_thinking=true` maps to the TUI Think on/off affordance
+and bridge thinking controls when the route supports them.
+Claude bridge launchers and image-input guards must honor `vision` /
+`supports_vision` from effective Policy and approved capability facts before
+falling back to a vision sidecar; known direct vision models such as
+`MiniMax-M3` keep image blocks on the primary model instead of routing them
+through sidecar OCR.
 
 Validation treats stale `hidden_models` / `disabled_models` entries as benign:
 they can intentionally suppress retired aliases if those aliases return later.
@@ -273,21 +298,27 @@ source-overlay surface, not the downstream source of truth:
 |---|---|
 | DeepSeek | `deepseek-v4-flash`, `deepseek-v4-pro` |
 | MiMo | `mimo-v2.5`, `mimo-v2.5-pro` |
-| Kimi | `kimi-for-coding`, `kimi-k2.5`, `K2.6` |
-| Qwen | `qwen3-coder-plus`, `qwen3.5-plus`, `qwen3.6-plus` |
+| Kimi | `k3`, `k3[1m]`, `kimi-k3`, `kimi-for-coding`, `kimi-for-coding-highspeed`, `kimi-k2.7-code`, `kimi-k2.5`, `K2.6` |
+| Qwen | `qwen3-coder-plus`, `qwen3.5-plus`, `qwen3.6-plus`, `qwen3.8-max-preview` |
 | GLM | `glm-5-turbo`, `glm-5.1` |
 | MiniMax | `MiniMax-M2.7` |
 | Gemini / Antigravity | `gemini-3-flash-agent(high)`, `gemini-3-flash-agent(medium)`, `gemini-3-flash-agent(low)`, `gemini-3-flash-agent(none)`, `gemini-3.1-flash-lite`, `gemini-3.1-pro-low` |
 | Claude / Antigravity | `claude-sonnet-4-6`, `claude-opus-4-6-thinking` |
 | GPT / OpenAI | `gpt-5.3-codex`, `gpt-5.3-codex-spark`, `gpt-5.4`, `gpt-5.5`, `gpt-image-2` |
 
-`K2.6` is intentionally classified under the Kimi family by policy. `gpt-5.3-codex-spark`
+`k3` and `K2.6` are intentionally classified under the Kimi family by policy. `gpt-5.3-codex-spark`
 uses the CPA local Codex channel (`us-cpa-local-codex`). The old Gemini preview
 surface (`gemini-3-flash-preview`, `gemini-3.1-flash-lite-preview`, `gemini-3.1-pro-preview`)
 is retired from the official policy surface; current Gemini 3.5/3.1 access goes
 through the CPA Antigravity provider (`us-cpa-local-antigravity`). Agent Soul is
 not narrowed by this execution whitelist so its draw/image and Jimeng-specific
 surfaces can stay project-owned until explicitly migrated.
+
+`qwen3.8-max-preview` is a source-backed partial Qwen entry: Model Studio confirms
+the model ID, Token Plan availability, Thinking, and Function Calling, but its Text
+Generation page does not publish an exact context window, max output, or direct
+image-input capability. Consumers must keep those fields unknown rather than infer
+`1M` or Vision from adjacent Qwen models; OpenRouter absence is not negative evidence.
 
 ## Consumer Rules
 

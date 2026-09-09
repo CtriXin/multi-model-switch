@@ -68,9 +68,35 @@ def ensure_dir_symlink(path: Path, target: Path) -> dict[str, str]:
         path.symlink_to(target)
         return {"path": str(path), "target": str(target), "status": "updated_symlink"}
     if path.exists():
+        if path.is_dir():
+            return _merge_into_existing_dir(path, target)
         return {"path": str(path), "target": str(target), "status": "skipped_existing_non_symlink"}
     path.symlink_to(target)
     return {"path": str(path), "target": str(target), "status": "created_symlink"}
+
+
+def _merge_into_existing_dir(path: Path, target: Path) -> dict[str, str]:
+    """When *path* is a real directory (e.g. ``~/.claude/skills/``), symlink
+    individual entries from *target* into it so that skills installed via this
+    package become visible even when the parent directory is not a symlink."""
+    merged = 0
+    skipped = 0
+    if target.is_dir():
+        for item in target.iterdir():
+            dst = path / item.name
+            if dst.exists() or dst.is_symlink():
+                skipped += 1
+                continue
+            try:
+                dst.symlink_to(item)
+                merged += 1
+            except OSError:
+                skipped += 1
+    return {
+        "path": str(path),
+        "target": str(target),
+        "status": f"merged_into_existing_dir (+{merged} -{skipped})",
+    }
 
 
 def is_managed_legacy_command_symlink(path: Path) -> bool:

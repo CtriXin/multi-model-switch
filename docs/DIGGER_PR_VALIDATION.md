@@ -53,10 +53,11 @@ is not a merge bot and must not be treated as committee approval.
 
 - The workflow is intentionally declared without `branches` filters. Any branch
   that contains this workflow can run it for PRs targeting that branch.
-- Today this PR targets `main`, so the immediate coverage is `head -> main` PRs
-  after the workflow lands on `main`.
-- To cover `dev` PRs, the workflow must also exist on `dev` because GitHub uses
-  the base branch's workflow definition for `pull_request` runs.
+- A base branch receives coverage only after this workflow exists on that branch,
+  because GitHub uses the base branch's workflow definition for `pull_request`
+  runs.
+- Once it lands on `main`, it covers `head -> main` PRs; once it lands on `dev`,
+  it covers `head -> dev` PRs.
 - To cover `release/*` PRs, cherry-pick or merge the workflow into the relevant
   release branch first.
 - Fork PRs are out of scope for now and are skipped by the same-repository guard.

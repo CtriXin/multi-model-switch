@@ -1,6 +1,257 @@
 import io
 import json
+import sys
 import types
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+
+
+def test_responses_json_parse_error_uses_chatcompletions_fallback():
+    import mms_bridge
+
+    assert mms_bridge._should_try_chatcompletions_fallback(
+        400,
+        '{"error":{"message":"Request body must be valid JSON"}}',
+    ) is True
+    assert mms_bridge._should_try_chatcompletions_fallback(
+        400,
+        '{"error":{"message":"input is required"}}',
+    ) is False
+    assert mms_bridge._should_try_chatcompletions_fallback(
+        422,
+        '{"error":{"message":"Request body must be valid JSON"}}',
+    ) is False
+    assert mms_bridge._should_cache_chatcompletions_fallback(
+        400,
+        '{"error":{"message":"Request body must be valid JSON"}}',
+    ) is False
+    assert mms_bridge._should_cache_chatcompletions_fallback(404, "not found") is True
+
+
+def test_chat_fallback_wire_evidence_is_opt_in_and_prompt_free(monkeypatch, tmp_path):
+    import mms_bridge
+
+    evidence_path = tmp_path / "chat-fallback.jsonl"
+    monkeypatch.delenv("MMS_BRIDGE_WIRE_LOG_PATH", raising=False)
+    mms_bridge._append_chat_fallback_wire_evidence(
+        event="chat_fallback_request",
+        model_name="gpt-test",
+        provider_id="test-provider",
+        target_url="https://relay.example/v1/chat/completions",
+        payload={"messages": [{"role": "user", "content": "secret prompt"}], "tools": []},
+    )
+    assert not evidence_path.exists()
+
+    monkeypatch.setenv("MMS_BRIDGE_WIRE_LOG_PATH", str(evidence_path))
+    payload = {"messages": [{"role": "user", "content": "secret prompt"}], "tools": []}
+    mms_bridge._append_chat_fallback_wire_evidence(
+        event="chat_fallback_response",
+        model_name="gpt-test",
+        provider_id="test-provider",
+        target_url="https://relay.example/v1/chat/completions",
+        payload=payload,
+        status_code=400,
+        response_body='{"error":{"message":"Invalid JSON"}}',
+    )
+
+    entry = json.loads(evidence_path.read_text(encoding="utf-8"))
+    assert entry["request_path"] == "/v1/chat/completions"
+    assert entry["status_code"] == 400
+    assert entry["request"]["json_valid"] is True
+    assert entry["request"]["message_count"] == 1
+    assert entry["response"]["json_valid"] is True
+    assert "secret prompt" not in evidence_path.read_text(encoding="utf-8")
+
+
+def test_chatcompletions_projection_keeps_codex_additional_tools():
+    import mms_bridge
+
+    tools, custom_tool_names = mms_bridge._responses_additional_tools_to_chat(
+        [
+            {
+                "type": "additional_tools",
+                "tools": [
+                    {
+                        "type": "custom",
+                        "name": "exec",
+                        "description": "Execute the host tool script.",
+                    },
+                    {
+                        "type": "function",
+                        "name": "wait",
+                        "description": "Wait for a running command.",
+                        "parameters": {"type": "object", "properties": {"id": {"type": "string"}}},
+                    },
+                ],
+            }
+        ]
+    )
+
+    assert custom_tool_names == {"exec"}
+    assert [tool["function"]["name"] for tool in tools] == ["exec", "wait"]
+    assert tools[0]["function"]["parameters"] == {
+        "type": "object",
+        "properties": {"input": {"type": "string"}},
+        "required": ["input"],
+        "additionalProperties": False,
+    }
+
+
+def test_chatcompletions_translator_returns_codex_custom_tool_events():
+    import mms_bridge
+
+    translator = mms_bridge._ChatCompletionsToResponsesTranslator(
+        "gpt-5.6-terra",
+        custom_tool_names={"exec"},
+    )
+    events = translator.process_chunk(
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "call_exec",
+                                "function": {"name": "exec", "arguments": '{"input":"await tools.exec_command({cmd: \\"pwd\\"})"}'},
+                            }
+                        ]
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ]
+        }
+    )
+
+    assert any(
+        event_name == "response.custom_tool_call_input.delta"
+        and payload["delta"] == 'await tools.exec_command({cmd: "pwd"})'
+        for event_name, payload in events
+    )
+    assert any(
+        event_name == "response.custom_tool_call_input.done"
+        and payload["input"] == 'await tools.exec_command({cmd: "pwd"})'
+        for event_name, payload in events
+    )
+    assert any(
+        event_name == "response.output_item.done"
+        and payload["item"]["type"] == "custom_tool_call"
+        and payload["item"]["name"] == "exec"
+        and payload["item"]["id"].startswith("ctc_")
+        for event_name, payload in events
+    )
+
+
+def test_chatcompletions_translator_keeps_function_call_id_prefix():
+    import mms_bridge
+
+    translator = mms_bridge._ChatCompletionsToResponsesTranslator("gpt-5.6-terra")
+    events = translator.process_chunk(
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "call_wait",
+                                "function": {"name": "wait", "arguments": '{"id":"job-1"}'},
+                            }
+                        ]
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ]
+        }
+    )
+
+    assert any(
+        event_name == "response.output_item.done"
+        and payload["item"]["type"] == "function_call"
+        and payload["item"]["id"].startswith("fc_")
+        for event_name, payload in events
+    )
+
+
+def test_chatcompletions_translator_streams_decoded_custom_tool_input_chunks():
+    import mms_bridge
+
+    translator = mms_bridge._ChatCompletionsToResponsesTranslator(
+        "gpt-5.6-terra",
+        custom_tool_names={"exec"},
+    )
+    first_events = translator.process_chunk(
+        {
+            "choices": [{
+                "delta": {
+                    "tool_calls": [{
+                        "index": 0,
+                        "id": "call_exec",
+                        "function": {"name": "exec", "arguments": '{"input":"printf \\u4f60'},
+                    }],
+                },
+                "finish_reason": None,
+            }]
+        }
+    )
+    second_events = translator.process_chunk(
+        {
+            "choices": [{
+                "delta": {
+                    "tool_calls": [{
+                        "index": 0,
+                        "function": {"arguments": '\\u597d\\n\\"quoted\\""}'},
+                    }],
+                },
+                "finish_reason": "tool_calls",
+            }]
+        }
+    )
+
+    events = first_events + second_events
+    deltas = [payload["delta"] for event_name, payload in events if event_name == "response.custom_tool_call_input.delta"]
+    assert "".join(deltas) == 'printf 你好\n"quoted"'
+    assert any(
+        event_name == "response.custom_tool_call_input.done"
+        and payload["input"] == 'printf 你好\n"quoted"'
+        for event_name, payload in events
+    )
+
+
+def test_responses_input_maps_custom_tool_history_to_chat_tool_messages():
+    import mms_bridge
+
+    messages = mms_bridge._responses_input_to_messages(
+        "",
+        [
+            {"type": "custom_tool_call", "call_id": "call_exec", "name": "exec", "input": "await tools.exec_command({cmd: 'pwd'})"},
+            {
+                "type": "custom_tool_call_output",
+                "call_id": "call_exec",
+                "output": [{"type": "input_text", "text": "/tmp"}],
+            },
+        ],
+    )
+
+    assert messages == [
+        {
+            "role": "assistant",
+            "tool_calls": [
+                {
+                    "id": "call_exec",
+                    "type": "function",
+                    "function": {
+                        "name": "exec",
+                        "arguments": '{"input": "await tools.exec_command({cmd: \'pwd\'})"}',
+                    },
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_exec", "content": "/tmp"},
+    ]
 
 
 def test_resolve_native_fallback_routes_finds_same_vendor_direct():
@@ -359,6 +610,325 @@ def test_responses_proxy_retries_native_fallback_on_cloudflare_524(monkeypatch):
         "https://codex.example.com/v1/responses",
     ]
     assert b"response.created" in handler.wfile.getvalue()
+
+
+def test_anthropic_bridge_mixed_protocol_fallback_uses_openai_responses(monkeypatch):
+    import mms_bridge
+
+    calls = []
+
+    class FakeResponse:
+        def __init__(self, status_code, body=b"", headers=None, lines=None):
+            self.status_code = status_code
+            self._body = body
+            self.headers = headers or {"content-type": "application/json"}
+            self._lines = lines or []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return self._body
+
+        def iter_lines(self):
+            return iter(self._lines)
+
+    def fake_stream(method, url, **kwargs):
+        calls.append((method, url, kwargs))
+        if len(calls) == 1:
+            return FakeResponse(403, b'{"error":{"message":"blocked"}}')
+        return FakeResponse(
+            200,
+            headers={"content-type": "text/event-stream"},
+            lines=[
+                'event: response.created',
+                'data: {"type":"response.created","response":{"id":"resp_gpt"}}',
+                "",
+            ],
+        )
+
+    monkeypatch.setattr(mms_bridge, "httpx", types.SimpleNamespace(stream=fake_stream))
+    monkeypatch.setattr(mms_bridge, "_record_bridge_speed", lambda *args, **kwargs: None)
+
+    handler = mms_bridge._ResponsesProxyHandler.__new__(mms_bridge._ResponsesProxyHandler)
+    handler.headers = {}
+    handler.wfile = io.BytesIO()
+    handler.server = types.SimpleNamespace(
+        provider_id="direct-qwen",
+        provider_profile="",
+        gateway_key="qwen-key",
+        gateway_url="https://qwen.example/v1",
+        speed_scope={},
+        proxy_url="",
+        no_proxy="",
+        reasoning_enabled=True,
+        reasoning_effort="medium",
+        native_fallback_routes=[{
+            "provider_id": "us-cpa-local-codex",
+            "provider_profile": "openai",
+            "gateway_url": "https://cpa.example/v1",
+            "gateway_key": "gpt-key",
+            "model": "gpt-5.5",
+            "protocol": "openai_responses",
+            "allow_model_switch": True,
+            "try_next_on": [403],
+        }],
+    )
+    captured = {"statuses": []}
+    handler.send_response = lambda code: captured["statuses"].append(code)
+    handler.send_header = lambda *args, **kwargs: None
+    handler.end_headers = lambda: None
+
+    handler._do_anthropic_messages_fallback(
+        {"model": "qwen3.7-max", "input": "hi", "stream": True},
+        "qwen3.7-max",
+        "https://qwen.example/v1",
+        "qwen-key",
+        0,
+        route={
+            "provider_id": "direct-qwen",
+            "provider_profile": "",
+            "protocol": "anthropic_messages",
+            "include_native_fallbacks": True,
+            "try_next_on": [403],
+        },
+    )
+
+    assert captured["statuses"] == [200]
+    assert [item[1] for item in calls] == [
+        "https://qwen.example/v1/messages",
+        "https://cpa.example/v1/responses",
+    ]
+    assert calls[1][2]["json"]["model"] == "gpt-5.5"
+    assert calls[1][2]["headers"]["Authorization"] == "Bearer gpt-key"
+    assert b"response.created" in handler.wfile.getvalue()
+
+
+def test_anthropic_bridge_chat_fallback_honors_try_next_on(monkeypatch):
+    import mms_bridge
+
+    calls = []
+
+    class FakeResponse:
+        def __init__(self, status_code, body=b"", headers=None, lines=None):
+            self.status_code = status_code
+            self._body = body
+            self.headers = headers or {"content-type": "application/json"}
+            self._lines = lines or []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return self._body
+
+        def iter_lines(self):
+            return iter(self._lines)
+
+    def fake_stream(method, url, **kwargs):
+        calls.append((method, url, kwargs))
+        if len(calls) == 1:
+            return FakeResponse(403, b'{"error":{"message":"primary blocked"}}')
+        if len(calls) == 2:
+            return FakeResponse(503, b'{"error":{"message":"chat unavailable"}}')
+        return FakeResponse(
+            200,
+            headers={"content-type": "text/event-stream"},
+            lines=[
+                'event: response.created',
+                'data: {"type":"response.created","response":{"id":"resp_after_chat"}}',
+                "",
+            ],
+        )
+
+    monkeypatch.setattr(mms_bridge, "httpx", types.SimpleNamespace(stream=fake_stream))
+    monkeypatch.setattr(mms_bridge, "_record_bridge_speed", lambda *args, **kwargs: None)
+
+    handler = mms_bridge._ResponsesProxyHandler.__new__(mms_bridge._ResponsesProxyHandler)
+    handler.headers = {}
+    handler.wfile = io.BytesIO()
+    handler.server = types.SimpleNamespace(
+        provider_id="direct-qwen",
+        provider_profile="",
+        gateway_key="qwen-key",
+        gateway_url="https://qwen.example/v1",
+        speed_scope={},
+        proxy_url="",
+        no_proxy="",
+        reasoning_enabled=True,
+        reasoning_effort="medium",
+        native_fallback_routes=[
+            {
+                "provider_id": "newapi-chat",
+                "provider_profile": "",
+                "gateway_url": "https://chat.example/v1",
+                "gateway_key": "chat-key",
+                "model": "gpt-5.5",
+                "protocol": "openai_chat_completions",
+                "allow_model_switch": True,
+                "try_next_on": [503],
+            },
+            {
+                "provider_id": "us-cpa-local-codex",
+                "provider_profile": "openai",
+                "gateway_url": "https://responses.example/v1",
+                "gateway_key": "responses-key",
+                "model": "gpt-5.5",
+                "protocol": "openai_responses",
+                "allow_model_switch": True,
+                "try_next_on": [503],
+            },
+        ],
+    )
+    captured = {"statuses": []}
+    handler.send_response = lambda code: captured["statuses"].append(code)
+    handler.send_header = lambda *args, **kwargs: None
+    handler.end_headers = lambda: None
+
+    handler._do_anthropic_messages_fallback(
+        {"model": "qwen3.7-max", "input": "hi", "stream": True},
+        "qwen3.7-max",
+        "https://qwen.example/v1",
+        "qwen-key",
+        0,
+        route={
+            "provider_id": "direct-qwen",
+            "provider_profile": "",
+            "protocol": "anthropic_messages",
+            "include_native_fallbacks": True,
+            "try_next_on": [403],
+        },
+    )
+
+    assert captured["statuses"] == [200]
+    assert [item[1] for item in calls] == [
+        "https://qwen.example/v1/messages",
+        "https://chat.example/v1/chat/completions",
+        "https://responses.example/v1/responses",
+    ]
+    assert calls[1][2]["json"]["model"] == "gpt-5.5"
+    assert calls[1][2]["headers"]["Authorization"] == "Bearer chat-key"
+    assert calls[2][2]["headers"]["Authorization"] == "Bearer responses-key"
+    assert b"resp_after_chat" in handler.wfile.getvalue()
+
+
+def test_anthropic_bridge_terminal_chat_fallback_retries_messages(monkeypatch):
+    import mms_bridge
+
+    calls = []
+
+    class FakeResponse:
+        def __init__(self, status_code, body=b"", headers=None, lines=None):
+            self.status_code = status_code
+            self._body = body
+            self.headers = headers or {"content-type": "application/json"}
+            self._lines = lines or []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return self._body
+
+        def iter_lines(self):
+            return iter(self._lines)
+
+    def fake_stream(method, url, **kwargs):
+        calls.append((method, url, kwargs))
+        if len(calls) == 1:
+            return FakeResponse(403, b'{"error":{"message":"primary blocked"}}')
+        if len(calls) == 2:
+            return FakeResponse(
+                400,
+                b'{"error":{"message":"prompt-cache sensitive route requires /v1/messages instead of /v1/chat/completions"}}',
+            )
+        return FakeResponse(
+            200,
+            headers={"content-type": "text/event-stream"},
+            lines=[
+                "event: message_start",
+                'data: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","content":[],"model":"gpt-5.5","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":1}}}',
+                "",
+                "event: content_block_start",
+                'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}',
+                "",
+                "event: content_block_delta",
+                'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"resp_messages_retry"}}',
+                "",
+                "event: content_block_stop",
+                'data: {"type":"content_block_stop","index":0}',
+                "",
+                "event: message_stop",
+                'data: {"type":"message_stop"}',
+                "",
+            ],
+        )
+
+    monkeypatch.setattr(mms_bridge, "httpx", types.SimpleNamespace(stream=fake_stream))
+    monkeypatch.setattr(mms_bridge, "_record_bridge_speed", lambda *args, **kwargs: None)
+
+    handler = mms_bridge._ResponsesProxyHandler.__new__(mms_bridge._ResponsesProxyHandler)
+    handler.headers = {}
+    handler.wfile = io.BytesIO()
+    handler.server = types.SimpleNamespace(
+        provider_id="direct-qwen",
+        provider_profile="",
+        gateway_key="qwen-key",
+        gateway_url="https://qwen.example/v1",
+        speed_scope={},
+        proxy_url="",
+        no_proxy="",
+        reasoning_enabled=True,
+        reasoning_effort="medium",
+        native_fallback_routes=[{
+            "provider_id": "newapi-chat",
+            "provider_profile": "",
+            "gateway_url": "https://chat.example/v1",
+            "gateway_key": "chat-key",
+            "model": "gpt-5.5",
+            "protocol": "openai_chat_completions",
+            "allow_model_switch": True,
+            "try_next_on": [503],
+        }],
+    )
+    captured = {"statuses": []}
+    handler.send_response = lambda code: captured["statuses"].append(code)
+    handler.send_header = lambda *args, **kwargs: None
+    handler.end_headers = lambda: None
+
+    handler._do_anthropic_messages_fallback(
+        {"model": "qwen3.7-max", "input": "hi", "stream": True},
+        "qwen3.7-max",
+        "https://qwen.example/v1",
+        "qwen-key",
+        0,
+        route={
+            "provider_id": "direct-qwen",
+            "provider_profile": "",
+            "protocol": "anthropic_messages",
+            "include_native_fallbacks": True,
+            "try_next_on": [403],
+        },
+    )
+
+    assert captured["statuses"] == [200]
+    assert [item[1] for item in calls] == [
+        "https://qwen.example/v1/messages",
+        "https://chat.example/v1/chat/completions",
+        "https://chat.example/v1/messages",
+    ]
+    assert calls[1][2]["headers"]["Authorization"] == "Bearer chat-key"
+    assert calls[2][2]["headers"]["x-api-key"] == "chat-key"
+    assert b"resp_messages_retry" in handler.wfile.getvalue()
 
 
 def test_responses_proxy_converts_terminal_403_to_fail_closed(monkeypatch):

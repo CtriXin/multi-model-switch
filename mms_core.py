@@ -7,6 +7,8 @@ import shlex
 import subprocess
 import json
 import shutil
+import copy
+import difflib
 import logging
 import threading
 import time
@@ -121,15 +123,20 @@ from mms_opencode_health import (
 from mms_opencode_profiles import (
     OPENCODE_AGENT_PROFILE_ID as _OPENCODE_AGENT_PROFILE_ID,
     OPENCODE_BASE_PROFILE_OPTIONS as _OPENCODE_BASE_PROFILE_OPTIONS,
+    OPENCODE_COMMITTEE_PROFILE_ID as _OPENCODE_COMMITTEE_PROFILE_ID,
+    OPENCODE_DEBATE_PROFILE_ID as _OPENCODE_DEBATE_PROFILE_ID,
     OPENCODE_DEFAULT_MODEL_PREFERENCES as _OPENCODE_DEFAULT_MODEL_PREFERENCES,
     OPENCODE_DEFAULT_PROFILE_ID as _OPENCODE_DEFAULT_PROFILE_ID,
     OPENCODE_LITE_PRO_ORCHESTRATED_EXTRA_SPECS as _OPENCODE_LITE_PRO_ORCHESTRATED_EXTRA_SPECS,
     OPENCODE_LITE_PRO_SPECS as _OPENCODE_LITE_PRO_SPECS,
     OPENCODE_PROFILE_OPTIONS as _OPENCODE_PROFILE_OPTIONS,
+    OPENCODE_REVIEW_PROFILE_ID as _OPENCODE_REVIEW_PROFILE_ID,
     apply_opencode_entrypoint as _apply_opencode_entrypoint,
     apply_opencode_profile as _apply_opencode_profile,
+    extract_opencode_committee_tier as _extract_opencode_committee_tier,
     normalize_opencode_entrypoint as _normalize_opencode_entrypoint,
     normalize_opencode_profile_id as _normalize_opencode_profile_id,
+    opencode_committee_preset_config as _opencode_committee_preset_config,
     opencode_lite_pro_specs as _opencode_lite_pro_specs,
     opencode_profile_label as _opencode_profile_label,
     opencode_profile_selection as _opencode_profile_selection,
@@ -205,6 +212,9 @@ PREFERENCES_DOC_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 
 PREFERENCES_EXAMPLE_TOML = """# ~/.config/mms/preferences.toml
 # User-owned preference overlay. Install/update never overwrites this file.
 
+[launch]
+disabled_clis = []            # e.g. ["pi", "agy"] hides/disables these MMS launch targets
+
 [launch.defaults]
 thinking_mode = "enable"      # enable | disable
 reasoning_effort = "high"     # low | medium | high | xhigh
@@ -229,16 +239,19 @@ skills = []                   # e.g. ["agent-browser", "token-saver"]
 mcp = []                      # e.g. ["pilot", "hive"]
 hooks = []                    # hook names or paths shown on confirm screen
 
+[assets]
+managed_enabled = true        # true = read user managed assets root before bundled assets
+managed_root = "~/.local/share/mms/assets"
+
 [assets.roots]
 # Optional custom roots; env vars like MMS_WEB_ACCESS_ROOT still win.
 # web_access = "~/my-skills/web-access"
 # weber = "~/my-skills/weber"
-# codegraph = "~/vendor/codegraph"
-# token_saver = "~/vendor/token-saver"
-# toon = "~/vendor/toon"
-# xmem = "~/auto-skills/shared-skills/xmem"
-# caveman = "~/vendor/caveman"
-# nsr = "~/vendor/non-stop-run"
+# codegraph = "~/my-skills/codegraph"
+# token_saver = "~/my-skills/token-saver"
+# toon = "~/my-skills/toon"
+# caveman = "~/my-packs/caveman"
+# nsr = "~/my-packs/non-stop-run"
 # ecc = "~/.mms/agent-packs/everything-claude-code"
 # omc = "~/.mms/agent-packs/oh-my-claudecode"
 """
@@ -665,16 +678,28 @@ MODEL_FAMILIES = [
     {"family": "Claude",  "keywords": ("claude",),                          "category": "Claude 系 ⭐"},
     {"family": "GPT",     "keywords": ("gpt-", "o1-", "o3-", "o4-", "codex-"), "category": "GPT 系"},
     {"family": "Gemini",  "keywords": ("gemini",),                          "category": "Google 系"},
+    {"family": "Grok",    "keywords": ("grok",),                           "category": "xAI 系"},
+    {"family": "Muse",    "keywords": ("muse",),                           "category": "Muse 系"},
+    {"family": "Inkling", "keywords": ("inkling",),                        "category": "Inkling 系"},
+    {"family": "Nemotron", "keywords": ("nemotron",),                      "category": "NVIDIA 系"},
+    {"family": "Llama",   "keywords": ("llama",),                          "category": "Meta 系"},
+    {"family": "Mistral", "keywords": ("mistral", "mixtral", "codestral"), "category": "Mistral 系"},
+    {"family": "Nova",    "keywords": ("nova-", "amazon-nova"),           "category": "Amazon 系"},
     {"family": "DeepSeek","keywords": ("deepseek",),                       "category": "国产系"},
     {"family": "Qwen",    "keywords": ("qwen",),                           "category": "国产系"},
-    {"family": "Kimi",    "keywords": ("kimi", "k2.6-code-preview", "k2.6"), "category": "国产系"},
+    {"family": "Spark",   "keywords": ("spark",),                          "category": "国产系"},
+    {"family": "Kimi",    "keywords": ("kimi", "k3", "k4", "k5", "k2.6-code-preview", "k2.6", "k2.7"), "category": "国产系"},
     {"family": "Mimo",    "keywords": ("mimo",),                           "category": "国产系"},
     {"family": "MiniMax", "keywords": ("minimax",),                        "category": "国产系"},
     {"family": "GLM",     "keywords": ("glm",),                            "category": "国产系"},
+    {"family": "StepFun", "keywords": ("stepfun", "step-"),                "category": "国产系"},
+    {"family": "Doubao",  "keywords": ("doubao", "seed-", "seedance"),   "category": "国产系"},
+    {"family": "Hunyuan", "keywords": ("hunyuan",),                        "category": "国产系"},
+    {"family": "Ernie",   "keywords": ("ernie",),                          "category": "国产系"},
 ]
 KNOWN_MODEL_FAMILY_NAMES = {entry["family"] for entry in MODEL_FAMILIES}
-DOMESTIC_MODEL_FAMILIES = {"DeepSeek", "Qwen", "Kimi", "Mimo", "MiniMax", "GLM"}
-DOMESTIC_MODEL_KEYWORDS = ("glm", "kimi", "qwen", "mimo", "minimax", "deepseek", "doubao", "seed", "bailian")
+DOMESTIC_MODEL_FAMILIES = {"DeepSeek", "Qwen", "Kimi", "Mimo", "MiniMax", "GLM", "StepFun", "Doubao", "Hunyuan", "Ernie", "Spark"}
+DOMESTIC_MODEL_KEYWORDS = ("glm", "kimi", "qwen", "mimo", "minimax", "deepseek", "stepfun", "step-", "doubao", "seed", "bailian", "hunyuan", "ernie", "spark", "iflytek")
 
 
 def _infer_model_family(model_name):
@@ -771,8 +796,8 @@ def current_command():
     if explicit:
         return explicit
     invoked = os.path.basename(str(sys.argv[0] or "")).strip()
-    if invoked == "mmf":
-        return "mmf"
+    if invoked:
+        return invoked
     return PRIMARY_COMMAND
 
 
@@ -797,6 +822,61 @@ def _git_output(args):
     return str(result.stdout or "").strip()
 
 
+def _release_track_for_channel(version_meta, git_branch=""):
+    """Return display-only channel track; preview tracks are not stable semver."""
+    version_meta = version_meta if isinstance(version_meta, dict) else {}
+    install_channel = str(version_meta.get("install_channel") or "").strip().lower()
+    installed_ref = str(version_meta.get("installed_ref") or "").strip().lower()
+    preview_mode = str(os.environ.get("MMS_PREVIEW_MODE") or "").strip().lower()
+    command_name = str(os.environ.get("MMS_COMMAND_NAME") or "").strip().lower()
+    branch = str(git_branch or "").strip().lower()
+
+    canary_markers = {"canary", "mmg", "mms-canary"}
+    dev_markers = {"dev", "mmf", "mms-dev"}
+    if preview_mode in canary_markers or command_name == "mmg":
+        return {
+            "release_track": "canary",
+            "release_track_series": "4.0",
+            "release_track_version": "4.0.0-canary",
+            "release_track_label": "4.0 Canary Preview",
+        }
+    if preview_mode in dev_markers or command_name == "mmf":
+        return {
+            "release_track": "dev",
+            "release_track_series": "4.0",
+            "release_track_version": "4.0.0-dev",
+            "release_track_label": "4.0 Dev Preview",
+        }
+    if install_channel == "canary" or installed_ref == "canary" or branch == "canary":
+        return {
+            "release_track": "canary",
+            "release_track_series": "4.0",
+            "release_track_version": "4.0.0-canary",
+            "release_track_label": "4.0 Canary Preview",
+        }
+    if install_channel == "dev" or installed_ref == "dev" or branch == "dev":
+        return {
+            "release_track": "dev",
+            "release_track_series": "4.0",
+            "release_track_version": "4.0.0-dev",
+            "release_track_label": "4.0 Dev Preview",
+        }
+    published_v4 = re.fullmatch(r"v?(4\.\d+\.\d+)", installed_ref)
+    if published_v4:
+        return {
+            "release_track": "stable",
+            "release_track_series": "4.x",
+            "release_track_version": published_v4.group(1),
+            "release_track_label": "4.x Stable",
+        }
+    return {
+        "release_track": "stable",
+        "release_track_series": "3.x",
+        "release_track_version": "3.x-stable",
+        "release_track_label": "3.x Stable",
+    }
+
+
 def _release_version_info():
     version_meta = _load_version_meta()
     installed_version = str(version_meta.get("installed_version") or "").strip()
@@ -805,7 +885,7 @@ def _release_version_info():
     git_branch = _git_output(["branch", "--show-current"])
     git_commit = _git_output(["rev-parse", "--short", "HEAD"])
     release = installed_version or git_describe or git_commit or "dev"
-    return {
+    info = {
         "release": release,
         "installed_version": installed_version,
         "installed_ref": installed_ref,
@@ -815,6 +895,8 @@ def _release_version_info():
         "install_channel": str(version_meta.get("install_channel") or "").strip(),
         "source": str(version_meta.get("source") or "").strip(),
     }
+    info.update(_release_track_for_channel(version_meta, git_branch))
+    return info
 
 
 def _refresh_update_cache_for_about(force_update=False):
@@ -979,6 +1061,43 @@ def _print_about_version_summary(about_snapshot):
         console.print(f"[cyan]{label}[/cyan] {value}")
 
 
+def _is_version_request(argv):
+    if not argv:
+        return False
+    return str(argv[0] or "").strip().lower() in {"--version", "-v", "version", "about"}
+
+
+def _version_summary_line(version_info=None):
+    info = version_info if isinstance(version_info, dict) else _release_version_info()
+    track = str(info.get("release_track_label") or info.get("release_track_version") or "").strip()
+    release = str(info.get("release") or "").strip()
+    branch = str(info.get("git_branch") or info.get("installed_ref") or "").strip()
+    commit = str(info.get("git_commit") or "").strip()
+    label = track or release or "dev"
+    source = ""
+    if branch and commit:
+        source = f" · {branch}@{commit}"
+    elif branch:
+        source = f" · {branch}"
+    elif commit:
+        source = f" · {commit}"
+    return f"{display_title()} {label}{source}"
+
+
+def _print_version_summary(argv=None):
+    argv = list(argv or [])
+    info = _release_version_info()
+    if "--json" in argv:
+        payload = {
+            "command": current_command(),
+            "display": _version_summary_line(info),
+            **info,
+        }
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        return
+    print(_version_summary_line(info))
+
+
 def _run_about_upgrade(*, target="mms", include_clis=False):
     _ensure_rich()
     target = str(target or "mms").strip().lower()
@@ -1084,19 +1203,24 @@ VALID_ROLES = set(ROLE_WEIGHTS.keys())
 _REASONING_MODEL_HINTS = (
     "claude-opus", "claude-sonnet", "gpt-5", "o1-", "o3-", "o4-",
     "gemini-2.5-pro", "gemini-3", "qwen3-max", "qwen3-coder",
-    "kimi-k2.5", "kimi-for-coding", "glm-5", "glm-4.7",
+    "k3", "kimi-k3", "kimi-k2.5", "kimi-for-coding", "glm-5", "glm-4.7",
     "minimax-m2", "deepseek-reasoner", "doubao-thinking",
 )
 _TOOL_USE_FAMILIES = {"Claude", "GPT", "Gemini", "Qwen", "Kimi", "GLM", "MiniMax"}
 _VISION_CAPABLE_MODEL_NAMES = {
     "mimo-v2.5",
     "mimo-v2-omni",
+    "k3",
+    "k3[1m]",
+    "kimi-k3",
     "k2.6",
     "k2.6-code-preview",
     "kimi-k2.5",
     "kimi-k2.6",
     "qwen3.6-flash",
     "qwen3.6-plus",
+    "minimax-m2.7",
+    "minimax-m3",
     "gemini-3.1-pro-preview",
     "gemini-3-flash-preview",
     "gemini-3.1-flash-lite-preview",
@@ -2140,7 +2264,7 @@ def _model_context_window(model_name):
         from mms_capability_resolver import resolve_model_capabilities
 
         caps = resolve_model_capabilities(clean)
-        if caps.get("sources", {}).get("context_window_tokens") == "approved_facts":
+        if caps.get("sources", {}).get("context_window_tokens") in {"approved_facts", "model_policy", "manual_override"}:
             window = int(caps.get("context_window_tokens"))
             if window > 0:
                 return window
@@ -2214,6 +2338,35 @@ def _default_reasoning_effort_for_model_info(model_info):
         values.extend(str(v or "") for k, v in model_info.items() if k != "subagent")
     else:
         values.append(str(model_info or ""))
+    try:
+        from mms_capability_resolver import load_default_model_policy
+
+        policy = load_default_model_policy()
+        models = policy.get("models") if isinstance(policy, dict) else {}
+        if isinstance(models, dict):
+            normalized_values = []
+            for item in values:
+                token = str(item or "").strip().lower()
+                if "/" in token:
+                    token = token.rsplit("/", 1)[-1]
+                normalized_values.append(token)
+            for key, entry in models.items():
+                model_key = str(key or "").strip().lower()
+                if "/" in model_key:
+                    model_key = model_key.rsplit("/", 1)[-1]
+                if model_key not in normalized_values or not isinstance(entry, dict):
+                    continue
+                caps = entry.get("capabilities") if isinstance(entry.get("capabilities"), dict) else {}
+                effort = str(caps.get("reasoning_effort") or entry.get("reasoning_effort") or "").strip().lower()
+                if effort in {"low", "medium", "high", "xhigh"}:
+                    return effort
+                if effort in {"none", "minimal"}:
+                    return "low"
+                if effort == "max":
+                    return "xhigh"
+    except Exception:
+        pass
+    # Explicit model policy wins; keep the existing GPT fallback when unset.
     for item in values:
         normalized = str(item or "").strip().lower()
         if "/" in normalized:
@@ -2247,6 +2400,14 @@ def _model_capability_tags(model_name):
         tags.append("tool_use")
     if any(hint in normalized for hint in _REASONING_MODEL_HINTS):
         tags.append("reasoning")
+    try:
+        from mms_capability_resolver import resolve_model_capabilities
+
+        caps = resolve_model_capabilities(model_name)
+        if caps.get("supports_thinking") is True and caps.get("sources", {}).get("supports_thinking") != "conservative_fallback":
+            tags.append("thinking")
+    except Exception:
+        pass
     context_window = _model_context_window(model_name)
     if context_window and context_window >= 200_000:
         tags.append("long_context")
@@ -2263,6 +2424,68 @@ def _model_supports_vision(model_name):
     if model_id in _VISION_CAPABLE_MODEL_NAMES:
         return True
     return any(hint in model_id for hint in _VISION_CAPABLE_MODEL_HINTS)
+
+
+def _capability_model_key(model_name):
+    normalized = str(model_name or "").strip().lower()
+    if "/" in normalized:
+        normalized = normalized.rsplit("/", 1)[-1]
+    if normalized.endswith("[1m]"):
+        normalized = normalized[:-4]
+    return normalized
+
+
+def _model_capability_entry(model_capabilities, model_name):
+    if not isinstance(model_capabilities, dict):
+        return {}
+    target = _capability_model_key(model_name)
+    if not target:
+        return {}
+    for key, value in model_capabilities.items():
+        if _capability_model_key(key) == target and isinstance(value, dict):
+            return value
+    return {}
+
+
+def _runtime_model_vision_override(runtime, model_name):
+    try:
+        from mms_capability_resolver import resolve_model_capabilities
+
+        runtime_dict = runtime if isinstance(runtime, dict) else {}
+        resolved = resolve_model_capabilities(
+            model_name,
+            runtime=runtime_dict,
+            provider_id=str(runtime_dict.get("id") or runtime_dict.get("provider_id") or ""),
+            base_url=str(
+                runtime_dict.get("anthropic_base_url")
+                or runtime_dict.get("openai_base_url")
+                or runtime_dict.get("base_url")
+                or ""
+            ),
+            profile_id=str(runtime_dict.get("profile") or runtime_dict.get("provider_profile") or ""),
+        )
+        source = (resolved.get("sources") or {}).get("supports_vision") if isinstance(resolved, dict) else ""
+        if source and source != "conservative_fallback" and isinstance(resolved.get("supports_vision"), bool):
+            return bool(resolved["supports_vision"])
+    except Exception:
+        pass
+    caps = _model_capability_entry(
+        (runtime or {}).get("model_capabilities") if isinstance(runtime, dict) else {},
+        model_name,
+    )
+    nested = caps.get("capabilities") if isinstance(caps.get("capabilities"), dict) else {}
+    for source in (caps, nested):
+        for key in ("vision", "supports_vision"):
+            if source.get(key) is True:
+                return True
+    return None
+
+
+def _runtime_model_supports_vision(runtime, model_name):
+    override = _runtime_model_vision_override(runtime, model_name)
+    if override is not None:
+        return override
+    return _model_supports_vision(model_name)
 
 
 def _model_cli_modes(model_name):
@@ -3305,7 +3528,6 @@ _PREFERENCE_ASSET_ROOT_KEYS = {
     "web_access": "web_access",
     "web-access": "web_access",
     "weber": "weber",
-    "xmem": "xmem",
 }
 
 
@@ -3321,14 +3543,45 @@ def _sanitize_asset_roots(payload):
     return result
 
 
+def _sanitize_managed_assets_root(value):
+    path = str(value or "").strip()
+    if not path:
+        return ""
+    return os.path.abspath(os.path.expanduser(path))
+
+
+def _sanitize_disabled_clis(value):
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, (list, tuple, set)):
+        return []
+    allowed = set(CLI_NAMES)
+    result = []
+    seen = set()
+    for item in value:
+        cli_name = str(item or "").strip().lower()
+        if not cli_name or cli_name not in allowed or cli_name in seen:
+            continue
+        seen.add(cli_name)
+        result.append(cli_name)
+    return result
+
+
 def _sanitize_user_preferences(raw):
     raw = raw if isinstance(raw, dict) else {}
     launch = raw.get("launch") if isinstance(raw.get("launch"), dict) else {}
     session_surfaces = raw.get("session_surfaces") if isinstance(raw.get("session_surfaces"), dict) else {}
     assets = raw.get("assets") if isinstance(raw.get("assets"), dict) else {}
 
-    result = {"launch": {"defaults": {}, "cli": {}}, "session_surfaces": {"disabled": {}}, "assets": {"roots": {}}}
+    result = {
+        "launch": {"defaults": {}, "cli": {}, "disabled_clis": []},
+        "session_surfaces": {"disabled": {}},
+        "assets": {"roots": {}, "managed_enabled": True, "managed_root": ""},
+    }
     result["launch"]["defaults"] = _sanitize_launch_preferences(launch.get("defaults"))
+    disabled_clis = _sanitize_disabled_clis(launch.get("disabled_clis", launch.get("disabled")))
+    if disabled_clis:
+        result["launch"]["disabled_clis"] = disabled_clis
     cli_tables = launch.get("cli") if isinstance(launch.get("cli"), dict) else {}
     for cli_name, table in cli_tables.items():
         normalized_cli = str(cli_name or "").strip().lower()
@@ -3340,6 +3593,14 @@ def _sanitize_user_preferences(raw):
     global_disabled = _sanitize_disabled_session_surfaces(session_surfaces.get("disabled"))
     if global_disabled:
         result["session_surfaces"]["disabled"] = global_disabled
+    managed_enabled = _pref_bool(assets.get("managed_enabled", assets.get("enabled")))
+    if managed_enabled is not None:
+        result["assets"]["managed_enabled"] = managed_enabled
+    managed_root = _sanitize_managed_assets_root(
+        assets.get("managed_root", assets.get("root"))
+    )
+    if managed_root:
+        result["assets"]["managed_root"] = managed_root
     roots = _sanitize_asset_roots(assets.get("roots"))
     if roots:
         result["assets"]["roots"] = roots
@@ -3364,6 +3625,136 @@ def preference_asset_root(asset_name):
     if not key:
         return ""
     return str(load_user_preferences().get("assets", {}).get("roots", {}).get(key) or "").strip()
+
+
+def managed_assets_enabled():
+    explicit_root = str(os.environ.get("MMS_MANAGED_ASSETS_ROOT") or os.environ.get("MMS_ASSETS_ROOT") or "").strip()
+    if explicit_root:
+        return True
+    try:
+        prefs = load_user_preferences()
+    except Exception:
+        prefs = {}
+    prefs = prefs if isinstance(prefs, dict) else {}
+    assets = prefs.get("assets") if isinstance(prefs.get("assets"), dict) else {}
+    return assets.get("managed_enabled") is not False
+
+
+def managed_assets_root():
+    """Return the stable user-owned MMS assets root without creating it."""
+    explicit = str(os.environ.get("MMS_MANAGED_ASSETS_ROOT") or os.environ.get("MMS_ASSETS_ROOT") or "").strip()
+    if explicit:
+        return os.path.abspath(os.path.expanduser(explicit))
+    try:
+        prefs = load_user_preferences()
+    except Exception:
+        prefs = {}
+    prefs = prefs if isinstance(prefs, dict) else {}
+    assets = prefs.get("assets") if isinstance(prefs.get("assets"), dict) else {}
+    configured = str(assets.get("managed_root") or "").strip()
+    if configured:
+        return os.path.abspath(os.path.expanduser(configured))
+    return os.path.join(resolve_real_user_home(), ".local", "share", "mms", "assets")
+
+
+def _normalize_skill_import_name(raw_name):
+    name = str(raw_name or "").strip()
+    if not name:
+        raise ValueError("skill name is required")
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", name):
+        raise ValueError("skill name must match [A-Za-z0-9._-]+")
+    return name
+
+
+def _read_skill_declared_name(skill_root):
+    skill_md = os.path.join(skill_root, "SKILL.md")
+    if not os.path.isfile(skill_md):
+        return ""
+    try:
+        text = open(skill_md, "r", encoding="utf-8").read()
+    except OSError:
+        return ""
+    match = re.search(r"(?im)^name:\s*([A-Za-z0-9._-]+)\s*$", text)
+    return str(match.group(1) or "").strip() if match else ""
+
+
+def _resolve_skill_import_source(raw_path):
+    source = os.path.abspath(os.path.expanduser(str(raw_path or "").strip()))
+    if not source:
+        raise ValueError("source path is required")
+    if os.path.isfile(source):
+        if os.path.basename(source) != "SKILL.md":
+            raise ValueError("source file must be SKILL.md")
+        source = os.path.dirname(source)
+    if not os.path.isdir(source):
+        raise ValueError(f"skill source not found: {source}")
+    if not os.path.isfile(os.path.join(source, "SKILL.md")):
+        raise ValueError(f"SKILL.md not found under: {source}")
+    return source
+
+
+def import_managed_skill(source_path, *, skill_name="", replace=False, copy_mode=False, dry_run=False):
+    source_root = _resolve_skill_import_source(source_path)
+    resolved_name = _normalize_skill_import_name(skill_name or _read_skill_declared_name(source_root) or os.path.basename(source_root))
+    target_root = os.path.join(managed_assets_root(), "skills", resolved_name)
+    parent_dir = os.path.dirname(target_root)
+    target_exists = os.path.lexists(target_root)
+    same_target = False
+    if target_exists:
+        try:
+            same_target = os.path.samefile(source_root, target_root)
+        except OSError:
+            same_target = False
+    result = {
+        "ok": True,
+        "mode": "copy" if copy_mode else "symlink",
+        "source_root": source_root,
+        "target_root": target_root,
+        "skill_name": resolved_name,
+        "managed_root": managed_assets_root(),
+        "changed": False,
+        "status": "noop" if same_target else "planned",
+        "dry_run": bool(dry_run),
+    }
+    if same_target:
+        result["status"] = "already_imported"
+        return result
+    if target_exists and not replace:
+        raise ValueError(f"target already exists: {target_root} (use --replace to overwrite)")
+    if dry_run:
+        result["status"] = "would_replace" if target_exists else "would_import"
+        return result
+    os.makedirs(parent_dir, exist_ok=True)
+    if target_exists:
+        if os.path.islink(target_root) or os.path.isfile(target_root):
+            os.unlink(target_root)
+        else:
+            shutil.rmtree(target_root)
+    if copy_mode:
+        shutil.copytree(source_root, target_root, symlinks=True)
+    else:
+        os.symlink(source_root, target_root)
+    result["changed"] = True
+    result["status"] = "replaced" if target_exists else "imported"
+    return result
+
+
+def _preference_disabled_clis(prefs):
+    prefs = prefs if isinstance(prefs, dict) else {}
+    launch = prefs.get("launch") if isinstance(prefs.get("launch"), dict) else {}
+    return set(_sanitize_disabled_clis(launch.get("disabled_clis", launch.get("disabled"))))
+
+
+def _disabled_clis_for_cfg(cfg):
+    prefs = (cfg or {}).get("_mms_preferences") if isinstance(cfg, dict) else None
+    if not isinstance(prefs, dict):
+        prefs = load_user_preferences()
+    return _preference_disabled_clis(prefs)
+
+
+def _cli_disabled_by_preferences(cfg, cli_name):
+    cli_name = str(cli_name or "").strip().lower()
+    return bool(cli_name and cli_name in _disabled_clis_for_cfg(cfg))
 
 
 def _merge_disabled_session_surfaces(*payloads):
@@ -3647,12 +4038,18 @@ def _runtime_hint_from_runtime(runtime):
     provider_id = _trace_runtime_provider_id(runtime)
     account_id = _trace_runtime_account_id(runtime)
     runtime_id = str(runtime.get("id") or "").strip()
+    opencode_profile = str(runtime.get("opencode_profile") or "").strip()
+    opencode_entrypoint = str(runtime.get("opencode_entrypoint") or "").strip()
     if provider_id:
         hint["provider_id"] = provider_id
     if account_id:
         hint["account_id"] = account_id
     if runtime_id:
         hint["runtime_id"] = runtime_id
+    if opencode_profile:
+        hint["opencode_profile"] = opencode_profile
+    if opencode_entrypoint:
+        hint["opencode_entrypoint"] = opencode_entrypoint
     return {k: v for k, v in hint.items() if v}
 
 
@@ -3661,6 +4058,11 @@ def _record_usage(runtime, cli_name, model_info):
         sources = stats.setdefault("sources", {})
         key = _runtime_usage_key(runtime, cli_name)
         model_name = _resolve_model_name(model_info)
+        model_profile = ""
+        if isinstance(model_info, dict):
+            model_profile = str(model_info.get("opencode_profile") or model_info.get("profile") or "").strip()
+        opencode_profile = str(runtime.get("opencode_profile") or model_profile).strip()
+        opencode_profile_label = str(runtime.get("opencode_profile_label") or "").strip()
         now = _iso_now()
         entry = sources.setdefault(key, {
             "runtime_kind": runtime.get("runtime_kind", "provider"),
@@ -3680,14 +4082,27 @@ def _record_usage(runtime, cli_name, model_info):
         models[model_name] = int(models.get(model_name, 0)) + 1
         model_last_used_at = entry.setdefault("model_last_used_at", {})
         model_last_used_at[model_name] = now
+        if cli_name == "opencode" and opencode_profile:
+            entry["opencode_profile"] = opencode_profile
+            if opencode_profile_label:
+                entry["opencode_profile_label"] = opencode_profile_label
+        else:
+            entry.pop("opencode_profile", None)
+            entry.pop("opencode_profile_label", None)
         last_by_cli = stats.setdefault("last_by_cli", {})
-        last_by_cli[cli_name] = {
+        last_payload = {
             "cli": cli_name,
             "model": model_name,
             "model_info": model_info if isinstance(model_info, dict) else {"model": str(model_info)},
             "runtime_hint": _runtime_hint_from_runtime(runtime),
             "last_used_at": now,
         }
+        if cli_name == "opencode" and opencode_profile:
+            last_payload["opencode_profile"] = opencode_profile
+            last_payload["profile"] = opencode_profile
+            if opencode_profile_label:
+                last_payload["opencode_profile_label"] = opencode_profile_label
+        last_by_cli[cli_name] = last_payload
 
     _update_usage_stats(_mutate)
 
@@ -3943,7 +4358,7 @@ def _launch_with_tracking(cli_name, model_info, runtime, once=False, extra_args=
         cli_name,
     )
     if cli_name == "claude":
-        runtime = _runtime_with_vision_sidecar(load_config() or {}, runtime)
+        runtime = _runtime_with_vision_sidecar(load_config() or {}, runtime, _resolve_model_name(model_info))
     if _trace_enabled:
         _print_trace(cli_name, model_info, runtime)
     _record_usage(runtime, cli_name, model_info)
@@ -4234,20 +4649,21 @@ def _config_truthy(value, default=False):
 def _vision_sidecar_model_candidates_for_provider(provider_id):
     normalized = str(provider_id or "").strip().lower()
     generic = [
-        "mimo-v2.5",
-        "mimo-v2-omni",
+        "qwen3.6-plus",
+        "qwen3.6-flash",
+        "kimi-k3",
+        "k3",
         "K2.6",
         "K2.6-code-preview",
         "kimi-k2.5",
-        "qwen3.6-flash",
-        "qwen3.6-plus",
+        "MiniMax-M3",
     ]
-    if "mimo" in normalized:
-        return ["mimo-v2.5", "mimo-v2-omni"]
     if "kimi" in normalized:
-        return ["K2.6", "K2.6-code-preview", "kimi-k2.5"]
+        return ["kimi-k3", "k3", "K2.6", "K2.6-code-preview", "kimi-k2.5"]
     if "qwen" in normalized:
         return ["qwen3.6-plus", "qwen3.6-flash"]
+    if "minimax" in normalized:
+        return ["MiniMax-M3"]
     return generic
 
 
@@ -4280,15 +4696,19 @@ def _vision_sidecar_candidate_pairs(raw, provider_ids, *, explicit_model="", exp
         return pairs
 
     preferred_pairs = [
-        ("mimo-direct-anthropic", "mimo-v2.5"),
-        ("direct-mimo", "mimo-v2.5"),
+        ("direct-qwen", "qwen3.6-plus"),
+        ("newapi-tencent", "qwen3.6-plus"),
+        ("newapi-personal-qwen", "qwen3.6-plus"),
+        ("newapi-personal-tokyo", "qwen3.6-plus"),
+        ("direct-kimi", "kimi-k3"),
+        ("direct-kimi", "k3"),
         ("direct-kimi", "K2.6"),
         ("newapi-personal-kimi", "K2.6-code-preview"),
         ("newapi-personal-kimi", "kimi-k2.5"),
-        ("direct-qwen", "qwen3.6-plus"),
-        ("newapi-personal-qwen", "qwen3.6-plus"),
-        ("newapi-personal-tokyo", "K2.6"),
         ("xin", "K2.6"),
+        ("minimax-codingplan", "MiniMax-M3"),
+        ("minimax-cn", "MiniMax-M3"),
+        ("minimax-en", "MiniMax-M3"),
     ]
     for provider_id, model in preferred_pairs:
         _append(provider_id, model)
@@ -4298,8 +4718,14 @@ def _vision_sidecar_candidate_pairs(raw, provider_ids, *, explicit_model="", exp
     return pairs
 
 
-def _runtime_with_vision_sidecar(cfg, runtime):
-    if not isinstance(runtime, dict) or runtime.get("vision_sidecar"):
+def _runtime_with_vision_sidecar(cfg, runtime, selected_model=""):
+    if not isinstance(runtime, dict):
+        return runtime
+    if selected_model and _runtime_model_supports_vision(runtime, selected_model):
+        updated = dict(runtime)
+        updated.pop("vision_sidecar", None)
+        return updated
+    if runtime.get("vision_sidecar"):
         return runtime
     raw = cfg.get("vision_sidecar") if isinstance(cfg, dict) else {}
     raw = raw if isinstance(raw, dict) else {}
@@ -4322,12 +4748,16 @@ def _runtime_with_vision_sidecar(cfg, runtime):
         [explicit_provider_id]
         if explicit_provider_id
         else [
-            "mimo-direct-anthropic",
-            "direct-mimo",
+            "direct-qwen",
+            "newapi-tencent",
+            "newapi-personal-qwen",
+            "newapi-personal-tokyo",
             "direct-kimi",
             "newapi-personal-kimi",
-            "newapi-personal-tokyo",
             "xin",
+            "minimax-codingplan",
+            "minimax-cn",
+            "minimax-en",
         ]
     )
     providers = cfg.get("providers", []) if isinstance(cfg, dict) else []
@@ -5877,6 +6307,7 @@ def _about_tui_payload(about_snapshot):
     claude_status = clis.get("claude") if isinstance(clis.get("claude"), dict) else {}
     info_lines = [
         ("MMS", f"{mms_status.get('current') or version_info.get('release') or 'dev'} · {mms_status.get('status') or '-'}"),
+        (_L("版本轨道", "Version track"), version_info.get("release_track_label") or version_info.get("release_track_version") or "-"),
         (_L("MMS 最新", "MMS latest"), mms_status.get("latest") or _L("未检查", "not checked")),
         ("Codex", _format_cli_about_line(codex_status)),
         (_L("Codex 最新", "Codex latest"), _format_about_latest_value(codex_status)),
@@ -6076,6 +6507,87 @@ def _update_provider_model_overrides(cfg, provider_id, *, extra_models=None, hid
     return load_config()
 
 
+def _model_default_rows_from_probe(provider, probe):
+    models = _normalize_model_id_list((probe or {}).get("models") or [])
+    if not models:
+        return []
+    existing_caps = {}
+    for row in provider.get("models") or []:
+        if not isinstance(row, dict):
+            continue
+        model_id = str(row.get("id") or row.get("model") or "").strip()
+        caps = row.get("capabilities")
+        if model_id and isinstance(caps, dict):
+            existing_caps[model_id] = dict(caps)
+    hidden = {item.lower() for item in _normalize_model_id_list(provider.get("hidden_models") or [])}
+    source = str((probe or {}).get("base_source") or "remote").strip() or "remote"
+    rows = []
+    for model_id in models:
+        row = {
+            "id": model_id,
+            "source": source,
+            "visible": model_id.lower() not in hidden,
+        }
+        if model_id in existing_caps:
+            row["capabilities"] = existing_caps[model_id]
+        rows.append(row)
+    return rows
+
+
+def _update_provider_model_default_rows(cfg, provider_id, probe):
+    updated_cfg = dict(cfg)
+    providers = []
+    changed = False
+    for item in cfg.get("providers", []):
+        if item.get("id") != provider_id:
+            providers.append(item)
+            continue
+        updated = dict(item)
+        rows = _model_default_rows_from_probe(updated, probe)
+        if rows:
+            if updated.get("models") != rows:
+                updated["models"] = rows
+                changed = True
+        providers.append(_normalize_provider(updated))
+    updated_cfg["providers"] = providers
+    return updated_cfg, changed
+
+
+def _refresh_all_provider_model_defaults(cfg, *, emit_output=True):
+    current_cfg = dict(cfg)
+    refreshed = 0
+    failed = 0
+    total_models = 0
+    details = []
+    for provider_def in cfg.get("providers", []):
+        provider_id = str(provider_def.get("id") or "").strip()
+        if not provider_id:
+            continue
+        provider = resolve_provider_context(current_cfg, provider_id)
+        if provider.get("enabled") is False:
+            details.append({"provider_id": provider_id, "status": "skipped_disabled", "models": 0})
+            continue
+        probe = _probe_models(provider, emit_output=emit_output, force_refresh=True)
+        models = probe.get("models") or []
+        if probe.get("error") or not models:
+            failed += 1
+            details.append({"provider_id": provider_id, "status": "failed", "models": 0, "error": probe.get("error") or probe.get("error_kind") or "empty_models"})
+            continue
+        current_cfg, changed = _update_provider_model_default_rows(current_cfg, provider_id, probe)
+        if changed:
+            refreshed += 1
+            total_models += len(models)
+            details.append({"provider_id": provider_id, "status": "updated_defaults", "models": len(models), "source": probe.get("base_source") or "remote"})
+        else:
+            details.append({"provider_id": provider_id, "status": "unchanged", "models": len(models), "source": probe.get("base_source") or "remote"})
+    if refreshed:
+        save_config(current_cfg)
+        for detail in details:
+            if detail.get("status") == "updated_defaults":
+                _invalidate_probe_cache(detail.get("provider_id"))
+    return {"ok": failed == 0, "refreshed_providers": refreshed, "failed_providers": failed, "total_models": total_models, "details": details, "config": current_cfg}
+
+
 def _display_provider_model_table(provider, probe):
     from mms_speed_stats import get_speed_entry
 
@@ -6174,7 +6686,8 @@ def _manage_provider_models(cfg, provider_id):
             ("5", "移除补充/取消隐藏"),
             ("6", "恢复默认模型补丁"),
             ("7", "编辑模型列表接口"),
-            ("8", "返回"),
+            ("8", "一键刷新全部通道模型默认清单"),
+            ("9", "返回"),
         ]
 
         choice = None
@@ -6192,8 +6705,10 @@ def _manage_provider_models(cfg, provider_id):
             ))
             for aid, alabel in actions:
                 console.print(f"  {aid}. {alabel}")
-            choice = Prompt.ask("选择操作", choices=[a[0] for a in actions], default="8")
+            choice = Prompt.ask("选择操作", choices=[a[0] for a in actions], default="9")
         if choice is None:
+            return current_cfg, changed
+        if choice == "9":
             return current_cfg, changed
         if choice == "1":
             if _use_tui():
@@ -6283,10 +6798,20 @@ def _manage_provider_models(cfg, provider_id):
             console.print(f"[green]✓ 已更新模型列表接口: {new_endpoint}[/green]")
             changed = True
             continue
+        if choice == "8":
+            result = _refresh_all_provider_model_defaults(current_cfg, emit_output=True)
+            current_cfg = result.get("config") if isinstance(result.get("config"), dict) else current_cfg
+            console.print(
+                f"[green]✓ 已刷新 {result.get('refreshed_providers', 0)} 个通道默认模型清单，"
+                f"失败 {result.get('failed_providers', 0)} 个；人工 extra/hidden/model-policy 不会被覆盖[/green]"
+            )
+            changed = changed or bool(result.get("refreshed_providers"))
+            continue
         return current_cfg, changed
 
 
 def _select_provider_for_models(cfg):
+    _ensure_rich()
     providers = [item for item in _list_manage_targets(cfg) if item.get("kind") == "provider"]
     if not providers:
         console.print("[yellow]当前还没有可管理的网关通道[/yellow]")
@@ -6342,6 +6867,7 @@ def _recent_models_for_provider(provider_id):
 def _pick_manual_models(models):
     if not models:
         return []
+    _ensure_rich()
     table = Table(title="选择要预热的模型", show_lines=True)
     table.add_column("#", style="cyan", width=4)
     table.add_column("模型", style="green")
@@ -6437,6 +6963,7 @@ def _warm_model_request(provider, model_name):
 
 
 def handle_warm_command(cfg, argv):
+    _ensure_rich()
     if argv and argv[0] in {"-h", "--help"}:
         console.print("[cyan]用法:[/cyan]", Text(f"{current_command()} warm [provider_id]"))
         console.print("[dim]不带参数时先选通道，再选择最近使用 / 手动选择 / 全部模型。[/dim]")
@@ -6516,6 +7043,7 @@ def handle_warm_command(cfg, argv):
 
 
 def handle_models_command(cfg, argv):
+    _ensure_rich()
     if argv and argv[0] in {"-h", "--help"}:
         console.print("[cyan]用法:[/cyan]", Text(f"{current_command()} ls [provider_id]"))
         console.print("[dim]不带参数时先选通道，再进入模型列表与测速页。[/dim]")
@@ -7125,13 +7653,19 @@ def _derived_model_aliases(base_models, provider=None):
         aliases.append("claude-sonnet-4-6")
     if any(model_id.startswith("claude-opus-4-") or model_id.startswith("claude-opus-4.") for model_id in claude_tails):
         aliases.append("claude-opus-4-6")
-    if _provider_supports_mimo_anthropic_selectors(provider):
-        model_set = set(base_models)
-        for model_id in ("mimo-v2.5-pro", "mimo-v2.5"):
-            selector = f"{model_id}[1m]"
-            if model_id in model_set and selector not in model_set:
-                aliases.append(selector)
+    # MiMo 1M is now controlled by model-policy context_window_tokens. Keep
+    # explicit legacy [1m] selectors, but do not invent duplicate model names.
     return aliases
+
+
+def _is_legacy_claude_model_selector(model_id):
+    tail = str(model_id or "").strip().lower().rsplit("/", 1)[-1]
+    if not tail.startswith("claude-"):
+        return False
+    if tail.startswith("claude-legacy-"):
+        return True
+    major = re.search(r"-(\d+)(?:[-.]|$)", tail)
+    return bool(major and int(major.group(1)) < 4)
 
 
 def _apply_provider_model_patch(provider, base_result):
@@ -7166,15 +7700,10 @@ def _apply_provider_model_patch(provider, base_result):
 
     # 过滤 claude- 前缀国产别名和旧版 Claude 模型
     _DOMESTIC_KW = ("glm", "kimi", "qwen", "minimax", "deepseek", "doubao", "seed", "bailian")
-    _CLAUDE_KEEP = {
-        "claude-opus-4-6", "claude-opus-4-6-thinking", "claude-sonnet-4-6",
-        "claude-opus-4-5-20251101", "claude-sonnet-4-5-20250929",
-        "claude-haiku-4-5-20251001",
-    }
     effective_models = [
         m for m in effective_models
         if not (m.startswith("claude-") and any(kw in m.lower() for kw in _DOMESTIC_KW))
-        and not (m.startswith("claude-") and m not in _CLAUDE_KEEP)
+        and not _is_legacy_claude_model_selector(m)
     ]
 
     hidden_applied = [model_id for model_id in effective_models if model_id.lower() in hidden_requested_lower]
@@ -7229,6 +7758,7 @@ def _probe_models(provider, emit_output=True, force_refresh=False, skip_cache=Fa
         "details": [],
         "working_url": None,
         "base_source": "remote",
+        "attempts": [],
     }
 
     _ensure_httpx()
@@ -7251,7 +7781,9 @@ def _probe_models(provider, emit_output=True, force_refresh=False, skip_cache=Fa
     else:
         # 尝试 base_url 和 alt_url（/v1 互转），以第一个能返回有效 JSON 的为准
         alt_url = base_url[:-3] if base_url.endswith("/v1") else f"{base_url}/v1"
+        first_exc = None
         last_exc = None
+        attempts = result["attempts"]
         models_endpoint = provider.get("models_endpoint", "/models")
         if models_endpoint == "manual":
             fallback = provider.get("fallback_models") or []
@@ -7292,6 +7824,7 @@ def _probe_models(provider, emit_output=True, force_refresh=False, skip_cache=Fa
                     result["raw_models"] = models
                     result["models"] = models
                     result["working_url"] = try_url
+                    attempts.append({"url": f"{try_url}{models_endpoint}", "status": f"ok ({len(models)} models)"})
                     if try_url != base_url and emit_output:
                         console.print(f"[yellow]⚠ 地址 {base_url} 不通，已自动用 {try_url} 连接成功[/yellow]")
                     if not models:
@@ -7299,7 +7832,14 @@ def _probe_models(provider, emit_output=True, force_refresh=False, skip_cache=Fa
                         continue
                     break
                 except Exception as exc:
+                    if first_exc is None:
+                        first_exc = exc
                     last_exc = exc
+                    status_code = getattr(getattr(exc, "response", None), "status_code", None)
+                    attempts.append({
+                        "url": f"{try_url}{models_endpoint}",
+                        "status": f"HTTP {status_code}" if status_code else type(exc).__name__,
+                    })
             if result["models"] is not None and not result["models"]:
                 result["error_kind"] = "empty_models"
                 result["error"] = "接口返回成功，但模型列表为空"
@@ -7317,13 +7857,19 @@ def _probe_models(provider, emit_output=True, force_refresh=False, skip_cache=Fa
                         console.print(f"[dim]该来源不支持 /models 端点，使用内置模型列表 ({len(fallback)} 个模型)[/dim]")
                 else:
                     result["error_kind"] = "request_failed"
-                    result["error"] = f"拉取模型列表失败: {last_exc}"
+                    headline_exc = str(first_exc or last_exc)
+                    if api_key:
+                        headline_exc = headline_exc.replace(api_key, "***")
+                    result["error"] = f"拉取模型列表失败: {headline_exc}"
 
     details = [
         f"provider: {_provider_label(provider)} ({provider_id})",
         f"openai_base_url: {base_url or '(未设置)'}",
         f"protocols: {', '.join(protocols) if protocols else '(未声明)'}",
     ]
+    probe_attempts = result.get("attempts") or []
+    if probe_attempts:
+        details.append("attempts: " + "; ".join(f"{a.get('url')} -> {a.get('status')}" for a in probe_attempts if isinstance(a, dict)))
     if result["error"]:
         details.append(f"error: {result['error']}")
     result["details"] = details
@@ -7771,6 +8317,8 @@ def _select_custom_model(models, cli_name, role=MODE_ALL, recommend=None, use_tu
         聚合模式: (model_name, provider_id) 或 (None, None)
         旧模式（List[str]）: model_name 或 None（兼容）
     """
+    if not use_tui:
+        _ensure_rich()
     is_aggregated = models and isinstance(models[0], dict)
 
     if is_aggregated:
@@ -8057,6 +8605,7 @@ def _aggregate_provider_models(cfg, cli_name, default_provider, default_models):
         models = _provider_effective_models(provider, cached_models, cfg)
         pid = provider.get("id", DEFAULT_PROVIDER_ID)
         pname = _provider_label(provider)
+        role = _normalize_role(provider.get("role", "auto"))
         for model_name in models:
             normalized = str(model_name or "").strip()
             if not normalized:
@@ -8069,13 +8618,16 @@ def _aggregate_provider_models(cfg, cli_name, default_provider, default_models):
                 "model": normalized,
                 "provider_id": pid,
                 "provider_name": pname,
+                "priority": _runtime_priority_for_model(provider, normalized),
+                "role": role,
+                "role_weight": ROLE_WEIGHTS.get(role, 1),
             })
     return aggregated
 
 
 def _resolve_best_provider(cfg, model_name, default_provider, default_models,
                            cli_name=None, protocol=None):
-    """给定模型名，返回最优 (provider_ctx, provider_name) — primary > auto > fallback × priority 高到低。
+    """给定模型名，返回最优 (provider_ctx, provider_name) — priority 高优先，role 仅作同分兜底。
 
     如果指定了 protocol（如 "anthropic_messages"），只考虑支持该协议的 provider。
     如果指定了 cli_name，只考虑支持该 CLI 的 provider。
@@ -8085,7 +8637,7 @@ def _resolve_best_provider(cfg, model_name, default_provider, default_models,
     if not model_lower:
         return None, None
 
-    scored = []  # [(role_weight, -priority, provider_ctx, provider_name)]
+    scored = []  # [(-priority, role_weight, provider_ctx, provider_name)]
     for provider, cached_models in _provider_candidates(cfg, default_provider, default_models):
         if not provider.get("enabled", True):
             continue
@@ -8110,7 +8662,7 @@ def _resolve_best_provider(cfg, model_name, default_provider, default_models,
         role = _normalize_role(provider.get("role", "auto"))
         priority = _runtime_priority_for_model(provider, model_name)
         pname = _provider_label(provider)
-        scored.append((ROLE_WEIGHTS.get(role, 1), -priority, provider, pname))
+        scored.append((-priority, ROLE_WEIGHTS.get(role, 1), provider, pname))
 
     if not scored:
         return None, None
@@ -8182,7 +8734,7 @@ def _build_model_families_for_cli(cfg, cli_name, default_provider, default_model
             if not _provider_supports_model_for_cli(provider, cli_name, normalized):
                 continue
             priority = _runtime_priority_for_model(provider, normalized)
-            score = (ROLE_WEIGHTS.get(role, 1), -priority)
+            score = (-priority, ROLE_WEIGHTS.get(role, 1))
             existing = model_best.get(normalized)
             if existing is None or score < existing[0]:
                 model_best[normalized] = (
@@ -8552,8 +9104,11 @@ def _choose_runtime_source(
 
 def _resolve_visible_clis(cfg, default_provider, default_models):
     visible = []
+    disabled_clis = _disabled_clis_for_cfg(cfg)
 
     for cli_name in CLI_NAMES:
+        if cli_name in disabled_clis:
+            continue
         if cli_name in MMS_MANAGED_OAUTH_CLIS:
             if _accounts_for_cli(cfg, cli_name):
                 visible.append(cli_name)
@@ -8711,7 +9266,10 @@ def _confirm_context_lines(cli, runtime):
 
 def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_nsr=False, has_ecc=False, has_omc=False):
     runtime = runtime if isinstance(runtime, dict) else {}
-    allow_execution_surfaces = not (cli == "claude" and runtime.get("auth_mode") == "oauth")
+    allow_execution_surfaces = not (
+        (cli == "claude" and runtime.get("auth_mode") == "oauth")
+        or cli == "pi"
+    )
     preview = {
         "allow_execution_surfaces": allow_execution_surfaces,
         "mcp": {"always": [], "caveman": [], "nsr": [], "ecc": [], "omc": []},
@@ -8739,7 +9297,6 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_nsr=F
             _merge_claude_settings,
             _merge_mms_session_hooks,
             _opencode_rtk_plugin_path,
-            _opencode_xmem_plugin_path,
             _resolve_agent_browser_root,
             _resolve_auto_github_contributor_root,
             _resolve_caveman_root,
@@ -8751,7 +9308,7 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_nsr=F
             _resolve_toon_root,
             _resolve_weber_root,
             _resolve_web_access_root,
-            _resolve_xmem_root,
+            _managed_dynamic_skill_entries,
             _sanitize_claude_inherited_settings_payload,
             _session_managed_mcp_servers,
             _strip_agent_im_hooks,
@@ -8906,20 +9463,10 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_nsr=F
             return _L("Map 自动索引", "Map auto-index"), _L("刷新项目结构索引", "Refresh project structure index")
         if "codegraph-auto-index" in lower_target or basename == "claude-codegraph-auto-index.sh":
             return "CodeGraph 自动索引", _L("刷新项目 CodeGraph 索引", "Refresh project CodeGraph index")
-        if "xmem-session-start-hook" in lower_target or basename == "xmem-session-start-hook.sh":
-            return "xmem 自动同步", _L("注册/同步当前项目 truth index", "Register/sync the current project truth index")
-        if "xmem-session-end-hook" in lower_target or basename == "xmem-session-end-hook.sh":
-            return "xmem 收尾同步", _L("记录会话结束，不注入知识正文", "Record session close without injecting memory body")
         if "nsr-claude-hook" in lower_target or "nsr-codex-hook" in lower_target or "nsr-builtin-hook" in lower_target:
             return "NSR 持续运行", _L("按 active NSR goal 注入继续执行提示", "Inject active NSR goal continuation hints")
-        if "claude-feishu-webfetch-guard" in lower_target or basename == "claude-feishu-webfetch-guard.sh":
-            return _L("飞书 WebFetch 防护", "Feishu WebFetch guard"), _L("拦截高风险飞书抓取", "Guard risky Feishu fetches")
         if "rtk-rewrite" in lower_target or basename == "rtk-rewrite.sh":
             return "RTK Bash 改写", _L("压缩高 token Bash 命令", "Rewrite token-heavy Bash commands")
-        if basename == "hook.sh" and "read-once" in (lower_target or lower_command):
-            return _L("Read-once 读取拦截", "Read-once read hook"), _L("避免重复全文读取", "Avoid redundant full-file rereads")
-        if basename == "compact.sh" and "read-once" in (lower_target or lower_command):
-            return _L("Read-once 压缩整理", "Read-once compact"), _L("编辑后优先回看 diff", "Prefer diff after edits")
         if "hive-compact-hook" in lower_target or basename == "hive-compact-hook.sh":
             return _L("Hive 压缩整理", "Hive compact"), _L("compact 前后整理上下文", "Summarize context before and after compact")
         if "caveman-activate" in lower_target or basename == "caveman-activate.js":
@@ -9253,19 +9800,6 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_nsr=F
                 ],
                 disable_key="opencode-rtk",
             )
-        xmem_plugin = _opencode_xmem_plugin_path(runtime)
-        if xmem_plugin:
-            _append(
-                "hooks",
-                "always",
-                title="xmem OpenCode plugin",
-                summary=_L("会话启动/结束时轻量同步当前项目", "Lightly sync the current project on session start/end"),
-                details=[
-                    (_L("类型", "Type"), "OpenCode plugin"),
-                    (_L("路径", "Path"), xmem_plugin),
-                ],
-                disable_key="opencode-xmem",
-            )
     elif cli == "agy":
         agy_mcp = _session_managed_mcp_servers(
             {},
@@ -9347,13 +9881,6 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_nsr=F
                 [{"name": "token-saver", "path": _skill_path(token_saver_root)}],
                 _L("会话技能", "Session skill"),
             )
-        if _resolve_xmem_root():
-            xmem_root = _resolve_xmem_root()
-            _append_skill_entries(
-                "always",
-                [{"name": "xmem", "path": _skill_path(xmem_root)}],
-                _L("会话技能", "Session skill"),
-            )
         if _resolve_auto_github_contributor_root():
             auto_github_contributor_root = _resolve_auto_github_contributor_root()
             _append_skill_entries(
@@ -9365,6 +9892,20 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_nsr=F
                     }
                 ],
                 _L("会话技能", "Session skill"),
+            )
+        managed_dynamic_skills = [
+            {
+                "name": str(entry.get("name") or "").strip(),
+                "path": _skill_path(str(entry.get("root") or "").strip()),
+            }
+            for entry in (_managed_dynamic_skill_entries() or [])
+            if str((entry or {}).get("name") or "").strip()
+        ]
+        if managed_dynamic_skills:
+            _append_skill_entries(
+                "always",
+                managed_dynamic_skills,
+                _L("MMS 动态导入", "MMS managed import"),
             )
 
         caveman_root = _resolve_caveman_root() if has_caveman else ""
@@ -9532,6 +10073,7 @@ def _opencode_profile_menu_options():
             summary = f"{summary} {lite_pro_health}"
         options.append({
             "id": option["id"],
+            "profile_id": profile_id,
             "label": option["label"],
             "summary": summary,
             "badge": option.get("badge", ""),
@@ -9629,6 +10171,20 @@ def _select_opencode_profile(use_tui=False):
 def _opencode_default_profile_from_config(cfg):
     opencode = cfg.get("opencode") if isinstance(cfg, dict) and isinstance(cfg.get("opencode"), dict) else {}
     return _opencode_profile_selection(opencode.get("default_profile") or opencode.get("profile"))
+
+
+def _opencode_profile_for_preset(cfg, preset, requested_profile=""):
+    requested_profile = str(requested_profile or "").strip()
+    if requested_profile:
+        return requested_profile
+    if isinstance(preset, dict):
+        preset_profile = str(preset.get("opencode_profile") or preset.get("profile") or "").strip()
+        if preset_profile:
+            profile_id, _entrypoint = _opencode_profile_selection(preset_profile)
+            if profile_id:
+                return profile_id
+    profile_id, _entrypoint = _opencode_default_profile_from_config(cfg)
+    return profile_id or _OPENCODE_AGENT_PROFILE_ID
 
 
 def _opencode_default_model_rank(model_name):
@@ -9777,6 +10333,1891 @@ def _resolve_opencode_profile_runtime(cfg, default_provider, default_models, pro
         profile_id,
         deps=_opencode_resolver_deps(),
     )
+
+
+_OPENCODE_REVIEW_DEFAULT_TOKENS = ("qwen", "kimi", "glm", "deepseek", "mimo")
+_OPENCODE_REVIEW_DOMESTIC_TOKENS = ("qwen", "kimi", "glm", "minimax", "deepseek", "mimo", "stepfun")
+_OPENCODE_COMMITTEE_DEFAULT_TOKENS = ("gpt-5.4",)
+_OPENCODE_COMMITTEE_OPTION_TOKENS = ("gpt-5.4", "gpt-5.5", "deepseek", "glm", "mimo", "kimi", "minimax")
+_OPENCODE_DEBATE_DEFAULT_TOKENS = ("gpt-5.4", "gpt-5.5", "deepseek")
+_OPENCODE_REVIEW_BASE_REVIEWER_AGENTS = (
+    "review-qwen",
+    "review-kimi",
+    "review-glm",
+    "review-deepseek",
+    "review-mimo",
+    "review-mimo-pro",
+)
+_OPENCODE_REVIEW_FAMILY_ALIASES = {
+    "gpt": "GPT",
+    "openai": "GPT",
+    "qwen": "Qwen",
+    "tongyi": "Qwen",
+    "kimi": "Kimi",
+    "moonshot": "Kimi",
+    "minimax": "MiniMax",
+    "mini": "MiniMax",
+    "glm": "GLM",
+    "zhipu": "GLM",
+    "deepseek": "DeepSeek",
+    "ds": "DeepSeek",
+    "mimo": "Mimo",
+    "xiaomi": "Mimo",
+    "stepfun": "StepFun",
+}
+_OPENCODE_REVIEW_FAMILY_ORDER = {
+    "Qwen": 0,
+    "Kimi": 1,
+    "GLM": 2,
+    "MiniMax": 3,
+    "DeepSeek": 4,
+    "Mimo": 5,
+    "StepFun": 6,
+}
+
+
+def _split_opencode_review_model_tokens(values):
+    if values is None:
+        return []
+    raw_items = values
+    if isinstance(values, str):
+        raw_items = [values]
+    tokens = []
+    seen = set()
+    for item in raw_items or []:
+        text = str(item or "").strip()
+        if not text:
+            continue
+        for chunk in re.split(r"[\s,，;；]+", text):
+            token = chunk.strip()
+            if not token:
+                continue
+            key = token.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            tokens.append(token)
+    return tokens
+
+
+def _opencode_model_selection_entries(values):
+    if values is None:
+        return []
+    raw_items = [values] if isinstance(values, dict) else values
+    if not isinstance(raw_items, (list, tuple)):
+        return []
+    entries = []
+    seen = set()
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        model = str(item.get("model") or item.get("id") or "").strip()
+        if not model:
+            continue
+        key = model.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        entries.append(
+            {
+                "model": model,
+                "family": str(item.get("family") or "").strip(),
+                "provider_id": str(item.get("provider_id") or item.get("provider") or "").strip(),
+                "provider_name": str(item.get("provider_name") or "").strip(),
+            }
+        )
+    return entries
+
+
+def _opencode_apply_selection_entries(selected, selection_entries):
+    by_model = {
+        str(item.get("model") or "").strip().lower(): item
+        for item in (selection_entries or [])
+        if str(item.get("model") or "").strip()
+    }
+    if not by_model:
+        return selected
+    result = []
+    for item in selected:
+        model_key = str(item.get("model") or "").strip().lower()
+        override = by_model.get(model_key)
+        next_item = dict(item)
+        if override:
+            if override.get("provider_id"):
+                next_item["provider_id"] = override["provider_id"]
+            if override.get("provider_name"):
+                next_item["provider_name"] = override["provider_name"]
+            if override.get("family") and not next_item.get("family"):
+                next_item["family"] = override["family"]
+        result.append(next_item)
+    return result
+
+
+def _opencode_agent_roster_config(cfg):
+    opencode = cfg.get("opencode") if isinstance(cfg, dict) and isinstance(cfg.get("opencode"), dict) else {}
+    roster = opencode.get("agent_roster") if isinstance(opencode.get("agent_roster"), dict) else {}
+    return roster
+
+
+def _opencode_saved_provider_entries_for_prefix(cfg, prefix="", agent_ids=None):
+    entries = {}
+    roster = _opencode_agent_roster_config(cfg)
+    if agent_ids:
+        iterable = [(agent_id, roster.get(agent_id)) for agent_id in agent_ids]
+    else:
+        iterable = roster.items()
+    prefix = str(prefix or "").strip()
+    for agent_id, entry in iterable:
+        if prefix and not str(agent_id or "").startswith(prefix):
+            continue
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("enabled") is False:
+            continue
+        model = str(entry.get("model") or "").strip()
+        if not model:
+            continue
+        provider_id = str(entry.get("provider_id") or entry.get("provider") or "").strip()
+        if not provider_id:
+            continue
+        entries[model.lower()] = {
+            "model": model,
+            "provider_id": provider_id,
+            "provider_name": str(entry.get("provider_name") or "").strip(),
+        }
+    return entries
+
+
+def _opencode_enrich_selected_with_saved_providers(selected, cfg, *, prefix="", agent_ids=None):
+    saved = _opencode_saved_provider_entries_for_prefix(cfg, prefix, agent_ids=agent_ids)
+    return _opencode_apply_selection_entries(selected, list(saved.values()))
+
+
+def _opencode_saved_model_selections(cfg, tokens, *, prefix="", agent_ids=None):
+    saved = _opencode_saved_provider_entries_for_prefix(cfg, prefix, agent_ids=agent_ids)
+    result = []
+    seen = set()
+    for token in tokens or []:
+        model = str(token or "").strip()
+        if not model:
+            continue
+        key = model.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        family, _category = _infer_model_family(model)
+        entry = {
+            "model": model,
+            "family": family,
+        }
+        saved_entry = saved.get(key)
+        if saved_entry:
+            entry.update({k: v for k, v in saved_entry.items() if v})
+        result.append(entry)
+    return result
+
+
+def _opencode_provider_hides_model(provider, model_name):
+    model_key = str(model_name or "").strip().lower()
+    if not model_key:
+        return False
+    hidden = {item.lower() for item in _normalize_model_id_list((provider or {}).get("hidden_models") or [])}
+    return model_key in hidden
+
+
+def _opencode_with_saved_selection_options(cfg, options, selected_models):
+    """Keep remembered rows visible unless the saved provider is hidden/unusable."""
+    result = list(options or [])
+    seen = {
+        str(item.get("model") or "").strip().lower()
+        for item in result
+        if isinstance(item, dict) and str(item.get("model") or "").strip()
+    }
+    providers = _provider_map(cfg)
+    for selection in selected_models or []:
+        model = _opencode_selection_model(selection)
+        key = model.lower()
+        if not key or key in seen or not _mms_model_visible(model):
+            continue
+        provider_id = _opencode_selection_provider_id(selection)
+        provider = providers.get(provider_id)
+        if not provider:
+            continue
+        if not provider.get("enabled", True):
+            continue
+        if not _provider_has_configured_base_url(provider) or not provider.get("api_key"):
+            continue
+        if _opencode_provider_hides_model(provider, model):
+            continue
+        if not _provider_supports_model_for_cli(provider, "opencode", model):
+            continue
+        family = str(selection.get("family") or "").strip() if isinstance(selection, dict) else ""
+        if not family:
+            family, _category = _infer_model_family(model)
+        role = _normalize_role(provider.get("role", "auto"))
+        result.append(
+            {
+                "model": model,
+                "family": family,
+                "provider_id": provider_id,
+                "provider_name": _opencode_selection_provider_name(selection) or _provider_label(provider),
+                "priority": _runtime_priority_for_model(provider, model),
+                "role": role,
+                "role_weight": ROLE_WEIGHTS.get(role, 1),
+            }
+        )
+        seen.add(key)
+    return result
+
+
+def _opencode_selection_model(selection):
+    if isinstance(selection, dict):
+        return str(selection.get("model") or "").strip()
+    return str(selection or "").strip()
+
+
+def _opencode_selection_provider_id(selection):
+    if isinstance(selection, dict):
+        return str(selection.get("provider_id") or selection.get("provider") or "").strip()
+    return ""
+
+
+def _opencode_selection_provider_name(selection):
+    if isinstance(selection, dict):
+        return str(selection.get("provider_name") or "").strip()
+    return ""
+
+
+def _opencode_review_config(cfg):
+    opencode = cfg.get("opencode") if isinstance(cfg, dict) and isinstance(cfg.get("opencode"), dict) else {}
+    review = opencode.get("review") if isinstance(opencode.get("review"), dict) else {}
+    return review
+
+
+def _opencode_review_saved_model_tokens(cfg):
+    review = _opencode_review_config(cfg)
+    for key in ("models", "model_tokens", "selected_models"):
+        tokens = _split_opencode_review_model_tokens(review.get(key))
+        if tokens:
+            return tokens
+    return []
+
+
+def _opencode_review_saved_agent_ids(cfg):
+    review = _opencode_review_config(cfg)
+    agents = review.get("selected_agents")
+    if not isinstance(agents, (list, tuple)):
+        return []
+    return [str(agent_id or "").strip() for agent_id in agents if str(agent_id or "").strip()]
+
+
+def _opencode_review_saved_host_selection(cfg):
+    review = _opencode_review_config(cfg)
+    host = review.get("host") if isinstance(review.get("host"), dict) else {}
+    if not host:
+        opencode = cfg.get("opencode") if isinstance(cfg, dict) and isinstance(cfg.get("opencode"), dict) else {}
+        host = opencode.get("review_host") if isinstance(opencode.get("review_host"), dict) else {}
+    models = _split_opencode_review_model_tokens(
+        host.get("primary_models")
+        or host.get("models")
+        or host.get("model")
+    )
+    roster_entry = _opencode_agent_roster_config(cfg).get("review-hub-host")
+    if not isinstance(roster_entry, dict):
+        roster_entry = {}
+    model = (models[0] if models else str(roster_entry.get("model") or "").strip()) or "gpt-5.4"
+    selection = {"model": model}
+    provider_id = str(roster_entry.get("provider_id") or host.get("provider_id") or "").strip()
+    if provider_id:
+        selection["provider_id"] = provider_id
+    return selection
+
+
+def _opencode_review_compact(value):
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").strip().lower())
+
+
+def _opencode_review_slug(value):
+    text = str(value or "").strip().lower()
+    if "/" in text:
+        text = text.rsplit("/", 1)[-1]
+    slug = re.sub(r"[^a-z0-9]+", "-", text).strip("-")
+    return slug or "model"
+
+
+def _opencode_review_model_keys(model_name):
+    raw = str(model_name or "").strip()
+    if "/" in raw:
+        raw = raw.rsplit("/", 1)[-1]
+    compact = _opencode_review_compact(raw)
+    keys = {compact} if compact else set()
+    family, _category = _infer_model_family(raw)
+    family_key = _opencode_review_compact(family)
+    if family_key and compact.startswith(family_key):
+        rest = compact[len(family_key):]
+        if rest:
+            for marker in ("k", "m", "v"):
+                if rest.startswith(marker) and len(rest) > 1 and rest[1].isdigit():
+                    keys.add(f"{family_key}{rest[1:]}")
+        if "pro" in rest:
+            keys.add(f"{family_key}pro")
+        if "turbo" in rest:
+            keys.add(f"{family_key}turbo")
+        if "max" in rest:
+            keys.add(f"{family_key}max")
+    return {key for key in keys if key}
+
+
+def _opencode_review_token_family(token):
+    compact = _opencode_review_compact(str(token or "").removeprefix("review-"))
+    return _OPENCODE_REVIEW_FAMILY_ALIASES.get(compact, "")
+
+
+def _opencode_review_family_rank(family, model_name):
+    lower = str(model_name or "").strip().lower()
+    compact = _opencode_review_compact(lower)
+    if family == "Qwen":
+        if "max" in lower:
+            return 0
+        if "plus" in lower:
+            return 1
+        if "coder" in lower:
+            return 2
+        if "flash" in lower:
+            return 4
+        return 3
+    if family == "Kimi":
+        if "k2.6" in lower or "k26" in compact:
+            return 0
+        if "for-coding" in lower or "coding" in lower:
+            return 1
+        if "k2.5" in lower or "k25" in compact:
+            return 2
+        return 3
+    if family == "MiniMax":
+        if "m2.7" in lower or "m27" in compact:
+            return 0
+        if "m2.6" in lower or "m26" in compact:
+            return 1
+        return 2
+    if family == "GLM":
+        if "5.1" in lower or "51" in compact:
+            return 0
+        if "turbo" in lower:
+            return 1
+        return 2
+    if family == "DeepSeek":
+        if "v4" in lower and "pro" in lower:
+            return 0
+        if "v4" in lower:
+            return 1
+        if "v3.2" in lower or "v32" in compact:
+            return 2
+        if "flash" in lower:
+            return 4
+        return 3
+    if family == "Mimo":
+        if ("v2.5" in lower or "v25" in compact) and "pro" not in lower:
+            return 0
+        if ("v2.5" in lower or "v25" in compact) and "pro" in lower:
+            return 1
+        if "pro" in lower:
+            return 2
+        return 3
+    return 10
+
+
+def _opencode_review_pool(cfg, default_provider, default_models):
+    pool = []
+    seen = set()
+    for entry in _aggregate_provider_models(cfg, "opencode", default_provider, default_models):
+        model_name = str(entry.get("model") or "").strip()
+        if not model_name:
+            continue
+        model_key = model_name.lower()
+        if model_key in seen:
+            continue
+        family, category = _infer_model_family(model_name)
+        seen.add(model_key)
+        item = dict(entry)
+        item["family"] = family
+        item["category"] = category
+        item["keys"] = _opencode_review_model_keys(model_name)
+        pool.append(item)
+    return pool
+
+
+def _opencode_review_model_sort_key(item):
+    family = str(item.get("family") or "")
+    model = str(item.get("model") or "")
+    return (
+        _opencode_review_family_rank(family, model),
+        _opencode_default_model_rank(model),
+        model.lower(),
+    )
+
+
+def _opencode_review_item_is_domestic(item):
+    family = str(item.get("family") or "")
+    model = str(item.get("model") or "").lower()
+    return family in DOMESTIC_MODEL_FAMILIES or any(keyword in model for keyword in DOMESTIC_MODEL_KEYWORDS)
+
+
+def _opencode_review_resolve_token(pool, token):
+    clean_token = str(token or "").strip()
+    if clean_token.lower().startswith("review-"):
+        clean_token = clean_token[7:]
+    family = _opencode_review_token_family(clean_token)
+    if family:
+        candidates = [item for item in pool if item.get("family") == family]
+        if candidates:
+            return sorted(candidates, key=_opencode_review_model_sort_key)[0]
+        return None
+
+    query_keys = _opencode_review_model_keys(clean_token) or {_opencode_review_compact(clean_token)}
+    scored = []
+    for item in pool:
+        model_keys = item.get("keys") or set()
+        score = None
+        if query_keys & model_keys:
+            score = 0
+        elif any(any(key.startswith(query) for key in model_keys) for query in query_keys):
+            score = 1
+        elif any(any(query in key for key in model_keys) for query in query_keys):
+            score = 2
+        elif any(any(key in query for key in model_keys) for query in query_keys):
+            score = 3
+        if score is not None:
+            scored.append((score, _opencode_review_model_sort_key(item), item))
+    if scored:
+        scored.sort(key=lambda row: (row[0], row[1]))
+        return scored[0][2]
+
+    key_to_item = {}
+    for item in pool:
+        for key in item.get("keys") or ():
+            key_to_item.setdefault(key, item)
+    close = difflib.get_close_matches(next(iter(query_keys), ""), list(key_to_item), n=1, cutoff=0.82)
+    if close:
+        return key_to_item[close[0]]
+    return None
+
+
+def _resolve_opencode_review_models(cfg, default_provider, default_models, tokens):
+    pool = _opencode_review_pool(cfg, default_provider, default_models)
+    selected = []
+    unresolved = []
+    seen_models = set()
+    for token in tokens:
+        compact = _opencode_review_compact(token)
+        raw_lower = str(token or "").strip().lower()
+        if compact in {"all", "allmodels"}:
+            expanded = sorted(pool, key=lambda item: (str(item.get("family") or ""), _opencode_review_model_sort_key(item)))
+        elif compact in {"domesticall", "allcn", "cnall"}:
+            expanded = sorted(
+                [item for item in pool if _opencode_review_item_is_domestic(item)],
+                key=lambda item: (str(item.get("family") or ""), _opencode_review_model_sort_key(item)),
+            )
+        elif compact in {"domestic", "cn", "china", "guochan"} or raw_lower == "国产":
+            expanded = [
+                _opencode_review_resolve_token(pool, item)
+                for item in _OPENCODE_REVIEW_DOMESTIC_TOKENS
+            ]
+            expanded = [item for item in expanded if item]
+        else:
+            expanded = [_opencode_review_resolve_token(pool, token)]
+        if not expanded or not expanded[0]:
+            unresolved.append(token)
+            continue
+        for item in expanded:
+            model_key = str(item.get("model") or "").strip().lower()
+            if not model_key or model_key in seen_models:
+                continue
+            seen_models.add(model_key)
+            selected.append({
+                "token": token,
+                "model": str(item.get("model") or "").strip(),
+                "family": str(item.get("family") or ""),
+            })
+    return selected, unresolved
+
+
+def _opencode_review_agent_id_for_model(model_name, existing):
+    base = f"review-{_opencode_review_slug(model_name)}"
+    agent_id = base
+    suffix = 2
+    while agent_id in existing:
+        agent_id = f"{base}-{suffix}"
+        suffix += 1
+    existing.add(agent_id)
+    return agent_id
+
+
+def _inject_opencode_review_roster(cfg, selected_models, tokens, *, host_selection=None):
+    next_cfg = copy.deepcopy(cfg)
+    opencode = next_cfg.setdefault("opencode", {})
+    if not isinstance(opencode, dict):
+        opencode = {}
+        next_cfg["opencode"] = opencode
+    roster = opencode.setdefault("agent_roster", {})
+    if not isinstance(roster, dict):
+        roster = {}
+        opencode["agent_roster"] = roster
+    if selected_models:
+        for agent_id in _OPENCODE_REVIEW_BASE_REVIEWER_AGENTS:
+            entry = roster.get(agent_id) if isinstance(roster.get(agent_id), dict) else {}
+            entry = dict(entry)
+            entry["enabled"] = False
+            roster[agent_id] = entry
+
+    existing = set(roster)
+    selected_agents = []
+    resolved_models = []
+    for index, item in enumerate(selected_models):
+        model_name = str(item.get("model") or "").strip()
+        if not model_name:
+            continue
+        agent_id = _opencode_review_agent_id_for_model(model_name, existing)
+        lower = model_name.lower()
+        entry = {
+            "enabled": True,
+            "custom": True,
+            "preset": "reviewer",
+            "model": model_name,
+            "priority": 200 + index,
+            "description": f"Review Hub dynamic reviewer for {model_name}",
+        }
+        provider_id = str(item.get("provider_id") or "").strip()
+        if provider_id:
+            entry["provider_id"] = provider_id
+        if lower.startswith("mimo-"):
+            entry["route_policy"] = "mimo_direct"
+        roster[agent_id] = entry
+        selected_agents.append(agent_id)
+        resolved_models.append(model_name)
+
+    review = opencode.setdefault("review", {})
+    if not isinstance(review, dict):
+        review = {}
+        opencode["review"] = review
+    if tokens or selected_agents or resolved_models:
+        review["models"] = list(tokens)
+        review["selected_agents"] = selected_agents
+        review["resolved_models"] = resolved_models
+    host_model = _opencode_selection_model(host_selection)
+    if host_model:
+        host = review.setdefault("host", {})
+        if not isinstance(host, dict):
+            host = {}
+            review["host"] = host
+        fallback = host.get("fallback_models") or host.get("fallback") or []
+        host["primary_models"] = [host_model]
+        if fallback:
+            host["fallback_models"] = _split_opencode_review_model_tokens(fallback)
+        host_entry = dict(roster.get("review-hub-host") if isinstance(roster.get("review-hub-host"), dict) else {})
+        host_entry.update({"enabled": True, "model": host_model})
+        host_provider = _opencode_selection_provider_id(host_selection)
+        if host_provider:
+            host_entry["provider_id"] = host_provider
+        roster["review-hub-host"] = host_entry
+    return next_cfg
+
+
+def _opencode_review_available_summary(cfg, default_provider, default_models):
+    pool = _opencode_review_pool(cfg, default_provider, default_models)
+    by_family = {}
+    for item in pool:
+        family = str(item.get("family") or "其他")
+        by_family.setdefault(family, []).append(str(item.get("model") or ""))
+    parts = []
+    for family in ("Qwen", "Kimi", "GLM", "MiniMax", "DeepSeek", "Mimo", "StepFun"):
+        models = [item for item in by_family.get(family, []) if item]
+        if not models:
+            continue
+        models = sorted(models, key=lambda model: _opencode_review_family_rank(family, model))
+        preview = ", ".join(models[:3])
+        if len(models) > 3:
+            preview += f", +{len(models) - 3}"
+        parts.append(f"{family}: {preview}")
+    return " | ".join(parts)
+
+
+def _opencode_profile_tui_model_options(cfg, default_provider, default_models):
+    options = []
+    for entry in _aggregate_provider_models(cfg, "opencode", default_provider, default_models):
+        model_name = str(entry.get("model") or "").strip()
+        if not model_name:
+            continue
+        family, category = _infer_model_family(model_name)
+        item = dict(entry)
+        item["family"] = family
+        item["category"] = category
+        item["keys"] = _opencode_review_model_keys(model_name)
+        options.append(
+            {
+                "model": model_name,
+                "family": family,
+                "provider_id": str(item.get("provider_id") or ""),
+                "provider_name": str(item.get("provider_name") or ""),
+                "priority": int(item.get("priority", 100) or 100),
+                "role": str(item.get("role") or "auto"),
+                "role_weight": int(item.get("role_weight", 1) or 1),
+            }
+        )
+    return options
+
+
+def _opencode_review_tui_options(cfg, default_provider, default_models):
+    pool = _opencode_profile_tui_model_options(cfg, default_provider, default_models)
+    pool.sort(
+        key=lambda item: (
+            0 if str(item.get("family") or "") == "GPT" else 1,
+            _OPENCODE_REVIEW_FAMILY_ORDER.get(str(item.get("family") or ""), 99),
+            _opencode_review_model_sort_key(item),
+            str(item.get("provider_name") or ""),
+        )
+    )
+    return pool
+
+
+def _select_opencode_review_models_tui(cfg, default_provider, default_models):
+    options = _opencode_review_tui_options(cfg, default_provider, default_models)
+    if not options:
+        console.print("[yellow]没有可用于 OpenCode review 的模型池；将使用 review profile 默认 roster。[/yellow]")
+        return []
+    saved_tokens = _opencode_review_saved_model_tokens(cfg)
+    default_tokens = saved_tokens or list(_OPENCODE_REVIEW_DEFAULT_TOKENS)
+    if saved_tokens:
+        selected_models = _opencode_saved_model_selections(
+            cfg,
+            saved_tokens,
+            prefix="review-",
+            agent_ids=_opencode_review_saved_agent_ids(cfg),
+        )
+    else:
+        selected, _unresolved = _resolve_opencode_review_models(cfg, default_provider, default_models, default_tokens)
+        selected_models = _opencode_enrich_selected_with_saved_providers(selected, cfg, prefix="review-")
+    options = _opencode_with_saved_selection_options(cfg, options, selected_models)
+    try:
+        from mms_tui import select_review_models_tui
+    except Exception:
+        return selected_models
+    return select_review_models_tui(
+        options,
+        selected_models=selected_models,
+        title="OpenCode Review reviewers",
+        return_provider=True,
+    )
+
+
+def _save_opencode_review_model_tokens(cfg, tokens, *, selected_models=None, host_selection=None):
+    base_cfg = cfg
+    if _preview_root_mode():
+        try:
+            loaded_cfg = _load_toml_file(_config_write_target_path())
+        except Exception:
+            loaded_cfg = None
+        if isinstance(loaded_cfg, dict):
+            base_cfg = loaded_cfg
+    next_cfg = copy.deepcopy(base_cfg)
+    opencode = next_cfg.setdefault("opencode", {})
+    if not isinstance(opencode, dict):
+        opencode = {}
+        next_cfg["opencode"] = opencode
+    review = opencode.setdefault("review", {})
+    if not isinstance(review, dict):
+        review = {}
+        opencode["review"] = review
+    if tokens or selected_models:
+        review["models"] = list(tokens)
+    if selected_models or host_selection:
+        next_cfg = _inject_opencode_review_roster(
+            next_cfg,
+            selected_models or [],
+            tokens,
+            host_selection=host_selection,
+        )
+    save_config(next_cfg, reason="opencode:save_review_models")
+    return next_cfg
+
+
+def _prepare_opencode_review_profile_config(
+    cfg,
+    default_provider,
+    default_models,
+    *,
+    host_model=None,
+    model_tokens=None,
+    interactive=False,
+    save_selected=False,
+    save_cfg=None,
+    ask_to_save=False,
+):
+    host_selection = host_model if host_model is not None else None
+    explicit_entries = _opencode_model_selection_entries(model_tokens)
+    explicit_tokens = [item["model"] for item in explicit_entries] if explicit_entries else _split_opencode_review_model_tokens(model_tokens)
+    saved_tokens = _opencode_review_saved_model_tokens(cfg)
+    tokens = explicit_tokens or saved_tokens
+    source = "cli" if explicit_tokens else ("saved" if saved_tokens else "")
+
+    if not tokens and interactive:
+        _ensure_rich()
+        summary = _opencode_review_available_summary(cfg, default_provider, default_models)
+        if summary:
+            console.print(f"[dim]Review 可用模型: {summary}[/dim]")
+        default_text = " ".join(_OPENCODE_REVIEW_DEFAULT_TOKENS)
+        answer = Prompt.ask(
+            "Review models（空格/逗号分隔；支持 qwen、kimi2.5、minimax2.7、glm5-turbo、domestic、all）",
+            default=default_text,
+        )
+        tokens = _split_opencode_review_model_tokens(answer)
+        source = "prompt"
+
+    if not tokens:
+        host_text = _opencode_selection_model(host_selection)
+        if host_text:
+            next_cfg = _inject_opencode_review_roster(cfg, [], [], host_selection=host_selection)
+            if save_selected:
+                _save_opencode_review_model_tokens(
+                    save_cfg or cfg,
+                    [],
+                    selected_models=[],
+                    host_selection=host_selection,
+                )
+            return next_cfg, {"host": host_text, "tokens": [], "selected": [], "unresolved": [], "source": source}
+        return cfg, {"tokens": [], "selected": [], "unresolved": [], "source": source}
+
+    if explicit_entries:
+        selected = [
+            {
+                **entry,
+                "family": entry.get("family") or _infer_model_family(entry.get("model"))[0],
+                "token": entry.get("model"),
+            }
+            for entry in explicit_entries
+        ]
+        unresolved = []
+    else:
+        selected, unresolved = _resolve_opencode_review_models(cfg, default_provider, default_models, tokens)
+        selected = _opencode_enrich_selected_with_saved_providers(
+            selected,
+            cfg,
+            prefix="review-",
+            agent_ids=_opencode_review_saved_agent_ids(cfg),
+        )
+    if unresolved:
+        console.print(f"[yellow]Review models 未解析: {', '.join(unresolved)}[/yellow]")
+    if not selected:
+        return cfg, {"tokens": tokens, "selected": [], "unresolved": unresolved, "source": source}
+
+    next_cfg = _inject_opencode_review_roster(cfg, selected, tokens, host_selection=host_selection)
+    if save_selected:
+        _save_opencode_review_model_tokens(
+            save_cfg or cfg,
+            tokens,
+            selected_models=selected,
+            host_selection=host_selection,
+        )
+    elif ask_to_save and source == "prompt":
+        _ensure_rich()
+        if Confirm.ask("保存这次 Review models 为下次默认？", default=False):
+            _save_opencode_review_model_tokens(
+                save_cfg or cfg,
+                tokens,
+                selected_models=selected,
+                host_selection=host_selection,
+            )
+
+    host_text = _opencode_selection_model(host_selection)
+    if host_text:
+        console.print(f"[green]Review host:[/green] {host_text}")
+    selected_text = ", ".join(f"{item['model']} -> review-{_opencode_review_slug(item['model'])}" for item in selected)
+    console.print(f"[green]Review reviewers:[/green] {selected_text}")
+    return next_cfg, {"host": host_text, "tokens": tokens, "selected": selected, "unresolved": unresolved, "source": source}
+
+
+def _opencode_committee_config(cfg):
+    opencode = cfg.get("opencode") if isinstance(cfg, dict) and isinstance(cfg.get("opencode"), dict) else {}
+    committee = opencode.get("committee") if isinstance(opencode.get("committee"), dict) else {}
+    return committee
+
+
+def _opencode_committee_saved_model_tokens(cfg):
+    committee = _opencode_committee_config(cfg)
+    for key in ("models", "model_tokens", "selected_models"):
+        tokens = _split_opencode_review_model_tokens(committee.get(key))
+        if tokens:
+            return tokens
+    opencode = cfg.get("opencode") if isinstance(cfg, dict) and isinstance(cfg.get("opencode"), dict) else {}
+    return _split_opencode_review_model_tokens(opencode.get("committee_models"))
+
+
+def _opencode_committee_saved_agent_ids(cfg):
+    committee = _opencode_committee_config(cfg)
+    agents = committee.get("selected_agents")
+    if not isinstance(agents, (list, tuple)):
+        return []
+    return [str(agent_id or "").strip() for agent_id in agents if str(agent_id or "").strip()]
+
+
+def _opencode_committee_saved_host_model(cfg):
+    committee = _opencode_committee_config(cfg)
+    host = committee.get("host") if isinstance(committee.get("host"), dict) else {}
+    for value in (
+        host.get("model"),
+        host.get("primary_model"),
+        committee.get("host_model"),
+    ):
+        text = str(value or "").strip()
+        if text:
+            return text
+    for value in (host.get("primary_models"), host.get("models")):
+        models = _split_opencode_review_model_tokens(value)
+        if models:
+            return models[0]
+    return ""
+
+
+def _opencode_committee_saved_host_fallback_model(cfg):
+    committee = _opencode_committee_config(cfg)
+    host = committee.get("host") if isinstance(committee.get("host"), dict) else {}
+    for value in (
+        host.get("fallback_model"),
+        committee.get("host_fallback_model"),
+    ):
+        text = str(value or "").strip()
+        if text:
+            return text
+    for value in (host.get("fallback_models"), host.get("fallback")):
+        models = _split_opencode_review_model_tokens(value)
+        if models:
+            return models[0]
+    return ""
+
+
+def _opencode_committee_saved_host_selection(cfg):
+    committee = _opencode_committee_config(cfg)
+    host = committee.get("host") if isinstance(committee.get("host"), dict) else {}
+    roster_entry = _opencode_agent_roster_config(cfg).get("committee-host")
+    if not isinstance(roster_entry, dict):
+        roster_entry = {}
+    model = _opencode_committee_saved_host_model(cfg) or str(roster_entry.get("model") or "").strip() or "gpt-5.4"
+    selection = {"model": model}
+    provider_id = str(host.get("provider_id") or roster_entry.get("provider_id") or "").strip()
+    if provider_id:
+        selection["provider_id"] = provider_id
+    return selection
+
+
+def _opencode_committee_channel_provider_id(cfg, default_provider, channel):
+    channel = str(channel or "").strip()
+    if not channel or channel.lower() in {"auto", "current"}:
+        return ""
+    if str((default_provider or {}).get("id") or "").strip() == channel:
+        return channel
+    return channel if channel in _provider_map(cfg) else ""
+
+
+def _opencode_committee_channel_lookup(member_channels, model_or_token, fallback_channel=""):
+    channels = member_channels if isinstance(member_channels, dict) else {}
+    raw = str(model_or_token or "").strip()
+    raw_lower = raw.lower()
+    raw_compact = _opencode_review_compact(raw)
+    for key, value in channels.items():
+        key_text = str(key or "").strip()
+        if not key_text:
+            continue
+        if key_text.lower() == raw_lower or _opencode_review_compact(key_text) == raw_compact:
+            return str(value or "").strip()
+    return str(fallback_channel or "").strip()
+
+
+def _resolve_opencode_committee_models_by_channel(
+    cfg,
+    default_provider,
+    default_models,
+    tokens,
+    member_channels,
+    fallback_channel="",
+):
+    selected = []
+    unresolved = []
+    seen_models = set()
+    for token in tokens:
+        channel = _opencode_committee_channel_lookup(member_channels, token, fallback_channel)
+        provider_id = _opencode_committee_channel_provider_id(cfg, default_provider, channel)
+        resolved, missing = _resolve_opencode_committee_models(
+            cfg,
+            default_provider,
+            default_models,
+            [token],
+            provider_id=provider_id,
+        )
+        unresolved.extend(missing)
+        for item in resolved:
+            model_key = str(item.get("model") or "").strip().lower()
+            if not model_key or model_key in seen_models:
+                continue
+            seen_models.add(model_key)
+            next_item = dict(item)
+            if provider_id and not _opencode_selection_provider_id(next_item):
+                next_item["provider_id"] = provider_id
+            selected.append(next_item)
+    return selected, unresolved
+
+
+def _opencode_committee_pool(cfg, default_provider, default_models, provider_id=""):
+    pool = []
+    seen = set()
+    for entry in _aggregate_provider_models(cfg, "opencode", default_provider, default_models):
+        if provider_id and str(entry.get("provider_id") or "").strip() != provider_id:
+            continue
+        model_name = str(entry.get("model") or "").strip()
+        if not model_name:
+            continue
+        model_key = model_name.lower()
+        if model_key in seen:
+            continue
+        family, category = _infer_model_family(model_name)
+        seen.add(model_key)
+        item = dict(entry)
+        item["family"] = family
+        item["category"] = category
+        item["keys"] = _opencode_review_model_keys(model_name)
+        pool.append(item)
+    return pool
+
+
+def _opencode_committee_model_rank(family, model_name):
+    lower = str(model_name or "").strip().lower()
+    compact = _opencode_review_compact(lower)
+    if family == "GPT":
+        if lower == "gpt-5.4":
+            return 0
+        if lower == "gpt-5.5":
+            return 1
+        return _opencode_default_model_rank(model_name) + 10
+    if family == "MiniMax":
+        if "m3" in lower:
+            return 0
+        if "m2.7" in lower or "m27" in compact:
+            return 1
+        if "m2.5" in lower or "m25" in compact:
+            return 2
+        return 3
+    if family == "Mimo":
+        if ("v2.5" in lower or "v25" in compact) and "pro" in lower:
+            return 0
+        if "pro" in lower:
+            return 1
+        if "v2.5" in lower or "v25" in compact:
+            return 2
+        return 3
+    return _opencode_review_family_rank(family, model_name)
+
+
+def _opencode_committee_model_sort_key(item):
+    family = str(item.get("family") or "")
+    model = str(item.get("model") or "")
+    return (
+        _opencode_committee_model_rank(family, model),
+        _opencode_default_model_rank(model),
+        model.lower(),
+    )
+
+
+def _opencode_committee_resolve_token(pool, token):
+    raw = str(token or "").strip()
+    compact = _opencode_review_compact(raw)
+    exact_aliases = {
+        "54": "gpt-5.4",
+        "5.4": "gpt-5.4",
+        "gpt54": "gpt-5.4",
+        "gpt5.4": "gpt-5.4",
+        "gpt5_4": "gpt-5.4",
+        "55": "gpt-5.5",
+        "5.5": "gpt-5.5",
+        "gpt55": "gpt-5.5",
+        "gpt5.5": "gpt-5.5",
+        "gpt5_5": "gpt-5.5",
+    }
+    exact = exact_aliases.get(compact) or (raw if raw.lower().startswith("gpt-5.") else "")
+    if exact:
+        exact_lower = exact.lower()
+        matches = [item for item in pool if str(item.get("model") or "").strip().lower() == exact_lower]
+        if matches:
+            return sorted(matches, key=_opencode_committee_model_sort_key)[0]
+
+    family = _opencode_review_token_family(raw)
+    if family:
+        candidates = [item for item in pool if item.get("family") == family]
+        if candidates:
+            return sorted(candidates, key=_opencode_committee_model_sort_key)[0]
+        return None
+
+    return _opencode_review_resolve_token(pool, raw)
+
+
+def _resolve_opencode_committee_models(cfg, default_provider, default_models, tokens, provider_id=""):
+    pool = _opencode_committee_pool(cfg, default_provider, default_models, provider_id=provider_id)
+    selected = []
+    unresolved = []
+    seen_models = set()
+    for token in tokens:
+        compact = _opencode_review_compact(token)
+        if compact in {"all", "allmodels"}:
+            expanded = sorted(pool, key=lambda item: (str(item.get("family") or ""), _opencode_committee_model_sort_key(item)))
+        elif compact in {"domestic", "cn", "china", "guochan"} or str(token or "").strip().lower() == "国产":
+            expanded = [
+                _opencode_committee_resolve_token(pool, item)
+                for item in ("deepseek", "glm", "mimo", "kimi", "minimax")
+            ]
+            expanded = [item for item in expanded if item]
+        else:
+            expanded = [_opencode_committee_resolve_token(pool, token)]
+        if not expanded or not expanded[0]:
+            unresolved.append(token)
+            continue
+        for item in expanded:
+            model_key = str(item.get("model") or "").strip().lower()
+            if not model_key or model_key in seen_models:
+                continue
+            seen_models.add(model_key)
+            selected_item = {
+                "token": token,
+                "model": str(item.get("model") or "").strip(),
+                "family": str(item.get("family") or ""),
+            }
+            for key in ("provider_id", "provider_name"):
+                value = str(item.get(key) or "").strip()
+                if value:
+                    selected_item[key] = value
+            selected.append(selected_item)
+    return selected, unresolved
+
+
+def _opencode_committee_agent_id_for_model(model_name, existing):
+    base = f"committee-{_opencode_review_slug(model_name)}"
+    agent_id = base
+    suffix = 2
+    while agent_id in existing:
+        agent_id = f"{base}-{suffix}"
+        suffix += 1
+    existing.add(agent_id)
+    return agent_id
+
+
+def _inject_opencode_committee_roster(
+    cfg,
+    selected_models,
+    tokens,
+    *,
+    host_model="",
+    host_selection=None,
+    host_fallback_model="",
+    host_fallback_selection=None,
+):
+    next_cfg = copy.deepcopy(cfg)
+    opencode = next_cfg.setdefault("opencode", {})
+    if not isinstance(opencode, dict):
+        opencode = {}
+        next_cfg["opencode"] = opencode
+    roster = opencode.setdefault("agent_roster", {})
+    if not isinstance(roster, dict):
+        roster = {}
+        opencode["agent_roster"] = roster
+
+    for agent_id in list(roster):
+        if str(agent_id).startswith("committee-") and agent_id not in {"committee-host", "committee-host-pro"}:
+            entry = roster.get(agent_id) if isinstance(roster.get(agent_id), dict) else {}
+            entry = dict(entry)
+            entry["enabled"] = False
+            roster[agent_id] = entry
+
+    existing = set(roster)
+    selected_agents = []
+    resolved_models = []
+    for index, item in enumerate(selected_models):
+        model_name = str(item.get("model") or "").strip()
+        if not model_name:
+            continue
+        agent_id = _opencode_committee_agent_id_for_model(model_name, existing)
+        lower = model_name.lower()
+        entry = {
+            "enabled": True,
+            "custom": True,
+            "preset": "reviewer",
+            "model": model_name,
+            "priority": 300 + index,
+            "description": f"Committee member for {model_name}",
+        }
+        provider_id = str(item.get("provider_id") or "").strip()
+        if provider_id:
+            entry["provider_id"] = provider_id
+        if lower.startswith("mimo-"):
+            entry["route_policy"] = "mimo_direct"
+        roster[agent_id] = entry
+        selected_agents.append(agent_id)
+        resolved_models.append(model_name)
+
+    committee = opencode.setdefault("committee", {})
+    if not isinstance(committee, dict):
+        committee = {}
+        opencode["committee"] = committee
+    if host_selection is None and host_model:
+        host_selection = {"model": str(host_model).strip()}
+    resolved_host_model = _opencode_selection_model(host_selection) or str(host_model or "").strip()
+    resolved_host_fallback_model = _opencode_selection_model(host_fallback_selection) or str(host_fallback_model or "").strip()
+    if resolved_host_model:
+        host_payload = {"model": resolved_host_model}
+        host_provider = _opencode_selection_provider_id(host_selection)
+        if host_provider:
+            host_payload["provider_id"] = host_provider
+        if resolved_host_fallback_model:
+            host_payload["fallback_models"] = [resolved_host_fallback_model]
+        committee["host"] = host_payload
+        host_entry = dict(roster.get("committee-host") if isinstance(roster.get("committee-host"), dict) else {})
+        host_entry.update({"enabled": True, "model": resolved_host_model})
+        if host_provider:
+            host_entry["provider_id"] = host_provider
+        roster["committee-host"] = host_entry
+    if resolved_host_fallback_model:
+        fallback_entry = dict(roster.get("committee-host-pro") if isinstance(roster.get("committee-host-pro"), dict) else {})
+        fallback_entry.update({"enabled": True, "model": resolved_host_fallback_model})
+        fallback_provider = _opencode_selection_provider_id(host_fallback_selection)
+        if fallback_provider:
+            fallback_entry["provider_id"] = fallback_provider
+        roster["committee-host-pro"] = fallback_entry
+    committee["models"] = list(tokens)
+    committee["selected_agents"] = selected_agents
+    committee["resolved_models"] = resolved_models
+    return next_cfg
+
+
+def _opencode_committee_tui_options(cfg, default_provider, default_models):
+    pool = _opencode_profile_tui_model_options(cfg, default_provider, default_models)
+    pool.sort(
+        key=lambda item: (
+            0 if str(item.get("model") or "").strip().lower() == "gpt-5.4" else 1,
+            0 if str(item.get("family") or "") == "GPT" else 1,
+            str(item.get("family") or ""),
+            _opencode_committee_model_sort_key(item),
+            str(item.get("provider_name") or ""),
+        )
+    )
+    return pool
+
+
+def _opencode_debate_config(cfg):
+    opencode = cfg.get("opencode") if isinstance(cfg, dict) and isinstance(cfg.get("opencode"), dict) else {}
+    debate = opencode.get("debate") if isinstance(opencode.get("debate"), dict) else {}
+    return debate
+
+
+def _opencode_debate_saved_model_tokens(cfg):
+    debate = _opencode_debate_config(cfg)
+    for key in ("models", "model_tokens", "selected_models"):
+        tokens = _split_opencode_review_model_tokens(debate.get(key))
+        if tokens:
+            return tokens
+    opencode = cfg.get("opencode") if isinstance(cfg, dict) and isinstance(cfg.get("opencode"), dict) else {}
+    return _split_opencode_review_model_tokens(opencode.get("debate_models"))
+
+
+def _opencode_debate_saved_agent_ids(cfg):
+    debate = _opencode_debate_config(cfg)
+    agents = debate.get("selected_agents")
+    if not isinstance(agents, (list, tuple)):
+        return []
+    return [str(agent_id or "").strip() for agent_id in agents if str(agent_id or "").strip()]
+
+
+def _opencode_debate_saved_host_model(cfg):
+    debate = _opencode_debate_config(cfg)
+    host = debate.get("host") if isinstance(debate.get("host"), dict) else {}
+    for value in (
+        host.get("model"),
+        host.get("primary_model"),
+        debate.get("host_model"),
+    ):
+        text = str(value or "").strip()
+        if text:
+            return text
+    for value in (host.get("primary_models"), host.get("models")):
+        models = _split_opencode_review_model_tokens(value)
+        if models:
+            return models[0]
+    return ""
+
+
+def _opencode_debate_saved_host_selection(cfg):
+    debate = _opencode_debate_config(cfg)
+    host = debate.get("host") if isinstance(debate.get("host"), dict) else {}
+    roster_entry = _opencode_agent_roster_config(cfg).get("debate-host")
+    if not isinstance(roster_entry, dict):
+        roster_entry = {}
+    model = _opencode_debate_saved_host_model(cfg) or str(roster_entry.get("model") or "").strip() or "gpt-5.4"
+    selection = {"model": model}
+    provider_id = str(host.get("provider_id") or roster_entry.get("provider_id") or "").strip()
+    if provider_id:
+        selection["provider_id"] = provider_id
+    return selection
+
+
+def _resolve_opencode_debate_models(cfg, default_provider, default_models, tokens):
+    return _resolve_opencode_committee_models(cfg, default_provider, default_models, tokens)
+
+
+def _opencode_debate_agent_id_for_model(model_name, existing):
+    base = f"debate-{_opencode_review_slug(model_name)}"
+    agent_id = base
+    suffix = 2
+    while agent_id in existing:
+        agent_id = f"{base}-{suffix}"
+        suffix += 1
+    existing.add(agent_id)
+    return agent_id
+
+
+def _inject_opencode_debate_roster(cfg, selected_models, tokens, *, host_model="", host_selection=None):
+    next_cfg = copy.deepcopy(cfg)
+    opencode = next_cfg.setdefault("opencode", {})
+    if not isinstance(opencode, dict):
+        opencode = {}
+        next_cfg["opencode"] = opencode
+    roster = opencode.setdefault("agent_roster", {})
+    if not isinstance(roster, dict):
+        roster = {}
+        opencode["agent_roster"] = roster
+
+    for agent_id in list(roster):
+        if str(agent_id).startswith("debate-") and agent_id not in {"debate-host", "debate-host-pro"}:
+            entry = roster.get(agent_id) if isinstance(roster.get(agent_id), dict) else {}
+            entry = dict(entry)
+            entry["enabled"] = False
+            roster[agent_id] = entry
+
+    existing = set(roster)
+    selected_agents = []
+    resolved_models = []
+    for index, item in enumerate(selected_models):
+        model_name = str(item.get("model") or "").strip()
+        if not model_name:
+            continue
+        agent_id = _opencode_debate_agent_id_for_model(model_name, existing)
+        lower = model_name.lower()
+        entry = {
+            "enabled": True,
+            "custom": True,
+            "preset": "reviewer",
+            "model": model_name,
+            "priority": 350 + index,
+            "description": f"Debate member for {model_name}",
+        }
+        provider_id = str(item.get("provider_id") or "").strip()
+        if provider_id:
+            entry["provider_id"] = provider_id
+        if lower.startswith("mimo-"):
+            entry["route_policy"] = "mimo_direct"
+        roster[agent_id] = entry
+        selected_agents.append(agent_id)
+        resolved_models.append(model_name)
+
+    debate = opencode.setdefault("debate", {})
+    if not isinstance(debate, dict):
+        debate = {}
+        opencode["debate"] = debate
+    if host_selection is None and host_model:
+        host_selection = {"model": str(host_model).strip()}
+    resolved_host_model = _opencode_selection_model(host_selection) or str(host_model or "").strip()
+    if resolved_host_model:
+        host_payload = {"model": resolved_host_model}
+        host_provider = _opencode_selection_provider_id(host_selection)
+        if host_provider:
+            host_payload["provider_id"] = host_provider
+        debate["host"] = host_payload
+        host_entry = dict(roster.get("debate-host") if isinstance(roster.get("debate-host"), dict) else {})
+        host_entry.update({"enabled": True, "model": resolved_host_model})
+        if host_provider:
+            host_entry["provider_id"] = host_provider
+        roster["debate-host"] = host_entry
+    debate["models"] = list(tokens)
+    debate["selected_agents"] = selected_agents
+    debate["resolved_models"] = resolved_models
+    return next_cfg
+
+
+def _opencode_debate_tui_options(cfg, default_provider, default_models):
+    return _opencode_committee_tui_options(cfg, default_provider, default_models)
+
+
+def _select_opencode_host_model_tui(cfg, default_provider, default_models, *, saved_selection, title):
+    saved_selection = dict(saved_selection or {})
+    saved_model = str(saved_selection.get("model") or "gpt-5.4").strip() or "gpt-5.4"
+    raw = _build_model_families_for_cli(cfg, "opencode", default_provider, default_models)
+    if not raw:
+        console.print("[yellow]没有可用于 OpenCode host 的模型池；将使用保存/default host。[/yellow]")
+        return saved_selection or {"model": saved_model}
+    families = []
+    detail = {}
+    for family in raw:
+        family_name = str(family.get("family") or "").strip()
+        models = [item for item in (family.get("models") or []) if isinstance(item, dict)]
+        if not family_name or not models:
+            continue
+        family_last_used_at = max((str(item.get("last_used_at") or "").strip() for item in models), default="")
+        families.append(
+            {
+                "family": family_name,
+                "count": len(models),
+                "use_count": sum(int(item.get("use_count", 0) or 0) for item in models),
+                "last_used_at": family_last_used_at,
+                "is_cold": _family_is_cold_for_tui(family_name, 0, family_last_used_at, preferred_family="GPT"),
+            }
+        )
+        detail[family_name] = models
+    if not families:
+        return saved_selection or {"model": saved_model}
+    families = _sort_family_entries_for_tui(families, preferred_family="GPT")
+    last_used = {
+        "opencode": {
+            "model": saved_model,
+            "model_info": {"model": saved_model},
+            "provider_id": str(saved_selection.get("provider_id") or ""),
+        }
+    }
+    try:
+        from mms_tui import select_family_tui
+    except Exception:
+        return saved_selection or {"model": saved_model}
+    result = select_family_tui(
+        {"opencode": families},
+        ["opencode"],
+        last_used=last_used,
+        families_detail={"opencode": detail},
+        provider_options_by_cli={"opencode": {}},
+        provider_options_loader_by_cli={
+            "opencode": _make_provider_options_loader(cfg, "opencode", default_provider, default_models)
+        },
+    )
+    if result is None:
+        return None
+    action, _cli, payload = result
+    if action == "last":
+        return saved_selection or {"model": saved_model}
+    if action == "submodel" and isinstance(payload, dict):
+        return payload
+    return None
+
+
+def _select_opencode_review_host_tui(cfg, default_provider, default_models):
+    selection = _opencode_review_saved_host_selection(cfg)
+    return _select_opencode_host_model_tui(
+        cfg,
+        default_provider,
+        default_models,
+        saved_selection=selection,
+        title="OpenCode Review host",
+    )
+
+
+def _select_opencode_committee_host_tui(cfg, default_provider, default_models):
+    selection = _opencode_committee_saved_host_selection(cfg)
+    return _select_opencode_host_model_tui(
+        cfg,
+        default_provider,
+        default_models,
+        saved_selection=selection,
+        title="OpenCode Committee host",
+    )
+
+
+def _select_opencode_committee_models_tui(cfg, default_provider, default_models):
+    options = _opencode_committee_tui_options(cfg, default_provider, default_models)
+    if not options:
+        console.print("[yellow]没有可用于 OpenCode committee 的模型池；将只尝试 committee host。[/yellow]")
+        return []
+    saved_tokens = _opencode_committee_saved_model_tokens(cfg)
+    default_tokens = saved_tokens or list(_OPENCODE_COMMITTEE_DEFAULT_TOKENS)
+    if saved_tokens:
+        selected_models = _opencode_saved_model_selections(
+            cfg,
+            saved_tokens,
+            prefix="committee-",
+            agent_ids=_opencode_committee_saved_agent_ids(cfg),
+        )
+    else:
+        selected, _unresolved = _resolve_opencode_committee_models(cfg, default_provider, default_models, default_tokens)
+        selected_models = _opencode_enrich_selected_with_saved_providers(selected, cfg, prefix="committee-")
+    options = _opencode_with_saved_selection_options(cfg, options, selected_models)
+    try:
+        from mms_tui import select_review_models_tui
+    except Exception:
+        return selected_models
+    return select_review_models_tui(
+        options,
+        selected_models=selected_models,
+        title="OpenCode Committee members",
+        return_provider=True,
+    )
+
+
+def _save_opencode_committee_model_tokens(
+    cfg,
+    tokens,
+    *,
+    host_model="",
+    host_selection=None,
+    host_fallback_model="",
+    host_fallback_selection=None,
+    selected_models=None,
+):
+    base_cfg = cfg
+    if _preview_root_mode():
+        try:
+            loaded_cfg = _load_toml_file(_config_write_target_path())
+        except Exception:
+            loaded_cfg = None
+        if isinstance(loaded_cfg, dict):
+            base_cfg = loaded_cfg
+    next_cfg = copy.deepcopy(base_cfg)
+    opencode = next_cfg.setdefault("opencode", {})
+    if not isinstance(opencode, dict):
+        opencode = {}
+        next_cfg["opencode"] = opencode
+    committee = opencode.setdefault("committee", {})
+    if not isinstance(committee, dict):
+        committee = {}
+        opencode["committee"] = committee
+    committee["models"] = list(tokens)
+    if host_selection is None and host_model:
+        host_selection = {"model": str(host_model).strip()}
+    resolved_host_model = _opencode_selection_model(host_selection) or str(host_model or "").strip()
+    if host_fallback_selection is None and host_fallback_model:
+        host_fallback_selection = {"model": str(host_fallback_model).strip()}
+    resolved_host_fallback_model = _opencode_selection_model(host_fallback_selection) or str(host_fallback_model or "").strip()
+    if resolved_host_model:
+        host_payload = {"model": resolved_host_model}
+        host_provider = _opencode_selection_provider_id(host_selection)
+        if host_provider:
+            host_payload["provider_id"] = host_provider
+        if resolved_host_fallback_model:
+            host_payload["fallback_models"] = [resolved_host_fallback_model]
+        committee["host"] = host_payload
+    if selected_models or host_selection or host_model or host_fallback_selection or host_fallback_model:
+        next_cfg = _inject_opencode_committee_roster(
+            next_cfg,
+            selected_models or [],
+            tokens,
+            host_model=resolved_host_model,
+            host_selection=host_selection,
+            host_fallback_model=resolved_host_fallback_model,
+            host_fallback_selection=host_fallback_selection,
+        )
+    save_config(next_cfg, reason="opencode:save_committee_models")
+    return next_cfg
+
+
+def _prepare_opencode_committee_profile_config(
+    cfg,
+    default_provider,
+    default_models,
+    *,
+    host_model=None,
+    model_tokens=None,
+    interactive=False,
+    save_selected=False,
+    save_cfg=None,
+    ask_to_save=False,
+    committee_tier="",
+):
+    tier_preset = _opencode_committee_preset_config(cfg, committee_tier)
+    tier_host = tier_preset.get("host_primary") or "gpt-5.4"
+    tier_host_fallback = tier_preset.get("host_fallback") or ""
+    tier_tokens = list(tier_preset.get("members") or _OPENCODE_COMMITTEE_DEFAULT_TOKENS)
+    tier_channel = tier_preset.get("channel") if committee_tier else ""
+    tier_host_channel = tier_preset.get("host_primary_channel") if committee_tier else ""
+    tier_host_fallback_channel = tier_preset.get("host_fallback_channel") if committee_tier else ""
+    tier_member_channels = tier_preset.get("member_channels") if committee_tier and isinstance(tier_preset.get("member_channels"), dict) else {}
+    tier_provider_id = _opencode_committee_channel_provider_id(cfg, default_provider, tier_channel)
+    tier_host_provider_id = _opencode_committee_channel_provider_id(cfg, default_provider, tier_host_channel or tier_channel)
+    tier_host_fallback_provider_id = _opencode_committee_channel_provider_id(cfg, default_provider, tier_host_fallback_channel or tier_channel)
+    explicit_host_entry = _opencode_model_selection_entries(host_model)
+    explicit_host = _opencode_selection_model(explicit_host_entry[0]) if explicit_host_entry else str(host_model or "").strip()
+    saved_host = _opencode_committee_saved_host_model(cfg)
+    saved_host_fallback = _opencode_committee_saved_host_fallback_model(cfg)
+    host_token = explicit_host or saved_host or tier_host
+    host_fallback_token = saved_host_fallback or tier_host_fallback
+    explicit_entries = _opencode_model_selection_entries(model_tokens)
+    explicit_tokens = [item["model"] for item in explicit_entries] if explicit_entries else _split_opencode_review_model_tokens(model_tokens)
+    saved_tokens = _opencode_committee_saved_model_tokens(cfg)
+    tokens = explicit_tokens or saved_tokens or tier_tokens
+    source = "cli" if explicit_tokens else ("saved" if saved_tokens else ("tier" if committee_tier else "default"))
+
+    if interactive and not explicit_host and not saved_host:
+        _ensure_rich()
+        host_token = Prompt.ask(
+            "Committee host model（默认 gpt-5.4；可填 gpt-5.5 或任意可用模型）",
+            default="gpt-5.4",
+        ).strip() or "gpt-5.4"
+
+    if explicit_host_entry:
+        selected_host = explicit_host_entry
+        unresolved_host = []
+        resolved_host_model = explicit_host
+    else:
+        selected_host, unresolved_host = _resolve_opencode_committee_models(
+            cfg,
+            default_provider,
+            default_models,
+            [host_token],
+            provider_id=tier_host_provider_id if not saved_host else "",
+        )
+        resolved_host_model = selected_host[0]["model"] if selected_host else ""
+    host_selection = explicit_host_entry[0] if explicit_host_entry else ({"model": resolved_host_model} if resolved_host_model else None)
+    if host_selection and tier_host_provider_id and not explicit_host_entry and not saved_host and not _opencode_selection_provider_id(host_selection):
+        host_selection = {**host_selection, "provider_id": tier_host_provider_id}
+    if unresolved_host:
+        console.print(f"[yellow]Committee host 未解析: {host_token}；将使用 profile 默认 host。[/yellow]")
+
+    selected_host_fallback = []
+    unresolved_host_fallback = []
+    resolved_host_fallback_model = ""
+    host_fallback_selection = None
+    if host_fallback_token:
+        selected_host_fallback, unresolved_host_fallback = _resolve_opencode_committee_models(
+            cfg,
+            default_provider,
+            default_models,
+            [host_fallback_token],
+            provider_id=tier_host_fallback_provider_id if not saved_host_fallback else "",
+        )
+        resolved_host_fallback_model = selected_host_fallback[0]["model"] if selected_host_fallback else str(host_fallback_token or "").strip()
+        host_fallback_selection = selected_host_fallback[0] if selected_host_fallback else {"model": resolved_host_fallback_model}
+        if tier_host_fallback_provider_id and not saved_host_fallback and not _opencode_selection_provider_id(host_fallback_selection):
+            host_fallback_selection = {**host_fallback_selection, "provider_id": tier_host_fallback_provider_id}
+    if unresolved_host_fallback:
+        console.print(f"[yellow]Committee fallback host 未解析: {host_fallback_token}；将使用 profile 默认 fallback。[/yellow]")
+
+    if interactive and not explicit_tokens and not saved_tokens:
+        _ensure_rich()
+        default_text = " ".join(_OPENCODE_COMMITTEE_DEFAULT_TOKENS)
+        answer = Prompt.ask(
+            "Committee models（空格/逗号分隔；支持 gpt-5.4、gpt-5.5、deepseek、glm、mimo、kimi、minimax、domestic、all）",
+            default=default_text,
+        )
+        tokens = _split_opencode_review_model_tokens(answer) or list(_OPENCODE_COMMITTEE_DEFAULT_TOKENS)
+        source = "prompt"
+
+    if explicit_entries:
+        selected = [
+            {
+                **entry,
+                "family": entry.get("family") or _infer_model_family(entry.get("model"))[0],
+                "token": entry.get("model"),
+            }
+            for entry in explicit_entries
+        ]
+        unresolved = []
+    else:
+        if source == "tier" and tier_member_channels:
+            selected, unresolved = _resolve_opencode_committee_models_by_channel(
+                cfg,
+                default_provider,
+                default_models,
+                tokens,
+                tier_member_channels,
+                tier_channel,
+            )
+        else:
+            selected, unresolved = _resolve_opencode_committee_models(
+                cfg,
+                default_provider,
+                default_models,
+                tokens,
+                provider_id=tier_provider_id if source == "tier" else "",
+            )
+        selected = _opencode_enrich_selected_with_saved_providers(
+            selected,
+            cfg,
+            prefix="committee-",
+            agent_ids=_opencode_committee_saved_agent_ids(cfg),
+        )
+    if unresolved:
+        console.print(f"[yellow]Committee models 未解析: {', '.join(unresolved)}[/yellow]")
+    if not selected:
+        return cfg, {
+            "host": resolved_host_model,
+            "host_fallback": resolved_host_fallback_model,
+            "host_token": host_token,
+            "host_fallback_token": host_fallback_token,
+            "channel": tier_provider_id or tier_channel or "",
+            "host_channel": tier_host_provider_id or tier_host_channel or "",
+            "host_fallback_channel": tier_host_fallback_provider_id or tier_host_fallback_channel or "",
+            "member_channels": dict(tier_member_channels) if source == "tier" else {},
+            "tokens": tokens,
+            "selected": [],
+            "unresolved": unresolved,
+            "unresolved_host": unresolved_host,
+            "unresolved_host_fallback": unresolved_host_fallback,
+            "source": source,
+        }
+
+    if save_selected:
+        _save_opencode_committee_model_tokens(
+            save_cfg or cfg,
+            tokens,
+            host_model=resolved_host_model,
+            host_selection=host_selection,
+            host_fallback_model=resolved_host_fallback_model,
+            host_fallback_selection=host_fallback_selection,
+            selected_models=selected,
+        )
+    elif ask_to_save and source == "prompt":
+        _ensure_rich()
+        if Confirm.ask("保存这次 Committee models 为下次默认？", default=False):
+            _save_opencode_committee_model_tokens(
+                save_cfg or cfg,
+                tokens,
+                host_model=resolved_host_model,
+                host_selection=host_selection,
+                host_fallback_model=resolved_host_fallback_model,
+                host_fallback_selection=host_fallback_selection,
+                selected_models=selected,
+            )
+
+    next_cfg = _inject_opencode_committee_roster(
+        cfg,
+        selected,
+        tokens,
+        host_model=resolved_host_model,
+        host_selection=host_selection,
+        host_fallback_model=resolved_host_fallback_model,
+        host_fallback_selection=host_fallback_selection,
+    )
+    selected_text = ", ".join(f"{item['model']} -> committee-{_opencode_review_slug(item['model'])}" for item in selected)
+    if resolved_host_model:
+        console.print(f"[green]Committee host:[/green] {resolved_host_model}")
+    console.print(f"[green]Committee members:[/green] {selected_text}")
+    return next_cfg, {
+        "host": resolved_host_model,
+        "host_fallback": resolved_host_fallback_model,
+        "host_token": host_token,
+        "host_fallback_token": host_fallback_token,
+        "channel": tier_provider_id or tier_channel or "",
+        "host_channel": tier_host_provider_id or tier_host_channel or "",
+        "host_fallback_channel": tier_host_fallback_provider_id or tier_host_fallback_channel or "",
+        "member_channels": dict(tier_member_channels) if source == "tier" else {},
+        "tokens": tokens,
+        "selected": selected,
+        "unresolved": unresolved,
+        "unresolved_host": unresolved_host,
+        "unresolved_host_fallback": unresolved_host_fallback,
+        "source": source,
+    }
+
+
+def _select_opencode_debate_host_tui(cfg, default_provider, default_models):
+    selection = _opencode_debate_saved_host_selection(cfg)
+    return _select_opencode_host_model_tui(
+        cfg,
+        default_provider,
+        default_models,
+        saved_selection=selection,
+        title="OpenCode Debate host",
+    )
+
+
+def _select_opencode_debate_models_tui(cfg, default_provider, default_models):
+    options = _opencode_debate_tui_options(cfg, default_provider, default_models)
+    if not options:
+        console.print("[yellow]没有可用于 OpenCode debate 的模型池；将只尝试 debate host。[/yellow]")
+        return []
+    saved_tokens = _opencode_debate_saved_model_tokens(cfg)
+    default_tokens = saved_tokens or list(_OPENCODE_DEBATE_DEFAULT_TOKENS)
+    if saved_tokens:
+        selected_models = _opencode_saved_model_selections(
+            cfg,
+            saved_tokens,
+            prefix="debate-",
+            agent_ids=_opencode_debate_saved_agent_ids(cfg),
+        )
+    else:
+        selected, _unresolved = _resolve_opencode_debate_models(cfg, default_provider, default_models, default_tokens)
+        selected_models = _opencode_enrich_selected_with_saved_providers(selected, cfg, prefix="debate-")
+    options = _opencode_with_saved_selection_options(cfg, options, selected_models)
+    try:
+        from mms_tui import select_review_models_tui
+    except Exception:
+        return selected_models
+    return select_review_models_tui(
+        options,
+        selected_models=selected_models,
+        title="OpenCode Debate members",
+        return_provider=True,
+    )
+
+
+def _save_opencode_debate_model_tokens(cfg, tokens, *, host_model="", host_selection=None, selected_models=None):
+    base_cfg = cfg
+    if _preview_root_mode():
+        try:
+            loaded_cfg = _load_toml_file(_config_write_target_path())
+        except Exception:
+            loaded_cfg = None
+        if isinstance(loaded_cfg, dict):
+            base_cfg = loaded_cfg
+    next_cfg = copy.deepcopy(base_cfg)
+    opencode = next_cfg.setdefault("opencode", {})
+    if not isinstance(opencode, dict):
+        opencode = {}
+        next_cfg["opencode"] = opencode
+    debate = opencode.setdefault("debate", {})
+    if not isinstance(debate, dict):
+        debate = {}
+        opencode["debate"] = debate
+    debate["models"] = list(tokens)
+    if host_selection is None and host_model:
+        host_selection = {"model": str(host_model).strip()}
+    resolved_host_model = _opencode_selection_model(host_selection) or str(host_model or "").strip()
+    if resolved_host_model:
+        host_payload = {"model": resolved_host_model}
+        host_provider = _opencode_selection_provider_id(host_selection)
+        if host_provider:
+            host_payload["provider_id"] = host_provider
+        debate["host"] = host_payload
+    if selected_models or host_selection or host_model:
+        next_cfg = _inject_opencode_debate_roster(
+            next_cfg,
+            selected_models or [],
+            tokens,
+            host_model=resolved_host_model,
+            host_selection=host_selection,
+        )
+    save_config(next_cfg, reason="opencode:save_debate_models")
+    return next_cfg
+
+
+def _prepare_opencode_debate_profile_config(
+    cfg,
+    default_provider,
+    default_models,
+    *,
+    host_model=None,
+    model_tokens=None,
+    interactive=False,
+    save_selected=False,
+    save_cfg=None,
+    ask_to_save=False,
+):
+    explicit_host_entry = _opencode_model_selection_entries(host_model)
+    explicit_host = _opencode_selection_model(explicit_host_entry[0]) if explicit_host_entry else str(host_model or "").strip()
+    saved_host = _opencode_debate_saved_host_model(cfg)
+    host_token = explicit_host or saved_host or "gpt-5.4"
+    explicit_entries = _opencode_model_selection_entries(model_tokens)
+    explicit_tokens = [item["model"] for item in explicit_entries] if explicit_entries else _split_opencode_review_model_tokens(model_tokens)
+    saved_tokens = _opencode_debate_saved_model_tokens(cfg)
+    tokens = explicit_tokens or saved_tokens or list(_OPENCODE_DEBATE_DEFAULT_TOKENS)
+    source = "cli" if explicit_tokens else ("saved" if saved_tokens else "default")
+
+    if interactive and not explicit_host and not saved_host:
+        _ensure_rich()
+        host_token = Prompt.ask(
+            "Debate host model（默认 gpt-5.4；可填 gpt-5.5 或任意可用模型）",
+            default="gpt-5.4",
+        ).strip() or "gpt-5.4"
+
+    if explicit_host_entry:
+        selected_host = explicit_host_entry
+        unresolved_host = []
+        resolved_host_model = explicit_host
+    else:
+        selected_host, unresolved_host = _resolve_opencode_debate_models(cfg, default_provider, default_models, [host_token])
+        resolved_host_model = selected_host[0]["model"] if selected_host else ""
+    host_selection = explicit_host_entry[0] if explicit_host_entry else ({"model": resolved_host_model} if resolved_host_model else None)
+    if unresolved_host:
+        console.print(f"[yellow]Debate host 未解析: {host_token}；将使用 profile 默认 host。[/yellow]")
+
+    if interactive and not explicit_tokens and not saved_tokens:
+        _ensure_rich()
+        default_text = " ".join(_OPENCODE_DEBATE_DEFAULT_TOKENS)
+        answer = Prompt.ask(
+            "Debate models（空格/逗号分隔；支持 gpt-5.4、gpt-5.5、deepseek、glm、mimo、kimi、minimax、domestic、all）",
+            default=default_text,
+        )
+        tokens = _split_opencode_review_model_tokens(answer) or list(_OPENCODE_DEBATE_DEFAULT_TOKENS)
+        source = "prompt"
+
+    if explicit_entries:
+        selected = [
+            {
+                **entry,
+                "family": entry.get("family") or _infer_model_family(entry.get("model"))[0],
+                "token": entry.get("model"),
+            }
+            for entry in explicit_entries
+        ]
+        unresolved = []
+    else:
+        selected, unresolved = _resolve_opencode_debate_models(cfg, default_provider, default_models, tokens)
+        selected = _opencode_enrich_selected_with_saved_providers(
+            selected,
+            cfg,
+            prefix="debate-",
+            agent_ids=_opencode_debate_saved_agent_ids(cfg),
+        )
+    if unresolved:
+        console.print(f"[yellow]Debate models 未解析: {', '.join(unresolved)}[/yellow]")
+    if not selected:
+        return cfg, {
+            "host": resolved_host_model,
+            "host_token": host_token,
+            "tokens": tokens,
+            "selected": [],
+            "unresolved": unresolved,
+            "unresolved_host": unresolved_host,
+            "source": source,
+        }
+
+    if save_selected:
+        _save_opencode_debate_model_tokens(
+            save_cfg or cfg,
+            tokens,
+            host_model=resolved_host_model,
+            host_selection=host_selection,
+            selected_models=selected,
+        )
+    elif ask_to_save and source == "prompt":
+        _ensure_rich()
+        if Confirm.ask("保存这次 Debate models 为下次默认？", default=False):
+            _save_opencode_debate_model_tokens(
+                save_cfg or cfg,
+                tokens,
+                host_model=resolved_host_model,
+                host_selection=host_selection,
+                selected_models=selected,
+            )
+
+    next_cfg = _inject_opencode_debate_roster(
+        cfg,
+        selected,
+        tokens,
+        host_model=resolved_host_model,
+        host_selection=host_selection,
+    )
+    selected_text = ", ".join(f"{item['model']} -> debate-{_opencode_review_slug(item['model'])}" for item in selected)
+    if resolved_host_model:
+        console.print(f"[green]Debate host:[/green] {resolved_host_model}")
+    console.print(f"[green]Debate members:[/green] {selected_text}")
+    return next_cfg, {
+        "host": resolved_host_model,
+        "host_token": host_token,
+        "tokens": tokens,
+        "selected": selected,
+        "unresolved": unresolved,
+        "unresolved_host": unresolved_host,
+        "source": source,
+    }
 
 
 def _select_and_apply_opencode_profile(runtime, *, use_tui=False):
@@ -10301,8 +12742,88 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
 
         # ── OpenCode profile ──
         if action_type == "profile" and cli == "opencode":
+            profile_cfg = current_cfg
+            canonical_profile, _profile_entrypoint = _opencode_profile_selection(action_data)
+            if canonical_profile == _OPENCODE_REVIEW_PROFILE_ID:
+                selected_review_host = _select_opencode_review_host_tui(
+                    current_cfg,
+                    current_provider,
+                    default_models,
+                )
+                if selected_review_host is None:
+                    continue
+                selected_review_models = _select_opencode_review_models_tui(
+                    current_cfg,
+                    current_provider,
+                    default_models,
+                )
+                if selected_review_models is None:
+                    continue
+                profile_cfg, _review_selection = _prepare_opencode_review_profile_config(
+                    current_cfg,
+                    current_provider,
+                    default_models,
+                    host_model=selected_review_host,
+                    model_tokens=selected_review_models,
+                    interactive=False,
+                    save_selected=bool(selected_review_models or selected_review_host),
+                    save_cfg=current_cfg,
+                )
+            elif canonical_profile == _OPENCODE_COMMITTEE_PROFILE_ID:
+                selected_committee_host = _select_opencode_committee_host_tui(
+                    current_cfg,
+                    current_provider,
+                    default_models,
+                )
+                if selected_committee_host is None:
+                    continue
+                selected_committee_models = _select_opencode_committee_models_tui(
+                    current_cfg,
+                    current_provider,
+                    default_models,
+                )
+                if selected_committee_models is None:
+                    continue
+                profile_cfg, _committee_selection = _prepare_opencode_committee_profile_config(
+                    current_cfg,
+                    current_provider,
+                    default_models,
+                    host_model=selected_committee_host,
+                    model_tokens=selected_committee_models,
+                    interactive=False,
+                    save_selected=bool(selected_committee_models or selected_committee_host),
+                    save_cfg=current_cfg,
+                )
+            elif canonical_profile == _OPENCODE_DEBATE_PROFILE_ID:
+                selected_debate_host = _select_opencode_debate_host_tui(
+                    current_cfg,
+                    current_provider,
+                    default_models,
+                )
+                if selected_debate_host is None:
+                    continue
+                selected_debate_models = _select_opencode_debate_models_tui(
+                    current_cfg,
+                    current_provider,
+                    default_models,
+                )
+                if selected_debate_models is None:
+                    continue
+                profile_cfg, _debate_selection = _prepare_opencode_debate_profile_config(
+                    current_cfg,
+                    current_provider,
+                    default_models,
+                    host_model=selected_debate_host,
+                    model_tokens=selected_debate_models,
+                    interactive=False,
+                    save_selected=bool(selected_debate_models or selected_debate_host),
+                    save_cfg=current_cfg,
+                )
+            if profile_cfg is not current_cfg:
+                current_cfg = profile_cfg
+                _families_dirty = True
             model_info, runtime_runtime = _resolve_opencode_profile_runtime(
-                current_cfg,
+                profile_cfg,
                 current_provider,
                 default_models,
                 action_data,
@@ -11061,7 +13582,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 continue
         runtime_runtime = _runtime_with_launch_preferences(current_cfg, runtime_runtime, cli)
         if cli == "claude":
-            runtime_runtime = _runtime_with_vision_sidecar(current_cfg, runtime_runtime)
+            runtime_runtime = _runtime_with_vision_sidecar(current_cfg, runtime_runtime, _resolve_model_name(model_info))
 
         clean_model_info = _clean_model_info(model_info)
         try:
@@ -11204,7 +13725,10 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     require_proxy=_claude_bypass_requires_proxy(runtime_runtime),
                 )
         if cli == "claude":
-            runtime_runtime["claude_1m_mode"] = "enable" if claude_1m_enabled else "disable"
+            # claude_1m_enabled 为 None 表示 TUI 未展示 1M 开关（非 Claude 模型），
+            # 保留 provider/account 已声明的 claude_1m_mode（如 auto），不覆盖为 disable。
+            if claude_1m_enabled is not None:
+                runtime_runtime["claude_1m_mode"] = "enable" if claude_1m_enabled else "disable"
             runtime_runtime["agent_pack"] = agent_pack if agent_pack in {"ecc", "omc"} else "none"
             runtime_runtime["ecc_mode"] = "enable" if agent_pack == "ecc" else "disable"
             runtime_runtime["omc_mode"] = "enable" if agent_pack == "omc" else "disable"
@@ -11221,7 +13745,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     runtime_runtime.get("disabled_session_surfaces"),
                     disabled_session_surfaces if isinstance(disabled_session_surfaces, dict) else {},
                 )
-        if cli in {"claude", "codex"}:
+        if cli in {"claude", "codex", "opencode"}:
             runtime_runtime["thinking_mode"] = "enable" if thinking_enabled else "disable"
             runtime_runtime["reasoning_effort"] = str(reasoning_effort or "high").strip().lower() or "high"
         _launch_with_tracking(cli, clean_model_info, runtime_runtime, once=once)
@@ -11428,6 +13952,9 @@ def handle_config(cfg, args_rest):
     if key_path in {"preferences.doc", "preference.doc"}:
         console.print(PREFERENCES_DOC_PATH)
         return
+    if key_path in {"assets.import-skill", "asset.import-skill", "skill.import"}:
+        _handle_assets_import_skill(args_rest[1:])
+        return
     if key_path in {"web", "webui", "setup.web", "setup-web"}:
         from mms_config_web import run_config_web
 
@@ -11540,6 +14067,58 @@ def handle_config(cfg, args_rest):
     if len(args_rest) == 2:
         _handle_config_set(cfg, [key_path, args_rest[1]])
         return
+
+
+def _handle_assets_import_skill(args_rest):
+    parser = argparse.ArgumentParser(
+        prog=f"{current_command()} config assets.import-skill",
+        description="把本地 skill root 导入到 MMS managed assets，供后续 session 动态加载。",
+    )
+    parser.add_argument("source", help="skill 根目录，或指向该 skill 的 SKILL.md")
+    parser.add_argument("--name", dest="skill_name", help="覆盖导入后的 skill 名称")
+    parser.add_argument("--replace", action="store_true", help="目标已存在时覆盖")
+    parser.add_argument("--copy", action="store_true", help="默认 symlink；加上后改为 copy")
+    parser.add_argument("--dry-run", action="store_true", help="只预览导入结果，不落盘")
+    parser.add_argument("--json", action="store_true", help="输出 JSON 结果")
+    args = parser.parse_args(args_rest)
+
+    try:
+        result = import_managed_skill(
+            args.source,
+            skill_name=args.skill_name or "",
+            replace=bool(args.replace),
+            copy_mode=bool(args.copy),
+            dry_run=bool(args.dry_run),
+        )
+    except (OSError, ValueError) as exc:
+        if args.json:
+            print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False, indent=2, sort_keys=True))
+        else:
+            console.print(f"[red]{exc}[/red]")
+        raise SystemExit(1)
+
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        return
+
+    status = str(result.get("status") or "").strip()
+    skill_name = str(result.get("skill_name") or "").strip() or "-"
+    mode = str(result.get("mode") or "").strip() or "symlink"
+    source_root = str(result.get("source_root") or "").strip()
+    target_root = str(result.get("target_root") or "").strip()
+
+    if status == "already_imported":
+        console.print(f"[green]✓ 已导入: {skill_name}[/green]")
+    elif bool(result.get("dry_run")):
+        console.print(f"[yellow]dry-run[/yellow] {skill_name} -> {target_root}")
+    elif status == "replaced":
+        console.print(f"[green]✓ 已替换导入: {skill_name}[/green]")
+    else:
+        console.print(f"[green]✓ 已导入 skill: {skill_name}[/green]")
+    console.print(f"[dim]模式: {mode}[/dim]")
+    console.print(f"[dim]来源: {source_root}[/dim]")
+    console.print(f"[dim]目标: {target_root}[/dim]")
+    console.print("[dim]新的 MMS session 会自动加载该 skill；已启动的旧 session 不会自动回填。[/dim]")
 
 
 def _handle_api_config(key_path, args_rest):
@@ -12289,6 +14868,7 @@ def _display_config_help():
     console.print(f"  {command} config unset <dot.path>")
     console.print(f"  {command} config connect")
     console.print(f"  {command} config web [--no-open]")
+    console.print(f"  {command} config assets.import-skill <path> [--name <skill>] [--replace] [--copy] [--dry-run] [--json]")
     console.print(f"  {command} config preferences.help")
     console.print(f"  {command} config human-gate")
     console.print(f"  [dim]可调参数示例: cache.probe_async_refresh_after_sec / cache.probe_async_min_interval_sec[/dim]")
@@ -12516,10 +15096,12 @@ def _display_preferences_help():
     console.print(f"  {command} config preferences.doc")
     console.print(f"  {command} config human-gate")
     console.print("\n[bold]Allowed keys:[/bold]")
+    console.print("  launch.disabled_clis: hide/disable MMS launch targets such as pi or agy")
     console.print("  launch.defaults: thinking_mode, reasoning_effort, caveman_mode, caveman_level, nsr_mode, agent_pack, bypass")
-    console.print("  launch.cli.<claude|codex|opencode|agy>: same launch keys")
+    console.print("  launch.cli.<claude|codex|opencode|pi|agy>: same launch keys")
     console.print("  session_surfaces.disabled: skills, mcp, hooks")
-    console.print("  assets.roots: web_access, weber, agent_browser, codegraph, token_saver, toon, xmem, caveman, nsr, ecc, omc, auto_github_contributor")
+    console.print("  assets: managed_enabled, managed_root")
+    console.print("  assets.roots: web_access, weber, agent_browser, codegraph, token_saver, toon, caveman, nsr, ecc, omc, auto_github_contributor")
     console.print("\n[bold]Denied / ignored:[/bold]")
     console.print("  api_key, base_url, proxy, account identity, provider routes, OAuth tokens, credentials, Claude config, real HOME/XDG/auth state")
     console.print("\n[bold]Overlay order:[/bold]")
@@ -13019,7 +15601,7 @@ def _load_preview_runtime_config_from_latest_bundle():
     if not providers:
         return None
     default_provider_id = _bundle_runtime_default_provider_id(profile_payload, providers)
-    return {
+    result = {
         "ui": {"language": "zh"},
         "user": {"role": MODE_ALL},
         "cache": {
@@ -13035,11 +15617,85 @@ def _load_preview_runtime_config_from_latest_bundle():
         "_mms_config_source": "latest-approved-bundle",
         "_mms_bundle_revision": manifest.get("bundle_revision") or "",
     }
+    runtime_config = profile_payload.get("runtime_config") if isinstance(profile_payload.get("runtime_config"), dict) else {}
+    runtime_opencode = runtime_config.get("opencode") if isinstance(runtime_config.get("opencode"), dict) else {}
+    if runtime_opencode:
+        result["opencode"] = copy.deepcopy(runtime_opencode)
+    return result
+
+
+def _merge_preview_local_launch_preferences(cfg):
+    """Preview bundle owns routes; local config keeps user launch preferences."""
+    if not isinstance(cfg, dict):
+        return cfg
+    try:
+        local_cfg = load_config(persist=False)
+    except Exception:
+        local_cfg = None
+    if not isinstance(local_cfg, dict):
+        return cfg
+
+    local_opencode = local_cfg.get("opencode") if isinstance(local_cfg.get("opencode"), dict) else {}
+    local_review = local_opencode.get("review") if isinstance(local_opencode.get("review"), dict) else {}
+    local_committee = local_opencode.get("committee") if isinstance(local_opencode.get("committee"), dict) else {}
+    local_debate = local_opencode.get("debate") if isinstance(local_opencode.get("debate"), dict) else {}
+    local_roster = local_opencode.get("agent_roster") if isinstance(local_opencode.get("agent_roster"), dict) else {}
+    local_opencode_defaults = {
+        key: local_opencode.get(key)
+        for key in ("default_profile", "profile")
+        if str(local_opencode.get(key) or "").strip()
+    }
+    if not local_review and not local_committee and not local_debate and not local_roster and not local_opencode_defaults:
+        return cfg
+
+    next_cfg = copy.deepcopy(cfg)
+    opencode = next_cfg.setdefault("opencode", {})
+    if not isinstance(opencode, dict):
+        opencode = {}
+        next_cfg["opencode"] = opencode
+    for key, value in local_opencode_defaults.items():
+        opencode[key] = copy.deepcopy(value)
+    if local_review:
+        review = opencode.setdefault("review", {})
+        if not isinstance(review, dict):
+            review = {}
+            opencode["review"] = review
+        for key, value in local_review.items():
+            if key == "host" and isinstance(value, dict):
+                host = review.setdefault("host", {})
+                if isinstance(host, dict):
+                    for host_key, host_value in value.items():
+                        host.setdefault(host_key, copy.deepcopy(host_value))
+                elif "host" not in review:
+                    review["host"] = copy.deepcopy(value)
+                continue
+            review.setdefault(key, copy.deepcopy(value))
+    if local_committee:
+        opencode["committee"] = copy.deepcopy(local_committee)
+    if local_debate:
+        opencode["debate"] = copy.deepcopy(local_debate)
+    if local_roster:
+        roster = opencode.setdefault("agent_roster", {})
+        if not isinstance(roster, dict):
+            roster = {}
+            opencode["agent_roster"] = roster
+        for agent_id, entry in local_roster.items():
+            agent_key = str(agent_id or "")
+            if not (
+                agent_key.startswith("review-")
+                or agent_key.startswith("committee-")
+                or agent_key.startswith("debate-")
+                or agent_key in {"review-hub-host", "committee-host", "committee-host-pro", "debate-host", "debate-host-pro"}
+            ):
+                continue
+            if isinstance(entry, dict):
+                roster[agent_key] = copy.deepcopy(entry)
+    return next_cfg
 
 
 def _load_config_or_preview_bundle():
     if _preview_root_mode():
-        return _load_preview_runtime_config_from_latest_bundle()
+        return _merge_preview_local_launch_preferences(_load_preview_runtime_config_from_latest_bundle())
     return load_config()
 
 
@@ -13054,6 +15710,9 @@ def _load_command_config():
 
 
 def _session_status_label(item):
+    status = str(item.get("status") or "").strip()
+    if status:
+        return status
     session_id = str(item.get("session_id") or "").strip()
     if not session_id:
         return "active"
@@ -13072,38 +15731,71 @@ def _session_display_id(item):
     return f"pid-{pid}" if pid is not None else "-"
 
 
-def _handle_session_ls(cli_name):
-    from mms_session_index import list_indexed_sessions
+def _session_table_id(item):
+    session_id = _session_display_id(item)
+    if len(session_id) > 18:
+        return session_id[:12]
+    return session_id
 
-    rows = list_indexed_sessions(cli_name=cli_name)
+
+def _session_project_label(item):
+    return (
+        str(item.get("project_name") or "").strip()
+        or os.path.basename(str(item.get("project_path") or item.get("cwd") or "").rstrip(os.sep))
+        or "-"
+    )
+
+
+def _session_updated_label(item):
+    return str(item.get("updated_at") or item.get("last_active_at") or item.get("started_at") or item.get("created_at") or "-")
+
+
+def _session_catalog_json(rows):
+    print(json.dumps(rows, ensure_ascii=False, indent=2))
+
+
+def _handle_session_ls(cli_name, *, query="", limit=80, json_output=False):
+    from mms_session_catalog import list_session_records
+
+    rows = list_session_records(cli=cli_name, query=query, limit=limit)
+    if json_output:
+        _session_catalog_json(rows)
+        return
     if not rows:
-        console.print(f"[yellow]当前没有已索引的 {cli_name} session[/yellow]")
+        console.print(f"[yellow]当前没有匹配的 {cli_name} session[/yellow]")
         return
 
-    table = Table(title=f"{cli_name} session 列表", show_lines=True)
-    table.add_column("ID", style="cyan")
-    table.add_column("项目", style="green")
-    table.add_column("来源", style="magenta")
-    table.add_column("状态", style="yellow")
-    table.add_column("最近活动", style="blue")
-    for item in rows:
-        project_name = os.path.basename(str(item.get("project_path", "")).rstrip(os.sep)) or "-"
-        source_label = str(item.get("account_id") or item.get("runtime_kind") or "-")
-        last_active = str(item.get("last_active_at") or item.get("started_at") or "-")
-        table.add_row(
-            _session_display_id(item),
-            project_name,
-            source_label,
-            _session_status_label(item),
-            last_active,
-        )
-    console.print(table)
+    cli_order = ["claude", "codex"] if cli_name == "all" else [cli_name]
+    for cli in cli_order:
+        cli_rows = [item for item in rows if str(item.get("cli") or "") == cli]
+        if not cli_rows:
+            continue
+        table = Table(title=f"{cli} session 历史（时间倒序）", show_lines=False)
+        table.add_column("ID 前缀", style="cyan", no_wrap=True)
+        table.add_column("项目", style="green")
+        table.add_column("最近活动", style="blue")
+        table.add_column("摘要", style="white")
+        table.add_column("来源", style="yellow")
+        for item in cli_rows:
+            source_label = str(item.get("source_kind") or "-")
+            title = str(item.get("title") or "").strip()
+            table.add_row(
+                _session_table_id(item),
+                _session_project_label(item),
+                _session_updated_label(item),
+                title[:96] if title else "-",
+                source_label,
+            )
+        console.print(table)
 
 
 def _handle_session_info(session_id, cli_name):
+    from mms_session_catalog import resolve_catalog_ref
     from mms_session_index import get_indexed_session
 
     item = get_indexed_session(session_id, cli_name=cli_name)
+    if item is None:
+        _resolved_id, item, _error = resolve_catalog_ref(session_id, cli=cli_name)
     if item is None:
         console.print(f"[red]找不到 session: {session_id}[/red]")
         sys.exit(1)
@@ -13121,8 +15813,13 @@ def _handle_session_info(session_id, cli_name):
         "cwd",
         "started_at",
         "last_active_at",
+        "updated_at",
+        "title",
         "exit_code",
         "stale_cleanup",
+        "status",
+        "source_kind",
+        "source_path",
         "slot_home",
         "_path",
     ]
@@ -13263,12 +15960,21 @@ def handle_session_command(argv):
     )
     subparsers = parser.add_subparsers(dest="subcommand")
 
-    ls_parser = subparsers.add_parser("ls", help="列出已索引 session")
-    ls_parser.add_argument("--cli", default="claude", choices=["claude"])
+    ls_parser = subparsers.add_parser("ls", help="列出可恢复 session 历史")
+    ls_parser.add_argument("--cli", default="all", choices=["claude", "codex", "all"])
+    ls_parser.add_argument("--search", default="", help="按项目、摘要或 session id 搜索")
+    ls_parser.add_argument("--limit", type=int, default=80, help="最多显示多少条")
+    ls_parser.add_argument("--json", action="store_true", help="输出 JSON，供 WebUI 使用")
+
+    search_parser = subparsers.add_parser("search", help="搜索可恢复 session 历史")
+    search_parser.add_argument("query", help="搜索关键词")
+    search_parser.add_argument("--cli", default="all", choices=["claude", "codex", "all"])
+    search_parser.add_argument("--limit", type=int, default=80, help="最多显示多少条")
+    search_parser.add_argument("--json", action="store_true", help="输出 JSON，供 WebUI 使用")
 
     info_parser = subparsers.add_parser("info", help="查看单个 session 详情")
     info_parser.add_argument("session_id", help="session_id 或 pid-<pid>")
-    info_parser.add_argument("--cli", default="claude", choices=["claude"])
+    info_parser.add_argument("--cli", default="all", choices=["claude", "codex", "all"])
 
     resume_parser = subparsers.add_parser("resume", help="恢复 legacy chat session")
     resume_parser.add_argument("session_ref", help="session id / 前缀 / 最近列表序号")
@@ -13282,7 +15988,10 @@ def handle_session_command(argv):
 
     args = parser.parse_args(argv)
     if args.subcommand == "ls":
-        _handle_session_ls(args.cli)
+        _handle_session_ls(args.cli, query=args.search, limit=args.limit, json_output=bool(args.json))
+        return
+    if args.subcommand == "search":
+        _handle_session_ls(args.cli, query=args.query, limit=args.limit, json_output=bool(args.json))
         return
     if args.subcommand == "info":
         _handle_session_info(args.session_id, args.cli)
@@ -13315,7 +16024,7 @@ def _split_cli_prefixed_resume_ref(session_ref):
     prefix, rest = ref.split(":", 1)
     prefix = prefix.strip().lower()
     rest = rest.strip()
-    if prefix in {"codex", "claude"} and rest:
+    if prefix in {"codex", "claude", "pi"} and rest:
         return prefix, rest
     return "", ref
 
@@ -13379,6 +16088,16 @@ def _resolve_codex_resume_ref(session_ref, *, allow_passthrough=False):
         return str(matches[0]["id"]), matches[0], None
     if len(matches) > 1:
         return None, None, f"Codex session 前缀不唯一: {ref}"
+    try:
+        from mms_session_catalog import resolve_catalog_ref
+
+        catalog_id, catalog_record, catalog_error = resolve_catalog_ref(ref, cli="codex")
+    except Exception:
+        catalog_id = catalog_record = catalog_error = None
+    if catalog_id and isinstance(catalog_record, dict):
+        return catalog_id, catalog_record, None
+    if catalog_error and "不唯一" in str(catalog_error):
+        return None, None, f"Codex {catalog_error}"
     if allow_passthrough:
         return ref, {"id": ref, "_unindexed": True}, None
     return None, None, f"找不到 Codex session: {ref}"
@@ -13408,15 +16127,49 @@ def _resolve_claude_resume_ref(session_ref, *, allow_passthrough=False):
         return str(matches[0].get("session_id") or "").strip(), matches[0], None
     if len(matches) > 1:
         return None, None, f"Claude session 前缀不唯一: {ref}"
+    try:
+        from mms_session_catalog import resolve_catalog_ref
+
+        catalog_id, catalog_record, catalog_error = resolve_catalog_ref(ref, cli="claude")
+    except Exception:
+        catalog_id = catalog_record = catalog_error = None
+    if catalog_id and isinstance(catalog_record, dict):
+        return catalog_id, catalog_record, None
+    if catalog_error and "不唯一" in str(catalog_error):
+        return None, None, f"Claude {catalog_error}"
     if allow_passthrough:
         return ref, {"session_id": ref, "_unindexed": True}, None
     return None, None, f"找不到 Claude session: {ref}"
 
 
+def _resolve_pi_resume_ref(session_ref, *, allow_passthrough=False):
+    ref = str(session_ref or "").strip()
+    if not ref:
+        return None, None, "session id 不能为空"
+    from mms_session_catalog import resolve_catalog_ref
+
+    session_id, record, error = resolve_catalog_ref(ref, cli="pi")
+    if session_id:
+        return session_id, record, None
+    if allow_passthrough:
+        return ref, {"session_id": ref, "_unindexed": True}, None
+    return None, None, f"Pi {error or f'找不到 session: {ref}'}"
+
+
+def _validated_pi_session_path(session_record):
+    source_path = str((session_record or {}).get("source_path") or "").strip()
+    if not source_path.lower().endswith(".jsonl"):
+        return None, "Pi session source 必须是 .jsonl 文件"
+    resolved = os.path.realpath(os.path.expanduser(source_path))
+    if not os.path.isfile(resolved):
+        return None, f"Pi session source 不存在或不是文件: {source_path}"
+    return resolved, None
+
+
 def _resolve_resume_target(session_ref, cli_hint="auto"):
     prefix_cli, ref = _split_cli_prefixed_resume_ref(session_ref)
     cli_hint = prefix_cli or str(cli_hint or "auto").strip().lower()
-    if cli_hint not in {"auto", "codex", "claude"}:
+    if cli_hint not in {"auto", "codex", "claude", "pi"}:
         return None, None, None, f"不支持的 CLI: {cli_hint}"
     if cli_hint == "codex":
         session_id, record, error = _resolve_codex_resume_ref(ref, allow_passthrough=True)
@@ -13424,15 +16177,29 @@ def _resolve_resume_target(session_ref, cli_hint="auto"):
     if cli_hint == "claude":
         session_id, record, error = _resolve_claude_resume_ref(ref, allow_passthrough=True)
         return "claude", session_id, record, error
+    if cli_hint == "pi":
+        # Pi's native --session option requires a JSONL path, not an opaque
+        # session id. Fail closed unless the catalog resolved a real record.
+        session_id, record, error = _resolve_pi_resume_ref(ref, allow_passthrough=False)
+        return "pi", session_id, record, error
 
     codex_id, codex_record, codex_error = _resolve_codex_resume_ref(ref, allow_passthrough=False)
     claude_id, claude_record, claude_error = _resolve_claude_resume_ref(ref)
-    if codex_id and not claude_id:
-        return "codex", codex_id, codex_record, None
-    if claude_id and not codex_id:
-        return "claude", claude_id, claude_record, None
-    if codex_id and claude_id:
-        return None, None, None, f"session id 同时匹配 Codex 和 Claude，请使用 codex:{ref} 或 claude:{ref}"
+    pi_id, pi_record, pi_error = _resolve_pi_resume_ref(ref)
+    matches = [
+        (name, session_id, record)
+        for name, session_id, record in (
+            ("codex", codex_id, codex_record),
+            ("claude", claude_id, claude_record),
+            ("pi", pi_id, pi_record),
+        )
+        if session_id
+    ]
+    if len(matches) == 1:
+        return matches[0][0], matches[0][1], matches[0][2], None
+    if len(matches) > 1:
+        prefixes = " / ".join(f"{name}:{ref}" for name, _session_id, _record in matches)
+        return None, None, None, f"session id 同时匹配多个 CLI，请使用 {prefixes}"
     uuid_cli = _uuid_resume_cli_hint(ref)
     if uuid_cli == "codex":
         # Codex UUIDs are usually v7 and may not have been written back into
@@ -13441,7 +16208,7 @@ def _resolve_resume_target(session_ref, cli_hint="auto"):
     if uuid_cli == "claude":
         # Claude Code prints v4 session UUIDs in "claude --resume <id>".
         return "claude", ref, {"session_id": ref, "_unindexed": True}, None
-    return None, None, None, codex_error or claude_error or f"找不到 session: {ref}"
+    return None, None, None, codex_error or claude_error or pi_error or f"找不到 session: {ref}"
 
 
 def _uuid_resume_cli_hint(session_ref):
@@ -13478,6 +16245,103 @@ def _session_resume_model(session_record):
     return ""
 
 
+def _config_has_provider_id(cfg, provider_id, cli_name):
+    provider_id = str(provider_id or "").strip()
+    if not provider_id:
+        return False
+    for provider in cfg.get("providers", []) if isinstance(cfg, dict) else []:
+        if not isinstance(provider, dict) or str(provider.get("id") or "").strip() != provider_id:
+            continue
+        supported = provider.get("supported_clis")
+        if not supported:
+            return True
+        return str(cli_name or "").strip() in {str(item).strip() for item in supported}
+    return False
+
+
+def _config_has_account_id(cfg, account_id, cli_name):
+    account_id = str(account_id or "").strip()
+    if not account_id:
+        return False
+    for account in cfg.get("accounts", []) if isinstance(cfg, dict) else []:
+        if not isinstance(account, dict) or str(account.get("id") or "").strip() != account_id:
+            continue
+        account_cli = str(account.get("cli") or "").strip()
+        return not account_cli or account_cli == str(cli_name or "").strip()
+    return False
+
+
+def _claude_resume_project_dir_names(project_path):
+    paths = set()
+    raw = str(project_path or "").strip()
+    for candidate in (raw, os.path.abspath(os.path.expanduser(raw)) if raw else "", os.path.realpath(raw) if raw else ""):
+        if candidate:
+            paths.add(candidate)
+    try:
+        from mms_project_store import canonical_project_path
+
+        paths.add(os.path.realpath(canonical_project_path(raw or None)))
+    except Exception:
+        pass
+    return sorted(path.replace(os.sep, "-") for path in paths if path)
+
+
+def _stage_claude_catalog_resume_files(session_record, project_path, runtime):
+    """Copy catalog-discovered Claude JSONL into the active MMS project store.
+
+    This lets mmz/mmf resume sessions found in another MMS root without reading
+    that root as a runtime fallback.
+    """
+    if not isinstance(session_record, dict) or not project_path:
+        return []
+    session_id = str(session_record.get("session_id") or "").strip()
+    if not session_id or session_record.get("_unindexed"):
+        return []
+    source_paths = list(session_record.get("source_paths") or [])
+    source_path = str(session_record.get("source_path") or "").strip()
+    if source_path:
+        source_paths.append(source_path)
+    source_paths = [path for path in dict.fromkeys(str(path or "").strip() for path in source_paths) if path]
+    if not source_paths:
+        return []
+
+    auth_mode = str((runtime or {}).get("auth_mode") or "").strip()
+    account_id = str((runtime or {}).get("id") or session_record.get("account_id") or "").strip()
+    if auth_mode == "oauth":
+        account_id = str((runtime or {}).get("id") or account_id).strip()
+
+    try:
+        from mms_project_store import claude_raw_entry_path
+    except Exception:
+        return []
+
+    target_projects_root = claude_raw_entry_path("projects", project_path, account_id=account_id)
+    dir_names = set(_claude_resume_project_dir_names(project_path))
+    staged = []
+    for raw_source in source_paths:
+        source = os.path.abspath(os.path.expanduser(raw_source))
+        if not source.endswith(".jsonl") or not os.path.isfile(source):
+            continue
+        if os.path.splitext(os.path.basename(source))[0] != session_id:
+            continue
+        parent_name = os.path.basename(os.path.dirname(source))
+        if parent_name:
+            dir_names.add(parent_name)
+        for dirname in sorted(dir_names):
+            target = os.path.join(str(target_projects_root), dirname, os.path.basename(source))
+            if os.path.realpath(source) == os.path.realpath(target):
+                continue
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            if os.path.exists(target):
+                continue
+            try:
+                shutil.copy2(source, target)
+            except OSError:
+                continue
+            staged.append(target)
+    return staged
+
+
 def _resolve_resume_runtime_and_model(
     cfg,
     cli,
@@ -13489,7 +16353,7 @@ def _resolve_resume_runtime_and_model(
     requested_model = str(args.model or "").strip()
     if requested_model:
         model_info = {"model": requested_model}
-    elif cli == "claude" and _session_resume_model(session_record):
+    elif cli in {"claude", "pi"} and _session_resume_model(session_record):
         model_info = {"model": _session_resume_model(session_record)}
     else:
         last_by_cli, _scene_counts = _get_scene_usage()
@@ -13502,9 +16366,9 @@ def _resolve_resume_runtime_and_model(
     if cli == "claude" and not account_id and not provider_id and isinstance(session_record, dict):
         source_id = str(session_record.get("account_id") or "").strip()
         runtime_kind = str(session_record.get("runtime_kind") or "").strip()
-        if source_id and runtime_kind == "api_key":
+        if source_id and (runtime_kind == "api_key" or _config_has_provider_id(cfg, source_id, cli)):
             provider_id = source_id
-        elif source_id and runtime_kind == "oauth":
+        elif source_id and (runtime_kind == "oauth" or _config_has_account_id(cfg, source_id, cli)):
             account_id = source_id
 
     runtime = cli_models = launch_cli_name = None
@@ -13541,14 +16405,15 @@ def _resolve_resume_runtime_and_model(
 def handle_resume_command(argv, preloaded_command_cfg=None, bootstrap_cfg=None, lang_override=None):
     parser = argparse.ArgumentParser(
         prog=f"{current_command()} resume",
-        description="通过 Codex/Claude session id 一键恢复 MMS 托管会话",
+        description="通过 Codex/Claude/Pi session id 一键恢复 MMS 托管会话",
     )
-    parser.add_argument("session_ref", help="session id、前缀，或 codex:<id> / claude:<id>")
+    parser.add_argument("session_ref", help="session id、前缀，或 codex:<id> / claude:<id> / pi:<id>")
     parser.add_argument("prompt", nargs="*", help="恢复后追加给 CLI 的可选 prompt；若 prompt 以 -- 开头请先写 --")
-    parser.add_argument("--cli", choices=["auto", "codex", "claude"], default="auto", help="强制指定恢复目标 CLI")
+    parser.add_argument("--cli", choices=["auto", "codex", "claude", "pi"], default="auto", help="强制指定恢复目标 CLI")
     parser.add_argument("--provider", help="临时指定 provider")
     parser.add_argument("--account", help="临时指定官方账号档案")
     parser.add_argument("--model", help="临时指定恢复时使用的模型")
+    parser.add_argument("--select-model", action="store_true", help="恢复前先交互选择本次使用的模型")
     parser.add_argument("--once", action="store_true", help="以一次性会话模式启动底层 CLI")
     args = parser.parse_intermixed_args(argv)
 
@@ -13559,7 +16424,7 @@ def handle_resume_command(argv, preloaded_command_cfg=None, bootstrap_cfg=None, 
     if error:
         console.print(f"[red]{error}[/red]")
         raise SystemExit(1)
-    if cli not in {"codex", "claude"} or not session_id:
+    if cli not in {"codex", "claude", "pi"} or not session_id:
         console.print(f"[red]无法识别 session: {args.session_ref}[/red]")
         raise SystemExit(1)
 
@@ -13571,6 +16436,22 @@ def handle_resume_command(argv, preloaded_command_cfg=None, bootstrap_cfg=None, 
 
     default_provider = ensure_provider_credentials(cfg)
     default_provider, models_cache = ensure_models_ready(cfg, default_provider)
+    if args.select_model and not args.model:
+        aggregated = _aggregate_provider_models(cfg, cli, default_provider, models_cache)
+        if not _ensure_models_cache_available(aggregated):
+            raise SystemExit(1)
+        model, selected_provider_id = _select_custom_model(
+            aggregated,
+            cli,
+            role=MODE_ALL,
+            recommend=cfg.get("recommend", {}).get("models", []),
+            use_tui=False,
+        )
+        if not model:
+            raise SystemExit(1)
+        args.model = model
+        if selected_provider_id and not args.provider and not args.account:
+            args.provider = selected_provider_id
     runtime, _cli_models, launch_cli_name, model_info = _resolve_resume_runtime_and_model(
         cfg,
         cli,
@@ -13585,17 +16466,31 @@ def handle_resume_command(argv, preloaded_command_cfg=None, bootstrap_cfg=None, 
     if launch_cli_name != cli:
         console.print(f"[red]resume 只支持原 CLI 恢复，当前解析为 {launch_cli_name}[/red]")
         raise SystemExit(1)
+    project_path = str((session_record or {}).get("project_path") or (session_record or {}).get("cwd") or "").strip()
+    if project_path and os.path.isdir(project_path):
+        os.chdir(project_path)
+    staged_resume_files = []
     if cli == "claude":
-        project_path = str((session_record or {}).get("project_path") or (session_record or {}).get("cwd") or "").strip()
-        if project_path and os.path.isdir(project_path):
-            os.chdir(project_path)
+        staged_resume_files = _stage_claude_catalog_resume_files(session_record, project_path, runtime)
+    if cli == "claude":
         extra_args = ["--resume", session_id] + list(args.prompt or [])
+    elif cli == "pi":
+        source_path, source_error = _validated_pi_session_path(session_record)
+        if source_error:
+            console.print(f"[red]{source_error}[/red]")
+            raise SystemExit(1)
+        extra_args = ["--session", source_path] + list(args.prompt or [])
     else:
         extra_args = ["resume", session_id] + list(args.prompt or [])
 
-    source = "未写入 MMS index，交给 Codex 原生 resume 校验" if (session_record or {}).get("_unindexed") else "MMS index"
+    if (session_record or {}).get("_unindexed"):
+        source = "未写入 MMS index，交给原生 resume 校验"
+    else:
+        source = str((session_record or {}).get("source_kind") or "MMS index")
     console.print(f"[cyan]恢复 {cli} session:[/cyan] {session_id}")
     console.print(f"[dim]来源: {source}[/dim]")
+    if staged_resume_files:
+        console.print(f"[dim]已为当前配置 root 准备 Claude 原始记录: {len(staged_resume_files)} 个路径[/dim]")
     _launch_with_tracking(cli, model_info, runtime, once=bool(args.once), extra_args=extra_args)
 
 
@@ -14203,11 +17098,27 @@ def _handle_disabled_legacy_chat_discuss(command):
 
 def main():
     argv, lang_override = _extract_global_lang(sys.argv[1:])
+    if argv and argv[0] == "web":
+        from mms_web.__main__ import main as web_main
+        web_args = list(argv[1:])
+        selected_root = os.environ.get("MMS_CONFIG_ROOT", "")
+        if selected_root and os.path.isdir(os.path.expanduser(selected_root)) and "--config-root" not in web_args and not any(a.startswith("--config-root=") for a in web_args):
+            web_args = ["--config-root", selected_root, *web_args]
+        return web_main(web_args)
+    if _is_version_request(argv):
+        set_language(_resolve_ui_language(None, lang_override))
+        _print_version_summary(argv[1:])
+        return
     if len(argv) >= 1 and argv[0] == "registry":
         set_language(_resolve_ui_language(None, lang_override))
         from mms_registry_cli import handle_registry_command
 
         raise SystemExit(handle_registry_command(argv[1:], command_name=f"{current_command()} registry"))
+    if len(argv) >= 1 and argv[0] == "flywheel":
+        set_language(_resolve_ui_language(None, lang_override))
+        from mms_flywheel import handle_flywheel_command
+
+        raise SystemExit(handle_flywheel_command(argv[1:], command_name=f"{current_command()} flywheel"))
     if _is_config_root_status_request(argv):
         _display_config_root(json_output="--json" in argv[2:])
         return
@@ -14263,6 +17174,17 @@ def main():
             from mms_review_launch import handle_review_launch_command
 
             raise SystemExit(handle_review_launch_command(argv[1:], command_name=current_command()))
+        if command == "review-dispatch":
+            from mms_review_dispatch import handle_review_dispatch_command
+
+            raise SystemExit(handle_review_dispatch_command(argv[1:], command_name=current_command()))
+        if command == "closeout":
+            # TB-46: explicit opt-in state-core closeout reference binding.
+            # Only an explicit `mms closeout` invocation reaches state-core;
+            # never wired to Stop/SessionEnd (see docs/STATE_CORE_CLOSEOUT_BINDING.md).
+            from mms_state_core_closeout import handle_closeout_command
+
+            raise SystemExit(handle_closeout_command(argv[1:], command_name=current_command()))
         if command == "guard":
             handle_guard_command(argv[1:], bootstrap_cfg=bootstrap_cfg)
             return
@@ -14291,7 +17213,7 @@ def main():
     preloaded_command_cfg = None
     if not help_request and len(argv) >= 1:
         command = argv[0]
-        if command not in {"guard", "logs", "fake-upstream", "exposure", "registry", "opencode-smoke"}:
+        if command not in {"guard", "logs", "fake-upstream", "exposure", "registry", "opencode-smoke", "review-dispatch"}:
             preloaded_command_cfg = _load_command_config()
             _refresh_routes_export_for_hive(
                 preloaded_command_cfg,
@@ -14401,7 +17323,7 @@ def main():
             f"  {current_command()} warm [id]       预热模型缓存\n"
             f"  {current_command()} cache ...       查看或调整模型 cache 异步刷新窗口\n"
             f"  {current_command()} session ...     查看托管 session\n"
-            f"  {current_command()} resume <id>     通过 Codex/Claude session id 恢复托管 CLI\n"
+            f"  {current_command()} resume <id>     通过 Codex/Claude/Pi session id 恢复托管 CLI\n"
             f"  {current_command()} routes ...      查看路由配置\n"
             f"  {current_command()} registry ...    刷新/查看本地 model registry source truth\n"
             f"  {current_command()} migrate config-v2 [--json]  只读 config v2 migration / promotion human gate\n"
@@ -14412,12 +17334,16 @@ def main():
             f"  {current_command()} test ...        最小闭环 smoke 测试 channel URL + key + bridge\n"
             f"  {current_command()} smoke ...       等同于 test\n"
             f"  {current_command()} opencode-smoke ... 测试 OpenCode profile config；--live 才真实请求模型\n"
-            f"  {current_command()} opencode --profile agent  启动默认 Agent mode\n"
-            f"  {current_command()} opencode --profile omo    启动 global OMO mode\n"
-            f"  {current_command()} opencode --profile raw    启动纯 OpenCode mode\n"
+            f"  {current_command()} opencode --profile agent   启动默认 Agent mode\n"
+            f"  {current_command()} opencode --profile review  启动 Review Hub host mode\n"
+            f"  {current_command()} opencode --profile omo     启动 global OMO mode\n"
+            f"  {current_command()} opencode --profile raw     启动纯 OpenCode mode\n"
             f"  {current_command()} logs ...        显示常用 logs 路径与查看命令\n"
             f"  {current_command()} fake-upstream ... 开发期 fake upstream 开关与日志\n"
             f"  {current_command()} review-launch ... 非交互 multi-review reviewer launcher 握手\n"
+            f"  {current_command()} review-dispatch --root <artifact-root> 生成/启动 OpenCode Review Hub 派发\n"
+            f"  {current_command()} closeout --task-id <id> --root <repo>  显式 state-core 收口(read-back completion_ref；绝不接 Stop)\n"
+            f"  {current_command()} flywheel resolve/run --lane worker --priority AI-P3  解析/运行 Flywheel lane\n"
             f"  {current_command()} env <preset>    输出预设对应的 export 环境变量\n"
             f"  {current_command()} activate <preset>  输出可 eval 的 export 语句\n"
             f"  {current_command()} usage ...       查看 usage 统计\n\n"
@@ -14442,7 +17368,58 @@ def main():
                         help="配合 --export 使用，写入 ~/.config/mms/env/<cli>.sh")
     parser.add_argument("--account", help="临时使用指定官方账号档案启动")
     parser.add_argument("--provider", help="临时使用指定模型源启动")
-    parser.add_argument("--profile", dest="opencode_profile", help="直接指定 OpenCode mode，例如 agent / omo / raw")
+    parser.add_argument("--profile", dest="opencode_profile", help="直接指定 OpenCode mode，例如 agent / review / committee / debate / omo / raw")
+    parser.add_argument(
+        "--review-models",
+        nargs="+",
+        help="OpenCode review profile 使用的 reviewer 模型/家族，支持模糊输入：qwen kimi2.5 minimax2.7 glm5-turbo domestic all",
+    )
+    parser.add_argument(
+        "--review-host-model",
+        "--review-host",
+        dest="review_host_model",
+        help="OpenCode review profile 使用的 host 模型，例如 gpt-5.4 / gpt-5.5 / 任意可用模型",
+    )
+    parser.add_argument(
+        "--save-review-models",
+        "--review-save",
+        action="store_true",
+        help="把本次 --review-host-model / --review-models 或交互选择保存为下次 review profile 默认",
+    )
+    parser.add_argument(
+        "--committee-models",
+        nargs="+",
+        help="OpenCode committee profile 使用的成员模型/家族，支持 gpt-5.4 gpt-5.5 deepseek glm mimo kimi minimax domestic all",
+    )
+    parser.add_argument(
+        "--committee-host-model",
+        "--committee-host",
+        dest="committee_host_model",
+        help="OpenCode committee profile 使用的 host 模型，例如 gpt-5.4 / gpt-5.5 / 任意可用模型",
+    )
+    parser.add_argument(
+        "--save-committee-models",
+        "--committee-save",
+        action="store_true",
+        help="把本次 --committee-host-model / --committee-models 保存为下次 committee profile 默认",
+    )
+    parser.add_argument(
+        "--debate-models",
+        nargs="+",
+        help="OpenCode debate profile 使用的成员模型/家族，支持 gpt-5.4 gpt-5.5 deepseek glm mimo kimi minimax domestic all",
+    )
+    parser.add_argument(
+        "--debate-host-model",
+        "--debate-host",
+        dest="debate_host_model",
+        help="OpenCode debate profile 使用的 host 模型，例如 gpt-5.4 / gpt-5.5 / 任意可用模型",
+    )
+    parser.add_argument(
+        "--save-debate-models",
+        "--debate-save",
+        action="store_true",
+        help="把本次 --debate-host-model / --debate-models 保存为下次 debate profile 默认",
+    )
     parser.add_argument(
         "--opencode-entrypoint",
         choices=["tui", "backend", "backend-agent", "serve", "headless", "acp"],
@@ -14456,7 +17433,7 @@ def main():
 
     args = parser.parse_args(argv)
 
-    user_cfg = bootstrap_cfg
+    user_cfg = preloaded_command_cfg if preloaded_command_cfg is not None else bootstrap_cfg
     set_language(_resolve_ui_language(user_cfg, args.lang or lang_override))
 
     global _trace_enabled, _trace_overrides
@@ -14486,9 +17463,16 @@ def main():
         console.print("[red]--account 和 --provider 不能同时使用[/red]")
         sys.exit(1)
     requested_opencode_profile, requested_profile_entrypoint = _opencode_profile_selection(args.opencode_profile)
+    requested_committee_tier = _extract_opencode_committee_tier(args.opencode_profile)
     if args.opencode_profile and not requested_opencode_profile:
         valid_profiles = ", ".join(_opencode_profile_selection_ids())
         parser.error(f"--profile 仅支持 OpenCode mode：{valid_profiles}")
+    if (args.review_models or args.review_host_model or args.save_review_models) and requested_opencode_profile and requested_opencode_profile != _OPENCODE_REVIEW_PROFILE_ID:
+        parser.error("--review-host-model / --review-models / --save-review-models 仅支持 --profile review")
+    if (args.committee_models or args.committee_host_model or args.save_committee_models) and requested_opencode_profile and requested_opencode_profile != _OPENCODE_COMMITTEE_PROFILE_ID:
+        parser.error("--committee-host-model / --committee-models / --save-committee-models 仅支持 --profile committee")
+    if (args.debate_models or args.debate_host_model or args.save_debate_models) and requested_opencode_profile and requested_opencode_profile != _OPENCODE_DEBATE_PROFILE_ID:
+        parser.error("--debate-host-model / --debate-models / --save-debate-models 仅支持 --profile debate")
     if requested_opencode_profile and args.account:
         parser.error("--profile 是 OpenCode 专用参数，不支持同时使用 --account")
     requested_opencode_entrypoints = []
@@ -14541,6 +17525,7 @@ def main():
         visible_presets = {
             name: p for name, p in presets.items()
             if _preset_has_visible_model_options(p)
+            and not _cli_disabled_by_preferences(cfg, p.get("cli"))
         }
         if visible_presets:
             table = Table(title="已保存预设")
@@ -14579,6 +17564,9 @@ def main():
         if p is None:
             return
         cli = p["cli"]
+        if _cli_disabled_by_preferences(cfg, cli):
+            console.print(f"[yellow]预设 {args.preset} 使用的 CLI `{cli}` 已在 preferences.toml 中关闭。[/yellow]")
+            return
         model_info = _preset_model_info(p)
         _trace_record(f'preset "{args.preset}"', cli=cli, model=p.get("model"), provider=p.get("provider"), account=p.get("account"), bridge=p.get("bridge"))
         if args.account or args.provider:
@@ -14599,6 +17587,7 @@ def main():
             console.print(f"[red]{cli} 当前没有可用运行来源[/red]")
             return
         if cli == "opencode":
+            runtime = _apply_opencode_profile(runtime, _opencode_profile_for_preset(cfg, p, requested_opencode_profile))
             runtime = _apply_opencode_entrypoint(runtime, requested_opencode_entrypoint)
         _launch_with_tracking(cli, model_info, runtime, once=once)
         return
@@ -14614,6 +17603,10 @@ def main():
             target = "opencode"
         elif target != "opencode":
             parser.error("--profile / OpenCode entrypoint 仅支持 target=opencode，例如：mms opencode --profile agent")
+    if target in CLI_NAMES and _cli_disabled_by_preferences(cfg, target):
+        console.print(f"[yellow]{target} 已在 preferences.toml 的 launch.disabled_clis 中关闭。[/yellow]")
+        console.print(f"[dim]当前可用 CLI: {', '.join(visible_clis)}[/dim]")
+        return
 
     if target:
         profile_to_launch = requested_opencode_profile
@@ -14622,6 +17615,12 @@ def main():
             profile_to_launch, configured_entrypoint = _opencode_default_profile_from_config(cfg)
             if not entrypoint_to_launch:
                 entrypoint_to_launch = configured_entrypoint
+            if not profile_to_launch and (args.review_models or args.review_host_model or args.save_review_models):
+                profile_to_launch = _OPENCODE_REVIEW_PROFILE_ID
+            if not profile_to_launch and (args.committee_models or args.committee_host_model or args.save_committee_models):
+                profile_to_launch = _OPENCODE_COMMITTEE_PROFILE_ID
+            if not profile_to_launch and (args.debate_models or args.debate_host_model or args.save_debate_models):
+                profile_to_launch = _OPENCODE_DEBATE_PROFILE_ID
 
         if target == "opencode" and profile_to_launch:
             cli = "opencode"
@@ -14630,8 +17629,52 @@ def main():
             profile_models = models_cache
             if args.provider:
                 profile_models = _probe_models(profile_provider, emit_output=False).get("models")
+            profile_cfg = cfg
+            if profile_to_launch == _OPENCODE_REVIEW_PROFILE_ID:
+                profile_cfg, _review_selection = _prepare_opencode_review_profile_config(
+                    cfg,
+                    profile_provider,
+                    profile_models,
+                    host_model=args.review_host_model,
+                    model_tokens=args.review_models,
+                    interactive=sys.stdin.isatty() and not bool(args.review_host_model),
+                    save_selected=bool(args.save_review_models),
+                    save_cfg=user_cfg,
+                    ask_to_save=not bool(args.review_models or args.review_host_model),
+                )
+            elif profile_to_launch == _OPENCODE_COMMITTEE_PROFILE_ID:
+                profile_cfg, _committee_selection = _prepare_opencode_committee_profile_config(
+                    cfg,
+                    profile_provider,
+                    profile_models,
+                    host_model=args.committee_host_model,
+                    model_tokens=args.committee_models,
+                    interactive=sys.stdin.isatty() and not bool(args.committee_models or args.committee_host_model),
+                    save_selected=bool(args.save_committee_models),
+                    save_cfg=user_cfg,
+                    ask_to_save=not bool(args.committee_models or args.committee_host_model),
+                    committee_tier=requested_committee_tier,
+                )
+            elif profile_to_launch == _OPENCODE_DEBATE_PROFILE_ID:
+                profile_cfg, _debate_selection = _prepare_opencode_debate_profile_config(
+                    cfg,
+                    profile_provider,
+                    profile_models,
+                    host_model=args.debate_host_model,
+                    model_tokens=args.debate_models,
+                    interactive=sys.stdin.isatty() and not bool(args.debate_models or args.debate_host_model),
+                    save_selected=bool(args.save_debate_models),
+                    save_cfg=user_cfg,
+                    ask_to_save=not bool(args.debate_models or args.debate_host_model),
+                )
+            elif args.review_models or args.review_host_model or args.save_review_models:
+                parser.error("--review-host-model / --review-models / --save-review-models 仅支持 --profile review")
+            elif args.committee_models or args.committee_host_model or args.save_committee_models:
+                parser.error("--committee-host-model / --committee-models / --save-committee-models 仅支持 --profile committee")
+            elif args.debate_models or args.debate_host_model or args.save_debate_models:
+                parser.error("--debate-host-model / --debate-models / --save-debate-models 仅支持 --profile debate")
             model_info, runtime = _resolve_opencode_profile_runtime(
-                cfg,
+                profile_cfg,
                 profile_provider,
                 profile_models,
                 profile_to_launch,
@@ -14693,7 +17736,7 @@ def main():
                 save_preset_interactive(user_cfg, cli, model_info)
             _launch_with_tracking(cli, {} if _uses_managed_entry(runtime, cli) else {"model": model}, runtime, once=once)
             return
-        if target in MMS_MANAGED_OAUTH_CLIS and _accounts_for_cli(cfg, target):
+        if target in MMS_MANAGED_OAUTH_CLIS and _accounts_for_cli(cfg, target) and not _cli_disabled_by_preferences(cfg, target):
             cli = target
             _trace_record("CLI target", cli=cli)
             if args.account or args.provider:
@@ -14734,6 +17777,10 @@ def main():
             _launch_with_tracking(cli, {} if _uses_managed_entry(runtime, cli) else {"model": model}, runtime, once=once)
             return
         if target in CLI_NAMES:
+            if _cli_disabled_by_preferences(cfg, target):
+                console.print(f"[yellow]{target} 已在 preferences.toml 的 launch.disabled_clis 中关闭。[/yellow]")
+                console.print(f"[dim]当前可用 CLI: {', '.join(visible_clis)}[/dim]")
+                return
             console.print(f"[yellow]{target} 当前没有匹配模型或未被 provider 支持，所以已隐藏。[/yellow]")
             console.print(f"[dim]当前可用 CLI: {', '.join(visible_clis)}[/dim]")
             return

@@ -7,12 +7,12 @@ def test_load_user_preferences_sanitizes_allowlist(monkeypatch, tmp_path):
     skill_root = tmp_path / "web-access"
     skill_root.mkdir()
     (skill_root / "SKILL.md").write_text("# skill\n", encoding="utf-8")
-    xmem_root = tmp_path / "xmem"
-    xmem_root.mkdir()
-    (xmem_root / "SKILL.md").write_text("# xmem\n", encoding="utf-8")
     pref_path = tmp_path / "preferences.toml"
     pref_path.write_text(
         f"""
+[launch]
+disabled_clis = ["pi", "agy", "unknown", "pi"]
+
 [launch.defaults]
 thinking_mode = "disable"
 reasoning_effort = "xhigh"
@@ -27,12 +27,15 @@ reasoning_effort = "low"
 disabled_session_surfaces = {{ skills = ["agent-browser"], mcp = ["pilot"] }}
 
 [session_surfaces.disabled]
-skills = ["web-access", "web-access"]
+skills = ["web-access", "web-access", "claude:frontend-design"]
 hooks = ["/tmp/drop.sh"]
+
+[assets]
+managed_enabled = true
+managed_root = "{tmp_path / 'managed-assets'}"
 
 [assets.roots]
 web_access = "{skill_root}"
-xmem = "{xmem_root}"
 credentials = "/tmp/should-not-load"
 
 [provider]
@@ -57,14 +60,41 @@ base_url = "https://should-not-load.example"
         "skills": ["agent-browser"],
         "mcp": ["pilot"],
     }
+    assert prefs["launch"]["disabled_clis"] == ["pi", "agy"]
     assert prefs["session_surfaces"]["disabled"] == {
-        "skills": ["web-access"],
+        "skills": ["web-access", "claude:frontend-design"],
         "hooks": ["/tmp/drop.sh"],
     }
-    assert prefs["assets"]["roots"] == {"web_access": str(skill_root), "xmem": str(xmem_root)}
+    assert prefs["assets"]["roots"] == {"web_access": str(skill_root)}
+    assert prefs["assets"]["managed_enabled"] is True
+    assert prefs["assets"]["managed_root"] == str(tmp_path / "managed-assets")
     assert "provider" not in prefs
     assert "api_key" not in prefs["launch"]["defaults"]
     assert "credentials" not in prefs["assets"]["roots"]
+
+
+def test_resolve_visible_clis_respects_disabled_cli_preferences(monkeypatch):
+    import mms_core
+
+    cfg = {"_mms_preferences": {"launch": {"disabled_clis": ["codex", "pi"]}}}
+    provider = {
+        "id": "provider-a",
+        "enabled": True,
+        "api_key": "sk-test",
+        "anthropic_base_url": "https://relay.example.com/anthropic",
+        "openai_base_url": "https://relay.example.com/v1",
+        "protocols": ["anthropic_messages", "openai_chat_completions"],
+        "supported_clis": ["claude", "codex", "opencode", "pi"],
+    }
+
+    monkeypatch.setattr(mms_core, "_accounts_for_cli", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(mms_core, "check_cli_installed", lambda _cli: False)
+    visible = mms_core._resolve_visible_clis(cfg, provider, ["claude-sonnet-4-6", "gpt-5.5"])
+
+    assert "claude" in visible
+    assert "opencode" in visible
+    assert "codex" not in visible
+    assert "pi" not in visible
 
 
 def test_runtime_preferences_merge_defaults_cli_and_disabled_surfaces():
@@ -183,8 +213,9 @@ def test_asset_root_preference_is_below_env_and_above_defaults(monkeypatch, tmp_
 
     pref_root = tmp_path / "pref-web"
     env_root = tmp_path / "env-web"
-    for root in (pref_root, env_root):
-        root.mkdir()
+    managed_root = tmp_path / "managed-assets" / "skills" / "web-access"
+    for root in (pref_root, env_root, managed_root):
+        root.mkdir(parents=True)
         (root / "SKILL.md").write_text("# skill\n", encoding="utf-8")
 
     monkeypatch.delenv("MMS_WEB_ACCESS_ROOT", raising=False)
@@ -193,10 +224,66 @@ def test_asset_root_preference_is_below_env_and_above_defaults(monkeypatch, tmp_
         "preference_asset_root",
         lambda asset_name: str(pref_root) if asset_name == "web_access" else "",
     )
+    monkeypatch.setattr(mms_launchers, "managed_assets_enabled", lambda: True)
+    monkeypatch.setattr(mms_launchers, "managed_assets_root", lambda: str(tmp_path / "managed-assets"))
     assert mms_launchers._resolve_web_access_root() == str(pref_root)
+
+    monkeypatch.setattr(mms_launchers, "preference_asset_root", lambda _asset_name: "")
+    assert mms_launchers._resolve_web_access_root() == str(managed_root)
 
     monkeypatch.setenv("MMS_WEB_ACCESS_ROOT", str(env_root))
     assert mms_launchers._resolve_web_access_root() == str(env_root)
+
+
+def test_bundled_session_assets_root_is_above_vendor(monkeypatch, tmp_path):
+    import mms_launchers
+
+    bundled_root = tmp_path / "assets" / "session-assets" / "skills" / "web-access"
+    bundled_root.mkdir(parents=True)
+    (bundled_root / "SKILL.md").write_text("# bundled skill\n", encoding="utf-8")
+
+    monkeypatch.delenv("MMS_WEB_ACCESS_ROOT", raising=False)
+    monkeypatch.setattr(mms_launchers, "preference_asset_root", lambda _asset_name: "")
+    monkeypatch.setattr(mms_launchers, "managed_assets_enabled", lambda: False)
+    monkeypatch.setattr(mms_launchers, "_bundled_assets_root", lambda: str(tmp_path / "assets" / "session-assets"))
+
+    assert mms_launchers._resolve_web_access_root() == str(bundled_root)
+
+
+def test_managed_assets_root_can_provide_session_hooks(monkeypatch, tmp_path):
+    import json
+    import mms_launchers
+
+    hooks_dir = tmp_path / "managed-assets" / "hooks" / "demo"
+    hooks_dir.mkdir(parents=True)
+    (hooks_dir / "hooks.json").write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "Stop": [
+                        {
+                            "matcher": "",
+                            "hooks": [{"type": "command", "command": "echo managed-hook"}],
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(mms_launchers, "managed_assets_enabled", lambda: True)
+    monkeypatch.setattr(mms_launchers, "managed_assets_root", lambda: str(tmp_path / "managed-assets"))
+
+    hooks = mms_launchers._load_managed_session_hooks()
+    assert hooks["Stop"][0]["hooks"][0]["command"] == "echo managed-hook"
+
+    codex_payload = mms_launchers._build_codex_session_hooks({})
+    commands = [
+        hook["command"]
+        for group in codex_payload["hooks"]["Stop"]
+        for hook in group["hooks"]
+    ]
+    assert "echo managed-hook" in commands
 
 
 def test_config_preferences_help_and_example_are_discoverable(monkeypatch):
@@ -222,6 +309,7 @@ def test_config_preferences_help_and_example_are_discoverable(monkeypatch):
     help_text = "\n".join(console.lines)
     assert "preferences.toml" in help_text
     assert "Human gate" in help_text
+    assert "managed_root" in help_text
 
     console.lines.clear()
     mms_core.handle_config({}, ["human-gate"])

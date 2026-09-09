@@ -8,6 +8,7 @@ from mms_tui import (
     _build_family_menu_items,
     _confirm_effort_values,
     _confirm_profile_capabilities,
+    _reasoning_effort_options_for_model,
     confirm_tui,
     select_reasoning_effort_tui,
 )
@@ -20,6 +21,22 @@ def test_reasoning_effort_options_include_xhigh():
 
 def test_reasoning_effort_tui_defaults_to_high():
     assert select_reasoning_effort_tui.__defaults__ == ("high",)
+
+
+def test_reasoning_effort_max_is_model_specific():
+    assert [value for value, _label in _reasoning_effort_options_for_model("gpt-5.6-luna")] == [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+    ]
+    assert [value for value, _label in _reasoning_effort_options_for_model("gpt-5.5")] == [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+    ]
 
 
 def test_confirm_tui_thinking_and_effort_defaults():
@@ -76,6 +93,27 @@ def test_confirm_profile_capabilities_apply_model_defaults(monkeypatch, tmp_path
     assert qwen_caps["default_enabled"] is False
     assert deepseek_caps["effort_supported"] is True
     assert _confirm_effort_values(deepseek_caps, deepseek_caps["tokens"]) == ["high", "xhigh"]
+
+
+def test_confirm_profile_capabilities_expose_max_only_for_gpt56(monkeypatch, tmp_path):
+    import mms_provider_profiles
+
+    monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
+    mms_provider_profiles.load_provider_profiles.cache_clear()
+
+    luna_caps = _confirm_profile_capabilities(
+        "gpt-5.6-luna",
+        {"id": "uscrsopenai", "openai_base_url": "https://example.test/v1"},
+    )
+    gpt55_caps = _confirm_profile_capabilities(
+        "gpt-5.5",
+        {"id": "uscrsopenai", "openai_base_url": "https://example.test/v1"},
+    )
+
+    assert "max" in luna_caps["effort_allowed"]
+    assert _confirm_effort_values(luna_caps, luna_caps["tokens"])[-1] == "max"
+    assert "max" not in gpt55_caps["effort_allowed"]
+    assert "max" not in _confirm_effort_values(gpt55_caps, gpt55_caps["tokens"])
 
 
 def test_core_confirm_tui_keeps_ecc_default_off():

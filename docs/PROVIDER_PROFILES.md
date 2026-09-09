@@ -29,11 +29,24 @@ candidates and then publish into the latest-approved bundle.
 - `effort`: protocol-specific effort field path, allowed values, defaults, and mappings.
 - `context_windows`: model-prefix context metadata.
 - `model_aliases`: protocol-specific provider wire-model aliases, optionally gated by `provider_id_contains` or `base_url_contains`, for cases where the logical MMS model should stay stable but the upstream API needs a different model string.
+- `opencode`: OpenCode runtime policy hints, such as `builtin_search_tools`, `shell_search_fallback`, `strict_json_schema`, and tool smoke status. These hints shape generated session-local agent permissions/prompts; they do not force provider transport by themselves.
 - `model_overrides`: model-prefix overrides for thinking/effort/context behavior.
 
 Context metadata is advisory unless the matching protocol can activate that upstream context mode. If an upstream rejects a documented long-context model suffix, keep the built-in profile conservative and move any larger context window to a human-managed local overlay only after a live smoke proves it.
 
 The patch engine intentionally supports only data-driven field patches. It does not load Python hooks from profiles.
+
+## OpenCode Runtime Policy
+
+`opencode.builtin_search_tools` controls whether generated OpenCode agents should rely on built-in search tools. Supported values are:
+
+- `auto`: keep the default OpenCode built-in `grep` / `glob` / `list` permissions.
+- `fallback_only`: deny built-in `grep` / `glob` / `list` for affected agents and instruct them to use shell fallback commands such as `rg --files`, `rg -n`, `find`, `ls`, and `pwd`.
+- `disabled` / `deny` / `shell_only`: aliases for the same shell-first behavior.
+
+Use this when a provider route passes normal tool smoke tests but still drifts on long OpenCode agent sessions. For the known CPA/Antigravity Gemini relay route, MMS keeps transport selection route-driven (for example CPA/NewAPI may still use Anthropic Messages), while committee agents use shell search fallback to avoid missing required built-in tool arguments such as `pattern`.
+
+Keep this policy route-scoped. The built-in `cpa-antigravity-gemini` profile carries the Gemini search fallback because that is the known problem channel; the generic `gemini` profile does not force all Gemini routes into shell search fallback.
 
 ## Current Dual-Format References
 
@@ -44,7 +57,8 @@ The patch engine intentionally supports only data-driven field patches. It does 
 | Xiaomi MiMo | `https://api.xiaomimimo.com/v1` + `/chat/completions` | `https://api.xiaomimimo.com/anthropic` + `/v1/messages` | `thinking.type` enabled/disabled; OpenAI format aliases output cap to `max_completion_tokens`; no GPT-style effort tier recorded |
 | MiniMax | `https://api.minimaxi.com/v1` + `/chat/completions` | `https://api.minimaxi.com/anthropic` + `/v1/messages` | OpenAI format can use `reasoning_split`; Anthropic format uses thinking blocks |
 | DeepSeek | `https://api.deepseek.com` + `/chat/completions` | `https://api.deepseek.com/anthropic` + `/v1/messages` | OpenAI `reasoning_effort` and Anthropic `output_config.effort`, currently `high`/`max` |
-| Kimi Code | `https://api.kimi.com/coding/v1` + `/chat/completions` | `https://api.kimi.com/coding/` + `/v1/messages` | `thinking.type` enabled/disabled; split assistant `tool_use` history must preserve both thinking blocks and `reasoning_content`; preserve normal client headers |
+| StepFun | `https://api.stepfun.com/v1` + `/chat/completions`; Step Plan uses `https://api.stepfun.com/step_plan/v1` | `https://api.stepfun.com` + `/v1/messages`; Step Plan uses `https://api.stepfun.com/step_plan` | OpenAI `reasoning_effort` and Anthropic `output_config.effort`, currently `low`/`medium`/`high` |
+| Kimi Code | `https://api.kimi.com/coding/v1` + `/chat/completions`; Moonshot API uses `https://api.moonshot.cn/v1` | `https://api.kimi.com/coding/` + `/v1/messages`; Moonshot API uses `https://api.moonshot.cn/anthropic` | K3 uses top-level `reasoning_effort=max`; Kimi Code plain `k3` is 256K and `k3[1m]` opts into 1M, while Moonshot API `kimi-k3` is 1M; K2.7 Code keeps `thinking.type` enabled/disabled; split assistant `tool_use` history must preserve both thinking blocks and `reasoning_content`; preserve normal client headers |
 | GLM / Z.ai | `https://api.z.ai/api/paas/v4/` + `/chat/completions` | `https://api.z.ai/api/anthropic` + `/v1/messages` | `thinking.type` enabled/disabled |
 
 MiMo context is route-scoped. Direct MiMo OpenAI-compatible `/v1` and
@@ -76,12 +90,24 @@ documented 1048576 context / 131072 output limits for `mimo-v2.5-pro` and
 - OpenRouter models API: https://openrouter.ai/api/v1/models
 - MiniMax Anthropic API: https://platform.minimaxi.com/docs/api-reference/text-anthropic-api
 - MiniMax OpenAI API: https://platform.minimaxi.com/docs/api-reference/text-openai-api
+- MiniMax text generation / M3: https://platform.minimax.io/docs/guides/text-generation
+- MiniMax M3 function call: https://platform.minimax.io/docs/guides/text-m3-function-call
 - DeepSeek Chat Completion: https://api-docs.deepseek.com/api/create-chat-completion
 - DeepSeek pricing / context lengths: https://api-docs.deepseek.com/quick_start/pricing/
 - DeepSeek Claude Code integration: https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code
 - DeepSeek Anthropic API: https://api-docs.deepseek.com/guides/anthropic_api
+- StepFun Step 3.7 Flash: https://platform.stepfun.com/docs/zh/guides/models/step-3.7-flash
+- StepFun Step 3.7 Flash quickstart: https://platform.stepfun.com/docs/zh/guides/models/step-3.7-flash-quickstart
+- StepFun Step Plan reasoning API: https://platform.stepfun.com/docs/zh/step-plan/integrations/reasoning-api
 - Kimi Code docs: https://www.kimi.com/code/docs/en/
 - Kimi Code third-party agents: https://www.kimi.com/code/docs/en/third-party-tools/other-coding-agents.html
+- Kimi K3 quickstart: https://platform.kimi.com/docs/guide/kimi-k3-quickstart
+- Kimi models overview: https://platform.kimi.com/docs/api/models-overview
+- Kimi reasoning effort: https://platform.kimi.com/docs/guide/use-thinking-effort
+- Kimi Claude Code integration: https://platform.kimi.com/docs/guide/claude-code-kimi
+- Kimi K2.7 Code quickstart: https://platform.kimi.ai/docs/guide/kimi-k2-7-code-quickstart
+- Kimi K2.7 Code pricing: https://platform.kimi.ai/docs/pricing/chat-k27-code
 - Z.ai API introduction: https://docs.z.ai/api-reference/introduction
 - Z.ai GLM-4.6 guide: https://docs.z.ai/guides/llm/glm-4.6
 - Z.ai DevPack overview: https://docs.z.ai/devpack/overview
+- Z.ai latest GLM coding model: https://docs.z.ai/devpack/latest-model

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Pi Committee"
+  short_description: "派发独立 Pi 多模型委员并由当前 Parent 综合"
+  default_prompt: "Use $pi-committee to dispatch an isolated Pi model committee for this task and synthesize the evidence."
+policy:
+  allow_implicit_invocation: false

@@ -5,13 +5,16 @@ from __future__ import annotations
 import copy
 import json
 import os
+import shutil
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from mms_capability_resolver import resolve_model_capabilities
 from mms_core import _model_supports_vision, _probe_models
 from mms_opencode_config import opencode_config_slug as _opencode_config_slug
+from mms_pi_capture import apply_capture_proxy as apply_pi_capture_proxy
 from mms_provider_profiles import resolve_provider_profile
+from mms_provider_profiles import profile_thinking_capabilities
 from mms_state_io import atomic_write_text
 
 _ONE_M_CONTEXT_SUFFIX = "[1m]"
@@ -118,10 +121,6 @@ def _resolve_token_saver_root():
     return _launchers_module()._resolve_token_saver_root()
 
 
-def _resolve_xmem_root():
-    return _launchers_module()._resolve_xmem_root()
-
-
 def _exec_or_run(cmd, env, once):
     return _launchers_module()._exec_or_run(cmd, env, once)
 
@@ -147,21 +146,121 @@ def _pi_retry_extension_path():
     return ""
 
 
+def _pi_vision_extension_path():
+    """Vision relay extension: lets non-multimodal main models see images via a
+    configured vision model (MiniMax-M3/kimi/gpt-5.5 fallback). Same injection
+    pattern as pi-retry-extension; discovered dynamically from the models.json
+    that mms materializes per session."""
+    extension_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "scripts",
+        "pi-vision-extension.ts",
+    )
+    if os.path.isfile(extension_path):
+        return extension_path
+    return ""
+
+
+def _glint_pi_bridge_path(env):
+    """Return Glint's managed Pi bridge only for a Glint-owned pane."""
+    env = env if isinstance(env, dict) else {}
+    if not str(env.get("GLINT_PANE_ID") or "").strip():
+        return ""
+    if not str(env.get("GLINT_AGENT_SOCK") or "").strip():
+        return ""
+
+    extension_path = Path(
+        _real_user_path(".pi", "agent", "extensions", "glint-agent-bridge.ts")
+    )
+    try:
+        if not extension_path.is_file():
+            return ""
+        if "Glint pi extension" not in extension_path.read_text(encoding="utf-8"):
+            return ""
+    except (OSError, UnicodeError):
+        return ""
+    return str(extension_path)
+
+
 def _pi_npx_cache_dir():
     return str(Path(__file__).resolve().parent / ".ai" / "cache" / "pi-npx")
 
 
+def _pi_global_executable():
+    """Use an active global Pi install when available; the wrapper owns fallback."""
+    candidate = shutil.which("pi")
+    if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+        return candidate
+    return ""
+
+
+def _pi_project_directories(project_dir):
+    current = Path(project_dir).resolve()
+    directories = []
+    while True:
+        directories.append(current)
+        if (current / ".git").exists() or current.parent == current:
+            return directories
+        current = current.parent
+
+
+def _pi_materialize_skill_overlay(session_home, project_dir):
+    """Merge Pi skill roots so project skills keep their existing precedence."""
+    overlay_dir = Path(session_home) / ".pi" / "skills-overlay"
+    try:
+        overlay_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return ""
+
+    sources = [(Path(_real_user_path(".agents", "skills")), False)]
+    for directory in reversed(_pi_project_directories(project_dir)):
+        sources.extend(
+            [
+                (directory / ".pi" / "skills", True),
+                (directory / ".agents" / "skills", False),
+            ]
+        )
+
+    linked = 0
+    for source_dir, include_markdown in sources:
+        if not source_dir.is_dir():
+            continue
+        try:
+            entries = list(source_dir.iterdir())
+        except OSError:
+            continue
+        for entry in entries:
+            if entry.name.startswith(".") or (entry.is_file() and not include_markdown):
+                continue
+            destination = overlay_dir / entry.name
+            try:
+                if destination.is_symlink() or destination.is_file():
+                    destination.unlink()
+                elif destination.exists():
+                    continue
+                destination.symlink_to(entry)
+                linked += 1
+            except OSError:
+                continue
+    return str(overlay_dir) if linked else ""
+
+
 def _pi_settings_payload():
     payload = {
+        "quietStartup": True,
         "retry": {
             "enabled": True,
             "maxRetries": 8,
             "baseDelayMs": 1000,
         }
     }
-    extension_path = _pi_retry_extension_path()
-    if extension_path:
-        payload["extensions"] = [extension_path]
+    extensions = []
+    for _path_fn in (_pi_retry_extension_path, _pi_vision_extension_path):
+        _extension_path = _path_fn()
+        if _extension_path:
+            extensions.append(_extension_path)
+    if extensions:
+        payload["extensions"] = extensions
     return payload
 
 
@@ -181,10 +280,12 @@ _PI_ADAPTIVE_CLAUDE_MODELS = {
 
 _PI_OPENAI_PROFILE_COMPAT = {
     "dashscope-openai": {
+        "supportsDeveloperRole": False,
         "thinkingFormat": "qwen",
     },
     "deepseek": {
         "requiresReasoningContentOnAssistantMessages": True,
+        "supportsDeveloperRole": False,
         "thinkingFormat": "deepseek",
     },
     "glm": {
@@ -195,6 +296,17 @@ _PI_OPENAI_PROFILE_COMPAT = {
         "supportsStore": False,
         "supportsDeveloperRole": False,
         "supportsReasoningEffort": False,
+        "maxTokensField": "max_tokens",
+        "supportsStrictMode": False,
+    },
+    # kimi-k3-coding 是为 K3 的 reasoning_effort 分档单独加的 profile（2026-09-02），
+    # 它抢在 kimi-code 之前匹配 k3，但当时没同步补 compat —— K3 于是拿不到
+    # supportsDeveloperRole=False，pi 按 OpenAI 惯例发 role:developer，上游 400
+    # 「role 'developer' is not allowed」。这里补齐；刻意不带 supportsReasoningEffort=False，
+    # 因为这个 profile 存在的目的就是保留 K3 的 effort 分档。
+    "kimi-k3-coding": {
+        "supportsStore": False,
+        "supportsDeveloperRole": False,
         "maxTokensField": "max_tokens",
         "supportsStrictMode": False,
     },
@@ -223,9 +335,15 @@ _PI_MODEL_MAX_TOKENS_HINTS = {
     "deepseek-v4-pro": 384000,
     "gpt-5.3-codex": 128000,
     "gpt-5.3-codex-spark": 32000,
+    "k3": 131072,
+    "k3[1m]": 1048576,
+    "kimi-k3": 1048576,
     "k2.6": 32768,
     "k2.6-code-preview": 32768,
     "kimi-for-coding": 32768,
+    "kimi-for-coding-highspeed": 32768,
+    "kimi-k2.7-code": 32768,
+    "kimi-k2.7-code-highspeed": 32768,
     "kimi-k2.6": 32768,
     "kimi-k2.6-code-preview": 32768,
     "mimo-v2-flash": 65536,
@@ -243,6 +361,9 @@ _PI_MODEL_MAX_TOKENS_HINTS = {
 _PI_MODEL_CONTEXT_WINDOW_HINTS = {
     "gpt-5.3-codex": 400000,
     "gpt-5.3-codex-spark": 128000,
+    "k3": 262144,
+    "k3[1m]": 1048576,
+    "kimi-k3": 1048576,
     "qwen3.6-flash": 1000000,
     "qwen3.7-max": 1000000,
 }
@@ -252,7 +373,11 @@ _PI_MODEL_INPUT_HINTS = {
     "claude-sonnet-4-6": ["text", "image"],
     "gpt-5.3-codex": ["text", "image"],
     "gpt-5.3-codex-spark": ["text", "image"],
+    "k3": ["text", "image"],
+    "k3[1m]": ["text", "image"],
+    "kimi-k3": ["text", "image"],
     "kimi-for-coding": ["text", "image"],
+    "kimi-for-coding-highspeed": ["text", "image"],
     "minimax-m2.7": ["text"],
     "qwen3.6-flash": ["text", "image"],
     "qwen3.7-max": ["text"],
@@ -274,7 +399,6 @@ _PI_PROVIDER_MODEL_BLOCK_REASONS = {
         "anthropic/claude-opus-4.7": "2026-05-28 live Pi smoke returned key-limit 403 on this relay",
         "claude-opus-4-6": "2026-05-28 live Pi smoke returned model_not_found on this relay",
         "claude-opus-4-6-thinking": "2026-05-28 live Pi smoke returned upstream 500 on this relay",
-        "gemini-3-flash-agent(high)": "2026-05-28 live Pi smoke returned upstream 500 on this relay",
         "gemini-3-flash-agent(low)": "2026-05-28 live Pi smoke returned upstream 500 on this relay",
         "gemini-3-flash-agent(medium)": "2026-05-28 live Pi smoke returned upstream 500 on this relay",
         "gemini-3.1-flash-lite": "2026-05-28 live Pi smoke returned upstream 500 on this relay",
@@ -483,11 +607,43 @@ def _pi_exposed_model_names(runtime, selected_model=""):
     return names
 
 
-def _pi_model_input_types(model_name):
+# What the user set for this model, through the WebUI or model-policy. This
+# always wins, in every harness, which is the whole point of setting it.
+_USER_CAPABILITY_SOURCES = frozenset({"manual_override", "model_policy"})
+# Curated capability data. It outranks the name-matching tables further down,
+# but not the Pi-specific hints, which record what this runner actually did.
+_CURATED_CAPABILITY_SOURCES = frozenset({"provider_profile", "approved_facts"})
+
+
+def _pi_caps_vision_state(caps, allowed_sources):
+    """Return the resolver's vision verdict when one of ``allowed_sources`` set it.
+
+    A field still on ``conservative_fallback`` means nothing declared the
+    model, which is not the same answer as a source declaring "no vision".
+    """
+    if not isinstance(caps, dict):
+        return None
+    sources = caps.get("sources") if isinstance(caps.get("sources"), dict) else {}
+    if sources.get("supports_vision") not in allowed_sources:
+        return None
+    value = caps.get("supports_vision")
+    return bool(value) if isinstance(value, bool) else None
+
+
+def _pi_model_input_types(model_name, caps=None):
+    # Priority: the user's own setting, then Pi's own verified hints, then
+    # curated profile/registry facts, then name matching. Keeping the user at
+    # the top is what makes a WebUI vision change take effect here.
+    user_vision = _pi_caps_vision_state(caps, _USER_CAPABILITY_SOURCES)
+    if user_vision is not None:
+        return ["text", "image"] if user_vision else ["text"]
     normalized = _pi_normalize_model_key(model_name)
     hint = _PI_MODEL_INPUT_HINTS.get(normalized)
     if isinstance(hint, list) and hint:
         return list(hint)
+    curated_vision = _pi_caps_vision_state(caps, _CURATED_CAPABILITY_SOURCES)
+    if curated_vision is not None:
+        return ["text", "image"] if curated_vision else ["text"]
     if normalized.startswith(("claude-", "gpt-5", "gemini-")):
         return ["text", "image"]
     vision_state = _pi_reference_supports_vision(model_name)
@@ -498,6 +654,127 @@ def _pi_model_input_types(model_name):
     if _model_supports_vision(model_name):
         return ["text", "image"]
     return ["text"]
+
+
+def _pi_model_supports_vision(runtime, model_name):
+    """Resolved vision verdict for one model on this runtime."""
+    try:
+        caps = _pi_model_capabilities(runtime, model_name)
+    except Exception:
+        caps = {}
+    return "image" in _pi_model_input_types(model_name, caps=caps)
+
+
+def _pi_vision_relay_enabled():
+    """Whether the image relay may run at all.
+
+    The only switch is ``[vision_sidecar] enabled`` in config.toml. There is no
+    built-in model list: which models can see images comes from the capability
+    each model actually has.
+    """
+    try:
+        from mms_core import load_config
+
+        cfg = load_config()
+    except Exception:
+        return True
+    raw = cfg.get("vision_sidecar") if isinstance(cfg, dict) else {}
+    raw = raw if isinstance(raw, dict) else {}
+    return str(raw.get("enabled", "true")).strip().lower() not in {"false", "0", "no", "off"}
+
+
+def _pi_vision_plan(runtime, model_name):
+    """Decide whether Pi needs the image relay, and which models can serve it.
+
+    The pool is every model on this channel whose resolved capability says it
+    reads images, so it follows the user's own configuration and never a
+    hardcoded name list. Only models this runtime already exposes are eligible,
+    so the pool never adds an entry to the model list the user picked from.
+    The relay picks from the pool at random when an image actually arrives.
+    """
+    runtime = runtime if isinstance(runtime, dict) else {}
+    plan = {"main_model_vision": False, "pool": []}
+    try:
+        plan["main_model_vision"] = _pi_model_supports_vision(runtime, model_name)
+    except Exception:
+        plan["main_model_vision"] = False
+    if not _pi_vision_relay_enabled():
+        return plan
+
+    launchers = _launchers_module()
+    try:
+        exposed = launchers._pi_exposed_model_names(runtime, selected_model=model_name)
+    except Exception:
+        exposed = []
+    pool = []
+    for candidate in exposed:
+        name = str(candidate or "").strip()
+        if not name:
+            continue
+        try:
+            if not _pi_model_supports_vision(runtime, name):
+                continue
+            # The relay addresses models by their models.json id, which is the
+            # wire name, not always the selector the user sees.
+            wire_id = str(_pi_model_entry(runtime, name)["model"].get("id") or "").strip()
+        except Exception:
+            continue
+        if wire_id:
+            pool.append({"model": wire_id, "selector": name})
+    # Sorted only so the exported value is stable to read and test; the relay
+    # itself picks at random.
+    plan["pool"] = sorted(pool, key=lambda entry: entry["selector"].lower())
+    return plan
+
+
+def _pi_is_kimi_k3_selector(model_name):
+    leaf = str(model_name or "").strip().lower().rsplit("/", 1)[-1]
+    return leaf in {"k3", "k3[1m]", "kimi-k3"}
+
+
+def _pi_profile_capability_overlay(runtime, model_name, *, provider_id, base_url, profile_id):
+    if not _pi_is_kimi_k3_selector(model_name):
+        return {}
+    try:
+        profile_caps = resolve_model_capabilities(
+            model_name,
+            runtime=runtime,
+            provider_id=provider_id,
+            base_url=base_url,
+            profile_id=profile_id,
+            approved_facts={},
+            model_policy={},
+        )
+    except Exception:
+        return {}
+    control = profile_caps.get("thinking_control") if isinstance(profile_caps.get("thinking_control"), dict) else {}
+    if str(control.get("path") or "").strip() != "reasoning_effort":
+        return {}
+    return profile_caps
+
+
+def _pi_apply_profile_capability_overlay(caps, profile_caps):
+    if not profile_caps:
+        return caps
+    merged = copy.deepcopy(caps if isinstance(caps, dict) else {})
+    sources = merged.setdefault("sources", {})
+    profile_sources = profile_caps.get("sources") if isinstance(profile_caps.get("sources"), dict) else {}
+    for field in (
+        "context_window_tokens",
+        "max_output_tokens",
+        "supports_thinking",
+        "thinking_control",
+        "expected_protocol",
+        "protocol_hints",
+    ):
+        if profile_sources.get(field) != "provider_profile":
+            continue
+        # A WebUI policy choice must override the provider's conservative default.
+        if sources.get(field) in {"model_policy", "manual_override"}:
+            continue
+        merged[field] = copy.deepcopy(profile_caps.get(field))
+        sources[field] = "provider_profile"
+    return merged
 
 
 def _pi_model_capabilities(runtime, model_name):
@@ -511,6 +788,16 @@ def _pi_model_capabilities(runtime, model_name):
         provider_id=provider_id,
         base_url=base_url,
         profile_id=profile_id,
+    )
+    caps = _pi_apply_profile_capability_overlay(
+        caps,
+        _pi_profile_capability_overlay(
+            runtime,
+            model_name,
+            provider_id=provider_id,
+            base_url=base_url,
+            profile_id=profile_id,
+        ),
     )
 
     needs_reference = any(
@@ -605,6 +892,38 @@ def _pi_openai_base_url(runtime):
     return base_url
 
 
+def _pi_declared_protocols(runtime):
+    """Return canonical Pi protocols explicitly declared by the runtime."""
+    runtime = runtime if isinstance(runtime, dict) else {}
+    raw_protocols = runtime.get("protocols") or []
+    if isinstance(raw_protocols, str):
+        raw_protocols = [raw_protocols]
+    if not isinstance(raw_protocols, (list, tuple, set)):
+        return []
+
+    aliases = {
+        "anthropic": "anthropic_messages",
+        "anthropic_messages": "anthropic_messages",
+        "messages": "anthropic_messages",
+        "claude_messages": "anthropic_messages",
+        "response": "responses",
+        "responses": "responses",
+        "openai_responses": "responses",
+        "openai_chat": "openai_chat_completions",
+        "openai_chat_completion": "openai_chat_completions",
+        "openai_chat_completions": "openai_chat_completions",
+        "chat_completions": "openai_chat_completions",
+        "chat/completions": "openai_chat_completions",
+    }
+    protocols = []
+    for item in raw_protocols:
+        token = str(item or "").strip().lower().replace("-", "_")
+        protocol = aliases.get(token, token)
+        if protocol in {"anthropic_messages", "responses", "openai_chat_completions"} and protocol not in protocols:
+            protocols.append(protocol)
+    return protocols
+
+
 def _pi_protocol_variant(runtime, protocol):
     runtime = runtime if isinstance(runtime, dict) else {}
     protocol_name = str(protocol or "").strip()
@@ -643,7 +962,7 @@ def _pi_protocol_variant(runtime, protocol):
 
 def _pi_protocol_variants(runtime):
     variants = []
-    for protocol in ("anthropic_messages", "responses", "openai_chat_completions"):
+    for protocol in _pi_declared_protocols(runtime):
         variant = _pi_protocol_variant(runtime, protocol)
         if variant:
             variants.append(variant)
@@ -694,10 +1013,32 @@ def _pi_profile_id(runtime, model_name, base_url=""):
 def _pi_pick_protocol(runtime, model_name):
     variants = _pi_protocol_variants(runtime)
     if not variants:
-        raise RuntimeError("Pi runtime requires either an Anthropic or OpenAI base URL")
+        raise RuntimeError("Pi runtime requires a declared protocol with its matching base URL")
     available = {item["protocol"] for item in variants}
     variant_by_protocol = {item["protocol"]: item for item in variants}
     caps = _pi_model_capabilities(runtime, model_name)
+    normalized_model = _pi_normalize_model_key(model_name)
+    if "openai_chat_completions" in available and (
+        normalized_model.startswith("glm-")
+        or _pi_is_kimi_k3_selector(normalized_model)
+        or normalized_model.startswith(("qwen3.7", "qwen3.8"))
+    ):
+        # GLM/K3 CRS channels accept OpenAI-compatible requests. Newer Qwen
+        # tiers (3.7+/3.8+) are not in the bridge thinking-allow list, so Pi
+        # (which bypasses the bridge) would forward thinking payloads to a
+        # NewAPI Anthropic adapter that intermittently drops the stop reason;
+        # the OpenAI path carries enable_thinking via dashscope-openai compat.
+        return variant_by_protocol["openai_chat_completions"], caps
+    if "anthropic_messages" in available and (
+        normalized_model.startswith("k3") or normalized_model.startswith(("claude-", "qwen", "kimi-", "gemini-"))
+    ):
+        return variant_by_protocol["anthropic_messages"], caps
+    if "openai_chat_completions" in available and normalized_model.startswith(("deepseek", "mimo-")):
+        return variant_by_protocol["openai_chat_completions"], caps
+    if "responses" in available and normalized_model.startswith(("gpt-", "o1", "o3", "o4")):
+        return variant_by_protocol["responses"], caps
+    if "openai_chat_completions" in available and normalized_model.startswith(("gpt-", "o1", "o3", "o4")):
+        return variant_by_protocol["openai_chat_completions"], caps
     hints = caps.get("protocol_hints") if isinstance(caps.get("protocol_hints"), dict) else {}
     preferred = str(hints.get("preferred_protocol") or "").strip()
     if preferred == "responses":
@@ -735,23 +1076,70 @@ def _pi_model_compat(model_name, protocol):
     return compat
 
 
-def _pi_model_thinking_level_map(profile_id, protocol, model_name, caps):
-    if str(protocol or "").strip() != "openai_chat_completions":
-        return {}
-    if str(profile_id or "").strip() != "deepseek":
-        return {}
+def _pi_model_thinking_level_map(runtime, profile_id, protocol, model_name, caps):
+    """Expose only Pi levels with a distinct, source-backed upstream meaning."""
     if not bool(caps.get("supports_thinking")):
         return {}
-    normalized = str(model_name or "").strip().lower().rsplit("/", 1)[-1]
-    if not normalized.startswith("deepseek"):
+
+    protocol_name = str(protocol or "").strip()
+    profile_id = str(profile_id or "").strip()
+    if protocol_name == "anthropic_messages" and _pi_is_kimi_k3_selector(model_name):
+        # K3 accepts Pi's max level on the Anthropic route and has no lower tier.
+        return {
+            "off": None,
+            "minimal": None,
+            "low": None,
+            "medium": None,
+            "high": None,
+            "xhigh": None,
+            "max": "max",
+        }
+    if protocol_name not in {"responses", "openai_chat_completions"}:
         return {}
-    return {
-        "minimal": None,
-        "low": None,
-        "medium": None,
-        "high": "high",
-        "xhigh": "max",
-    }
+
+    if profile_id == "deepseek":
+        return {
+            "minimal": None,
+            "low": None,
+            "medium": None,
+            "high": "high",
+            "xhigh": "max",
+        }
+
+    profile_caps = profile_thinking_capabilities(
+        model_name,
+        runtime=runtime,
+        provider_id=str(runtime.get("id") or runtime.get("provider_id") or ""),
+        base_url=str(_openai_base_url(runtime) or _anthropic_base_url(runtime) or ""),
+        profile_id=profile_id,
+    )
+    if not profile_caps.get("thinking_supported"):
+        return {}
+
+    allowed = set(profile_caps.get("effort_allowed") or [])
+    effort_map = profile_caps.get("effort_map") if isinstance(profile_caps.get("effort_map"), dict) else {}
+    if allowed:
+        levels = ("minimal", "low", "medium", "high", "xhigh", "max")
+        result = {
+            level: (str(effort_map.get(level) or level) if level in allowed else None)
+            for level in levels
+        }
+        if profile_id == "openrouter-moonshot-kimi-k3":
+            # K3 is always-on and exposes only its vendor-defined max effort.
+            result["off"] = None
+        return result
+
+    if profile_id in {"dashscope-openai", "glm"}:
+        # These profiles expose a Thinking toggle, not comparable effort tiers.
+        return {
+            "minimal": None,
+            "low": None,
+            "medium": None,
+            "high": "high",
+            "xhigh": None,
+            "max": None,
+        }
+    return {}
 
 
 def _pi_effective_selected_model(runtime, model_name):
@@ -823,13 +1211,19 @@ def _pi_model_entry(runtime, model_name):
     entry = {
         "id": wire_model_name,
         "name": display_name or model_name,
-        "input": _pi_model_input_types(model_name),
+        "input": _pi_model_input_types(model_name, caps=caps),
         "contextWindow": int(caps.get("context_window_tokens") or 128000),
         "maxTokens": int(caps.get("max_output_tokens") or 16384),
     }
     if bool(caps.get("supports_thinking")):
         entry["reasoning"] = True
-    thinking_level_map = _pi_model_thinking_level_map(profile_id, variant["protocol"], model_name, caps)
+    thinking_level_map = _pi_model_thinking_level_map(
+        runtime,
+        profile_id,
+        variant["protocol"],
+        model_name,
+        caps,
+    )
     if thinking_level_map:
         entry["thinkingLevelMap"] = thinking_level_map
     model_compat = _pi_model_compat(model_name, variant["protocol"])
@@ -950,12 +1344,125 @@ def _write_pi_settings_config(agent_dir):
     return settings_path
 
 
+def _pi_gateway_root():
+    """Keep Pi state inside the config root selected for this MMS launch."""
+    launchers = _launchers_module()
+    config_root = launchers._selected_mms_config_root(
+        {"MMS_REAL_HOME": _real_user_path()}
+    )
+    return os.path.join(config_root, "pi-gateway")
+
+
+def _pi_session_dir():
+    """Return the persistent, config-root-scoped Pi session directory."""
+    return os.path.join(_pi_gateway_root(), "sessions")
+
+
+def _pi_shared_agent_bin():
+    """Gateway-level shared tools dir, survives per-PID session cleanup.
+
+    Pi auto-installs tools (e.g. ripgrep) into ``<agent_dir>/bin``. Because each
+    launch gets a fresh per-PID ``agent_dir`` under ``s/<pid>`` and stale ones are
+    reaped by ``_cleanup_stale_sessions``, those downloads are thrown away every
+    launch and re-fetched. Pointing every session's ``agent_dir/bin`` at this
+    shared dir (via symlink) lets the first install be reused by later sessions.
+    Lives directly under ``pi-gateway`` (not under ``s/``) so cleanup never touches it.
+    """
+    return os.path.join(_pi_gateway_root(), "agent-bin")
+
+
+def _seed_pi_trust_store(agent_dir, project_dir):
+    """Seed the isolated agentDir's trust.json so project trust follows the session.
+
+    Mirrors the `_ensure_claude_project_trust` idea: mmf isolates pi's HOME and
+    PI_CODING_AGENT_DIR per PID, so pi's trust store is a fresh file under the
+    per-PID session home. Without seeding, pi re-prompts project trust every
+    new PID for any cwd that has `.agents/skills` (e.g. ~/feature-update).
+
+    Trust only the selected launch cwd. Never seed the whole real HOME tree:
+    that would silently trust unrelated present and future repositories.
+    Only writes when no decision exists yet, so an explicit `/trust` choice
+    inside pi still wins for that PID.
+    """
+    try:
+        trust_path = os.path.join(agent_dir, "trust.json")
+        if os.path.exists(trust_path):
+            return
+        trust_root = os.path.realpath(str(project_dir or "").strip())
+        real_home = os.path.realpath(_real_user_path())
+        if not trust_root or trust_root == real_home:
+            return
+        os.makedirs(os.path.dirname(trust_path), exist_ok=True)
+        atomic_write_text(
+            trust_path,
+            json.dumps({trust_root: True}, indent=2) + "\n",
+            mode=0o600,
+        )
+    except Exception:
+        # Best-effort: never block launch on trust seeding.
+        return
+
+
+def _pi_link_shared_agent_bin(agent_dir):
+    """Link ``<agent_dir>/bin`` to the gateway-level shared tools dir.
+
+    Pi auto-downloads tools (ripgrep, etc.) into ``<agent_dir>/bin``. The per-PID
+    ``agent_dir`` is removed when its session is reaped, so those downloads are
+    re-fetched on every launch. Symlinking ``bin`` at a shared gateway dir means
+    the first download is reused by all later sessions. Best-effort: any failure
+    leaves pi free to create its own ``bin``.
+    """
+    try:
+        shared_bin = _pi_shared_agent_bin()
+        os.makedirs(shared_bin, exist_ok=True)
+        link_path = os.path.join(agent_dir, "bin")
+        if os.path.islink(link_path) or os.path.exists(link_path):
+            return
+        os.makedirs(agent_dir, exist_ok=True)
+        try:
+            os.symlink(shared_bin, link_path)
+        except OSError:
+            # Symlink failed (e.g. cross-device): leave pi to manage its own bin.
+            return
+    except Exception:
+        return
+
+
+def _pi_seed_agent_policy(agent_dir):
+    """Snapshot only the user's AGENTS policy into a fresh isolated Pi agentDir.
+
+    Pi discovers global context under PI_CODING_AGENT_DIR, not the real HOME.
+    Preserve an existing session policy and native AGENTS override precedence.
+    Do not link the global file: editing session context must not write home.
+    This allowlist intentionally excludes auth, settings and Claude state.
+    """
+    source_dir = Path(_real_user_path(".pi", "agent"))
+    target_dir = Path(agent_dir)
+    if target_dir.resolve() == source_dir.resolve():
+        raise ValueError("Pi policy requires an isolated agent directory")
+    names = ("AGENTS.override.md", "AGENTS.md", "AGENTS.MD")
+    if any((target_dir / name).is_file() for name in names):
+        return
+    for name in names:
+        source = source_dir / name
+        if source.is_file():
+            # An unreadable configured policy is an explicit startup error,
+            # not a silently policy-free launch or a global-account fallback.
+            try:
+                content = source.read_text(encoding="utf-8")
+                target_dir.mkdir(parents=True, exist_ok=True)
+                atomic_write_text(str(target_dir / name), content, mode=0o600)
+            except (OSError, UnicodeError) as error:
+                raise RuntimeError(f"Cannot load Pi agent policy: {source}") from error
+            return
+
+
 def _pi_gateway_env(runtime, model_info=None):
     runtime = runtime if isinstance(runtime, dict) else {}
     launchers = _launchers_module()
     requested_model = _resolve_model(model_info or runtime)
     model = _pi_effective_selected_model(runtime, requested_model)
-    gateway_base = _real_user_path(".config", "mms", "pi-gateway")
+    gateway_base = _pi_gateway_root()
     os.makedirs(gateway_base, exist_ok=True)
     sessions_dir = os.path.join(gateway_base, "s")
     session_home = os.path.join(sessions_dir, str(os.getpid()))
@@ -974,10 +1481,15 @@ def _pi_gateway_env(runtime, model_info=None):
     env["MMS_PI_SOFT_HOME"] = "1"
 
     agent_dir = os.path.join(session_home, ".pi", "agent")
-    session_dir = os.path.join(agent_dir, "sessions")
+    _pi_seed_agent_policy(agent_dir)
+    _pi_link_shared_agent_bin(agent_dir)
+    session_dir = _pi_session_dir()
     models_path, provider_ref = _write_pi_models_config(agent_dir, runtime, model)
     settings_path = _write_pi_settings_config(agent_dir)
+    # Opt-in only (MMS_PI_CAPTURE_PROXY); a no-op otherwise. See issue #97.
+    apply_pi_capture_proxy(models_path, env, session_home)
     os.makedirs(session_dir, exist_ok=True)
+    _seed_pi_trust_store(agent_dir, os.getcwd())
     env["PI_CODING_AGENT_DIR"] = agent_dir
     env["PI_CODING_AGENT_SESSION_DIR"] = session_dir
     env["PI_TELEMETRY"] = "0"
@@ -985,7 +1497,21 @@ def _pi_gateway_env(runtime, model_info=None):
     env["MMS_PI_SETTINGS_JSON"] = settings_path
     env["MMS_PI_PROVIDER"] = provider_ref
     env["MMS_PI_SELECTED_MODEL"] = model
+    vision_plan = _pi_vision_plan(runtime, model)
+    # The relay extension cannot see the --model argument, so hand it the
+    # already-resolved verdict instead of letting it guess.
+    env["MMS_PI_MAIN_MODEL_VISION"] = "1" if vision_plan.get("main_model_vision") else "0"
+    env["MMS_PI_VISION_POOL"] = json.dumps(
+        [entry["model"] for entry in vision_plan.get("pool") or []],
+        ensure_ascii=True,
+    )
     env["MMS_PI_NPX_CACHE"] = _pi_npx_cache_dir()
+    global_pi = _pi_global_executable()
+    if global_pi:
+        env["MMS_PI_EXECUTABLE"] = global_pi
+    skill_overlay = _pi_materialize_skill_overlay(session_home, os.getcwd())
+    if skill_overlay:
+        env["MMS_PI_SKILLS_OVERLAY"] = skill_overlay
     wrapper_path = launchers._pi_wrapper_path()
     if wrapper_path:
         env["MMS_PI_BIN"] = wrapper_path
@@ -1005,7 +1531,6 @@ def _pi_gateway_env(runtime, model_info=None):
             "weber": bool(_resolve_weber_root()),
             "toon": bool(_resolve_toon_root()),
             "token_saver": bool(_resolve_token_saver_root()),
-            "xmem": bool(_resolve_xmem_root()),
         },
     )
     return env
@@ -1017,11 +1542,17 @@ def _pi_provider_export_env(runtime, model):
     effective_model = _pi_effective_selected_model(runtime, model or runtime.get("model"))
     provider_ref = _opencode_config_slug(runtime.get("id") or runtime.get("name"), "provider")
     model_ref = _opencode_config_slug(effective_model or runtime.get("model"), "model")
-    agent_dir = _real_user_path(".config", "mms", "pi-gateway", "exports", f"{provider_ref}-{model_ref}", "agent")
-    session_dir = os.path.join(agent_dir, "sessions")
+    agent_dir = os.path.join(
+        _pi_gateway_root(),
+        "exports",
+        f"{provider_ref}-{model_ref}",
+        "agent",
+    )
+    session_dir = _pi_session_dir()
     models_path, selected_provider_ref = _write_pi_models_config(agent_dir, runtime, effective_model)
     settings_path = _write_pi_settings_config(agent_dir)
     os.makedirs(session_dir, exist_ok=True)
+    shell_vision_plan = _pi_vision_plan(runtime, effective_model)
     exports = {
         "PI_CODING_AGENT_DIR": agent_dir,
         "PI_CODING_AGENT_SESSION_DIR": session_dir,
@@ -1031,10 +1562,18 @@ def _pi_provider_export_env(runtime, model):
         "MMS_PI_PROVIDER": selected_provider_ref,
         "MMS_PI_SELECTED_MODEL": effective_model,
         "MMS_PI_NPX_CACHE": _pi_npx_cache_dir(),
+        "MMS_PI_MAIN_MODEL_VISION": "1" if shell_vision_plan.get("main_model_vision") else "0",
+        "MMS_PI_VISION_POOL": json.dumps(
+            [entry["model"] for entry in shell_vision_plan.get("pool") or []],
+            ensure_ascii=True,
+        ),
     }
     wrapper_path = launchers._pi_wrapper_path()
     if wrapper_path:
         exports["MMS_PI_BIN"] = wrapper_path
+    global_pi = _pi_global_executable()
+    if global_pi:
+        exports["MMS_PI_EXECUTABLE"] = global_pi
     return exports
 
 
@@ -1050,9 +1589,33 @@ def launch_pi(model_info, runtime, once=False, extra_args=None):
     model = _pi_effective_selected_model(runtime, requested_model)
     env = _pi_gateway_env(runtime, model_info=model_info)
     provider_ref = str(env.get("MMS_PI_PROVIDER") or _pi_provider_ref(runtime)).strip()
+    if env.get("MMS_PI_MAIN_MODEL_VISION") == "0":
+        relay_models = []
+        try:
+            relay_models = json.loads(env.get("MMS_PI_VISION_POOL") or "[]")
+        except (TypeError, ValueError):
+            relay_models = []
+        if relay_models:
+            launchers.console.print(
+                f"[dim]vision pool: {', '.join(str(item) for item in relay_models)}[/dim]"
+            )
+        else:
+            # Fail loudly rather than dropping image support without a word.
+            launchers.console.print(
+                f"[yellow]{model} 不能直接读图，当前通道里也没有能读图的模型，"
+                "本次会话无法识别图片。在通道里启用一个支持图片的模型，"
+                "或在 Web 的通道模型页把该模型标记为可接收图片[/yellow]"
+            )
     cmd = ["pi", "--provider", provider_ref]
     if model:
         cmd += ["--model", model]
+    glint_bridge = _glint_pi_bridge_path(env)
+    if glint_bridge:
+        # MMS isolates PI_CODING_AGENT_DIR, so load the global Glint bridge explicitly.
+        cmd += ["--extension", glint_bridge]
+    skill_overlay = str(env.get("MMS_PI_SKILLS_OVERLAY") or "").strip()
+    if skill_overlay:
+        cmd += ["--no-skills", "--skill", skill_overlay]
 
     thinking_mode = str(runtime.get("thinking_mode") or "").strip().lower()
     reasoning_effort = str(runtime.get("reasoning_effort") or "").strip().lower()

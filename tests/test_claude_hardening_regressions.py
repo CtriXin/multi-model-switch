@@ -163,9 +163,29 @@ def test_build_claude_session_settings_drops_deprecated_mindkeeper_mcp(monkeypat
     assert "mcpServers" not in result
 
 
-def test_build_claude_session_settings_includes_installed_plugin_http_mcp(monkeypatch):
+def test_build_claude_session_settings_skips_installed_plugin_http_mcp_by_default(monkeypatch):
     import mms_launchers
 
+    monkeypatch.setattr(mms_launchers, "_load_mms_claude_settings_template", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_load_global_claude_settings_template", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_default_session_mcp_servers", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_default_hive_session_mcp_server", lambda: None)
+    monkeypatch.setattr(mms_launchers, "_default_pilot_session_mcp_server", lambda: None)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_installed_claude_plugin_mcp_servers",
+        lambda: {"figma": {"type": "http", "url": "https://mcp.figma.com/mcp"}},
+    )
+
+    result = mms_launchers._build_claude_session_settings({})
+
+    assert "mcpServers" not in result
+
+
+def test_build_claude_session_settings_includes_installed_plugin_http_mcp_when_enabled(monkeypatch):
+    import mms_launchers
+
+    monkeypatch.setenv("MMS_ENABLE_MCP_FIGMA", "1")
     monkeypatch.setattr(mms_launchers, "_load_mms_claude_settings_template", lambda: {})
     monkeypatch.setattr(mms_launchers, "_load_global_claude_settings_template", lambda: {})
     monkeypatch.setattr(mms_launchers, "_default_session_mcp_servers", lambda: {})
@@ -522,11 +542,31 @@ def test_append_codex_mcp_servers_drops_missing_bare_codegraph(monkeypatch, tmp_
     assert rendered == 'base_url = "https://example.test"\n'
 
 
-def test_append_codex_mcp_servers_includes_installed_plugin_http_server(monkeypatch, tmp_path):
+def test_append_codex_mcp_servers_skips_installed_plugin_http_server_by_default(monkeypatch, tmp_path):
     import mms_launchers
 
     real_home = tmp_path / "real-home"
     real_home.mkdir(parents=True)
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+    monkeypatch.setattr(mms_launchers, "_default_hive_session_mcp_server", lambda: None)
+    monkeypatch.setattr(mms_launchers, "_default_pilot_session_mcp_server", lambda: None)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_installed_claude_plugin_mcp_servers",
+        lambda: {"figma": {"type": "http", "url": "https://mcp.figma.com/mcp"}},
+    )
+
+    rendered = mms_launchers._append_codex_mcp_servers_from_claude_json('base_url = "https://example.test"\n')
+
+    assert "[mcp_servers.figma]" not in rendered
+
+
+def test_append_codex_mcp_servers_includes_installed_plugin_http_server_when_enabled(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir(parents=True)
+    monkeypatch.setenv("MMS_ENABLE_MCP_FIGMA", "1")
     monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
     monkeypatch.setattr(mms_launchers, "_default_hive_session_mcp_server", lambda: None)
     monkeypatch.setattr(mms_launchers, "_default_pilot_session_mcp_server", lambda: None)
@@ -731,6 +771,56 @@ def test_build_claude_session_settings_strips_execution_surfaces_for_oauth_claud
     assert "mcpServers" not in result
 
 
+def test_build_claude_session_settings_strips_headroom_runtime_hooks(monkeypatch):
+    import mms_launchers
+
+    monkeypatch.setattr(mms_launchers, "_load_mms_claude_settings_template", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_load_global_claude_settings_template", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_default_session_mcp_servers", lambda: {})
+
+    result = mms_launchers._build_claude_session_settings(
+        {
+            "hooks": {
+                "SessionStart": [
+                    {
+                        "matcher": "startup|resume",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": "/Users/xin/.local/bin/headroom init hook ensure --profile init-user",
+                            },
+                            {"type": "command", "command": "/bin/echo keep"},
+                        ],
+                    }
+                ]
+            },
+            "env": {
+                "ANTHROPIC_BASE_URL": "http://127.0.0.1:8787",
+                "HEADROOM_PORT": "8787",
+            },
+            "enabledPlugins": {"headroom@headroom-marketplace": True},
+        },
+        required_env={
+            "ANTHROPIC_BASE_URL": "http://127.0.0.1:50105",
+            "ANTHROPIC_AUTH_TOKEN": "bridge-token",
+            "MMS_ROUTE_STATUS_PATH": "/tmp/route-status.json",
+        },
+    )
+
+    commands = [
+        hook.get("command")
+        for groups in (result.get("hooks") or {}).values()
+        for group in groups
+        for hook in group.get("hooks", [])
+        if isinstance(hook, dict)
+    ]
+    assert "/bin/echo keep" in commands
+    assert not any("headroom" in str(command).lower() for command in commands)
+    assert result["env"]["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:50105"
+    assert "HEADROOM_PORT" not in result["env"]
+    assert "enabledPlugins" not in result
+
+
 def test_build_claude_session_settings_rewrites_caveman_hooks_per_session(monkeypatch, tmp_path):
     import mms_launchers
 
@@ -789,7 +879,6 @@ def test_build_claude_session_settings_rewrites_caveman_hooks_per_session(monkey
     assert disabled_user_prompt == []
     assert disabled_stop == [
         mms_launchers._CLAUDE_BRAINKEEPER_SESSION_END_HOOK,
-        mms_launchers._XMEM_SESSION_END_HOOK,
     ]
 
     enabled = mms_launchers._build_claude_session_settings(
@@ -927,9 +1016,7 @@ def test_resolve_local_hooks_dir_canonicalizes_repo_worktree(tmp_path):
     hooks_dir.mkdir(parents=True)
     for name in (
         "nsr-codex-hook.sh",
-        "xmem-session-start-hook.sh",
-        "xmem-session-end-hook.sh",
-        "xmem-gateway-hook.sh",
+        "nsr-claude-hook.sh",
     ):
         (hooks_dir / name).write_text("#!/bin/sh\n", encoding="utf-8")
     worktree_module = repo / ".worktrees" / "feature-a" / "mms_launchers.py"
@@ -1009,7 +1096,6 @@ def test_build_codex_session_hooks_respects_session_caveman_toggle(monkeypatch, 
         for item in group["hooks"]
     ]
     assert "/tmp/notify.sh" in disabled_commands
-    assert mms_launchers._XMEM_SESSION_START_HOOK not in disabled_commands
     assert "PreToolUse" not in disabled["hooks"]
 
     enabled = mms_launchers._build_codex_session_hooks(
@@ -1028,7 +1114,6 @@ def test_build_codex_session_hooks_respects_session_caveman_toggle(monkeypatch, 
     assert "CAVEMAN_DEFAULT_MODE=lite" in caveman_commands[0]
     assert "CAVEMAN_HOOK_EVENT=SessionStart" in caveman_commands[0]
     assert f'node "{caveman_root / "hooks" / "caveman-activate.js"}"' in caveman_commands[0]
-    assert mms_launchers._XMEM_SESSION_START_HOOK not in enabled_commands
     assert "PreToolUse" not in enabled["hooks"]
 
 
@@ -1136,7 +1221,7 @@ def test_build_claude_session_settings_respects_session_nsr_toggle(monkeypatch):
                 {
                     "hooks": [
                         {"type": "command", "command": "/tmp/keep-session-start.sh"},
-                        {"type": "command", "command": "/tmp/nsr-claude-hook.sh"},
+                        {"type": "command", "command": "/Users/me/.mms/hooks/nsr-claude-hook.sh"},
                         {"type": "command", "command": "/Users/me/.codex/skills/looop/hooks/session-start.sh"},
                     ]
                 }
@@ -1163,23 +1248,8 @@ def test_build_claude_session_settings_respects_session_nsr_toggle(monkeypatch):
         for item in group.get("hooks", [])
     ]
     assert "/tmp/keep-session-start.sh" in enabled_commands
-    assert enabled_commands.count(mms_launchers._NSR_CLAUDE_HOOK) >= 2
-    assert mms_launchers._NSR_CLAUDE_HOOK in [
-        item["command"]
-        for group in enabled_hooks["Stop"]
-        for item in group["hooks"]
-    ]
-    assert mms_launchers._NSR_CLAUDE_HOOK not in [
-        item["command"]
-        for group in enabled_hooks.get("SessionStart", [])
-        for item in group.get("hooks", [])
-    ]
-    assert mms_launchers._NSR_CLAUDE_HOOK not in [
-        item["command"]
-        for group in enabled_hooks.get("UserPromptSubmit", [])
-        for item in group.get("hooks", [])
-    ]
-    assert not any("/tmp/nsr-claude-hook.sh" == command or "looop" in command for command in enabled_commands)
+    assert mms_launchers._NSR_CLAUDE_HOOK not in enabled_commands
+    assert not any("nsr-" in command or "looop" in command or "bugloop" in command for command in enabled_commands)
 
 
 def test_build_codex_session_hooks_respects_session_nsr_toggle():
@@ -1192,7 +1262,7 @@ def test_build_codex_session_hooks_respects_session_nsr_toggle():
                     "matcher": "startup|resume",
                     "hooks": [
                         {"type": "command", "command": "/tmp/keep.sh"},
-                        {"type": "command", "command": "/tmp/nsr-codex-hook.sh"},
+                        {"type": "command", "command": "/Users/me/.mms/hooks/nsr-codex-hook.sh"},
                         {"type": "command", "command": "/tmp/bugloop-nightly-fix.sh"},
                     ],
                 }
@@ -1219,26 +1289,11 @@ def test_build_codex_session_hooks_respects_session_nsr_toggle():
         for item in group.get("hooks", [])
     ]
     assert "/tmp/keep.sh" in enabled_commands
-    assert enabled_commands.count(mms_launchers._NSR_CODEX_HOOK) >= 2
-    assert mms_launchers._NSR_CODEX_HOOK in [
-        item["command"]
-        for group in enabled_hooks["Stop"]
-        for item in group["hooks"]
-    ]
-    assert mms_launchers._NSR_CODEX_HOOK not in [
-        item["command"]
-        for group in enabled_hooks.get("SessionStart", [])
-        for item in group.get("hooks", [])
-    ]
-    assert mms_launchers._NSR_CODEX_HOOK not in [
-        item["command"]
-        for group in enabled_hooks.get("UserPromptSubmit", [])
-        for item in group.get("hooks", [])
-    ]
-    assert not any("/tmp/nsr-codex-hook.sh" == command or "bugloop" in command for command in enabled_commands)
+    assert mms_launchers._NSR_CODEX_HOOK not in enabled_commands
+    assert not any("nsr-" in command or "looop" in command or "bugloop" in command for command in enabled_commands)
 
 
-def test_builtin_nsr_hook_injects_active_context(monkeypatch, tmp_path):
+def test_builtin_nsr_hook_leaves_old_active_context_untouched(monkeypatch, tmp_path):
     state_home = tmp_path / "nsr"
     session_dir = state_home / "sessions" / "session-a"
     session_dir.mkdir(parents=True)
@@ -1268,38 +1323,18 @@ def test_builtin_nsr_hook_injects_active_context(monkeypatch, tmp_path):
     )
 
     assert result.returncode == 0
-    payload = json.loads(result.stdout)
-    assert payload["continue"] is True
-    assert "Finish release" in payload["hookSpecificOutput"]["additionalContext"]
-    assert "Run tests" in payload["hookSpecificOutput"]["additionalContext"]
-    assert (session_dir / "events.jsonl").read_text(encoding="utf-8").strip()
-
-    first_stop = subprocess.run(
-        ["python3", "hooks/nsr-builtin-hook.py", "claude"],
-        input=json.dumps({"hook_event_name": "Stop", "session_id": "session-a"}),
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        env=env,
-        check=False,
-    )
-    assert first_stop.returncode == 0
-    assert json.loads(first_stop.stdout)["decision"] == "block"
-
-    repeated_stop = subprocess.run(
-        ["python3", "hooks/nsr-builtin-hook.py", "claude"],
-        input=json.dumps({"hook_event_name": "Stop", "session_id": "session-a"}),
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        env=env,
-        check=False,
-    )
-    assert repeated_stop.returncode == 0
-    assert json.loads(repeated_stop.stdout)["continue"] is True
-    state = json.loads((session_dir / "state.json").read_text(encoding="utf-8"))
-    assert state["loop"]["status"] == "blocked"
-    assert "infinite hook loop" in state["quality"]["blocker"]
+    assert json.loads(result.stdout) == {}
+    assert not (session_dir / "events.jsonl").exists()
+    for active in (False, True):
+        stopped = subprocess.run(
+            ["python3", "hooks/nsr-builtin-hook.py", "claude"],
+            input=json.dumps({"hook_event_name": "Stop", "session_id": "session-a", "stop_hook_active": active}),
+            text=True, capture_output=True, env=env, check=True,
+        )
+        assert json.loads(stopped.stdout) == {}
+    state = json.loads((session_dir / "state.json").read_text())
+    assert state["loop"]["status"] == "running"
+    assert not (session_dir / "events.jsonl").exists()
 
 
 def test_build_codex_session_hooks_respects_session_disabled_hook_commands():
@@ -1436,10 +1471,10 @@ def test_map_auto_index_hook_keeps_codex_stdout_empty(tmp_path):
     )
 
     assert result.stdout == ""
-    assert "[map] Index up to date." in result.stderr
+    assert result.stderr == ""
 
 
-def test_codegraph_hook_auto_registers_missing_index(tmp_path):
+def test_codegraph_hook_does_not_register_missing_index(tmp_path):
     repo = tmp_path / "repo"
     bin_dir = tmp_path / "bin"
     log_path = tmp_path / "codegraph.log"
@@ -1480,13 +1515,11 @@ def test_codegraph_hook_auto_registers_missing_index(tmp_path):
 
     assert result.stdout == ""
     assert result.stderr == ""
-    assert log_path.read_text(encoding="utf-8").splitlines() == [
-        f"init {repo}",
-        f"index {repo}",
-    ]
+    assert not log_path.exists()
+    assert not (repo / ".codegraph").exists()
 
 
-def test_codegraph_hook_syncs_existing_index(tmp_path):
+def test_codegraph_hook_leaves_existing_index_untouched(tmp_path):
     repo = tmp_path / "repo"
     bin_dir = tmp_path / "bin"
     log_path = tmp_path / "codegraph.log"
@@ -1526,7 +1559,8 @@ def test_codegraph_hook_syncs_existing_index(tmp_path):
         check=True,
     )
 
-    assert log_path.read_text(encoding="utf-8").strip() == f"sync {repo}"
+    assert not log_path.exists()
+    assert (repo / ".codegraph").is_dir()
 
 
 def test_rtk_hook_is_silent_when_dependencies_are_missing(tmp_path):
@@ -2037,6 +2071,8 @@ def test_overlay_web_access_session_entries_merges_session_and_web_access_skill(
     (web_access_root / "SKILL.md").write_text("# web-access\n", encoding="utf-8")
     (web_access_root / "README.md").write_text("# readme\n", encoding="utf-8")
 
+    # Host canonical skills have precedence; this test owns an empty real HOME.
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(tmp_path.joinpath("real-home", *parts)))
     monkeypatch.setenv("MMS_WEB_ACCESS_ROOT", str(web_access_root))
 
     mms_launchers._overlay_web_access_session_entries(
@@ -2095,6 +2131,7 @@ def test_overlay_agent_browser_session_entries_merges_session_and_agent_browser_
     (agent_browser_root / "_meta.json").write_text("{}\n", encoding="utf-8")
 
     monkeypatch.setenv("MMS_AGENT_BROWSER_ROOT", str(agent_browser_root))
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str((tmp_path / "real-home").joinpath(*parts)))
 
     mms_launchers._overlay_agent_browser_session_entries(
         str(parent_dir),
@@ -2360,6 +2397,7 @@ def test_overlay_toon_session_entries_merges_existing_session_skills(monkeypatch
     os.symlink(existing_skills, parent_dir / "skills")
 
     monkeypatch.setenv("MMS_TOON_ROOT", str(toon_root))
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str((tmp_path / "real-home").joinpath(*parts)))
 
     mms_launchers._overlay_toon_session_entries(str(parent_dir), str(session_home))
 
@@ -2385,6 +2423,81 @@ def test_materialize_codex_session_entry_merges_existing_generated_skill_dir(tmp
 
     assert (generated_skills / ".system").is_dir()
     assert os.path.islink(generated_skills / "keep-skill")
+
+
+def test_materialize_codex_session_entry_filters_disabled_global_skills(tmp_path):
+    import mms_launchers
+
+    real_skills = tmp_path / "real" / "skills"
+    generated_skills = tmp_path / "gateway" / "skills"
+    (real_skills / "keep-skill").mkdir(parents=True)
+    (real_skills / "blocked-skill").mkdir(parents=True)
+
+    mms_launchers._materialize_codex_session_entry_filtered(
+        "skills",
+        str(real_skills),
+        str(generated_skills),
+        disabled_session_surfaces={"skills": ["codex:blocked-skill"]},
+    )
+
+    assert os.path.islink(generated_skills / "keep-skill")
+    assert not (generated_skills / "blocked-skill").exists()
+    assert (real_skills / "blocked-skill").is_dir()
+
+
+def test_prepare_claude_session_tree_filters_disabled_global_skills(monkeypatch, tmp_path):
+    import mms_launchers
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    monkeypatch.chdir(repo_dir)
+
+    raw_root = tmp_path / "project-store"
+    for entry in mms_launchers.CLAUDE_PERSISTENT_ENTRIES:
+        target = raw_root / entry
+        if entry.endswith(".jsonl"):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.touch()
+        else:
+            target.mkdir(parents=True, exist_ok=True)
+
+    source_claude_dir = tmp_path / "source-claude"
+    (source_claude_dir / "skills" / "keep-skill").mkdir(parents=True)
+    (source_claude_dir / "skills" / "blocked-skill").mkdir(parents=True)
+
+    monkeypatch.setattr(
+        mms_launchers,
+        "ensure_claude_project_store",
+        lambda cwd, account_id="": {"project_key": "project-key"},
+    )
+    monkeypatch.setattr(
+        mms_launchers,
+        "claude_raw_entry_path",
+        lambda entry, cwd, account_id="": raw_root / entry,
+    )
+    monkeypatch.setattr(mms_launchers, "record_claude_session_start", lambda **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "write_slot_marker", lambda *args, **kwargs: None)
+
+    session_home = tmp_path / "session"
+    session_claude_dir = session_home / ".claude"
+    session_claude_dir.mkdir(parents=True)
+    os.symlink(source_claude_dir / "skills", session_claude_dir / "skills")
+    stale_overlay = session_home / ".mms-global-skill-overlay" / "claude" / "skills"
+    stale_overlay.mkdir(parents=True)
+    os.symlink(source_claude_dir / "skills" / "blocked-skill", stale_overlay / "blocked-skill")
+
+    mms_launchers._prepare_claude_session_tree(
+        str(session_home),
+        str(session_claude_dir),
+        account_id="relay-a",
+        source_claude_dir=str(source_claude_dir),
+        disabled_session_surfaces={"skills": ["claude:blocked-skill"]},
+    )
+
+    assert os.path.islink(session_claude_dir / "skills")
+    assert os.path.islink(session_claude_dir / "skills" / "keep-skill")
+    assert not (session_claude_dir / "skills" / "blocked-skill").exists()
+    assert (source_claude_dir / "skills" / "blocked-skill").is_dir()
 
 
 def test_codex_gateway_env_materializes_session_toon_skill_and_wrapper(monkeypatch, tmp_path):
@@ -2646,7 +2759,7 @@ def test_sanitize_global_snapshot_strips_session_only_hooks_and_hive_server():
                     "matcher": "WebFetch",
                     "commands": [
                         "/tmp/keep-webfetch.sh",
-                        mms_launchers._CLAUDE_FEISHU_WEBFETCH_GUARD_HOOK,
+                        "/tmp/claude-feishu-webfetch-guard.sh",
                     ],
                 }
             ],
@@ -2725,6 +2838,209 @@ def test_overlay_ecc_session_entries_merges_session_and_ecc_assets(monkeypatch, 
     assert os.path.islink(parent_dir / "rules" / "everything-claude-code-guardrails.md")
 
 
+def test_optional_agent_rules_loader_noops_when_missing_or_empty(tmp_path):
+    import mms_launchers
+
+    parent_dir = tmp_path / "session" / ".claude"
+    parent_dir.mkdir(parents=True)
+    agents_dir = tmp_path / ".agents"
+
+    assert mms_launchers._merge_optional_agent_rules_into_session_tree(str(parent_dir), str(agents_dir)) == []
+    assert not (parent_dir / "rules").exists()
+
+    (agents_dir / "rules").mkdir(parents=True)
+    assert mms_launchers._merge_optional_agent_rules_into_session_tree(str(parent_dir), str(agents_dir)) == []
+    assert not (parent_dir / "rules").exists()
+
+
+def test_optional_agent_rules_loader_filters_markdown_and_sorts(tmp_path):
+    import mms_launchers
+
+    rules_dir = tmp_path / ".agents" / "rules"
+    rules_dir.mkdir(parents=True)
+    (rules_dir / "20-second.md").write_text("# second\n", encoding="utf-8")
+    (rules_dir / "10-first.MD").write_text("# first\n", encoding="utf-8")
+    (rules_dir / "30-third.markdown").write_text("# third\n", encoding="utf-8")
+    (rules_dir / "notes.txt").write_text("skip\n", encoding="utf-8")
+    (rules_dir / "40-dir.md").mkdir()
+
+    files = mms_launchers._optional_agent_rule_files(str(rules_dir))
+
+    assert [name for name, _path in files] == [
+        "10-first.MD",
+        "20-second.md",
+        "30-third.markdown",
+    ]
+
+
+def test_agent_rules_diagnostics_reports_noop_states(tmp_path):
+    import mms_launchers
+
+    rules_dir = tmp_path / ".agents" / "rules"
+
+    missing = mms_launchers._agent_rules_diagnostics_payload(
+        str(rules_dir),
+        allow_agent_rules=True,
+    )
+    assert missing["schema"] == mms_launchers.AGENT_RULES_DIAGNOSTICS_SCHEMA
+    assert missing["checked_path"] == "~/.agents/rules/"
+    assert missing["status"] == "missing"
+    assert missing["loaded_count"] == 0
+    assert missing["loaded_files"] == []
+
+    rules_dir.mkdir(parents=True)
+    empty = mms_launchers._agent_rules_diagnostics_payload(
+        str(rules_dir),
+        allow_agent_rules=True,
+    )
+    assert empty["status"] == "empty"
+    assert empty["entry_count"] == 0
+
+    (rules_dir / "notes.txt").write_text("skip\n", encoding="utf-8")
+    (rules_dir / "nested.md").mkdir()
+    unsupported = mms_launchers._agent_rules_diagnostics_payload(
+        str(rules_dir),
+        allow_agent_rules=True,
+    )
+    assert unsupported["status"] == "unsupported-only"
+    assert unsupported["supported_count"] == 0
+    assert unsupported["unsupported_count"] == 2
+
+
+def test_agent_rules_diagnostics_reports_loaded_filenames_without_content(tmp_path):
+    import mms_launchers
+
+    rules_dir = tmp_path / ".agents" / "rules"
+    rules_dir.mkdir(parents=True)
+    (rules_dir / "20-second.markdown").write_text("# private second body\n", encoding="utf-8")
+    (rules_dir / "10-first.md").write_text("# private first body\n", encoding="utf-8")
+    (rules_dir / "notes.txt").write_text("private note\n", encoding="utf-8")
+
+    payload = mms_launchers._agent_rules_diagnostics_payload(
+        str(rules_dir),
+        allow_agent_rules=True,
+        loaded_files=["10-first.md", "20-second.markdown"],
+    )
+    serialized = json.dumps(payload, ensure_ascii=False)
+
+    assert payload["status"] == "loaded"
+    assert payload["supported_count"] == 2
+    assert payload["unsupported_count"] == 1
+    assert payload["loaded_count"] == 2
+    assert payload["loaded_files"] == ["10-first.md", "20-second.markdown"]
+    assert "private first body" not in serialized
+    assert "private second body" not in serialized
+
+
+def test_optional_agent_rules_loader_preserves_existing_real_rules_dir(tmp_path):
+    import mms_launchers
+
+    parent_dir = tmp_path / "session" / ".claude"
+    existing_rules = parent_dir / "rules"
+    existing_rules.mkdir(parents=True)
+    existing_file = existing_rules / "00-existing.md"
+    existing_file.write_text("# existing\n", encoding="utf-8")
+
+    agents_dir = tmp_path / ".agents"
+    (agents_dir / "rules").mkdir(parents=True)
+    (agents_dir / "rules" / "10-local.md").write_text("# local\n", encoding="utf-8")
+
+    loaded = mms_launchers._merge_optional_agent_rules_into_session_tree(str(parent_dir), str(agents_dir))
+
+    assert loaded == ["10-local.md"]
+    assert existing_rules.is_dir()
+    assert not existing_rules.is_symlink()
+    assert existing_file.read_text(encoding="utf-8") == "# existing\n"
+    assert os.path.islink(existing_rules / "10-local.md")
+    assert (existing_rules / "10-local.md").read_text(encoding="utf-8") == "# local\n"
+
+
+def test_merge_agents_into_session_tree_loads_optional_agent_rules(tmp_path):
+    import mms_launchers
+
+    parent_dir = tmp_path / "session" / ".claude"
+    parent_dir.mkdir(parents=True)
+    existing_rules = tmp_path / "existing-rules"
+    existing_rules.mkdir()
+    (existing_rules / "00-existing.md").write_text("# existing\n", encoding="utf-8")
+    os.symlink(existing_rules, parent_dir / "rules")
+
+    agents_dir = tmp_path / ".agents"
+    (agents_dir / "rules").mkdir(parents=True)
+    (agents_dir / "rules" / "20-second.md").write_text("# second\n", encoding="utf-8")
+    (agents_dir / "rules" / "10-first.md").write_text("# first\n", encoding="utf-8")
+    (agents_dir / "rules" / "notes.txt").write_text("skip\n", encoding="utf-8")
+    (agents_dir / "rules" / "nested.md").mkdir()
+
+    mms_launchers._merge_agents_into_session_tree(
+        str(parent_dir),
+        str(agents_dir),
+        {"skills", "commands"},
+        allow_agent_rules=True,
+    )
+
+    assert os.path.islink(parent_dir / "rules")
+    assert sorted(os.listdir(parent_dir / "rules")) == [
+        "00-existing.md",
+        "10-first.md",
+        "20-second.md",
+    ]
+    assert os.path.islink(parent_dir / "rules" / "10-first.md")
+    assert os.path.islink(parent_dir / "rules" / "20-second.md")
+    assert not (parent_dir / "rules" / "notes.txt").exists()
+    assert not (parent_dir / "rules" / "nested.md").exists()
+
+
+def test_prepare_claude_session_tree_skips_agent_rules_for_restricted_allowlist(monkeypatch, tmp_path):
+    import mms_launchers
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    monkeypatch.chdir(repo_dir)
+
+    raw_root = tmp_path / "project-store"
+    real_home = tmp_path / "real-home"
+    agents_rules = real_home / ".agents" / "rules"
+    agents_rules.mkdir(parents=True)
+    (agents_rules / "10-local.md").write_text("# local\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        mms_launchers,
+        "ensure_claude_project_store",
+        lambda cwd, account_id="": {"project_key": "project-key"},
+    )
+    monkeypatch.setattr(
+        mms_launchers,
+        "claude_raw_entry_path",
+        lambda entry, cwd, account_id="": raw_root / entry,
+    )
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+    monkeypatch.setattr(mms_launchers, "record_claude_session_start", lambda **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "write_slot_marker", lambda *args, **kwargs: None)
+
+    session_home = tmp_path / "session"
+    session_claude_dir = session_home / ".claude"
+    session_claude_dir.mkdir(parents=True)
+
+    session_tree_env = mms_launchers._prepare_claude_session_tree(
+        str(session_home),
+        str(session_claude_dir),
+        account_id="oauth-a",
+        runtime_kind="oauth",
+        allowed_source_entries=mms_launchers._CLAUDE_OAUTH_SESSION_SOURCE_ENTRY_ALLOWLIST,
+    )
+
+    assert not (session_claude_dir / "rules").exists()
+    diagnostics_path = Path(session_tree_env["agent_rules_diagnostics"])
+    assert diagnostics_path == session_home / ".mms" / "diagnostics" / "agent-rules.json"
+    diagnostics = json.loads(diagnostics_path.read_text(encoding="utf-8"))
+    assert diagnostics["status"] == "skipped-by-restricted-allowlist"
+    assert diagnostics["allow_agent_rules"] is False
+    assert diagnostics["supported_count"] == 1
+    assert diagnostics["loaded_count"] == 0
+    assert diagnostics["loaded_files"] == []
+
+
 def test_claude_gateway_env_materializes_session_ecc_assets_and_env(monkeypatch, tmp_path):
     import mms_launchers
 
@@ -2780,7 +3096,11 @@ def test_claude_gateway_env_materializes_session_ecc_assets_and_env(monkeypatch,
     monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=True: env)
     monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *args, **kwargs: None)
     monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
-    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda: [str(tmp_path / "route-status.json")])
+    monkeypatch.setattr(
+        mms_launchers,
+        "_claude_route_status_paths",
+        lambda *args, **kwargs: [str(tmp_path / "route-status.json")],
+    )
     monkeypatch.setattr(mms_launchers, "list_indexed_sessions", lambda _cli="claude": [])
 
     env = mms_launchers._claude_gateway_env(
@@ -2795,6 +3115,9 @@ def test_claude_gateway_env_materializes_session_ecc_assets_and_env(monkeypatch,
     assert env["ECC_PLUGIN_ROOT"] == str(ecc_root)
     assert env["ECC_HOOK_PROFILE"] == "standard"
     settings = json.loads((session_home / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    assert "ANTHROPIC_API_KEY" not in env
+    assert "ANTHROPIC_API_KEY" not in settings["env"]
+    assert settings["env"]["ANTHROPIC_AUTH_TOKEN"] == "bridge-token"
     assert settings["env"]["CLAUDE_PLUGIN_ROOT"] == str(ecc_root)
     assert settings["env"]["ECC_PLUGIN_ROOT"] == str(ecc_root)
     session_start_commands = [
@@ -2840,7 +3163,7 @@ def test_claude_gateway_env_materializes_session_web_access_skill(monkeypatch, t
     monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=True: env)
     monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *args, **kwargs: None)
     monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
-    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda: [str(tmp_path / "route-status.json")])
+    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda *args, **kwargs: [str(tmp_path / "route-status.json")])
     monkeypatch.setattr(mms_launchers, "list_indexed_sessions", lambda _cli="claude": [])
 
     env = mms_launchers._claude_gateway_env(
@@ -2862,6 +3185,68 @@ def test_claude_gateway_env_materializes_session_web_access_skill(monkeypatch, t
     assert settings["env"]["MMS_MODEL_NAME"] == "kimi-for-coding"
     assert settings["env"]["MMS_SESSION_PACKET_JSON"] == env["MMS_SESSION_PACKET_JSON"]
     assert env["MMS_SESSION_PACKET_FORMAT"] == "toon"
+
+
+def test_claude_gateway_env_exposes_agent_rules_diagnostics(monkeypatch, tmp_path):
+    import mms_launchers
+
+    session_home = tmp_path / "gateway-session"
+    session_home.mkdir()
+    real_home = tmp_path / "real-home"
+    (real_home / ".local").mkdir(parents=True)
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    diagnostics_path = session_home / ".mms" / "diagnostics" / "agent-rules.json"
+
+    def prepare_session_tree(_home, claude_dir, **_kwargs):
+        os.makedirs(claude_dir, exist_ok=True)
+        diagnostics_path.parent.mkdir(parents=True, exist_ok=True)
+        diagnostics_path.write_text(
+            json.dumps(
+                {
+                    "schema": "mms.agent_rules_diagnostics.v1",
+                    "checked_path": "~/.agents/rules/",
+                    "status": "loaded",
+                    "loaded_count": 1,
+                    "loaded_files": ["10-local.md"],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return {"agent_rules_diagnostics": str(diagnostics_path)}
+
+    monkeypatch.chdir(repo_dir)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_reserve_session_home",
+        lambda *args, **kwargs: (str(session_home), 0, 1),
+    )
+    monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_claude_library_entries", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_prepare_claude_session_tree", prepare_session_tree)
+    monkeypatch.setattr(mms_launchers, "_pick_gateway_model", lambda *args, **kwargs: "kimi-for-coding")
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=True: env)
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda *args, **kwargs: [str(tmp_path / "route-status.json")])
+    monkeypatch.setattr(mms_launchers, "list_indexed_sessions", lambda _cli="claude": [])
+
+    env = mms_launchers._claude_gateway_env(
+        {"id": "relay-a", "api_key": "sk-runtime"},
+        base_url="https://relay.example.com",
+        auth_token="bridge-token",
+        selected_model="kimi-for-coding",
+        display_model="kimi-for-coding",
+    )
+
+    settings = json.loads((session_home / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    packet = json.loads(Path(env["MMS_SESSION_PACKET_JSON"]).read_text(encoding="utf-8"))
+
+    assert env["MMS_AGENT_RULES_DIAGNOSTICS_JSON"] == str(diagnostics_path)
+    assert settings["env"]["MMS_AGENT_RULES_DIAGNOSTICS_JSON"] == str(diagnostics_path)
+    assert {"name": "agent_rules_diagnostics", "path": str(diagnostics_path)} in packet["paths"]
 
 
 def test_claude_gateway_env_materializes_session_toon_skill_and_export(monkeypatch, tmp_path):
@@ -2903,7 +3288,7 @@ def test_claude_gateway_env_materializes_session_toon_skill_and_export(monkeypat
     monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
     monkeypatch.setattr(mms_launchers, "_mms_toon_script_path", lambda: str(toon_script))
     monkeypatch.setattr(mms_launchers, "_SESSION_REAL_HOME_WRAPPER_COMMANDS", ())
-    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda: [str(tmp_path / "route-status.json")])
+    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda *args, **kwargs: [str(tmp_path / "route-status.json")])
     monkeypatch.setattr(mms_launchers, "list_indexed_sessions", lambda _cli="claude": [])
 
     env = mms_launchers._claude_gateway_env(
@@ -3148,6 +3533,86 @@ def test_cleanup_stale_sessions_respects_launch_cap(tmp_path):
 
     remaining = sorted(item.name for item in sessions_dir.iterdir())
     assert len(remaining) == 2
+
+
+def test_cleanup_stale_sessions_keeps_live_legacy_locale_identity(monkeypatch, tmp_path):
+    import mms_launchers
+
+    sessions_dir = tmp_path / "sessions"
+    session_home = sessions_dir / "1234"
+    session_home.mkdir(parents=True)
+    marker_path = session_home / mms_launchers._SESSION_GUARD_MARKER_NAME
+    marker_path.write_text(
+        json.dumps(
+            {
+                "launcher_pid": 1234,
+                "launcher_identity": "/opt/homebrew/Ce 五  6月/26 21:29:13 2026",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_kill(pid, sig):
+        if int(pid) == 1234:
+            return None
+        raise ProcessLookupError()
+
+    monkeypatch.setattr(mms_launchers.os, "kill", fake_kill)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_session_guard_process_identity",
+        lambda _pid: "/opt/homebrew/Ce Fri Jun 26 21:29:13 2026",
+    )
+
+    mms_launchers._cleanup_stale_sessions(str(sessions_dir))
+
+    assert session_home.exists()
+
+
+def test_write_session_guard_marker_refreshes_launcher_identity(monkeypatch, tmp_path):
+    import mms_launchers
+
+    session_home = tmp_path / "sessions" / "2222"
+    session_home.mkdir(parents=True)
+    marker_path = session_home / mms_launchers._SESSION_GUARD_MARKER_NAME
+    marker_path.write_text(
+        json.dumps({"launcher_pid": 1111, "launcher_identity": "legacy-locale"}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(mms_launchers.os, "getpid", lambda: 2222)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_session_guard_process_identity",
+        lambda pid: f"canonical-{pid}",
+    )
+
+    mms_launchers._write_session_guard_marker(str(session_home), account_id="relay-a", runtime_kind="api_key")
+
+    marker = json.loads(marker_path.read_text(encoding="utf-8"))
+    assert marker["launcher_pid"] == 2222
+    assert marker["launcher_identity"] == "canonical-2222"
+    assert marker["account_id"] == "relay-a"
+
+
+def test_validate_claude_session_settings_requires_auth_env(tmp_path):
+    import mms_launchers
+
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(
+        json.dumps({"env": {"ANTHROPIC_BASE_URL": "https://relay.example.com"}}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="ANTHROPIC_AUTH_TOKEN"):
+        mms_launchers._validate_claude_session_settings(
+            str(settings_path),
+            {
+                "ANTHROPIC_AUTH_TOKEN": "bridge-token",
+                "ANTHROPIC_BASE_URL": "https://relay.example.com",
+                "MMS_ROUTE_STATUS_PATH": str(tmp_path / "route_status.json"),
+            },
+        )
 
 
 def test_claude_guard_runtime_uses_gateway_home_for_api_key(monkeypatch, tmp_path):
@@ -3398,6 +3863,7 @@ def test_launch_claude_failed_probe_still_uses_bridge_for_non_claude_model(monke
             "auth_mode": "api_key",
             "api_key": "sk-runtime",
             "anthropic_base_url": "https://token-plan-cn.xiaomimimo.com/anthropic",
+            "model_capabilities": {"mimo-v2.5-pro": {"vision": False}},
             "vision_sidecar": {
                 "enabled": True,
                 "provider_id": "mimo-direct-anthropic",
@@ -3411,11 +3877,240 @@ def test_launch_claude_failed_probe_still_uses_bridge_for_non_claude_model(monke
 
     assert captured["gateway_url"] == "https://token-plan-cn.xiaomimimo.com/anthropic/v1"
     assert captured["bridge_kwargs"]["heavy_model"] == "mimo-v2.5-pro"
+    assert captured["bridge_kwargs"]["model_capabilities"]["mimo-v2.5-pro"]["vision"] is False
     assert captured["bridge_kwargs"]["vision_sidecar"]["model"] == "mimo-v2.5"
     assert captured["prepare_kwargs"]["auth_token"] == "bridge-token"
     assert captured["prepare_kwargs"]["selected_model"] == "claude-sonnet-4-6"
     assert captured["prepare_kwargs"]["display_model"] == "mimo-v2.5-pro"
+    assert captured["cmd"][1:3] == [
+        "--settings",
+        str(tmp_path / "session" / ".claude" / "settings.json"),
+    ]
     assert captured["exec_kwargs"]["bridge_info"]["base_url"] == "http://127.0.0.1:4567/v1"
+
+
+def test_launch_claude_mimo_1m_shell_model_keeps_compact_window(monkeypatch, tmp_path):
+    import mms_launchers
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    monkeypatch.chdir(repo_dir)
+    captured = {}
+
+    class FakeBridge:
+        def __enter__(self):
+            return {"base_url": "http://127.0.0.1:4567/v1", "api_key": "bridge-token"}
+
+        def __exit__(self, *_args):
+            return None
+
+    def fake_bridge(gateway_url, gateway_key, **kwargs):
+        captured["gateway_url"] = gateway_url
+        captured["gateway_key"] = gateway_key
+        captured["bridge_kwargs"] = kwargs
+        return FakeBridge()
+
+    def fake_prepare(runtime, **kwargs):
+        captured["prepare_kwargs"] = kwargs
+        return {
+            "HOME": str(tmp_path / "session"),
+            "PATH": "/usr/bin",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-4-6",
+            "CLAUDE_CODE_SUBAGENT_MODEL": "claude-sonnet-4-6",
+        }
+
+    def fake_exec(cmd, env, once, **kwargs):
+        captured["cmd"] = cmd
+        captured["env"] = env
+        captured["exec_kwargs"] = kwargs
+
+    monkeypatch.setattr(mms_launchers, "_ensure_bridge_helpers", lambda: None)
+    monkeypatch.setattr(mms_launchers, "_ensure_speed_stats", lambda: None)
+    monkeypatch.setattr(mms_launchers, "build_provider_speed_scope", lambda _runtime: {})
+    monkeypatch.setattr(mms_launchers, "_health_check_due", lambda _provider_id: False)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_probe_models",
+        lambda *_args, **_kwargs: {"models": ["mimo-v2.5"], "base_source": "test"},
+    )
+    monkeypatch.setattr(mms_launchers, "_resolve_anthropic_base_url", lambda *_args, **_kwargs: (None, "failed"))
+    monkeypatch.setattr(mms_launchers, "_resolve_native_fallback_routes", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(mms_launchers, "_gateway_claude_bridge_context", fake_bridge)
+    monkeypatch.setattr(mms_launchers, "_prepare_claude_env_with_status", fake_prepare)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_effective_context_window",
+        lambda *models, **_kwargs: 1_048_576 if "mimo-v2.5" in models else 200_000,
+    )
+    monkeypatch.setattr(mms_launchers, "_resolve_real_home_command_path", lambda *_args, **_kwargs: "claude")
+    monkeypatch.setattr(mms_launchers, "_exec_or_run", fake_exec)
+    monkeypatch.setattr(mms_launchers, "_finalize_claude_slot", lambda *_args, **_kwargs: None)
+
+    mms_launchers.launch_claude(
+        {"model": "mimo-v2.5"},
+        {
+            "id": "mimo-direct-anthropic",
+            "auth_mode": "api_key",
+            "api_key": "sk-runtime",
+            "anthropic_base_url": "https://token-plan-cn.xiaomimimo.com/anthropic",
+            "model_capabilities": {"mimo-v2.5": {"vision": True}},
+        },
+        once=True,
+    )
+
+    assert captured["prepare_kwargs"]["selected_model"] == "claude-sonnet-4-6"
+    assert captured["prepare_kwargs"]["display_model"] == "mimo-v2.5"
+    assert captured["env"]["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] == "1048576"
+    assert captured["env"]["CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE"] == "1045576"
+    for key in (
+        "ANTHROPIC_MODEL",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_REASONING_MODEL",
+        "CLAUDE_CODE_SUBAGENT_MODEL",
+    ):
+        assert captured["env"][key] == "claude-sonnet-4-6[1m]"
+
+
+def test_claude_shell_context_slots_cover_260k_routed_models():
+    import mms_launchers
+
+    env = {
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-4-6",
+        "CLAUDE_CODE_SUBAGENT_MODEL": "claude-sonnet-4-6",
+    }
+
+    shell_model = mms_launchers._apply_claude_shell_context_slots(
+        env,
+        context_window=262_144,
+        fallback_model="claude-sonnet-4-6",
+        enable_1m=True,
+        provider_id="kimi-direct",
+    )
+
+    assert shell_model == "claude-sonnet-4-6[1m]"
+    for key in (
+        "ANTHROPIC_MODEL",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_REASONING_MODEL",
+        "CLAUDE_CODE_SUBAGENT_MODEL",
+    ):
+        assert env[key] == "claude-sonnet-4-6[1m]"
+
+    base_env = {"ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-4-6"}
+    assert (
+        mms_launchers._apply_claude_shell_context_slots(
+            base_env,
+            context_window=200_000,
+            fallback_model="claude-sonnet-4-6",
+            enable_1m=True,
+            provider_id="kimi-direct",
+        )
+        == ""
+    )
+    assert base_env["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "claude-sonnet-4-6"
+
+
+def test_launch_claude_policy_vision_model_suppresses_sidecar(monkeypatch, tmp_path):
+    import mms_launchers
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    monkeypatch.chdir(repo_dir)
+    captured = {}
+
+    class FakeBridge:
+        def __enter__(self):
+            return {"base_url": "http://127.0.0.1:4567/v1", "api_key": "bridge-token"}
+
+        def __exit__(self, *_args):
+            return None
+
+    def fake_bridge(gateway_url, gateway_key, **kwargs):
+        captured["gateway_url"] = gateway_url
+        captured["gateway_key"] = gateway_key
+        captured["bridge_kwargs"] = kwargs
+        return FakeBridge()
+
+    def fake_prepare(runtime, **kwargs):
+        captured["prepare_kwargs"] = kwargs
+        return {"HOME": str(tmp_path / "session"), "PATH": "/usr/bin"}
+
+    def fake_exec(cmd, env, once, **kwargs):
+        captured["exec_kwargs"] = kwargs
+
+    monkeypatch.setattr(mms_launchers, "_ensure_bridge_helpers", lambda: None)
+    monkeypatch.setattr(mms_launchers, "_ensure_speed_stats", lambda: None)
+    monkeypatch.setattr(mms_launchers, "build_provider_speed_scope", lambda _runtime: {})
+    monkeypatch.setattr(mms_launchers, "_health_check_due", lambda _provider_id: False)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_probe_models",
+        lambda *_args, **_kwargs: {"models": ["MiniMax-M3"], "base_source": "test"},
+    )
+    monkeypatch.setattr(mms_launchers, "_resolve_anthropic_base_url", lambda *_args, **_kwargs: (None, "failed"))
+    monkeypatch.setattr(mms_launchers, "_resolve_native_fallback_routes", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(mms_launchers, "_gateway_claude_bridge_context", fake_bridge)
+    monkeypatch.setattr(mms_launchers, "_prepare_claude_env_with_status", fake_prepare)
+    monkeypatch.setattr(mms_launchers, "_resolve_real_home_command_path", lambda *_args, **_kwargs: "claude")
+    monkeypatch.setattr(mms_launchers, "_exec_or_run", fake_exec)
+    monkeypatch.setattr(mms_launchers, "_finalize_claude_slot", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        mms_launchers,
+        "resolve_model_capabilities",
+        lambda *_args, **_kwargs: {
+            "supports_vision": False,
+            "sources": {"supports_vision": "conservative_fallback"},
+        },
+    )
+
+    mms_launchers.launch_claude(
+        {"model": "MiniMax-M3"},
+        {
+            "id": "minimax",
+            "auth_mode": "api_key",
+            "api_key": "sk-runtime",
+            "anthropic_base_url": "https://minimax.example.com/anthropic",
+            "vision_sidecar": {
+                "enabled": True,
+                "provider_id": "direct-qwen",
+                "model": "qwen3.6-plus",
+                "anthropic_base_url": "https://qwen.example.com/anthropic",
+                "api_key": "sk-vision",
+            },
+        },
+        once=True,
+    )
+
+    assert captured["gateway_url"] == "https://minimax.example.com/anthropic/v1"
+    assert captured["bridge_kwargs"]["heavy_model"] == "MiniMax-M3"
+    assert captured["bridge_kwargs"]["model_capabilities"]["MiniMax-M3"]["vision"] is True
+    assert captured["bridge_kwargs"]["vision_sidecar"] == {}
+    assert captured["prepare_kwargs"]["selected_model"] == "claude-sonnet-4-6"
+    assert captured["prepare_kwargs"]["display_model"] == "MiniMax-M3"
+
+
+def test_runtime_model_capabilities_updates_stale_normalized_vision_key(monkeypatch):
+    import mms_launchers
+
+    monkeypatch.setattr(
+        mms_launchers,
+        "resolve_model_capabilities",
+        lambda *_args, **_kwargs: {
+            "supports_vision": False,
+            "sources": {"supports_vision": "conservative_fallback"},
+        },
+    )
+
+    capabilities = mms_launchers._runtime_model_capabilities(
+        {"model_capabilities": {"minimax-m3": {"vision": False}}},
+        "MiniMax-M3",
+    )
+
+    assert capabilities["minimax-m3"]["vision"] is True
+    assert capabilities["minimax-m3"]["supports_vision"] is True
+    assert mms_launchers._model_capabilities_support_vision(capabilities, "MiniMax-M3") is True
 
 
 def test_load_probe_file_cache_marks_stale_and_preserves_error(monkeypatch, tmp_path):
@@ -4866,6 +5561,8 @@ def test_claude_gateway_env_scrubs_inherited_claude_auth_env(monkeypatch, tmp_pa
     monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-parent")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-parent")
     monkeypatch.setenv("CLAUDE_CODE_SUBAGENT_MODEL", "claude-haiku-4-5")
+    monkeypatch.setenv("HEADROOM_PORT", "8787")
+    monkeypatch.setenv("HEADROOM_MODE", "token")
 
     monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *args, **kwargs: None)
     monkeypatch.setattr(mms_launchers, "_link_claude_library_entries", lambda *args, **kwargs: None)
@@ -4876,7 +5573,7 @@ def test_claude_gateway_env_scrubs_inherited_claude_auth_env(monkeypatch, tmp_pa
     monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=True: env)
     monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
     monkeypatch.setattr(mms_launchers, "_claude_gateway_home", lambda: str(gateway_home))
-    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda: [str(tmp_path / "route-status.json")])
+    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda *args, **kwargs: [str(tmp_path / "route-status.json")])
     monkeypatch.setattr(mms_launchers, "list_indexed_sessions", lambda _cli="claude": [])
 
     env = mms_launchers._claude_gateway_env(
@@ -4889,6 +5586,8 @@ def test_claude_gateway_env_scrubs_inherited_claude_auth_env(monkeypatch, tmp_pa
     assert env["ANTHROPIC_AUTH_TOKEN"] == "bridge-token"
     assert env["ANTHROPIC_BASE_URL"] == "https://relay.example.com"
     assert "ANTHROPIC_API_KEY" not in env
+    assert "HEADROOM_PORT" not in env
+    assert "HEADROOM_MODE" not in env
     assert env["CLAUDE_CODE_SUBAGENT_MODEL"] != "claude-haiku-4-5"
 
 
@@ -4955,7 +5654,7 @@ def test_claude_gateway_env_seeds_ui_state_and_sanitized_project_trust(monkeypat
     monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=True: env)
     monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *args, **kwargs: None)
     monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
-    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda: [str(tmp_path / "route-status.json")])
+    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda *args, **kwargs: [str(tmp_path / "route-status.json")])
     monkeypatch.setattr(
         mms_launchers,
         "_session_managed_mcp_servers",
@@ -4993,7 +5692,7 @@ def test_claude_gateway_env_seeds_ui_state_and_sanitized_project_trust(monkeypat
     assert "lastSessionId" not in project_state
 
 
-def test_claude_gateway_env_restores_project_scoped_resume_pointer(monkeypatch, tmp_path):
+def test_claude_gateway_env_does_not_restore_project_scoped_resume_pointer_on_new_launch(monkeypatch, tmp_path):
     import mms_launchers
 
     session_home = tmp_path / "gateway-session"
@@ -5033,7 +5732,7 @@ def test_claude_gateway_env_restores_project_scoped_resume_pointer(monkeypatch, 
     monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=True: env)
     monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *args, **kwargs: None)
     monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
-    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda: [str(tmp_path / "route-status.json")])
+    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda *args, **kwargs: [str(tmp_path / "route-status.json")])
     monkeypatch.setattr(
         mms_launchers,
         "list_indexed_sessions",
@@ -5079,10 +5778,10 @@ def test_claude_gateway_env_restores_project_scoped_resume_pointer(monkeypatch, 
 
     session_state = json.loads((session_home / ".claude.json").read_text(encoding="utf-8"))
     project_state = session_state["projects"][str(repo_dir.resolve())]
-    assert project_state["lastSessionId"] == "session-match"
+    assert "lastSessionId" not in project_state
 
 
-def test_claude_gateway_env_does_not_restore_cross_model_resume_pointer(monkeypatch, tmp_path):
+def test_claude_gateway_env_does_not_restore_cross_model_resume_pointer_on_new_launch(monkeypatch, tmp_path):
     import mms_launchers
 
     session_home = tmp_path / "gateway-session"
@@ -5120,7 +5819,7 @@ def test_claude_gateway_env_does_not_restore_cross_model_resume_pointer(monkeypa
     monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=True: env)
     monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *args, **kwargs: None)
     monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
-    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda: [str(tmp_path / "route-status.json")])
+    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda *args, **kwargs: [str(tmp_path / "route-status.json")])
     monkeypatch.setattr(
         mms_launchers,
         "list_indexed_sessions",
@@ -5369,6 +6068,48 @@ def test_gateway_bridge_post_disables_trust_env_and_respects_runtime_proxy(monke
     assert captured["url"] == "https://relay.example.com/v1/messages"
     assert captured["kwargs"]["trust_env"] is False
     assert captured["kwargs"]["proxy"] == "http://127.0.0.1:15721"
+
+
+def test_gateway_bridge_handles_count_tokens_locally(monkeypatch):
+    import mms_bridge
+
+    def fake_post(*_args, **_kwargs):
+        raise AssertionError("count_tokens must not be forwarded upstream")
+
+    monkeypatch.setattr(mms_bridge, "httpx", types.SimpleNamespace(post=fake_post))
+    monkeypatch.setattr(mms_bridge, "_ensure_httpx", lambda: mms_bridge.httpx)
+
+    raw_body = json.dumps(
+        {
+            "model": "MiniMax-M3",
+            "system": [{"type": "text", "text": "stable prefix"}],
+            "messages": [{"role": "user", "content": "hi from claude code"}],
+        }
+    ).encode("utf-8")
+
+    captured = {}
+    handler = mms_bridge._GatewayBridgeHandler.__new__(mms_bridge._GatewayBridgeHandler)
+    handler.path = "/v1/messages/count_tokens?beta=true"
+    handler.headers = {
+        "content-length": str(len(raw_body)),
+        "authorization": "Bearer bridge-token",
+    }
+    handler.rfile = io.BytesIO(raw_body)
+    handler.wfile = io.BytesIO()
+    handler.server = types.SimpleNamespace(
+        bridge_token="bridge-token",
+        gateway_key="gateway-key",
+        gateway_url="https://relay.example.com/v1",
+    )
+    handler._json = lambda code, payload: captured.update({"code": code, "payload": payload})
+    handler.send_response = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("send_response should not be called"))
+    handler.send_header = lambda *_args, **_kwargs: None
+    handler.end_headers = lambda: None
+
+    handler.do_POST()
+
+    assert captured["code"] == 200
+    assert captured["payload"]["input_tokens"] >= 1
 
 
 def test_gateway_bridge_preserves_qwen_anthropic_cache_control(monkeypatch):
@@ -5784,6 +6525,664 @@ def test_chatcompletions_fallback_429_respects_retry_after_without_fanout(monkey
     assert sleep_calls == [2.0]
     assert status["code"] == 429
     assert sent_headers["Retry-After"] == "3"
+
+
+def test_responses_input_to_messages_preserves_kimi_reasoning_for_split_tool_calls():
+    import mms_bridge
+
+    messages = mms_bridge._responses_input_to_messages(
+        "",
+        [
+            {
+                "type": "reasoning",
+                "id": "rs_1",
+                "summary": [{"type": "summary_text", "text": "carry this forward"}],
+            },
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "I will call tools now."}],
+            },
+            {
+                "type": "function_call",
+                "id": "fc_1",
+                "call_id": "call_1",
+                "name": "Bash",
+                "arguments": "{\"command\":\"pwd\"}",
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_1",
+                "output": "/tmp",
+            },
+        ],
+        "kimi-k2.6",
+    )
+
+    assert messages[0]["role"] == "assistant"
+    assert messages[0]["content"] == "I will call tools now."
+    assert messages[0]["reasoning_content"] == "carry this forward"
+    assert messages[1]["role"] == "assistant"
+    assert messages[1]["tool_calls"][0]["function"]["name"] == "Bash"
+    assert messages[1]["reasoning_content"] == "carry this forward"
+    assert messages[2] == {"role": "tool", "tool_call_id": "call_1", "content": "/tmp"}
+
+
+def test_responses_input_to_messages_carries_kimi_reasoning_across_multiple_tool_rounds():
+    import mms_bridge
+
+    messages = mms_bridge._responses_input_to_messages(
+        "",
+        [
+            {
+                "type": "reasoning",
+                "id": "rs_1",
+                "summary": [{"type": "summary_text", "text": "carry this forward"}],
+            },
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "Loading work skill."}],
+            },
+            {
+                "type": "function_call",
+                "id": "fc_1",
+                "call_id": "call_1",
+                "name": "Bash",
+                "arguments": "{\"command\":\"python3 work_runner.py init\"}",
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_1",
+                "output": "phase: INTAKE",
+            },
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "Skill loaded."}],
+            },
+            {
+                "type": "function_call",
+                "id": "fc_2",
+                "call_id": "call_2",
+                "name": "Bash",
+                "arguments": "{\"command\":\"pwd\"}",
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_2",
+                "output": "/Users/xin/site-group/anime-apocalypse-wiki",
+            },
+        ],
+        "kimi-k2.6",
+    )
+
+    assert messages[0]["reasoning_content"] == "carry this forward"
+    assert messages[1]["reasoning_content"] == "carry this forward"
+    assert messages[3]["role"] == "assistant"
+    assert messages[3]["content"] == "Skill loaded."
+    assert "reasoning_content" not in messages[3]
+    assert messages[4]["role"] == "assistant"
+    assert messages[4]["tool_calls"][0]["function"]["name"] == "Bash"
+    assert messages[4]["reasoning_content"] == "carry this forward"
+
+
+def test_responses_input_to_messages_restores_kimi_tool_reasoning_from_session():
+    import mms_bridge
+
+    messages = mms_bridge._responses_input_to_messages(
+        "",
+        [
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "I will call tools now."}],
+            },
+            {
+                "type": "function_call",
+                "id": "fc_1",
+                "call_id": "call_1",
+                "name": "Bash",
+                "arguments": "{\"command\":\"pwd\"}",
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_1",
+                "output": "/tmp",
+            },
+        ],
+        "kimi-k2.6",
+        session_reasoning_content="carry this forward",
+    )
+
+    assert messages[0]["role"] == "assistant"
+    assert "reasoning_content" not in messages[0]
+    assert messages[1]["role"] == "assistant"
+    assert messages[1]["tool_calls"][0]["function"]["name"] == "Bash"
+    assert messages[1]["reasoning_content"] == "carry this forward"
+
+
+def test_responses_payload_to_anthropic_messages_payload_preserves_kimi_reasoning():
+    import mms_bridge
+
+    payload = mms_bridge._responses_payload_to_anthropic_messages_payload(
+        {
+            "instructions": "",
+            "input": [
+                {
+                    "type": "reasoning",
+                    "id": "rs_1",
+                    "summary": [{"type": "summary_text", "text": "carry this forward"}],
+                },
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "I will call tools now."}],
+                },
+                {
+                    "type": "function_call",
+                    "id": "fc_1",
+                    "call_id": "call_1",
+                    "name": "Bash",
+                    "arguments": "{\"command\":\"pwd\"}",
+                },
+            ],
+        },
+        "kimi-k2.6",
+    )
+
+    assert payload["messages"][0]["content"][0] == {"type": "thinking", "thinking": "carry this forward"}
+    assert payload["messages"][0]["content"][1] == {"type": "text", "text": "I will call tools now."}
+    assert payload["messages"][1]["content"][0] == {"type": "thinking", "thinking": "carry this forward"}
+    assert payload["messages"][1]["content"][1]["type"] == "tool_use"
+
+
+def test_chatcompletions_fallback_preserves_kimi_reasoning_for_tool_history(monkeypatch):
+    import mms_bridge
+
+    captured = {}
+
+    class FakeResponse:
+        status_code = 400
+        headers = {}
+
+        def __init__(self, body):
+            self._body = body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return self._body
+
+        @staticmethod
+        def iter_lines():
+            return iter(())
+
+    def fake_stream(method, url, **kwargs):
+        captured["json"] = kwargs.get("json")
+        return FakeResponse(b"missing reasoning_content")
+
+    monkeypatch.setattr(mms_bridge, "httpx", types.SimpleNamespace(stream=fake_stream))
+    monkeypatch.setattr(
+        mms_bridge,
+        "_build_gateway_candidate_urls",
+        lambda *args, **kwargs: ["https://gw.example.com/chat/completions"],
+    )
+
+    handler = mms_bridge._ResponsesProxyHandler.__new__(mms_bridge._ResponsesProxyHandler)
+    handler.headers = {}
+    handler.wfile = io.BytesIO()
+    handler.server = types.SimpleNamespace(
+        speed_scope=None,
+        provider_id="kimi",
+        provider_profile="kimi-code",
+        reasoning_enabled=True,
+        reasoning_effort="high",
+    )
+    handler.send_response = lambda code: None
+    handler.send_header = lambda name, value: None
+    handler.end_headers = lambda: None
+    handler._json = lambda code, payload: captured.setdefault("error", (code, payload))
+
+    handler._do_chatcompletions_fallback(
+        {
+            "input": [
+                {
+                    "type": "reasoning",
+                    "id": "rs_1",
+                    "summary": [{"type": "summary_text", "text": "carry this forward"}],
+                },
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "I will call tools now."}],
+                },
+                {
+                    "type": "function_call",
+                    "id": "fc_1",
+                    "call_id": "call_1",
+                    "name": "Bash",
+                    "arguments": "{\"command\":\"pwd\"}",
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_1",
+                    "output": "/tmp",
+                },
+            ],
+            "instructions": "",
+        },
+        "kimi-k2.6",
+        "https://gw.example.com",
+        "gateway-key",
+        0,
+        route={"provider_id": "kimi", "provider_profile": "kimi-code"},
+    )
+
+    messages = captured["json"]["messages"]
+    assert messages[0]["reasoning_content"] == "carry this forward"
+    assert messages[1]["reasoning_content"] == "carry this forward"
+    assert messages[1]["tool_calls"][0]["function"]["name"] == "Bash"
+
+
+def test_chatcompletions_translator_emits_kimi_reasoning_in_completed_output():
+    import mms_bridge
+
+    translator = mms_bridge._ChatCompletionsToResponsesTranslator("kimi-k2.6", response_id="resp_test")
+    completed = None
+
+    chunks = [
+        {"choices": [{"delta": {"reasoning_content": "carry "}, "finish_reason": None}]},
+        {"choices": [{"delta": {"reasoning_content": "this forward"}, "finish_reason": None}]},
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "call_1",
+                                "function": {"name": "Bash", "arguments": ""},
+                            }
+                        ]
+                    },
+                    "finish_reason": None,
+                }
+            ]
+        },
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "function": {"arguments": "{\"command\":\"pwd\"}"},
+                            }
+                        ]
+                    },
+                    "finish_reason": None,
+                }
+            ]
+        },
+        {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
+    ]
+
+    for chunk in chunks:
+        for event_name, event_payload in translator.process_chunk(chunk):
+            if event_name == "response.completed":
+                completed = event_payload["response"]
+
+    assert completed is not None
+    output = completed["output"]
+    assert output[0]["type"] == "reasoning"
+    assert output[0]["summary"] == [{"type": "summary_text", "text": "carry this forward"}]
+    assert output[1]["type"] == "function_call"
+    assert output[1]["reasoning_content"] == "carry this forward"
+    assert output[1]["call_id"] == "call_1"
+
+
+def test_chatcompletions_translator_completed_output_roundtrips_kimi_tool_reasoning():
+    import mms_bridge
+
+    translator = mms_bridge._ChatCompletionsToResponsesTranslator("kimi-k2.6", response_id="resp_test")
+    completed_output = None
+
+    chunks = [
+        {"choices": [{"delta": {"reasoning_content": "carry this forward"}, "finish_reason": None}]},
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "call_1",
+                                "function": {"name": "Bash", "arguments": "{\"command\":\"pwd\"}"},
+                            }
+                        ]
+                    },
+                    "finish_reason": None,
+                }
+            ]
+        },
+        {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
+    ]
+
+    for chunk in chunks:
+        for event_name, event_payload in translator.process_chunk(chunk):
+            if event_name == "response.completed":
+                completed_output = event_payload["response"]["output"]
+
+    messages = mms_bridge._responses_input_to_messages(
+        "",
+        list(completed_output or [])
+        + [
+            {
+                "type": "function_call_output",
+                "call_id": "call_1",
+                "output": "/tmp",
+            }
+        ],
+        "kimi-k2.6",
+    )
+
+    assert messages[0]["role"] == "assistant"
+    assert messages[0]["tool_calls"][0]["function"]["name"] == "Bash"
+    assert messages[0]["reasoning_content"] == "carry this forward"
+    assert messages[1] == {"role": "tool", "tool_call_id": "call_1", "content": "/tmp"}
+
+
+def test_codex_chat_bridge_preserves_kimi_reasoning_across_real_tool_roundtrip():
+    import importlib
+    import mms_bridge
+
+    mms_bridge = importlib.reload(mms_bridge)
+
+    class FakeUpstreamHandler(BaseHTTPRequestHandler):
+        requests = []
+
+        def log_message(self, *_args):
+            return
+
+        def do_POST(self):
+            length = int(self.headers.get("content-length") or 0)
+            body = self.rfile.read(length) if length else b"{}"
+            payload = json.loads(body.decode("utf-8"))
+            type(self).requests.append(payload)
+
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+
+            if len(type(self).requests) == 1:
+                events = [
+                    {
+                        "choices": [
+                            {
+                                "delta": {"reasoning_content": "carry this forward"},
+                                "finish_reason": None,
+                            }
+                        ]
+                    },
+                    {
+                        "choices": [
+                            {
+                                "delta": {
+                                    "tool_calls": [
+                                        {
+                                            "index": 0,
+                                            "id": "call_1",
+                                            "function": {
+                                                "name": "Bash",
+                                                "arguments": "{\"command\":\"python3 work_runner.py init\"}",
+                                            },
+                                        }
+                                    ]
+                                },
+                                "finish_reason": None,
+                            }
+                        ]
+                    },
+                    {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
+                ]
+            else:
+                events = [
+                    {
+                        "choices": [
+                            {
+                                "delta": {"content": "ok"},
+                                "finish_reason": None,
+                            }
+                        ]
+                    },
+                    {"choices": [{"delta": {}, "finish_reason": "stop"}]},
+                ]
+
+            for item in events:
+                self.wfile.write(f"data: {json.dumps(item)}\n\n".encode("utf-8"))
+            self.wfile.flush()
+
+    upstream = HTTPServer(("127.0.0.1", 0), FakeUpstreamHandler)
+    upstream_port = upstream.server_address[1]
+    upstream_thread = threading.Thread(target=upstream.serve_forever, daemon=True)
+    upstream_thread.start()
+
+    try:
+        mms_bridge._ensure_httpx()
+        client = mms_bridge.httpx
+        assert client is not None
+
+        with mms_bridge.codex_chatcompletions_bridge(
+            f"http://127.0.0.1:{upstream_port}",
+            "gateway-key",
+            model_name="kimi-k2.6",
+            advertised_models=["kimi-k2.6"],
+            provider_id="kimi",
+            provider_profile="kimi-code",
+            reasoning_enabled=True,
+            reasoning_effort="high",
+        ) as bridge:
+            headers = {
+                "Authorization": f"Bearer {bridge['api_key']}",
+                "User-Agent": "codex_cli_rs/0.38.0",
+                "originator": "codex_cli_rs",
+                "openai-beta": "responses=v1",
+            }
+
+            response = client.post(
+                f"{bridge['base_url']}/v1/responses",
+                headers=headers,
+                json={
+                    "model": "kimi-k2.6",
+                    "instructions": "",
+                    "input": [{"role": "user", "content": [{"type": "input_text", "text": "hi"}]}],
+                    "stream": True,
+                },
+                timeout=10,
+            )
+            assert response.status_code == 200
+            completed_output = None
+            for raw_line in response.text.splitlines():
+                line = raw_line.strip()
+                if not line.startswith("data: "):
+                    continue
+                payload = json.loads(line[6:])
+                if payload.get("type") == "response.completed":
+                    completed_output = payload["response"]["output"]
+            assert completed_output is not None
+
+            response = client.post(
+                f"{bridge['base_url']}/v1/responses",
+                headers=headers,
+                json={
+                    "model": "kimi-k2.6",
+                    "instructions": "",
+                    "input": list(completed_output)
+                    + [{"type": "function_call_output", "call_id": "call_1", "output": "phase: INTAKE"}],
+                    "stream": True,
+                },
+                timeout=10,
+            )
+            assert response.status_code == 200
+
+        second_request = FakeUpstreamHandler.requests[1]
+        assistant_tool_message = next(
+            message
+            for message in second_request["messages"]
+            if message.get("role") == "assistant" and message.get("tool_calls")
+        )
+        assert assistant_tool_message["reasoning_content"] == "carry this forward"
+        assert assistant_tool_message["tool_calls"][0]["function"]["name"] == "Bash"
+    finally:
+        upstream.shutdown()
+        upstream.server_close()
+        upstream_thread.join(timeout=2)
+
+
+def test_codex_chat_bridge_restores_kimi_reasoning_when_client_drops_reasoning_item():
+    import importlib
+    import mms_bridge
+
+    mms_bridge = importlib.reload(mms_bridge)
+
+    class FakeUpstreamHandler(BaseHTTPRequestHandler):
+        requests = []
+
+        def log_message(self, *_args):
+            return
+
+        def do_POST(self):
+            length = int(self.headers.get("content-length") or 0)
+            body = self.rfile.read(length) if length else b"{}"
+            payload = json.loads(body.decode("utf-8"))
+            type(self).requests.append(payload)
+
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+
+            if len(type(self).requests) == 1:
+                events = [
+                    {"choices": [{"delta": {"reasoning_content": "carry this forward"}, "finish_reason": None}]},
+                    {
+                        "choices": [
+                            {
+                                "delta": {
+                                    "tool_calls": [
+                                        {
+                                            "index": 0,
+                                            "id": "call_1",
+                                            "function": {
+                                                "name": "Bash",
+                                                "arguments": "{\"command\":\"python3 work_runner.py init\"}",
+                                            },
+                                        }
+                                    ]
+                                },
+                                "finish_reason": None,
+                            }
+                        ]
+                    },
+                    {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
+                ]
+            else:
+                events = [
+                    {"choices": [{"delta": {"content": "ok"}, "finish_reason": None}]},
+                    {"choices": [{"delta": {}, "finish_reason": "stop"}]},
+                ]
+
+            for item in events:
+                self.wfile.write(f"data: {json.dumps(item)}\n\n".encode("utf-8"))
+            self.wfile.flush()
+
+    upstream = HTTPServer(("127.0.0.1", 0), FakeUpstreamHandler)
+    upstream_port = upstream.server_address[1]
+    upstream_thread = threading.Thread(target=upstream.serve_forever, daemon=True)
+    upstream_thread.start()
+
+    try:
+        mms_bridge._ensure_httpx()
+        client = mms_bridge.httpx
+        assert client is not None
+
+        with mms_bridge.codex_chatcompletions_bridge(
+            f"http://127.0.0.1:{upstream_port}",
+            "gateway-key",
+            model_name="kimi-k2.6",
+            advertised_models=["kimi-k2.6"],
+            provider_id="kimi",
+            provider_profile="kimi-code",
+            reasoning_enabled=True,
+            reasoning_effort="high",
+        ) as bridge:
+            headers = {
+                "Authorization": f"Bearer {bridge['api_key']}",
+                "User-Agent": "codex_cli_rs/0.38.0",
+                "originator": "codex_cli_rs",
+                "openai-beta": "responses=v1",
+            }
+
+            response = client.post(
+                f"{bridge['base_url']}/v1/responses",
+                headers=headers,
+                json={
+                    "model": "kimi-k2.6",
+                    "instructions": "",
+                    "input": [{"role": "user", "content": [{"type": "input_text", "text": "hi"}]}],
+                    "stream": True,
+                },
+                timeout=10,
+            )
+            assert response.status_code == 200
+
+            response = client.post(
+                f"{bridge['base_url']}/v1/responses",
+                headers=headers,
+                json={
+                    "model": "kimi-k2.6",
+                    "instructions": "",
+                    "input": [
+                        {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [{"type": "output_text", "text": "I will call tools now."}],
+                        },
+                        {
+                            "type": "function_call",
+                            "id": "fc_1",
+                            "call_id": "call_1",
+                            "name": "Bash",
+                            "arguments": "{\"command\":\"python3 work_runner.py init\"}",
+                        },
+                        {
+                            "type": "function_call_output",
+                            "call_id": "call_1",
+                            "output": "phase: INTAKE",
+                        },
+                    ],
+                    "stream": True,
+                },
+                timeout=10,
+            )
+            assert response.status_code == 200
+
+        second_request = FakeUpstreamHandler.requests[1]
+        assistant_tool_message = next(
+            message
+            for message in second_request["messages"]
+            if message.get("role") == "assistant" and message.get("tool_calls")
+        )
+        assert assistant_tool_message["reasoning_content"] == "carry this forward"
+        assert assistant_tool_message["tool_calls"][0]["function"]["name"] == "Bash"
+    finally:
+        upstream.shutdown()
+        upstream.server_close()
+        upstream_thread.join(timeout=2)
 
 
 def test_build_codex_payload_maps_output_limit():
@@ -6476,3 +7875,22 @@ def test_llm_classify_retries_retry_after_on_429(monkeypatch):
         "https://relay.example.com/v1/messages",
     ]
     assert sleep_calls == [1.0]
+
+
+def test_default_pilot_session_mcp_server_requires_explicit_opt_in(monkeypatch, tmp_path):
+    import mms_launchers
+
+    pilot_root = tmp_path / "pilot"
+    (pilot_root / "scripts").mkdir(parents=True)
+    (pilot_root / "scripts" / "pilot_mcp_server.py").write_text("# pilot\n", encoding="utf-8")
+    monkeypatch.setenv("MMS_PILOT_ROOT", str(pilot_root))
+    monkeypatch.delenv("MMS_ENABLE_MCP_PILOT", raising=False)
+    monkeypatch.delenv("MMS_ENABLE_PILOT_MCP", raising=False)
+
+    assert mms_launchers._default_pilot_session_mcp_server() is None
+
+    monkeypatch.setenv("MMS_ENABLE_MCP_PILOT", "1")
+    spec = mms_launchers._default_pilot_session_mcp_server()
+
+    assert spec["command"] == "python3"
+    assert spec["args"] == [str(pilot_root / "scripts" / "pilot_mcp_server.py")]

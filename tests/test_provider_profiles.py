@@ -97,7 +97,7 @@ def test_mimo_relay_profile_resolution_prefers_protocol_specific_profile(monkeyp
         provider_id="xin",
         base_url="https://apple.clawopen.online",
         protocol="anthropic_messages",
-    ) == 1_000_000
+    ) == 1_048_576
     assert profiles.profile_model_alias(
         "mimo-v2.5[1m]",
         protocol="anthropic_messages",
@@ -177,6 +177,212 @@ def test_deepseek_effort_maps_xhigh_to_max_and_disables_cleanly(monkeypatch, tmp
     assert payload["output_config"] == {"format": "markdown"}
 
 
+def test_stepfun_effort_profile_patches_openai_and_messages(monkeypatch, tmp_path):
+    profiles = _profiles(monkeypatch, tmp_path)
+    chat_payload = {"model": "step-3.7-flash", "messages": []}
+
+    profile_id = profiles.apply_profile_body_patches(
+        chat_payload,
+        protocol="openai_chat",
+        provider_id="stepfun",
+        base_url="https://api.stepfun.com/v1",
+        model_name="step-3.7-flash",
+        thinking_enabled=True,
+        reasoning_effort="xhigh",
+    )
+
+    assert profile_id == "stepfun"
+    assert chat_payload["reasoning_effort"] == "high"
+
+    default_payload = {"model": "step-3.7-flash", "messages": []}
+    profiles.apply_profile_body_patches(
+        default_payload,
+        protocol="openai_chat",
+        provider_id="stepfun",
+        base_url="https://api.stepfun.com/v1",
+        model_name="step-3.7-flash",
+        thinking_enabled=True,
+    )
+    assert default_payload["reasoning_effort"] == "high"
+
+    messages_payload = {
+        "model": "step-router-v1",
+        "messages": [],
+        "output_config": {"format": "markdown"},
+    }
+    profile_id = profiles.apply_profile_body_patches(
+        messages_payload,
+        protocol="anthropic_messages",
+        provider_id="stepfun",
+        base_url="https://api.stepfun.com/step_plan",
+        model_name="step-router-v1",
+        thinking_enabled=True,
+        reasoning_effort="medium",
+    )
+
+    assert profile_id == "stepfun"
+    assert messages_payload["output_config"] == {
+        "format": "markdown",
+        "effort": "medium",
+    }
+
+    profiles.apply_profile_body_patches(
+        messages_payload,
+        protocol="anthropic_messages",
+        provider_id="stepfun",
+        base_url="https://api.stepfun.com/step_plan",
+        model_name="step-router-v1",
+        thinking_enabled=False,
+        reasoning_effort="high",
+    )
+    assert messages_payload["output_config"] == {"format": "markdown"}
+
+    caps = profiles.profile_thinking_capabilities(
+        "step-3.7-flash",
+        provider_id="stepfun",
+        base_url="https://api.stepfun.com/v1",
+    )
+    assert caps["profile"] == "stepfun"
+    assert caps["thinking_supported"] is True
+    assert caps["effort_supported"] is True
+    assert set(caps["effort_allowed"]) == {"low", "medium", "high"}
+    assert caps["effort_default"] == "high"
+    assert caps["effort_official_default"] == "medium"
+    assert caps["effort_recommended_default"] == "high"
+    assert caps["effort_map"]["xhigh"] == "high"
+    assert profiles.profile_context_window(
+        "step-3.7-flash",
+        provider_id="stepfun",
+        base_url="https://api.stepfun.com/v1",
+    ) == 262_144
+
+    headers = {"Content-Type": "application/json"}
+    profiles.apply_profile_auth_headers(
+        headers,
+        protocol="anthropic_messages",
+        api_key="sk-step",
+        provider_id="stepfun",
+        base_url="https://api.stepfun.com/step_plan",
+        model_name="step-router-v1",
+    )
+    assert headers["Authorization"] == "Bearer sk-step"
+
+
+def test_kimi_k27_profile_keeps_thinking_enabled_when_disabled_requested(monkeypatch, tmp_path):
+    profiles = _profiles(monkeypatch, tmp_path)
+    payload = {"model": "kimi-k2.7-code", "messages": []}
+
+    profile_id = profiles.apply_profile_body_patches(
+        payload,
+        protocol="anthropic_messages",
+        provider_id="kimi",
+        base_url="https://api.kimi.com/coding/",
+        model_name="kimi-k2.7-code",
+        thinking_enabled=False,
+    )
+
+    assert profile_id == "kimi-code"
+    assert payload["thinking"] == {"type": "enabled"}
+
+
+def test_kimi_k3_profile_uses_reasoning_effort_without_k2_thinking_patch(monkeypatch, tmp_path):
+    profiles = _profiles(monkeypatch, tmp_path)
+    payload = {"model": "k3", "messages": [], "thinking": {"type": "enabled"}}
+
+    profile_id = profiles.apply_profile_body_patches(
+        payload,
+        protocol="anthropic_messages",
+        provider_id="kimi",
+        base_url="https://api.kimi.com/coding/",
+        model_name="k3",
+        thinking_enabled=True,
+        reasoning_effort="high",
+    )
+
+    assert profile_id == "kimi-code"
+    assert profiles.resolve_provider_profile(provider_id="demo", model_name="k3")[0] == "kimi-code"
+    assert payload["reasoning_effort"] == "max"
+    assert "thinking" not in payload
+    disabled_payload = {"model": "k3", "messages": [], "thinking": {"type": "disabled"}}
+    profiles.apply_profile_body_patches(
+        disabled_payload,
+        protocol="anthropic_messages",
+        provider_id="kimi",
+        base_url="https://api.kimi.com/coding/",
+        model_name="k3",
+        thinking_enabled=False,
+        reasoning_effort="low",
+    )
+    assert disabled_payload["reasoning_effort"] == "max"
+    assert "thinking" not in disabled_payload
+    assert profiles.profile_context_window(
+        "k3",
+        provider_id="kimi",
+        base_url="https://api.kimi.com/coding/",
+    ) == 262_144
+    assert profiles.profile_context_window(
+        "k3[1m]",
+        provider_id="kimi",
+        base_url="https://api.kimi.com/coding/",
+    ) == 1_048_576
+    assert profiles.profile_context_window(
+        "kimi-k3",
+        provider_id="kimi",
+        base_url="https://api.kimi.com/coding/",
+    ) == 1_048_576
+    caps = profiles.profile_thinking_capabilities(
+        "k3",
+        provider_id="kimi",
+        base_url="https://api.kimi.com/coding/",
+    )
+    assert caps["profile"] == "kimi-code"
+    assert caps["thinking_supported"] is True
+    assert caps["effort_allowed"] == ["max"]
+    assert caps["effort_default"] == "max"
+    assert caps["effort_map"]["high"] == "max"
+
+
+def test_openrouter_kimi_k3_profile_aliases_to_moonshot_wire_model(monkeypatch, tmp_path):
+    profiles = _profiles(monkeypatch, tmp_path)
+    payload = {"model": "k3", "messages": []}
+
+    profile_id = profiles.apply_profile_body_patches(
+        payload,
+        protocol="openai_chat",
+        provider_id="openrouter",
+        base_url="https://openrouter.ai/api/v1",
+        model_name="k3",
+        thinking_enabled=True,
+        reasoning_effort="low",
+    )
+
+    assert profile_id == "openrouter-moonshot-kimi-k3"
+    assert payload["reasoning_effort"] == "max"
+    assert profiles.profile_model_alias(
+        "k3",
+        protocol="openai_chat",
+        provider_id="openrouter",
+        base_url="https://openrouter.ai/api/v1",
+    ) == "moonshotai/kimi-k3"
+    assert profiles.profile_model_alias(
+        "k3[1m]",
+        protocol="openai_chat",
+        provider_id="openrouter",
+        base_url="https://openrouter.ai/api/v1",
+    ) == "moonshotai/kimi-k3"
+    assert profiles.profile_model_alias(
+        "moonshotai/kimi-k3",
+        protocol="openai_chat",
+        provider_id="openrouter",
+        base_url="https://openrouter.ai/api/v1",
+    ) == "moonshotai/kimi-k3"
+    assert profiles.profile_context_window(
+        "moonshotai/kimi-k3",
+        provider_id="openrouter",
+        base_url="https://openrouter.ai/api/v1",
+    ) == 1_048_576
+
+
 def test_profile_context_window_and_references(monkeypatch, tmp_path):
     profiles = _profiles(monkeypatch, tmp_path)
 
@@ -184,17 +390,17 @@ def test_profile_context_window_and_references(monkeypatch, tmp_path):
         "mimo-v2.5-pro",
         provider_id="mimo",
         base_url="https://api.xiaomimimo.com/anthropic",
-    ) == 262_144
+    ) == 1_048_576
     assert profiles.profile_context_window(
         "mimo-v2.5-pro[1m]",
         provider_id="mimo",
         base_url="https://api.xiaomimimo.com/anthropic",
-    ) == 1_000_000
+    ) == 1_048_576
     assert profiles.profile_context_window(
         "mimo-v2.5[1m]",
         provider_id="mimo",
         base_url="https://api.xiaomimimo.com/anthropic",
-    ) == 1_000_000
+    ) == 1_048_576
     assert profiles.profile_context_window(
         "mimo-v2.5",
         provider_id="mimo-direct-openai",
@@ -372,6 +578,35 @@ def test_empty_generated_provider_profile_does_not_shadow_gpt_capabilities(monke
     assert caps["effort_supported"] is True
 
 
+def test_gemini_opencode_policy_uses_shell_search_fallback(monkeypatch, tmp_path):
+    profiles = _profiles(monkeypatch, tmp_path)
+
+    policy = profiles.profile_opencode_policy(
+        "gemini-3-flash-agent(high)",
+        provider_id="cpa-antigravity",
+        base_url="http://161.33.197.51:4001/v1",
+        protocol="anthropic_messages",
+    )
+
+    assert policy["profile"] == "cpa-antigravity-gemini"
+    assert policy["builtin_search_tools"] == "fallback_only"
+    assert policy["shell_search_fallback"] is True
+    assert policy["strict_json_schema"] == "weak"
+
+
+def test_generic_gemini_profile_does_not_force_opencode_search_fallback(monkeypatch, tmp_path):
+    profiles = _profiles(monkeypatch, tmp_path)
+
+    policy = profiles.profile_opencode_policy(
+        "gemini-3-flash-agent(high)",
+        provider_id="gemini-direct",
+        base_url="https://generativelanguage.googleapis.com",
+        protocol="anthropic_messages",
+    )
+
+    assert policy == {}
+
+
 def test_gemini_profile_keeps_3_level_and_25_numeric_budget(monkeypatch, tmp_path):
     profiles = _profiles(monkeypatch, tmp_path)
 
@@ -481,6 +716,8 @@ def test_stable_root_without_latest_bundle_keeps_legacy_profile_overlay(monkeypa
     monkeypatch.setenv("XDG_CONFIG_HOME", str(stable_root.parent))
     monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
     monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    monkeypatch.delenv("MMS_PREVIEW_MODE", raising=False)
+    monkeypatch.delenv("MMS_COMMAND_NAME", raising=False)
     import mms_provider_profiles
 
     mms_provider_profiles.load_provider_profiles.cache_clear()

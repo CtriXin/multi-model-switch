@@ -2,6 +2,187 @@
 
 from __future__ import annotations
 
+import math
+import os
+import threading
+
+
+_FALSE_VALUES = {"0", "false", "no", "off", "disable", "disabled", "skip"}
+_TRUE_VALUES = {"1", "true", "yes", "on", "enable", "enabled"}
+_DEFAULT_OPENCODE_HEALTH_TIMEOUT_SEC = 2.0
+
+
+def _env(environ=None):
+    return os.environ if environ is None else environ
+
+
+def _opencode_health_check_enabled(runtime, *, environ=None):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    if runtime.get("skip_gateway_health_check"):
+        return False
+    raw = str(_env(environ).get("MMS_OPENCODE_HEALTHCHECK") or "").strip().lower()
+    if raw in _FALSE_VALUES:
+        return False
+    if raw in _TRUE_VALUES:
+        return True
+    if "opencode_health_check" in runtime:
+        return str(runtime.get("opencode_health_check") or "").strip().lower() not in _FALSE_VALUES
+    return True
+
+
+def _opencode_health_check_async_enabled(runtime, *, environ=None):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    raw = str(_env(environ).get("MMS_OPENCODE_HEALTHCHECK") or "").strip().lower()
+    if raw in {"async", "background", "bg"}:
+        return True
+    if raw in _TRUE_VALUES or raw in _FALSE_VALUES:
+        return False
+    mode = str(runtime.get("opencode_health_check") or "").strip().lower()
+    return mode in {"async", "background", "bg"}
+
+
+def _run_opencode_health_check_async(check_fn):
+    if hasattr(os, "fork"):
+        try:
+            pid = os.fork()
+        except OSError:
+            pid = -1
+        if pid == 0:
+            try:
+                check_fn()
+            finally:
+                os._exit(0)
+        if pid > 0:
+            return
+    thread = threading.Thread(target=check_fn, daemon=True)
+    thread.start()
+
+
+def _opencode_float_setting(runtime, env_name, runtime_keys, default, *, environ=None):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    raw = str(_env(environ).get(env_name) or "").strip()
+    if not raw:
+        for key in runtime_keys:
+            if key in runtime and runtime.get(key) not in (None, ""):
+                raw = str(runtime.get(key)).strip()
+                break
+    if not raw:
+        return float(default)
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return float(default)
+    if not math.isfinite(value) or value <= 0:
+        return float(default)
+    return min(value, 8.0)
+
+
+def _opencode_int_setting(runtime, env_name, runtime_keys, default, *, environ=None):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    raw = str(_env(environ).get(env_name) or "").strip()
+    if not raw:
+        for key in runtime_keys:
+            if key in runtime and runtime.get(key) not in (None, ""):
+                raw = str(runtime.get(key)).strip()
+                break
+    if not raw:
+        return int(default)
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return int(default)
+    if value <= 0:
+        return int(default)
+    return value
+
+
+def _opencode_health_check_timeout(runtime, *, environ=None):
+    return _opencode_float_setting(
+        runtime,
+        "MMS_OPENCODE_HEALTHCHECK_TIMEOUT",
+        ("opencode_health_check_timeout_sec", "gateway_health_timeout_sec"),
+        _DEFAULT_OPENCODE_HEALTH_TIMEOUT_SEC,
+        environ=environ,
+    )
+
+
+def _opencode_route_health_key(route):
+    protocol = str(route.get("protocol") or "openai_chat_completions").strip()
+    route_base_url = route.get("anthropic_base_url") if protocol == "anthropic_messages" else route.get("openai_base_url")
+    return (route.get("provider_id"), protocol, route_base_url)
+
+
+def _opencode_ordered_unique_routes(runtime, routes):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    routes = [route for route in (routes or []) if isinstance(route, dict)]
+    if len(routes) <= 1:
+        return routes
+
+    by_id = {}
+    for route in routes:
+        route_id = str(route.get("id") or "").strip()
+        if route_id and route_id not in by_id:
+            by_id[route_id] = route
+
+    ordered = []
+    preferred_ids = []
+    default_route_key = str(runtime.get("opencode_default_route_key") or "").strip()
+    if default_route_key:
+        preferred_ids.append(default_route_key)
+    configured = runtime.get("opencode_launch_fallback_route_keys")
+    if isinstance(configured, str):
+        configured = [configured]
+    if isinstance(configured, (list, tuple)):
+        preferred_ids.extend(str(item or "").strip() for item in configured)
+    for route_id in preferred_ids:
+        route = by_id.get(route_id)
+        if route is not None and route not in ordered:
+            ordered.append(route)
+    for route in routes:
+        if route not in ordered:
+            ordered.append(route)
+
+    unique = []
+    seen = set()
+    for route in ordered:
+        key = _opencode_route_health_key(route)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(route)
+    return unique
+
+
+def _opencode_health_check_routes(runtime, routes, *, environ=None):
+    unique = _opencode_ordered_unique_routes(runtime, routes)
+    if len(unique) <= 1:
+        return unique
+    max_routes = _opencode_int_setting(
+        runtime,
+        "MMS_OPENCODE_HEALTHCHECK_MAX_ROUTES",
+        ("opencode_health_check_max_routes",),
+        1,
+        environ=environ,
+    )
+    return unique[:max_routes]
+
+
+def _opencode_route_health_runtime(runtime, route, *, timeout_sec):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    health_runtime = dict(runtime)
+    protocol = str(route.get("protocol") or "openai_chat_completions").strip()
+    health_runtime["id"] = route.get("provider_id") or health_runtime.get("id")
+    if protocol == "anthropic_messages":
+        health_runtime["openai_base_url"] = ""
+        health_runtime["anthropic_base_url"] = route.get("anthropic_base_url") or health_runtime.get("anthropic_base_url")
+    else:
+        health_runtime["openai_base_url"] = route.get("openai_base_url") or health_runtime.get("openai_base_url")
+        health_runtime["anthropic_base_url"] = ""
+    health_runtime["api_key"] = route.get("api_key") or health_runtime.get("api_key")
+    health_runtime["gateway_health_timeout_sec"] = timeout_sec
+    health_runtime["gateway_health_source"] = "opencode"
+    return health_runtime
+
 
 def opencode_gateway_health_check(
     runtime,
@@ -12,30 +193,29 @@ def opencode_gateway_health_check(
     gateway_health_check,
 ):
     runtime = runtime if isinstance(runtime, dict) else {}
-    routes = runtime_routes(runtime, resolve_model(runtime))
-    if len(routes) > 1:
-        seen = set()
-        for route in routes:
-            protocol = str(route.get("protocol") or "openai_chat_completions").strip()
-            route_base_url = route.get("anthropic_base_url") if protocol == "anthropic_messages" else route.get("openai_base_url")
-            key = (route.get("provider_id"), protocol, route_base_url)
-            if key in seen:
-                continue
-            seen.add(key)
-            health_runtime = dict(runtime)
-            health_runtime["id"] = route.get("provider_id") or health_runtime.get("id")
-            if protocol == "anthropic_messages":
-                health_runtime["openai_base_url"] = ""
-                health_runtime["anthropic_base_url"] = route.get("anthropic_base_url") or health_runtime.get("anthropic_base_url")
-            else:
-                health_runtime["openai_base_url"] = route.get("openai_base_url") or health_runtime.get("openai_base_url")
-                health_runtime["anthropic_base_url"] = ""
-            health_runtime["api_key"] = route.get("api_key") or health_runtime.get("api_key")
-            gateway_health_check(health_runtime)
+    if not _opencode_health_check_enabled(runtime):
         return
-    health_runtime = dict(runtime)
-    health_runtime["openai_base_url"] = provider_base_url(runtime)
-    gateway_health_check(health_runtime)
+    timeout_sec = _opencode_health_check_timeout(runtime)
+
+    def run_check():
+        routes = runtime_routes(runtime, resolve_model(runtime))
+        checked_routes = _opencode_health_check_routes(runtime, routes)
+        if checked_routes:
+            for route in checked_routes:
+                gateway_health_check(_opencode_route_health_runtime(runtime, route, timeout_sec=timeout_sec))
+            return
+        if routes:
+            return
+        health_runtime = dict(runtime)
+        health_runtime["openai_base_url"] = provider_base_url(runtime)
+        health_runtime["gateway_health_timeout_sec"] = timeout_sec
+        health_runtime["gateway_health_source"] = "opencode"
+        gateway_health_check(health_runtime)
+
+    if _opencode_health_check_async_enabled(runtime):
+        _run_opencode_health_check_async(run_check)
+        return
+    run_check()
 
 
 def opencode_is_global_profile_runtime(cli, runtime):
@@ -103,6 +283,7 @@ def launch_opencode(
     selected_entrypoint = entrypoint(runtime)
     if profile in {"heavy", "heavy_omo", "omo"} or runtime.get("opencode_use_global_config"):
         env = global_omo_env(runtime)
+        inject_selected_model_name(env, resolve_model(model_info), model_info=model_info)
         env["MMS_OPENCODE_ENTRYPOINT"] = selected_entrypoint
         cmd = global_command(runtime, selected_entrypoint)
         exec_or_run(cmd, env, once)
