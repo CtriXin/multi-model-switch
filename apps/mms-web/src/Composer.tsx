@@ -124,7 +124,11 @@ export function Composer({
       cancelled = true;
     };
   }, [workspaceId]);
-  const [text, setText] = useState(draft?.text ?? initialText);
+  const [text, setText] = useState(() => {
+    const original = draft?.text ?? initialText;
+    const paths = (draft?.attachments || []).flatMap(a => a.localPath && !original.includes(a.localPath) && !original.includes(JSON.stringify(a.localPath)) ? [JSON.stringify(a.localPath)] : []);
+    return paths.length ? [original, ...paths].filter(Boolean).join("\n") : original;
+  });
   const [fileSelections, setFileSelections] = useState<FileSelection[]>(draft?.fileSelections || []);
   const [submitting, setSubmitting] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>(
@@ -141,7 +145,7 @@ export function Composer({
       !saveDraft(draftKey, {
         text,
         skills: selectedSkills,
-        attachments,
+        attachments: attachments.filter(a => referencedInText(a)),
         references,
         thumbnails,
         fileSelections,
@@ -259,6 +263,25 @@ export function Composer({
     setText((old) => old.replace(/(^|\s)@[^\s]*$/, "$1"));
     input.current?.focus();
   }
+  function referencedInText(item: Attachment, value = text) {
+    return !item.localPath || value.includes(item.localPath) || value.includes(JSON.stringify(item.localPath));
+  }
+  function insertPaths(paths: string[]) {
+    if (!paths.length) return;
+    const element = input.current;
+    const current = element?.value ?? text;
+    const start = element?.selectionStart ?? current.length;
+    const end = element?.selectionEnd ?? start;
+    const before = current.slice(0, start);
+    const after = current.slice(end);
+    const inserted = (before && !/\s$/.test(before) ? "\n" : "") + paths.map(path => JSON.stringify(path)).join("\n") + "\n";
+    setText(before + inserted + after);
+    setDismissed(true);
+    requestAnimationFrame(() => {
+      element?.focus();
+      element?.setSelectionRange(before.length + inserted.length, before.length + inserted.length);
+    });
+  }
   async function addLocalFiles(paths?: string[]) {
     if (uploadLock.current) return;
     uploadLock.current = true;
@@ -271,11 +294,12 @@ export function Composer({
         paths ? { paths } : {},
       );
       const fresh = result.attachments.filter(
-        (item) => !attachments.some((old) => old.localPath === item.localPath),
+        (item) => !attachments.some((old) => referencedInText(old) && old.localPath === item.localPath),
       );
-      if (attachments.length + fresh.length > 8)
+      if (attachments.filter(a => referencedInText(a)).length + fresh.length > 8)
         throw new Error("每条消息最多引用 8 个文件，请减少选择。");
-      setAttachments((old) => [...old, ...fresh]);
+      setAttachments((old) => [...old.filter(a => referencedInText(a)), ...fresh]);
+      insertPaths(result.attachments.flatMap(item => item.localPath ? [item.localPath] : []));
       for (const item of fresh.filter((item) =>
         item.mimeType.startsWith("image/"),
       )) {
@@ -301,29 +325,33 @@ export function Composer({
     setUploadErrors([]);
     const failures: string[] = [];
     try {
-      if (attachments.length + list.length > 8)
+      if (attachments.filter(a => referencedInText(a)).length + list.length > 8)
         throw new Error("每条消息最多 8 个附件。");
+      if (!workspaceId) throw new Error("先选一个工作文件夹，拖入的文件会保存在里面。");
+      const imported: Attachment[] = [];
       for (const file of list) {
         try {
           if (file.size > 8 * 1024 * 1024)
-            throw new Error("文件超过 8 MB，请缩小后重试（文本文件限 1 MB）。");
+            throw new Error("文件超过 8 MB，可直接粘贴原文件路径引用。");
           const dataUrl = await new Promise<string>((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = () => resolve(String(reader.result));
             reader.onerror = () => reject(new Error("无法读取 " + file.name));
             reader.readAsDataURL(file);
           });
-          const item = await request<Attachment>("/attachments", {
+          const item = await request<Attachment>("/files/import", {
+            workspaceId,
             name: file.name,
             data: dataUrl.split(",")[1],
           });
-          setAttachments((old) => [...old, item]);
-          if (item.mimeType.startsWith("image/"))
-            setThumbnails((old) => ({ ...old, [item.id]: dataUrl }));
+          imported.push(item);
         } catch (e) {
           failures.push(`${file.name}：${(e as Error).message}`);
         }
       }
+      setAttachments((old) => [...old.filter(a => referencedInText(a)), ...imported]);
+      insertPaths(imported.flatMap(item => item.localPath ? [item.localPath] : []));
+      if (imported.length) setFilePathHint("文件已保存到项目的 .pilot/attachments，路径已插入正文，可在其他会话继续引用。");
     } catch (e) {
       failures.push((e as Error).message);
     } finally {
@@ -335,7 +363,7 @@ export function Composer({
   async function submit(e?: FormEvent) {
     e?.preventDefault();
     if (
-      (!text.trim() && !attachments.length) ||
+      (!text.trim() && !attachments.some(a => referencedInText(a))) ||
       disabled ||
       busy ||
       uploading ||
@@ -377,7 +405,7 @@ export function Composer({
             "当前执行工具未提供这个命令。输入 / 查看可用命令，普通路径可用 @ 引用。",
           );
         ok = await send(outgoing || "请查看附件。", {
-          attachments: attachments.map((a) => a.id),
+          attachments: attachments.filter(a => referencedInText(a, outgoing)).map((a) => a.id),
           references,
           skills: outgoingSkills,
           fileSelections,
@@ -444,10 +472,7 @@ export function Composer({
               e.dataTransfer.getData("text/plain"),
           );
           if (paths.length) void addLocalFiles(paths);
-          else if (e.dataTransfer.files.length)
-            setFilePathHint(
-              "浏览器没有提供原文件路径。请选择本地文件，或直接粘贴完整路径；文件不会被复制。",
-            );
+          else if (e.dataTransfer.files.length) void upload(Array.from(e.dataTransfer.files));
         }}
       >
         {dragging && (
@@ -456,9 +481,9 @@ export function Composer({
             引用本地文件
           </div>
         )}
-        {(attachments.length > 0 || references.length > 0) && (
+        {(attachments.some(a => !a.localPath) || references.length > 0) && (
           <div className="attachment-list">
-            {attachments.map((a) => (
+            {attachments.filter(a => !a.localPath).map((a) => (
               <div className="attachment-chip" key={a.id}>
                 {thumbnails[a.id] ? (
                   <img src={thumbnails[a.id]} alt={a.name} />
@@ -570,12 +595,7 @@ export function Composer({
               const images = Array.from(e.clipboardData.files);
               if (images.length) {
                 e.preventDefault();
-                if (images.every((file) => file.type.startsWith("image/")))
-                  void upload(images);
-                else
-                  setFilePathHint(
-                    "请粘贴文件的完整路径，或选择本地文件。文件将直接交给 Pi 读取。",
-                  );
+                void upload(images);
               }
             }}
             onKeyDown={(e) => {
@@ -702,7 +722,7 @@ export function Composer({
                 submitting ||
                 uploading ||
                 localFilesBusy ||
-                (!text.trim() && !attachments.length)
+                (!text.trim() && !attachments.some(a => referencedInText(a)))
               }
               title={running ? "加入待发送队列" : "发送任务"}
               aria-label={running ? "加入队列" : "发送任务"}
@@ -724,9 +744,6 @@ export function Composer({
         {filePathHint && (
           <div className="composer-file-hint" role="status">
             <span>{filePathHint}</span>
-            <button type="button" onClick={() => void addLocalFiles()}>
-              选择本地文件
-            </button>
             <button
               type="button"
               onClick={() => setFilePathHint("")}

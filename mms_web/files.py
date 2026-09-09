@@ -1,4 +1,4 @@
-"""Workspace reads and private attachments; no arbitrary filesystem write API."""
+"""Workspace reads, local references and imports confined to project attachments."""
 from __future__ import annotations
 
 import base64
@@ -6,6 +6,7 @@ import difflib
 import hashlib
 import json
 import mimetypes
+import os
 import subprocess
 import sys
 import uuid
@@ -40,6 +41,44 @@ class FileService:
     def __init__(self, catalog, state_root: Path):
         self.catalog = catalog
         self.root = state_root / "attachments"
+
+    def import_to_workspace(self, payload: dict) -> dict:
+        """Persist browser-provided bytes as a normal project file, then reference it."""
+        root = self.workspace(str(payload.get("workspaceId") or ""))
+        raw = str(payload.get("data") or "")
+        try:
+            if len(raw) > MAX_FILE * 1.4:
+                raise ValueError()
+            data = base64.b64decode(raw, validate=True)
+            if not data or len(data) > MAX_FILE:
+                raise ValueError()
+        except ValueError as exc:
+            raise WebError("INVALID_ATTACHMENT", "文件内容无效，拖入的单个文件最大 8 MB。", 400) from exc
+        name = Path(str(payload.get("name") or "file").replace("\\", "/")).name
+        name = "".join(c for c in name if ord(c) >= 32).encode()[:180].decode(errors="ignore").strip(". ") or "file"
+        filename = uuid.uuid4().hex[:12] + "-" + name
+        # O_NOFOLLOW keeps a project symlink from redirecting this write elsewhere.
+        fd = None
+        try:
+            fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+            for part in (".pilot", "attachments"):
+                try:
+                    os.mkdir(part, 0o700, dir_fd=fd)
+                except FileExistsError:
+                    pass
+                child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                os.close(fd)
+                fd = child
+            output = os.open(filename, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=fd)
+            with os.fdopen(output, "wb") as stream:
+                stream.write(data)
+        except OSError as exc:
+            raise WebError("FILE_IMPORT_FAILED", "这个工作文件夹不能保存附件，请换一个可写的文件夹后重试。", 400) from exc
+        finally:
+            if fd is not None:
+                os.close(fd)
+        target = root / ".pilot" / "attachments" / filename
+        return self.reference_local({"paths": [str(target)]})["attachments"][0]
 
     def reference_local(self, payload: dict) -> dict:
         paths = payload.get("paths")

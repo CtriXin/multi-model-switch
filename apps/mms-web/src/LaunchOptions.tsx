@@ -1,9 +1,9 @@
-import { useState } from "react";
-import { ChevronDown, FolderOpen } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ChevronDown, FolderOpen, Search, ArrowUpRight } from "lucide-react";
 import type { Model, Preset, Workspace } from "./types";
 import { Dialog } from "./components";
 import { ModelExplorer } from "./ModelExplorer";
-import { mutate } from "./api";
+import { mutate, request } from "./api";
 
 export function ModelPicker({
   presets,
@@ -65,78 +65,82 @@ export function ModelPicker({
   );
 }
 
-export function WorkspaceDialog({
-  close,
-  added,
-}: {
+export function WorkspaceDialog({ close, added }: {
   close: () => void;
   added: (workspace: Workspace) => void;
 }) {
-  const [path, setPath] = useState("");
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<Workspace[]>([]);
+  const [choice, setChoice] = useState(0);
+  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  async function choose() {
-    setBusy(true);
-    setError("");
+  useEffect(() => {
+    document.getElementById(`workspace-match-${choice}`)?.scrollIntoView({block: "nearest"});
+  }, [choice]);
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoading(true);
+    const timer = setTimeout(() => {
+      request<{workspaces: Workspace[]}>("/workspaces/search", {query}, controller.signal)
+        .then(data => { if (!controller.signal.aborted) { setResults(data.workspaces); setChoice(0); setError(""); } })
+        .catch(e => { if (!controller.signal.aborted) setError(e.message); })
+        .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    }, 120);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [query]);
+  async function select(workspace: Workspace) {
+    if (busy) return;
+    setBusy(true); setError("");
     try {
-      const result = await mutate<{ path: string }>("/workspaces/choose", {});
-      if (result.path) setPath(result.path);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError("");
-    try {
-      added(await mutate<Workspace>("/workspaces", { path }));
+      added(workspace.id ? workspace : await mutate<Workspace>("/workspaces", {path: workspace.path}));
       close();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
+  }
+  async function choose() {
+    if (busy) return;
+    setBusy(true); setError("");
+    try {
+      const result = await mutate<{path: string}>("/workspaces/choose", {});
+      if (result.path) {
+        added(await mutate<Workspace>("/workspaces", {path: result.path}));
+        close();
+      }
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
   }
   return (
-    <Dialog title="添加工作文件夹" close={close}>
-      <p className="dialog-intro">
-        把资料和生成的文件放在一起。AI 会在这个文件夹中开始工作。
-      </p>
-      <form className="workspace-form" onSubmit={submit}>
-        <button
-          type="button"
-          className="button"
-          disabled={busy}
-          onClick={() => void choose()}
-        >
-          <FolderOpen size={16} />
-          从电脑中选择文件夹
-        </button>
-        <label>
-          也可以填写文件夹路径
-          <input
-            value={path}
-            onChange={(e) => setPath(e.target.value)}
-            placeholder="/Users/你的名字/Documents/项目"
-            required
-            autoComplete="off"
-          />
+    <Dialog title="找到你的项目" close={() => { if (!busy) close(); }}>
+      <p className="dialog-intro">输入项目名，就能找到常用的工作文件夹。选好后会记住，下次可以直接开始。</p>
+      <form className="workspace-form" onSubmit={e => { e.preventDefault(); if (!loading && results[choice]) void select(results[choice]); }}>
+        <label className="workspace-search-input">
+          <Search size={18} />
+          <input autoFocus value={query} onChange={e => setQuery(e.target.value)}
+            placeholder="输入项目名，如 runtimia 或 multi" autoComplete="off" aria-label="搜索项目文件夹"
+            role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls="workspace-matches"
+            aria-activedescendant={results[choice] ? `workspace-match-${choice}` : undefined}
+            onKeyDown={e => {
+              if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                if (!loading && results[choice]) void select(results[choice]);
+              }
+              if ((e.key === "ArrowDown" || e.key === "ArrowUp") && results.length) {
+                e.preventDefault(); setChoice(old => (old + (e.key === "ArrowDown" ? 1 : -1) + results.length) % results.length);
+              }
+            }} />
         </label>
-        {error && (
-          <p role="alert" className="inline-alert">
-            {error}
-          </p>
-        )}
-        <button
-          className="button primary"
-          disabled={busy || !path.trim()}
-          type="submit"
-        >
-          {busy ? "正在连接…" : "使用这个文件夹"}
-        </button>
+        <p className="muted" role="status">{loading ? "正在查找…" : query ? `找到 ${results.length} 个文件夹` : "最近和常用的文件夹"}</p>
+        <div id="workspace-matches" className="workspace-matches" role="listbox" aria-label="匹配的项目">
+          {results.map((item, index) => <button type="button" id={`workspace-match-${index}`} key={item.path}
+            role="option" aria-selected={choice === index} disabled={busy || loading}
+            onMouseEnter={() => setChoice(index)} onClick={() => void select(item)}>
+            <FolderOpen size={18} /><span><strong>{item.name}</strong><small>{item.path}</small></span><ArrowUpRight size={15} />
+          </button>)}
+          {!loading && !results.length && <p className="muted">还没找到，可以换个关键词、粘贴路径，或浏览文件夹。</p>}
+        </div>
+        {error && <p role="alert" className="inline-alert">{error}</p>}
+        <button type="button" className="text-button" disabled={busy} onClick={() => void choose()}><FolderOpen size={16} />浏览其他文件夹…</button>
       </form>
     </Dialog>
   );

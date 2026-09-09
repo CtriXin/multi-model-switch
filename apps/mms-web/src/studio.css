@@ -1298,4 +1298,14 @@
 }
 
 .appearance-options, .accent-options { flex-wrap: wrap; max-width: 100%; }
+.home-intro button.workspace-picker { font: inherit; font-size: max(11px, .8571rem); cursor: pointer; }
+.workspace-picker > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
+.workspace-search-input { display: flex; align-items: center; gap: 9px; }
+.workspace-search-input input { flex: 1; min-width: 0; }
+.workspace-matches { display: grid; gap: 4px; max-height: min(42vh, 350px); overflow: auto; }
+.workspace-matches button { display: flex; align-items: center; gap: 12px; padding: 11px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--ink); text-align: left; }
+.workspace-matches button[aria-selected="true"] { background: var(--soft); border-color: var(--line); }
+.workspace-matches button > span { display: grid; gap: 4px; flex: 1; min-width: 0; }
+.workspace-matches strong { font-weight: 600; }
+.workspace-matches small { color: var(--muted); font-size: max(11px, .8571rem); overflow-wrap: anywhere; }
 .preference-row > div { min-width: 0; }

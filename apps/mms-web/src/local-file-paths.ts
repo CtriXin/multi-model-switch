@@ -5,10 +5,10 @@ export function localFilePaths(value: string): string[] {
     .split(/\r?\n/)
     .map((line) => {
       let path = line.trim();
-      if (
-        (path.startsWith("'") && path.endsWith("'")) ||
-        (path.startsWith('"') && path.endsWith('"'))
-      )
+      if (path.startsWith('"') && path.endsWith('"')) {
+        try { path = JSON.parse(path); }
+        catch { path = path.slice(1, -1); }
+      } else if (path.startsWith("'") && path.endsWith("'"))
         path = path.slice(1, -1);
       if (path.startsWith("file://")) {
         try {
