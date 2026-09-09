@@ -16,7 +16,7 @@ const content: Record<TourStep, StepContent> = {
   reply: { target: ['.conversation-turn:last-child', '.current-activity', 'textarea[aria-label="任务内容"]'], title: "回复会出现在这里", body: "等待 AI 回答后，可以继续问「说得简单一点」「给个例子」，或补充你的要求。结果不符合预期也没关系，接着沟通就好。", tip: "你已经认识基本操作。附件、Skills 和成果等功能，可以需要时再学。" },
   attachments: { target: ['button[aria-label="添加内容"]'], title: "在需要的地方插入文件", body: "把光标放在要求旁边，拖入文件、粘贴截图，或点 + 选择文件。路径会插入正文，你可以在不同文件之间写各自的要求。浏览器没提供原路径时，Pilot 会自动保存到项目的 .pilot/attachments。", tip: "复制插入的路径可在其他会话继续用。输入 @ 可找文件，输入 / 可查看快捷命令。" },
   skills: { target: ['[data-guide="skills"]'], title: "Skills：可复用的做事方法", body: "点这里选择想做的事，例如保存进度或检查改动。内置能力无需安装，可以先用示例填入草稿。", tip: "补充自己的要求，发送后才开始。也可以不选，直接对话。" },
-  materials: { target: ['.materials-access'], title: "项目资料：不用每次重新交代", body: "把项目背景、常用要求和约定保存在这里。保存并启用后，它们会加入这个文件夹后续的新消息。", tip: "只影响之后的消息。编辑、停用或删除，不会撤回已经发出的内容；消息下方「本次使用」能核对提交的材料。" },
+  materials: { target: ['.materials-access'], title: "项目资料：不用每次重新交代", body: "把项目背景、常用要求和约定保存在这里。保存并启用后，它们会加入这个文件夹后续的新消息。", tip: "只影响之后的消息。编辑、停用或删除，不会撤回已经发出的内容；有附加内容时，消息下方「附带资料」可查看来源。" },
   artifacts: { target: ['.result-panel .panel-tabs button.active', 'button[aria-label="切换成果侧栏"]'], title: "成果：看看 AI 做出了什么", body: "在这里预览生成的文章、表格、图片或静态网页。还可以查看已记录的版本和差异，下载文件，引用文字选段或图片区域让 AI 修改。", tip: "先有会话才能打开成果。选段先进入草稿，发送后才处理；查看旧版本不会回滚电脑上的文件。" },
   runtime: { target: ['.result-panel .panel-tabs button.active'], title: "过程与运行详情：了解当前状态", body: "在这里看当前模型、上下文和用量。对话中的过程可以展开，查看工具做了什么；待确认的问题需要你在卡片里回答。", tip: "停止会结束本轮执行，已经发生的文件修改不会自动撤销。模型在正文里自报身份可能不准确，请核对运行详情。" },
   sessions: { target: ['.sidebar-sessions', '.sidebar'], title: "以前的对话都在这里", body: "左侧按工作文件夹收好会话。点标题就能接着聊；上方可以新建、搜索和筛选。工作文件夹和会话旁的更多菜单可排序、重命名、归档、导出或创建分支。", tip: "移除文件夹只从侧栏隐藏，旧会话仍能继续；归档也保留内容。对话分支不会复制或回滚项目文件。" },
