@@ -40,7 +40,7 @@
 | --- | --- | --- |
 | Anthropic | 全部。4.6 两个 legacy 加当前四个：Opus 5、Sonnet 5、Fable 5.1、Haiku 4.5 | 无 |
 | OpenAI | 只有官方页面还在列的四个：gpt-6-astra、gpt-5.6 的 sol / terra / luna | gpt-5、gpt-5-pro、gpt-5.4、gpt-5.4-mini、gpt-5.5 已从官方页下架，值沿用旧记录 |
-| Google Gemini | gemini-3.1（pro preview 页）、3.5-flash、3.8-flash | gemini-2.5-flash / 2.5-pro / 裸 gemini-3 / gemini-3.5 / 3.1-flash-image |
+| Google Gemini | 3.1、3.5-flash、3.8-flash、2.5-pro、2.5-flash、裸 gemini-3（即已下线的 3-pro-preview） | gemini-3.5、3.1-flash-image |
 | xAI Grok | 全部七个的上下文 | 官方页面不写各模型是否收图，因此一律不记 vision |
 | DeepSeek | V4 三个：flash、pro、flash-vision-exp | deepseek-chat、deepseek-reasoner 已不在官方页 |
 | Moonshot Kimi | k3 全系、k2.6、k2.7-code 及 highspeed、kimi-for-coding 两个 | kimi-k2.5、k2.6-code-preview、kimi-for-code |
@@ -51,6 +51,29 @@
 | StepFun | step-3.7-flash、step-3.5-flash、step-1o-turbo-vision | step-router-v1 不在官方文档里 |
 
 覆盖面有意做得比任何单个中转通道宽：把厂商当前在售的整条产品线都写进来，新模型出现在通道里时就已经有数据，不用等下一轮补。
+
+## 官方文档查不到时，按这个顺序找
+
+**一、厂商自己的机器可读接口。** 和文档同源，而且是活的，还能覆盖文档已经下架的旧模型。需要该通道的 key。
+
+| 厂商 | 接口 | 直接给出 |
+| --- | --- | --- |
+| Anthropic | `GET https://api.anthropic.com/v1/models` | `max_input_tokens`、`max_tokens`、`capabilities.image_input.supported`、`capabilities.effort` 的 low/medium/high/max/xhigh、`capabilities.thinking.types` |
+| Google | `GET https://generativelanguage.googleapis.com/v1beta/models` | `inputTokenLimit`、`outputTokenLimit`、`supportedGenerationMethods` |
+| OpenAI | `GET /v1/models` | 只有 id，没有限额，这条路走不通 |
+
+Anthropic 那个接口的字段和我们需要的字段几乎一一对应，是所有来源里最好的一个。
+
+**二、实测这条通道。** 对中转来说这是唯一真正准确的答案，因为**生效的上限是中转的上限，不是厂商的**。厂商说 1M，中转可能只给你 200K，文档永远看不出来。两个探测：
+
+- 上下文与最大输出：故意把 `max_tokens` 设到明显超限，或送一段超长输入，读错误里报出来的数字。多数网关会把真实上限写进错误消息。
+- 识图：发一张 1×1 的图，收不收一次就知道。
+
+这也是套餐分档唯一能被发现的方式。
+
+**三、承认查不到。** 留空、走保守值，比填一个来源不明的数字好。留空时 `conservative_fallback` 会接手，含义是「没有任何来源声明过」，不是「不支持」。
+
+**明确不采信**：模型卡站、API 聚合站、第三方目录、评测榜、搜索结果摘要、以及任何转述官方而不是官方本身的页面。它们经常把预览版和正式版、把套餐档位和模型上限混在一起，而且不会随厂商更新。（`web.archive.org` 上的官方页面快照在原则上可信，但当前环境取不到。）
 
 ## OpenRouter：备选，不是真值
 
