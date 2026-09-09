@@ -1697,12 +1697,15 @@ export function App() {
               </div>
               {detail && (
                 <div className="session-composer">
-                  <CurrentActivity
-                    session={detail.session}
-                    disconnected={!connected || statusesStale || !!sessionError}
-                  />
                   <div className="session-workbar">
+                    {/* Status and location are both one line of context; keeping
+                        them on separate bands cost a row above the composer. */}
+                    <CurrentActivity
+                      session={detail.session}
+                      disconnected={!connected || statusesStale || !!sessionError}
+                    />
                     <button
+                      className="workbar-folder"
                       title={detail.session.cwd}
                       onClick={() => setFilesOpen(true)}
                     >

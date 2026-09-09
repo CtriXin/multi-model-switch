@@ -2348,8 +2348,12 @@ dialog:has(.dialog-body.sheet) .dialog-body.sheet > header {
 }
 /* The folder name takes the slack, so every control after it sits together
    on the right whether or not the process toggle is present. */
-.session-workbar > button:first-child {
+.session-workbar > .workbar-folder {
   margin-right: auto;
+}
+.session-workbar > .current-activity {
+  margin-bottom: 0;
+  flex: none;
 }
 .session-workbar > button {
   overflow: hidden;
