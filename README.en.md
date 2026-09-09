@@ -346,7 +346,7 @@ Use `--launch-web` to open it without asking, `--no-launch-web` to skip it, and 
 
 The optional global packs are gone. RTK, BrainKeeper, Map, CodeGraph, global token-saver, global TOON, ops-env-safe, ECC, and OMC no longer have installer paths. Their `--install-*` and `--*-ref` flags print a notice and are ignored, so older scripts keep working.
 
-Machines upgrading from an older version are unbound from those packs during the install. It removes the MMS-written RTK hook, the BrainKeeper commands and MCP entry, Map/CodeGraph auto-index registrations, the global token-saver/TOON skill links and `~/.local/bin` wrappers, the ops-env-safe skill and path map, and the ECC/OMC packs under `~/.mms/agent-packs`. Only entries carrying an MMS marker or pointing into an MMS directory are touched, `~/.claude/settings.json` is backed up before any write, and no third-party binary (rtk, codegraph, brainkeeper, node, jq) is uninstalled. To run the cleanup on its own:
+Upgrades archive only wrappers/commands with MMS-specific markers, Skill links pointing into this MMS install, and its retired agent packs under `~/.mms/retired-backup.*`. Originals remain recoverable. Same-name custom Skills, global hook/MCP settings and real config files are preserved; third-party programs are not uninstalled. Review global registrations separately using the read-only retirement plan above. To archive MMS entries without reinstalling:
 
 ```bash
 bash install.sh --cleanup-retired-packs

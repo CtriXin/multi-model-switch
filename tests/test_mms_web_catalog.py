@@ -1043,7 +1043,9 @@ def test_remove_workspace_keeps_the_folder_on_disk(tmp_path: Path) -> None:
 
     service.remove_workspace({"id": added["id"]})
 
-    assert not any(w["id"] == added["id"] for w in service._workspaces())
+    assert next(w for w in service._workspaces() if w["id"] == added["id"])["hidden"] is True
+    assert service.add_workspace({"path": str(folder)})["id"] == added["id"]
+    assert not next(w for w in service._workspaces() if w["id"] == added["id"]).get("hidden")
     assert (folder / "notes.md").read_text(encoding="utf-8") == "keep me"
 
 

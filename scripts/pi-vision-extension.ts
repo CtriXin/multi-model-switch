@@ -10,7 +10,7 @@
  * 设计要点：
  *  - 双启动兼容：优先 PI_CODING_AGENT_DIR（mmf 注入），回退 ~/.pi/agent（原生 pi）。
  *  - 零硬编码：模型池、base_url、apiKey、协议全部运行时动态发现。
- *  - 多模态主模型自动不注册：若当前主模型 input 含 image，直接 return，主模型自己用 read 看图。
+ *  - 跟随当前模型：多模态时停用辅助工具，切到纯文本模型后启用，保留其他工具。
  *  - 按需：promptGuidelines 明确「只有需要视觉理解才调用」，非图片/文本文件走 read。
  *  - 凭证安全：apiKey 仅在请求头使用，绝不进入工具返回或日志。
  */
@@ -298,24 +298,20 @@ export default async function (pi) {
     return;
   }
 
-  // 主模型是否多模态。mmf 用 --model 启动 pi，扩展看不到这个参数，所以由
-  // mmf 在启动前用统一的能力真值算好结果注入；原生 pi 才退回自己查 models.json。
-  const injectedVision = process.env.MMS_PI_MAIN_MODEL_VISION;
-  if (injectedVision === "1") {
-    // 主模型自己能看图，不注册本工具。
-    return;
+  // Register once; tool activation follows Pi's actual model, including restore.
+  // Startup environment is a snapshot and cannot decide a hot-switched toolset.
+  function syncModel(model) {
+    if (!model) return;
+    process.env.MMS_MODEL_NAME = model.id;
+    process.env.MMS_PI_SELECTED_MODEL = model.id;
+    process.env.MMS_PI_PROVIDER = model.provider;
+    process.env.MMS_PI_MAIN_MODEL_VISION = model.input?.includes("image") ? "1" : "0";
+    const active = pi.getActiveTools().filter((name) => name !== "describe_image");
+    if (!model.input?.includes("image") && pool.length) active.push("describe_image");
+    pi.setActiveTools(active);
   }
-  if (injectedVision !== "0") {
-    const settings = readJson(settingsFile) || {};
-    const currentModel =
-      process.env.MMS_PI_SELECTED_MODEL || process.env.PI_MODEL || settings.defaultModel;
-    if (currentModel) {
-      const input = findModelInput(models, currentModel);
-      if (input && input.includes("image")) {
-        return;
-      }
-    }
-  }
+  pi.on("session_start", (_event, ctx) => syncModel(ctx.model));
+  pi.on("model_select", (event) => syncModel(event.model));
 
   // 构建候选池（只保留 models.json 里能找到 provider 且有 key 的）
   const pool = [];

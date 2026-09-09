@@ -101,6 +101,7 @@ export function RichText({
   );
 }
 export function Dialog({
+  guide,
   title,
   children,
   close,
@@ -111,6 +112,7 @@ export function Dialog({
   children: ReactNode;
   close: () => void;
   dismissible?: boolean;
+  guide?: "settings";
   /** "wide" for lists that read badly in a narrow column, "sheet" for the
    *  settings surface, which holds a full channel table. */
   size?: "default" | "wide" | "sheet";
@@ -122,6 +124,7 @@ export function Dialog({
   }, []);
   return (
     <dialog
+      data-guide-dialog={guide}
       ref={ref}
       onCancel={(e) => {
         e.preventDefault();

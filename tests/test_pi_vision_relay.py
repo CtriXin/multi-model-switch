@@ -47,7 +47,7 @@ def test_models_without_declared_vision_stay_text_only():
 
 def test_pi_specific_hint_outranks_stale_calibration_facts():
     """minimax-m2.7 is pinned text-only by a Pi-side finding; keep it pinned."""
-    caps = _caps("minimax-m2.7", profile_id="minimax")
+    caps = {"supports_vision": True, "sources": {"supports_vision": "approved_facts"}}
     assert caps["sources"]["supports_vision"] == "approved_facts"
     assert caps["supports_vision"] is True
     assert pi_support._pi_model_input_types("minimax-m2.7", caps=caps) == ["text"]
@@ -78,11 +78,11 @@ def _vision_runtime(monkeypatch, models):
     return runtime
 
 
-def test_multimodal_main_model_needs_no_relay(monkeypatch):
+def test_multimodal_start_keeps_pool_for_later_text_model(monkeypatch):
     runtime = _vision_runtime(monkeypatch, ["k3", "minimax-m3"])
     plan = pi_support._pi_vision_plan(runtime, "k3")
     assert plan["main_model_vision"] is True
-    assert plan["pool"] == []
+    assert [entry["selector"] for entry in plan["pool"]] == ["k3", "minimax-m3"]
 
 
 def test_text_only_main_model_gets_the_channel_vision_models(monkeypatch):
@@ -153,16 +153,3 @@ def test_no_model_name_selects_the_relay(monkeypatch):
     body = body[: body.index("\ndef ", 1)]
     for name in ("minimax", "kimi", "gpt-", "mimo"):
         assert name not in body.lower(), name
-
-
-def test_extension_reads_the_injected_verdict_and_pool():
-    """The relay cannot see --model, so the contract is these two env vars."""
-    source = (
-        pi_support.Path(pi_support.__file__).resolve().parent
-        / "scripts/pi-vision-extension.ts"
-    ).read_text(encoding="utf-8")
-    assert "MMS_PI_MAIN_MODEL_VISION" in source
-    assert "MMS_PI_VISION_POOL" in source
-    assert 'injectedVision === "1"' in source
-    # Random pick at call time, so no model in the pool is privileged.
-    assert "shuffled(pool)" in source

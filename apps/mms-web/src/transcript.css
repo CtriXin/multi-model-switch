@@ -21,7 +21,7 @@
   position: relative;
 }
 .conversation-content .markdown {
-  font-size: 15px;
+  font-size: max(11px, 1.0714rem);
   line-height: 1.8;
 }
 .conversation-content .markdown:empty {
@@ -31,7 +31,7 @@
   margin-top: 0;
 }
 .conversation-content .markdown :is(h4, h5, h6) {
-  font-size: 14px;
+  font-size: max(11px, 1.0000rem);
   margin: 18px 0 8px;
 }
 .conversation-content .markdown li > :is(ul, ol) {
@@ -47,10 +47,10 @@
 .conversation-content .message-author {
   min-height: 22px;
   margin-bottom: 8px;
-  font-size: 11px;
+  font-size: max(11px, 0.7857rem);
 }
 .conversation-content .message-author span {
-  font-size: 11px;
+  font-size: max(11px, 0.7857rem);
 }
 .conversation-content .message.continuation {
   margin-left: 39px;
@@ -67,7 +67,7 @@
 }
 .conversation-content .message.intermediate .markdown {
   color: var(--muted);
-  font-size: 13px;
+  font-size: max(11px, 0.9286rem);
 }
 .conversation-content .thinking-block {
   border: 0;
@@ -80,7 +80,7 @@
 .conversation-content .thinking-block > summary {
   width: fit-content;
   padding: 3px 0;
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
 }
 .conversation-content .thinking-block > summary:hover {
   color: var(--ink);
@@ -156,7 +156,7 @@
   pointer-events: auto;
 }
 .conversation-content .notice-event {
-  font-size: 11px;
+  font-size: max(11px, 0.7857rem);
   margin: 12px 0 16px 39px;
 }
 
@@ -181,7 +181,7 @@
   align-items: center;
   gap: 9px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
 }
 .tool-group-heading strong {
   font-weight: 550;
@@ -214,7 +214,7 @@
   background: var(--danger);
 }
 .tool-group-status {
-  font-size: 11px;
+  font-size: max(11px, 0.7857rem);
 }
 .tool-group .tool-event {
   margin: 0;
@@ -233,7 +233,7 @@
   gap: 10px;
   min-height: 37px;
   padding: 8px 12px;
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
 }
 .tool-event > summary:hover {
   background: color-mix(in srgb, var(--ink) 3%, transparent);
@@ -289,11 +289,11 @@
   padding: 6px 0 10px;
 }
 .tool-input > summary {
-  font-size: 11px;
+  font-size: max(11px, 0.7857rem);
   width: fit-content;
 }
 .tool-output-label {
-  font-size: 10px;
+  font-size: max(11px, 0.7143rem);
   margin: 6px 0;
 }
 .tool-expanded pre {
@@ -301,13 +301,13 @@
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 6px;
-  font-size: 11px;
+  font-size: max(11px, 0.7857rem);
   max-height: 420px;
   overflow: auto;
   margin: 6px 0 0;
 }
 .tool-empty {
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
   padding: 6px 0;
 }
 
@@ -374,7 +374,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
   line-height: 1.5;
   transition: opacity 100ms ease;
 }
@@ -417,7 +417,7 @@
   background: var(--surface);
   box-shadow: 0 2px 6px #0000000a;
   padding: 9px 13px;
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
   cursor: pointer;
 }
 .return-latest:hover {
@@ -480,10 +480,10 @@
 .turn-process-toggle, .transcript-process-actions button {
   display: inline-flex; align-items: center; gap: 7px; padding: 7px 8px;
   border: 0; border-radius: 6px; background: transparent; color: var(--muted);
-  font: inherit; font-size: 12px; cursor: pointer;
+  font: inherit; font-size: max(11px, 0.8571rem); cursor: pointer;
 }
 .turn-process-toggle:hover, .transcript-process-actions button:hover { background: var(--surface-hover, #f3f3f7); color: var(--text); }
-.turn-process-toggle span { opacity: .75; font-size: 11px; }
+.turn-process-toggle span { opacity: .75; font-size: max(11px, 0.7857rem); }
 .turn-process { margin: 8px 0 18px; }
 .turn-process > .turn-process-toggle { margin-left: 30px; margin-bottom: 6px; }
 .turn-process-footer { margin: -12px 0 24px 30px; }

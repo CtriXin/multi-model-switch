@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { Sun, Moon, Monitor, Minus, Plus, SlidersHorizontal, Palette } from "lucide-react";
 import type { Bootstrap } from "./types";
 import { Models } from "./Models";
@@ -6,6 +6,7 @@ import { FONT_FAMILIES } from "./App";
 import { AppVersion, Dialog } from "./components";
 
 export function SettingsPage({
+  tour,
   data,
   favorites,
   toggleFavorite,
@@ -29,6 +30,7 @@ export function SettingsPage({
   selectToCopy, setSelectToCopy,
   requestNavigation, editStateChanged,
 }: {
+  tour?: ReactNode;
   data: Bootstrap;
   favorites: string[];
   toggleFavorite: (id: string) => void;
@@ -62,7 +64,7 @@ export function SettingsPage({
 }) {
   const [tab, setTab] = useState("models");
   return (
-    <Dialog title="设置" size="sheet" close={() => requestNavigation(back)}>
+    <Dialog guide="settings" title="设置" size="sheet" close={() => requestNavigation(back)}>
     <div className="settings-shell">
       <nav className="settings-tabs" aria-label="设置分类">
         <button
@@ -290,6 +292,7 @@ export function SettingsPage({
         </section>
       )}
     </div>
+    {tour}
     </Dialog>
   );
 }

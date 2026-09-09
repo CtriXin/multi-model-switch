@@ -226,7 +226,7 @@ Figma 和 Pilot MCP 不再默认注入；即使检测到已安装 plugin/server�
 
 安装器不再提供可选包。RTK、BrainKeeper、Map、CodeGraph、全局 token-saver、全局 TOON、ops-env-safe、ECC 与 OMC 的安装路径已移除；对应的 `--install-*` 参数会打印一条提示后忽略。token-saver、TOON、web-access、weber、agent-browser 仍作为内建 session assets 随 MMS 提供。
 
-从旧版本升级的机器会在安装时自动解绑这些包：删除 MMS 写入的 RTK hook、BrainKeeper 命令与 MCP 条目、Map/CodeGraph auto-index 注册、全局 token-saver/TOON skill 链接与 `~/.local/bin` wrapper、ops-env-safe skill 与路径映射，以及 `~/.mms/agent-packs` 下的 ECC/OMC。清理只删带 MMS marker 或指向 MMS 目录的条目，改写 `~/.claude/settings.json` 前先备份，不卸载 rtk、codegraph、brainkeeper、node、jq 等第三方二进制。想单独跑清理而不重装：
+从旧版本升级时，仅将有 MMS 专属标记的 wrapper/命令、明确指向当前 MMS vendor 的 Skill 链接和安装目录内的旧 agent packs 移入 `~/.mms/retired-backup.*`，保留原文件供恢复。同名自定义 Skills、全局 hooks/MCP 设置及真实配置目录不自动修改，也不卸载第三方程序。全局退休 hook 可按上面的只读清理计划另行检查。想单独整理 MMS 条目而不重装：
 
 ```bash
 bash install.sh --cleanup-retired-packs

@@ -8,7 +8,7 @@
   list-style: none;
   padding: 0;
   margin: 4px 0 26px;
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
   color: var(--muted);
 }
 .connection-steps li {
@@ -24,7 +24,7 @@
   width: 21px;
   height: 21px;
   border-radius: 50%;
-  font-size: 11px;
+  font-size: max(11px, 0.7857rem);
 }
 .connection-steps li[aria-current] {
   color: var(--ink);
@@ -37,7 +37,7 @@
   color: var(--inverse);
 }
 .connection-heading {
-  font-size: 20px;
+  font-size: max(11px, 1.4286rem);
   letter-spacing: -0.4px;
   margin: 0 0 18px;
 }
@@ -55,7 +55,7 @@
 }
 .connection-flow .field small,
 .connection-note {
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
   font-weight: 400;
   color: var(--muted);
   line-height: 1.7;
@@ -67,7 +67,7 @@
   margin-top: 1px;
 }
 .connection-endpoint {
-  font-size: 11px;
+  font-size: max(11px, 0.7857rem);
   color: var(--muted);
   overflow-wrap: anywhere;
   margin: 2px 0 16px;
@@ -80,7 +80,7 @@
   background: none;
   color: var(--muted);
   padding: 12px 0;
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
   cursor: pointer;
 }
 .connection-text-button:hover {
@@ -95,12 +95,12 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 13px;
+  font-size: max(11px, 0.9286rem);
   margin: 0 0 16px;
 }
 .connection-route span {
   color: var(--muted);
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
   overflow-wrap: anywhere;
 }
 .connection-search {
@@ -116,7 +116,7 @@
   align-items: center;
   justify-content: space-between;
   color: var(--muted);
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
   padding: 12px 0 8px;
 }
 .connection-selection > div {
@@ -148,7 +148,7 @@
   align-items: center;
   padding: 13px 14px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: max(11px, 0.9286rem);
   border-bottom: 1px solid var(--line);
 }
 .connection-models label:last-child {
@@ -198,7 +198,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  font-size: 13px;
+  font-size: max(11px, 0.9286rem);
 }
 .connection-spinner {
   animation: connection-spin 1s linear infinite;
@@ -216,7 +216,7 @@
 @media (max-width: 540px) {
   .connection-steps {
     gap: 12px;
-    font-size: 11px;
+    font-size: max(11px, 0.7857rem);
   }
   .connection-steps li {
     gap: 5px;
@@ -227,7 +227,7 @@
   }
   .connection-footer .button {
     padding: 10px;
-    font-size: 12px;
+    font-size: max(11px, 0.8571rem);
   }
 }
 
@@ -236,12 +236,12 @@
   border-top: 1px solid var(--line);
 }
 .model-library-empty h3 {
-  font-size: 17px;
+  font-size: max(11px, 1.2143rem);
   font-weight: 550;
   margin: 0 0 10px;
 }
 .model-library-empty p {
-  font-size: 13px;
+  font-size: max(11px, 0.9286rem);
   color: var(--muted);
   line-height: 1.7;
 }

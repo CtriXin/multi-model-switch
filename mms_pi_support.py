@@ -698,7 +698,7 @@ def _pi_vision_plan(runtime, model_name):
         plan["main_model_vision"] = _pi_model_supports_vision(runtime, model_name)
     except Exception:
         plan["main_model_vision"] = False
-    if plan["main_model_vision"] or not _pi_vision_relay_enabled():
+    if not _pi_vision_relay_enabled():
         return plan
 
     launchers = _launchers_module()
@@ -709,7 +709,7 @@ def _pi_vision_plan(runtime, model_name):
     pool = []
     for candidate in exposed:
         name = str(candidate or "").strip()
-        if not name or _pi_normalize_model_key(name) == _pi_normalize_model_key(model_name):
+        if not name:
             continue
         try:
             if not _pi_model_supports_vision(runtime, name):

@@ -4,7 +4,7 @@
 }
 .channel-models h2 {
   margin: 26px 0 6px;
-  font-size: 22px;
+  font-size: max(11px, 1.5714rem);
   letter-spacing: -0.02em;
 }
 .channel-models-heading,
@@ -39,7 +39,7 @@
   gap: 8px;
   flex: 1;
   max-width: 580px;
-  font-size: 13px;
+  font-size: max(11px, 0.9286rem);
   color: var(--muted);
 }
 .channel-toolbar select {
@@ -48,7 +48,7 @@
 }
 .channel-list-toolbar {
   margin-bottom: 12px;
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
   color: var(--muted);
 }
 .channel-search {
@@ -76,7 +76,7 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 6px 12px;
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
   color: var(--muted);
 }
 .channel-model-capability label {
@@ -94,7 +94,7 @@
   border: 0;
   background: transparent;
   color: var(--accent);
-  font-size: 11px;
+  font-size: max(11px, 0.7857rem);
   padding: 2px 4px;
   border-radius: 5px;
   white-space: nowrap;
@@ -106,7 +106,7 @@
   padding: 10px 12px;
   color: var(--muted);
   background: var(--soft);
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
 }
 .channel-model-rows {
   max-height: 46vh;
@@ -146,12 +146,12 @@
   gap: 3px;
 }
 .channel-model-name strong {
-  font-size: 14px;
+  font-size: max(11px, 1.0000rem);
   font-weight: 550;
   overflow-wrap: anywhere;
 }
 .channel-model-name small {
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
   color: var(--muted);
 }
 .channel-model-name small:empty {
@@ -159,10 +159,10 @@
 }
 .channel-model-row select {
   width: 100%;
-  font-size: 13px;
+  font-size: max(11px, 0.9286rem);
 }
 .effort-unavailable {
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
 }
 .channel-manual {
   margin-top: 16px;
@@ -173,20 +173,20 @@
 }
 .channel-scope-note {
   color: var(--muted);
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
   line-height: 1.7;
   margin: 18px 0;
 }
 .channel-save {
   padding-top: 18px;
   border-top: 1px solid var(--line);
-  font-size: 13px;
+  font-size: max(11px, 0.9286rem);
   color: var(--muted);
 }
 .channel-notice {
   display: flex;
   gap: 10px;
-  font-size: 13px;
+  font-size: max(11px, 0.9286rem);
   line-height: 1.6;
   color: var(--ink);
   padding: 12px;
@@ -200,7 +200,7 @@
 }
 .channel-review {
   max-width: 620px;
-  font-size: 14px;
+  font-size: max(11px, 1.0000rem);
 }
 .channel-review p {
   line-height: 1.7;
@@ -208,7 +208,7 @@
 .channel-config-path {
   display: block;
   color: var(--muted);
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
   overflow-wrap: anywhere;
 }
 .channel-review ul {
@@ -226,7 +226,7 @@
   overflow-wrap: anywhere;
 }
 .channel-review li strong {
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
   color: var(--muted);
 }
 .channel-review small {
@@ -264,7 +264,7 @@
     align-items: flex-start;
   }
   .channel-models-heading .button {
-    font-size: 12px;
+    font-size: max(11px, 0.8571rem);
     padding-inline: 8px;
   }
   .channel-toolbar {
@@ -315,7 +315,7 @@
 .channel-connection-fields label {
   display: grid;
   gap: 7px;
-  font-size: 13px;
+  font-size: max(11px, 0.9286rem);
 }
 .channel-connection-fields input {
   width: 100%;
@@ -326,11 +326,11 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 12px;
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
 }
 .channel-connection-fields p {
   margin: 0;
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
 }
 .channel-review li span {
   overflow-wrap: anywhere;

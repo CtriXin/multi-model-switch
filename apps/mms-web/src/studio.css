@@ -97,7 +97,7 @@
 }
 .brand-mms {
   font-family: var(--font-sans);
-  font-size: 20px;
+  font-size: max(11px, 1.4286rem);
   font-weight: 800;
   letter-spacing: -0.035em;
   color: var(--ink);
@@ -105,7 +105,7 @@
 }
 .brand-pilot {
   font-family: var(--font-sans);
-  font-size: 11px;
+  font-size: max(11px, 0.7857rem);
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -124,7 +124,7 @@
   border: 1px solid transparent;
   background: var(--accent);
   color: var(--inverse);
-  font-size: 13px;
+  font-size: max(11px, 0.9286rem);
   border-radius: 9px;
   gap: 11px;
 }
@@ -157,7 +157,7 @@
   background: transparent;
   border: 0;
   color: var(--muted);
-  font-size: 11px;
+  font-size: max(11px, 0.7857rem);
   padding: 7px 8px;
   border-radius: 5px;
 }
@@ -169,11 +169,11 @@
 }
 .workspace-heading {
   padding: 5px 8px;
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
   gap: 7px;
 }
 .workspace-heading > span:last-child {
-  font-size: 10px;
+  font-size: max(11px, 0.7143rem);
   opacity: 0.7;
 }
 .workspace-group + .workspace-group {
@@ -302,7 +302,7 @@
   margin: 4px 11px 2px;
   padding-top: 8px;
   border-top: 1px solid var(--line);
-  font-size: 10px;
+  font-size: max(11px, 0.7143rem);
   color: var(--muted);
 }
 .load-more-sessions {
@@ -310,7 +310,7 @@
   border: 0;
   background: transparent;
   color: var(--muted);
-  font-size: 11px;
+  font-size: max(11px, 0.7857rem);
   text-align: left;
   padding: 8px 10px 8px 17px;
   border-radius: 8px;
@@ -344,7 +344,7 @@
   display: block;
 }
 .model-monogram-text {
-  font-size: 11px;
+  font-size: max(11px, 0.7857rem);
   font-weight: 650;
   text-transform: capitalize;
 }
@@ -357,7 +357,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
   color: var(--muted);
 }
 .font-options label > span:first-child {
@@ -374,7 +374,7 @@
 .workspace-notice {
   margin: 0 5px 10px;
   padding: 6px 8px;
-  font-size: 11px;
+  font-size: max(11px, 0.7857rem);
   color: var(--muted);
   background: var(--soft);
   border-radius: 6px;
@@ -398,12 +398,12 @@
   border-radius: 8px;
 }
 .session-link-copy strong {
-  font-size: 13px;
+  font-size: max(11px, 0.9286rem);
   font-weight: 450;
   line-height: 1.6;
 }
 .session-link-copy small {
-  font-size: 10px;
+  font-size: max(11px, 0.7143rem);
   margin-top: 2px;
   color: var(--muted);
 }
@@ -429,7 +429,7 @@
   text-align: left;
   flex: 1;
   padding: 9px 3px;
-  font-size: 13px;
+  font-size: max(11px, 0.9286rem);
 }
 .settings-entry:hover {
   color: var(--accent);
@@ -444,7 +444,7 @@
   margin: 0 16px 10px;
   padding: 10px;
   border-radius: 8px;
-  font-size: 11px;
+  font-size: max(11px, 0.7857rem);
   text-align: left;
 }
 .attention-banner span {
@@ -497,17 +497,17 @@
 }
 .home-intro .workspace-picker select {
   max-width: 260px;
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
   cursor: pointer;
 }
 .home-intro h1 {
-  font-size: 34px;
+  font-size: max(11px, 2.4286rem);
   letter-spacing: -0.05em;
   line-height: 1.4;
   font-weight: 600;
 }
 .home-intro p {
-  font-size: 14px;
+  font-size: max(11px, 1.0000rem);
   margin-top: 12px;
 }
 .recipe-access {
@@ -516,7 +516,7 @@
   margin: 0 5px 9px;
 }
 .recipe-access .text-button {
-  font-size: 11px;
+  font-size: max(11px, 0.7857rem);
   color: var(--muted);
 }
 .home-content .composer,
@@ -537,7 +537,7 @@
 }
 .home-content .composer textarea {
   min-height: 84px;
-  font-size: 15px;
+  font-size: max(11px, 1.0714rem);
 }
 .composer-editor textarea {
   resize: none;
@@ -561,7 +561,7 @@
 }
 .composer-tools > button {
   min-height: 34px;
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
   gap: 6px;
   padding: 7px;
   border-radius: 7px;
@@ -585,14 +585,14 @@
   border: 0;
   border-radius: 7px;
   background: transparent;
-  font-size: 11px;
+  font-size: max(11px, 0.7857rem);
 }
 .task-settings-trigger:hover {
   background: var(--soft);
 }
 .task-model-name {
   color: var(--ink);
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
   font-weight: 550;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -605,16 +605,16 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: max(11px, 0.7857rem);
 }
 .task-effort {
   color: var(--accent);
-  font-size: 11px;
+  font-size: max(11px, 0.7857rem);
   flex-shrink: 0;
 }
 .task-plan {
   color: var(--muted);
-  font-size: 10px;
+  font-size: max(11px, 0.7143rem);
   flex-shrink: 0;
 }
 .send-button {
@@ -624,7 +624,7 @@
 }
 .input-hint {
   justify-content: flex-end;
-  font-size: 10px;
+  font-size: max(11px, 0.7143rem);
   margin-top: 11px;
 }
 .recent-section {
@@ -634,7 +634,7 @@
   margin-bottom: 13px;
 }
 .recent-section h2 {
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
   color: var(--muted);
   font-weight: 500;
 }
@@ -651,11 +651,11 @@
   color: var(--muted);
 }
 .recent-copy strong {
-  font-size: 13px;
+  font-size: max(11px, 0.9286rem);
   font-weight: 500;
 }
 .recent-copy small {
-  font-size: 11px;
+  font-size: max(11px, 0.7857rem);
   margin-top: 5px;
 }
 .empty-setup {
@@ -674,7 +674,7 @@
   border-radius: 14px;
   color: var(--ink);
   box-shadow: var(--float-shadow);
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
 }
 .studio-popover::backdrop {
   background: transparent;
@@ -684,7 +684,7 @@
   align-items: center;
   gap: 8px;
   padding: 11px 11px 15px;
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
 }
 .task-setting-row {
   display: flex;
@@ -698,7 +698,7 @@
 .task-setting-row > span:first-child {
   flex-shrink: 0;
   color: var(--muted);
-  font-size: 11px;
+  font-size: max(11px, 0.7857rem);
 }
 .task-setting-row .model-picker-trigger {
   display: flex;
@@ -713,15 +713,15 @@
 }
 .task-setting-row .model-picker-trigger strong {
   overflow-wrap: anywhere;
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
 }
 .task-setting-row .model-picker-trigger small {
-  font-size: 10px;
+  font-size: max(11px, 0.7143rem);
 }
 .task-setting-row select {
   border: 0;
   padding: 7px;
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
   background: var(--soft);
   border-radius: 6px;
   max-width: 190px;
@@ -732,7 +732,7 @@
 .session-model-detail {
   text-align: right;
   overflow-wrap: anywhere;
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
 }
 .session-model-detail small {
   display: block;
@@ -741,7 +741,7 @@
 }
 .popover-note {
   padding: 8px 11px 13px;
-  font-size: 10px;
+  font-size: max(11px, 0.7143rem);
   line-height: 1.6;
   color: var(--muted);
 }
@@ -755,7 +755,7 @@
   border-top: 1px solid var(--line);
   padding: 13px 11px 6px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: max(11px, 0.7857rem);
 }
 .popover-footer:hover {
   color: var(--accent);
@@ -778,13 +778,13 @@
   flex: 1;
 }
 .filter-option strong {
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
   font-weight: 500;
 }
 .filter-option small,
 .content-option small {
   display: block;
-  font-size: 10px;
+  font-size: max(11px, 0.7143rem);
   color: var(--muted);
   margin-top: 5px;
   line-height: 1.5;
@@ -810,11 +810,11 @@
   margin: 0 auto;
 }
 .settings-heading h1 {
-  font-size: 26px;
+  font-size: max(11px, 1.8571rem);
 }
 .settings-heading p {
   color: var(--muted);
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
   margin-top: 7px;
 }
 .settings-tabs {
@@ -829,7 +829,7 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
   background: transparent;
   border: 0;
   padding: 9px 3px;
@@ -858,17 +858,17 @@
   gap: 15px;
 }
 .settings-shell .page-heading h2 {
-  font-size: 17px;
+  font-size: max(11px, 1.2143rem);
 }
 .settings-shell .page-heading p {
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
   margin-top: 8px;
   line-height: 1.7;
 }
 .model-library-count {
   margin: 0 0 20px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: max(11px, 0.7857rem);
 }
 .model-library > .model-explorer {
   box-shadow: none;
@@ -881,20 +881,20 @@
 }
 .model-group strong,
 .channel-select strong {
-  font-size: 13px;
+  font-size: max(11px, 0.9286rem);
 }
 .model-group small,
 .channel-select small {
-  font-size: 11px;
+  font-size: max(11px, 0.7857rem);
 }
 .channel-choice.selected {
   box-shadow: none;
 }
 .model-detail-heading h3 {
-  font-size: 23px;
+  font-size: max(11px, 1.6429rem);
 }
 .model-facts {
-  font-size: 11px;
+  font-size: max(11px, 0.7857rem);
 }
 .model-group.selected {
   box-shadow: none;
@@ -914,14 +914,14 @@
   border-bottom: 1px solid var(--line);
 }
 .preference-row h2 {
-  font-size: 13px;
+  font-size: max(11px, 0.9286rem);
   font-weight: 550;
 }
 .preference-row p {
   color: var(--muted);
-  font-size: 11px;
-  line-height: 1.5;
-  margin-top: 2px;
+  font-size: max(12px, 0.8571rem);
+  line-height: 1.6;
+  margin-top: 3px;
   max-width: 52ch;
 }
 /* Two shapes of content, two rules.
@@ -982,15 +982,15 @@
    it had as a full page, so its headings ran four points larger than the
    appearance pane sitting one tab away. */
 .settings-shell .settings-page h2 {
-  font-size: 15px;
+  font-size: max(11px, 1.0714rem);
   font-weight: 600;
 }
 .settings-shell .settings-page .page-heading p {
-  font-size: 11px;
+  font-size: max(11px, 0.7857rem);
   line-height: 1.5;
 }
 .settings-shell .model-detail-heading h3 {
-  font-size: 17px;
+  font-size: max(11px, 1.2143rem);
 }
 .settings-shell .channel-list strong {
   font-weight: 600;
@@ -1046,14 +1046,14 @@
 .font-size-row .stepper output {
   min-width: 26px;
   text-align: center;
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
   font-variant-numeric: tabular-nums;
 }
 .general-settings select {
   border: 1px solid var(--line);
   border-radius: 7px;
   padding: 5px 8px;
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
   background: var(--surface);
   min-width: 150px;
   flex: none;
@@ -1070,9 +1070,9 @@
   border: 1px solid var(--line);
   border-radius: 7px;
   padding: 6px 10px;
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
   background: var(--surface);
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
   white-space: nowrap;
 }
 .appearance-options button[aria-pressed="true"] {
@@ -1095,7 +1095,7 @@
 .session-composer textarea {
   min-height: 54px;
   height: 54px;
-  font-size: 14px;
+  font-size: max(11px, 1.0000rem);
 }
 .session-composer .composer-bottom {
   margin-top: 10px;
@@ -1107,12 +1107,12 @@
   margin-bottom: 30px;
 }
 .message-author {
-  font-size: 11px;
+  font-size: max(11px, 0.7857rem);
   color: var(--muted);
   font-weight: 500;
 }
 .markdown {
-  font-size: 14px;
+  font-size: max(11px, 1.0000rem);
   line-height: 1.9;
 }
 .message.user .message-body {
@@ -1159,13 +1159,13 @@
     padding-top: 30px;
   }
   .home-intro h1 {
-    font-size: 28px;
+    font-size: max(11px, 2.0000rem);
   }
   .home-intro .workspace-picker {
     margin-bottom: 22px;
   }
   .home-intro p {
-    font-size: 12px;
+    font-size: max(11px, 0.8571rem);
   }
   .home-content .composer {
     padding: 16px 13px 12px;
@@ -1173,7 +1173,7 @@
   }
   .home-content .composer textarea {
     min-height: 80px;
-    font-size: 14px;
+    font-size: max(11px, 1.0000rem);
   }
   .composer-bottom,
   .home-content .composer-bottom {
@@ -1199,26 +1199,26 @@
   }
   .task-model-name {
     max-width: 150px;
-    font-size: 11px;
+    font-size: max(11px, 0.7857rem);
   }
   .task-route-name {
     max-width: 85px;
-    font-size: 9px;
+    font-size: max(11px, 0.6429rem);
   }
   .task-effort {
-    font-size: 10px;
+    font-size: max(11px, 0.7143rem);
   }
   .task-plan {
     display: none;
   }
   .input-hint {
-    font-size: 9px;
+    font-size: max(11px, 0.6429rem);
   }
   .recent-section {
     margin-top: 34px;
   }
   .recent-row > .status {
-    font-size: 10px;
+    font-size: max(11px, 0.7143rem);
   }
   .topbar {
     padding: 0 16px;
@@ -1236,30 +1236,30 @@
     gap: 9px;
   }
   .settings-shell {
-    padding: 12px 19px 28px;
+    padding: 0;
   }
   .settings-heading {
     gap: 8px;
   }
   .settings-heading h1 {
-    font-size: 23px;
+    font-size: max(11px, 1.6429rem);
   }
   .settings-tabs {
     gap: 18px;
   }
   .settings-tabs button {
-    font-size: 11px;
+    font-size: max(11px, 0.7857rem);
   }
   .settings-shell .page-heading {
     align-items: flex-start;
   }
   .settings-shell .page-heading .button {
     white-space: nowrap;
-    font-size: 11px;
+    font-size: max(11px, 0.7857rem);
     padding: 8px;
   }
   .settings-shell .page-heading p {
-    font-size: 11px;
+    font-size: max(11px, 0.7857rem);
   }
   .preference-row {
     flex-wrap: wrap;
@@ -1282,7 +1282,17 @@
   }
 }
 
-.app-version { color: var(--muted); font-size: 12px; font-weight: 400; letter-spacing: 0; white-space: nowrap; }
-.brand > .app-version { margin-left: 2px; font-size: 11px; }
+.app-version { color: var(--muted); font-size: max(11px, 0.8571rem); font-weight: 400; letter-spacing: 0; white-space: nowrap; }
+.brand > .app-version { margin-left: 2px; font-size: max(11px, 0.7857rem); }
 /* Settings is a sheet now; the version rides the tab row it replaced. */
 .settings-tabs > .app-version { margin-left: auto; align-self: center; }
+
+/* Settings, help and the tour share one inset and font scale on small screens. */
+@media (max-width: 640px) {
+  dialog[data-guide-dialog="settings"] { width: calc(100vw - 16px); }
+  dialog[data-guide-dialog="settings"] > .dialog-body.sheet { padding: 18px 18px 16px; height: min(740px, calc(100dvh - 32px)); }
+  .settings-tabs { gap: 10px; flex-wrap: wrap; }
+  .settings-tabs > .app-version { font-size: 11px; }
+  .settings-tabs button { font-size: max(12px, .8571rem); }
+  .session-workbar { flex-wrap: wrap; row-gap: 6px; }
+}

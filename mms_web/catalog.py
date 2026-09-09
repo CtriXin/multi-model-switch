@@ -798,7 +798,7 @@ class CatalogService:
             "models": models,
             "services": services,
             "presets": presets,
-            "workspaces": self._workspaces(),
+            "workspaces": [w for w in self._workspaces() if not w.get("hidden")],
             "diagnostics": diagnostics,
             "revision": self._config_revision(),
         }
@@ -818,6 +818,7 @@ class CatalogService:
                             "id": str(item.get("id") or ""),
                             "name": str(item.get("name") or Path(item["path"]).name),
                             "path": str(item["path"]),
+                            **({"hidden": True} if item.get("hidden") is True else {}),
                         }
                     )
         if not any(item["id"] == "default" for item in workspaces):
@@ -1253,7 +1254,7 @@ class CatalogService:
         workspace_id = str(payload.get("id") or "").strip()
         if workspace_id == "default":
             raise WebError("WORKSPACE_PROTECTED", "启动目录不能移除。", 409)
-        return self._rewrite_workspaces(workspace_id, lambda item: None)
+        return self._rewrite_workspaces(workspace_id, lambda item: {**item, "hidden": True})
 
     def _rewrite_workspaces(self, workspace_id: str, change) -> dict:
         from .runtime import private_json

@@ -200,6 +200,7 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [page, setPage] = useState<Page>("new");
   const [guideOpen, setGuideOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [guideStep, setGuideStep] = useState<TourStep | null>(null);
   const [guideSettingsKey, setGuideSettingsKey] = useState(0);
   const [guideRequest, setGuideRequest] = useState<{ nonce: string; text: string }>();
@@ -569,6 +570,8 @@ export function App() {
   function navigate(next: Page, after?: () => void) {
     requestNavigation(() => {
     setGuideStep(null);
+    setSettingsOpen(next === "models");
+    if (next === "models") { setNavOpen(false); after?.(); return; }
     setPage(next);
     if (next !== "session")
       history.replaceState(null, "", location.pathname + location.search);
@@ -582,20 +585,25 @@ export function App() {
     });
   }
   function beginGuideStep(step: TourStep) {
-    const apply = () => { setGuideOpen(false); setGuideStep(step); };
-    if (step !== "artifacts" && step !== "runtime") setPanel(false);
-    if (step !== "model" && step !== "effort") {
-      document.querySelectorAll<HTMLElement>('.studio-popover:popover-open').forEach(el => el.hidePopover());
-    }
-    if (step === "connection" || step === "settings") {
-      navigate("models", () => { setGuideSettingsKey(old => old + 1); apply(); });
-    } else if (step === "workspace" || step === "compose" || (page === "models" && !["finish", "sessions"].includes(step))) {
-      navigate("new", apply);
-    } else {
-      if (step === "artifacts" || step === "runtime") { setPanel(true); setPanelTab(step === "artifacts" ? "artifacts" : "runtime"); }
+    requestNavigation(() => {
+      setGuideOpen(false);
+      if (step !== "artifacts" && step !== "runtime") setPanel(false);
+      if (step !== "model" && step !== "effort") {
+        document.querySelectorAll<HTMLElement>('.studio-popover:popover-open').forEach(el => el.hidePopover());
+      }
+      const inSettings = step === "connection" || step === "settings";
+      setSettingsOpen(inSettings);
+      if (inSettings) setGuideSettingsKey(old => old + 1);
+      if (step === "workspace" || step === "compose") {
+        setPage("new"); setSelectedId(""); setDetail(null); currentSelection.current = "";
+        history.replaceState(null, "", location.pathname + location.search);
+      }
+      if (step === "artifacts" || step === "runtime") {
+        setPanel(true); setPanelTab(step === "artifacts" ? "artifacts" : "runtime");
+      }
       setNavOpen(step === "sessions");
-      apply();
-    }
+      setGuideStep(step);
+    });
   }
   function guideNavigate(action: GuideAction) {
     const steps: Record<GuideAction, TourStep> = { settings: "settings", workspace: "workspace", model: "model", compose: "compose", materials: "materials", artifacts: "artifacts", runtime: "runtime" };
@@ -820,6 +828,7 @@ export function App() {
     page === "session" && atBottom && !sessionError,
     connected && !statusesStale,
   );
+  const tour = guideStep ? <GuidedTour step={guideStep} move={beginGuideStep} close={() => setGuideStep(null)} help={() => requestNavigation(() => { setSettingsOpen(false); setGuideStep(null); setGuideOpen(true); })} example={guideExample} modelReady={data.presets.some(p => p.available)} configure={!!data.capabilities.configure} hasSession={page === "session" && !!detail} /> : null;
   return (
     <div className="app-shell" data-page={page}>
       {navOpen && (
@@ -1400,7 +1409,7 @@ export function App() {
             )}
           </div>
         </header>
-        {guideStep && <GuidedTour step={guideStep} move={beginGuideStep} close={() => setGuideStep(null)} help={() => { setGuideStep(null); setGuideOpen(true); }} example={guideExample} modelReady={data.presets.some(p => p.available)} configure={!!data.capabilities.configure} hasSession={page === "session" && !!detail} />}
+        {!settingsOpen && tour}
         {isPreview && (
           <div className="preview-banner">
             <span>
@@ -1597,9 +1606,10 @@ export function App() {
             </div>
           </div>
         )}
-        {page === "models" && (
+        {settingsOpen && (
           <SettingsPage
             key={guideSettingsKey}
+            tour={tour}
             requestNavigation={requestNavigation}
             editStateChanged={setSettingsEdit}
             autoCollapseProcess={autoCollapseProcess}
@@ -1627,7 +1637,7 @@ export function App() {
             setThemeChoice={setThemeChoice}
             accent={accent}
             setAccent={setAccent}
-            back={() => navigate("new")}
+            back={() => { setSettingsOpen(false); setGuideStep(null); }}
             data={data}
             favorites={favorites}
             toggleFavorite={favorite}

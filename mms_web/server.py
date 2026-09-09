@@ -33,6 +33,7 @@ class WebApplication:
         state_root = require_private_root(state_root)
         if config_root is None:
             config_root = state_root / "config"
+        self.config_root = config_root
         self.state_root = state_root
         self.csrf_token = secrets.token_urlsafe(32)
         self.catalog = _adapter(
@@ -194,6 +195,10 @@ class WebApplication:
 
 def create_server(app: WebApplication, static_root: Path, port: int = 8765):
     root = static_root.resolve()
+    import hashlib
+    from mms_version import VERSION
+    identity = hashlib.sha256((str(Path(__file__).resolve().parent.parent) + "|" +
+                               str(app.config_root.resolve()) + "|" + VERSION).encode()).hexdigest()
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "MMSWeb/1"
@@ -222,6 +227,7 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
+            self.send_header("X-MMS-Web-Identity", identity)
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
             self.send_header("X-Frame-Options", "SAMEORIGIN" if preview else "DENY")
@@ -231,7 +237,8 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
                              "img-src 'self' data:; connect-src 'self'; "
                              "object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
             self.end_headers()
-            self.wfile.write(body)
+            if self.command != "HEAD":
+                self.wfile.write(body)
 
         def _json(self, status, payload):
             self._send(status, json.dumps(payload, ensure_ascii=False).encode(),
@@ -274,6 +281,9 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
                 pass
             except Exception as exc:
                 self._error(exc)
+
+        def do_HEAD(self):
+            self.do_GET()
 
         def do_POST(self):
             try:

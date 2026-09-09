@@ -120,7 +120,7 @@ export function CurrentActivity({
       aria-atomic="true"
     >
       <Status session={session} disconnected={disconnected} />
-      <span className="activity-hint">{hints[phase]}</span>
+      {!["completed", "stopped", "waiting"].includes(phase) && <span className="activity-hint">{hints[phase]}</span>}
     </div>
   );
 }
