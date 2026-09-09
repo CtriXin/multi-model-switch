@@ -140,15 +140,6 @@
   justify-content: space-between;
   font-size: max(11px, .857143rem);
 }
-.capability-review-actions .capability-select-all {
-  border-color: var(--accent);
-  background: color-mix(in oklab, var(--accent) 12%, var(--surface));
-  color: var(--accent-hover);
-  font-weight: 650;
-}
-.capability-review-actions .capability-select-all:hover:not(:disabled) {
-  background: color-mix(in oklab, var(--accent) 20%, var(--surface));
-}
 .capability-selection-warning {
   color: var(--warn-ink);
 }
@@ -244,18 +235,8 @@
   gap: 8px;
 }
 .channel-capability-refresh .capability-refresh {
-  border: 1px solid var(--line);
-  background: var(--soft);
-  color: var(--ink);
-  font-size: max(11px, 0.857143rem);
-  padding: 5px 11px;
-  border-radius: 999px;
-  white-space: nowrap;
-  transition: background var(--duration-fast) var(--ease-out);
-}
-.channel-capability-refresh .capability-refresh:hover:not(:disabled) {
-  background: var(--surface);
-  border-color: var(--accent);
+  min-height: 40px;
+  font-weight: 650;
 }
 .channel-capability-refresh .capability-refresh:disabled {
   opacity: 0.55;

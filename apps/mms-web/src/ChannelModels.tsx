@@ -588,11 +588,13 @@ export function ChannelModels({
           <div className="channel-capability-refresh">
             <button
               type="button"
-              className="capability-refresh"
+              className="button primary capability-refresh"
               disabled={!!busy}
+              aria-busy={busy === "refresh"}
               title="对比 MMF 官方数据和本地已知快照，列出与当前配置不一致的地方"
               onClick={() => void checkCapabilities()}
             >
+              <RefreshCw size={16} aria-hidden="true" />
               {busy === "refresh" ? "正在对比…" : "检查最新能力"}
             </button>
             <span className="muted">
@@ -836,7 +838,7 @@ export function ChannelModels({
                   <div className="capability-review-actions">
                     <button
                       type="button"
-                      className="button capability-select-all"
+                      className="button"
                       disabled={!!busy}
                       aria-describedby="capability-selection-help"
                       onClick={() => chooseRefresh(allRefreshSelected ? "none" : "all")}
