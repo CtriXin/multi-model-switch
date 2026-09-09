@@ -54,6 +54,8 @@ _PY_COMPILE_TARGETS = [
 ]
 
 _PYTEST_TARGETS = [
+    "tests/test_mms_web_merge_regressions.py",
+    "tests/test_pi_vision_relay.py",
     "tests/test_mms_web_project_materials.py",
     "tests/test_mms_web_context_flow.py",
     "tests/test_mms_web_artifact_history.py",
@@ -128,6 +130,16 @@ _SCENARIO_MATRIX = [
         "id": "resume-explicit-only",
         "state": "old Claude project pointers and explicit mms resume",
         "coverage": "new launch does not consume stale project resume, explicit resume still works",
+    },
+    {
+        "id": "retired-optional-pack-cleanup",
+        "state": "upgrade from a version that installed RTK/BrainKeeper/Map/CodeGraph/token-saver/TOON/ops-env-safe/ECC/OMC",
+        "coverage": "install unbinds every MMS-written leftover, preserves user-owned lookalikes, backs up Claude settings, and uninstalls no third-party binary",
+    },
+    {
+        "id": "one-question-install",
+        "state": "installer run with no arguments, with and without a terminal",
+        "coverage": "nothing that changes the install is asked; stable channel and shell PATH are the defaults; the only question offers to open MMS Web, which starts detached with a real config root, falls back off a taken port, reuses a running instance, and is skipped without a terminal",
     },
     {
         "id": "codex-hook-trust-and-history",

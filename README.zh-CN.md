@@ -58,38 +58,38 @@ v4.0.0 是本地 Web 的首个大版本。下列 3.x 轨道为此前分支发布
 
 ## 安装 / 升级
 
-> 默认 UI 语言是中文；如果要英文，加 `--lang en`。
-
-### Stable：推荐给普通用户
+在新电脑上打开终端，粘贴这一条：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel stable --write-shell-rc
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash
 ```
 
-### Dev：推荐给你的两台工作机保持同状态
+装完会问一句要不要打开 MMS Web。回车即可，浏览器自动弹出，服务在后台运行，安装进程随即退出。在页面里添加 provider 和 API Key 就能开始对话。
+
+安装过程不问任何会影响安装内容的问题，默认走 stable 通道并把 `~/.local/bin` 写进 shell PATH。默认 UI 语言是中文，要英文加 `--lang en`。
+
+<details>
+<summary>其他安装方式</summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel dev --write-shell-rc
-```
+# 需要最新修复的开发用户
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel dev
 
-### Canary：只给测试机或专门试新功能的 session
+# 只给测试机
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel canary
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel canary --write-shell-rc
-```
-
-### 固定到某个 release 或分支
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref v3.4.0
+# 固定到某个 release 或分支
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref v4.2.1
 curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref main
+
+# 不打开 Web 端，也不改 shell 配置（CI、脚本）
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --no-launch-web --no-shell-rc
+
+# 装完直接打开，不询问
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --launch-web
 ```
 
-### 全新电脑顺手安装 CLI
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel dev --install-cli claude,codex,opencode --write-shell-rc
-```
+</details>
 
 安装器默认会：
 
@@ -224,18 +224,18 @@ NSR、Map、CodeGraph 的自动 hook 已退出默认路径。旧 `nsr-*-hook`、
 
 Figma 和 Pilot MCP 不再默认注入；即使检测到已安装 plugin/server，也需要用 `MMS_ENABLE_MCP_FIGMA=1`、`MMS_ENABLE_FIGMA_MCP=1`、`MMS_ENABLE_MCP_PILOT=1` 或 `MMS_ENABLE_PILOT_MCP=1` 显式 opt-in。
 
-可选全局安装示例：
+安装器不再提供可选包。RTK、BrainKeeper、Map、CodeGraph、全局 token-saver、全局 TOON、ops-env-safe、ECC 与 OMC 的安装路径已移除；对应的 `--install-*` 参数会打印一条提示后忽略。token-saver、TOON、web-access、weber、agent-browser 仍作为内建 session assets 随 MMS 提供。
+
+从旧版本升级的机器会在安装时自动解绑这些包：删除 MMS 写入的 RTK hook、BrainKeeper 命令与 MCP 条目、Map/CodeGraph auto-index 注册、全局 token-saver/TOON skill 链接与 `~/.local/bin` wrapper、ops-env-safe skill 与路径映射，以及 `~/.mms/agent-packs` 下的 ECC/OMC。清理只删带 MMS marker 或指向 MMS 目录的条目，改写 `~/.claude/settings.json` 前先备份，不卸载 rtk、codegraph、brainkeeper、node、jq 等第三方二进制。想单独跑清理而不重装：
 
 ```bash
-bash install.sh --install-codegraph
-bash install.sh --install-token-saver
-bash install.sh --install-toon
+bash install.sh --cleanup-retired-packs
 ```
 
-CodeGraph 初始化提示：
+安装过程零交互：不再询问 UI 语言，也不再逐项确认可选包。`pi` 是必装项，pilot web 端依赖它；缺失的 `claude` / `codex` / `opencode` 会自动补装，已安装的保持不动。需要精确控制时仍可用 `--install-cli`：
 
-```text
-仅针对当前任务需要的 repo 显式执行 codegraph init -i / codegraph index，已有索引需要刷新时执行 codegraph sync。
+```bash
+bash install.sh --install-cli claude,codex
 ```
 
 ## 安全原则
