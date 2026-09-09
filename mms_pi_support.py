@@ -381,6 +381,7 @@ _PI_MODEL_INPUT_HINTS = {
     "minimax-m2.7": ["text"],
     "qwen3.6-flash": ["text", "image"],
     "qwen3.7-max": ["text"],
+    "deepseek-v4.1-flash-expires-on-0910": ["text", "image"],
 }
 
 _PI_MODEL_UNSUPPORTED_HINTS = {
@@ -994,14 +995,9 @@ def _pi_model_thinking_level_map(runtime, profile_id, protocol, model_name, caps
     if protocol_name not in {"responses", "openai_chat_completions"}:
         return {}
 
-    if profile_id == "deepseek":
-        return {
-            "minimal": None,
-            "low": None,
-            "medium": None,
-            "high": "high",
-            "xhigh": "max",
-        }
+    # 2026-09-09: deepseek 档位改由 provider-profiles.json 驱动（v4.1 实测 7 档
+    # none/minimal/low/medium/high/xhigh/max；v4-pro/flash 由 model_overrides 钉住旧保守表）。
+    # 见 config/provider-profiles.json deepseek.effort + model_overrides。
 
     profile_caps = profile_thinking_capabilities(
         model_name,

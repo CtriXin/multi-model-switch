@@ -804,6 +804,7 @@ def test_pi_openai_provider_compat_uses_profile_specific_flags(monkeypatch, tmp_
         "medium": None,
         "high": "high",
         "xhigh": "max",
+        "max": "max",
     }
 
 
