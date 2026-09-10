@@ -472,6 +472,7 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-MMS-Web-Identity", identity)
+            self.send_header("X-MMS-Web-Version", VERSION)
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
             self.send_header("X-Frame-Options", "SAMEORIGIN" if preview else "DENY")
