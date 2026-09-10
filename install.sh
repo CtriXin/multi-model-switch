@@ -176,25 +176,16 @@ bundled_session_asset_present() {
     local asset="$1"
     local assets_root="$MMS_HOME/assets/session-assets"
     case "$asset" in
-        caveman)
-            [ -f "$assets_root/packs/caveman/skills/caveman/SKILL.md" ] \
-                && [ -f "$assets_root/packs/caveman/hooks/caveman-activate.js" ] \
-                && [ -f "$assets_root/packs/caveman/hooks/caveman-mode-tracker.js" ]
-            ;;
-        token-saver)
-            [ -f "$assets_root/skills/token-saver/SKILL.md" ]
+        grill-me)
+            [ -f "$assets_root/skills/grill-me/SKILL.md" ]
             ;;
         toon)
             [ -f "$assets_root/skills/toon/SKILL.md" ]
             ;;
-        web-access)
-            [ -f "$assets_root/skills/web-access/SKILL.md" ]
-            ;;
         weber)
-            [ -f "$assets_root/skills/weber/SKILL.md" ]
-            ;;
-        agent-browser)
-            [ -f "$assets_root/skills/agent-browser/SKILL.md" ]
+            [ -f "$assets_root/skills/weber/SKILL.md" ] \
+                && [ -f "$assets_root/skills/weber/backends-web-access/SKILL.md" ] \
+                && [ -f "$assets_root/skills/weber/backends-agent-browser/SKILL.md" ]
             ;;
         nsr)
             [ -f "$MMS_HOME/hooks/nsr-builtin-hook.py" ] \
@@ -215,14 +206,11 @@ print_bundled_session_asset_status() {
     local asset label path mode
     local assets_root="$MMS_HOME/assets/session-assets"
     echo "$(t "内建 session assets" "Bundled session assets")"
-    for asset in caveman token-saver toon web-access weber agent-browser nsr; do
+    for asset in grill-me toon weber nsr; do
         case "$asset" in
-            caveman) label="Caveman"; path="$assets_root/packs/caveman"; mode="$(t "按 session 注入；默认随偏好/确认页启用" "session-local; enabled by preference/confirm screen")" ;;
-            token-saver) label="token-saver"; path="$assets_root/skills/token-saver"; mode="$(t "默认可用" "available by default")" ;;
+            grill-me) label="grill-me"; path="$assets_root/skills/grill-me"; mode="$(t "默认可用；需要时显式调用" "available by default; invoke when needed")" ;;
             toon) label="TOON"; path="$assets_root/skills/toon"; mode="$(t "默认可用" "available by default")" ;;
-            web-access) label="web-access"; path="$assets_root/skills/web-access"; mode="$(t "默认可用" "available by default")" ;;
-            weber) label="weber"; path="$assets_root/skills/weber"; mode="$(t "默认可用" "available by default")" ;;
-            agent-browser) label="agent-browser"; path="$assets_root/skills/agent-browser"; mode="$(t "Codex/Antigravity 默认可用" "available by default for Codex/Antigravity")" ;;
+            weber) label="weber"; path="$assets_root/skills/weber"; mode="$(t "默认可用（含 web-access / agent-browser backend）" "available by default (includes web-access / agent-browser backends)")" ;;
             nsr) label="NSR"; path="$MMS_HOME/hooks/nsr-stop-wrapper.py"; mode="$(t "显式 /nsr 手动工作；自动 hook 已退休" "explicit /nsr manual work; automatic hooks retired")" ;;
         esac
         if bundled_session_asset_present "$asset"; then
@@ -288,7 +276,7 @@ $(t "说明:" "Notes:")
   - $(t "--launch-web 跳过提问直接打开，--no-launch-web 完全不打开；没有终端时不提问，只打印命令" "--launch-web opens it without asking, --no-launch-web never opens it; with no terminal available nothing is asked and the command is printed instead")
   - $(t "MMS Web 在后台运行，安装进程随即退出；PATH 默认写入 shell 配置，--no-shell-rc 可关闭" "MMS Web runs in the background and the installer exits right after; PATH is written to your shell config by default and --no-shell-rc turns that off")
   - $(t "pi 是必装项，pilot web 端依赖它；缺失的 claude/codex/opencode 会自动补装，已安装的不会被改动" "pi is mandatory because the pilot web app depends on it; missing claude/codex/opencode are installed automatically while existing ones are left untouched")
-  - $(t "内建能力（网页访问、浏览器自动化、省 token 工具、Caveman、NSR）随 MMS 一起安装，只在 MMS 启动的会话里生效" "Built-in tools (web access, browser automation, token savers, Caveman, NSR) ship with MMS and only apply inside sessions MMS starts")
+  - $(t "内建能力（weber 网页路由、grill-me、TOON、NSR）随 MMS 一起安装，只在 MMS 启动的会话里生效" "Built-in tools (weber web routing, grill-me, TOON, NSR) ship with MMS and only apply inside sessions MMS starts")
   - $(t "--install-cli 可显式指定要补装的 CLI：claude/codex/opencode/pi（逗号分隔）；能用 npm 的 CLI 均走 npm package" "--install-cli explicitly selects which CLIs to install: claude/codex/opencode/pi (comma-separated); CLIs with npm packages are installed through npm")
   - $(t "默认安装 Fira Code 与 JetBrains Mono 到用户字体目录，供 Web 字体选择使用；已装则跳过，--no-coding-fonts 可关闭" "Fira Code and JetBrains Mono are installed into the user font directory for the Web font picker; already-installed families are skipped, and --no-coding-fonts turns this off")
   - $(t "--write-shell-rc 支持 bash/zsh/fish；Ghostty/iTerm/Terminal 重开 tab 后即可直接输入 mms" "--write-shell-rc supports bash/zsh/fish; reopen Ghostty/iTerm/Terminal tabs to type mms directly")
@@ -1904,7 +1892,7 @@ print_dry_run_plan() {
     echo "• $(t "命令目录" "command dir"): $BIN_DIR"
     echo "• $(t "虚拟环境" "virtualenv"): $VENV_DIR"
     echo "• $(t "配置目录" "config dir"): $REAL_HOME/.config/mms"
-    echo "• $(t "会安装内建能力：网页访问、浏览器自动化、省 token 工具、Caveman、NSR" "would install the built-in tools: web access, browser automation, token savers, Caveman, NSR")"
+    echo "• $(t "会安装内建能力：weber 网页路由、grill-me、TOON、NSR" "would install the built-in tools: weber web routing, grill-me, TOON, NSR")"
 
     if [ -n "$INSTALL_CLI_LIST" ]; then
         echo "• $(t "会安装 CLI" "would install CLI"): $INSTALL_CLI_LIST"
@@ -2525,7 +2513,7 @@ if [ -n "$INSTALL_CLI_LIST" ]; then
     echo "• $(t "附带安装 CLI" "Optional CLI install"): $INSTALL_CLI_LIST"
 fi
 
-echo "• $(t "内建能力" "Built-in tools"): $(t "网页访问、浏览器自动化、省 token 工具等随 MMS 一起安装" "web access, browser automation, token-saving tools and more come with MMS")"
+echo "• $(t "内建能力" "Built-in tools"): $(t "weber 网页路由、grill-me、TOON、NSR 随 MMS 一起安装" "weber routing, grill-me, TOON and NSR come with MMS")"
 echo "  $(t "它们只在 MMS 启动的会话里生效，不会改动你已有的全局配置。" "They only apply inside sessions MMS starts, and none of your existing global config is modified.")"
 
 if [ "$ENSURE_NODE22" -eq 1 ]; then

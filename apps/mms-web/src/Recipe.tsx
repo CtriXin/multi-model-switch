@@ -87,11 +87,12 @@ export function RecipeImport({ loaded }: { loaded: (draft: RecipeDraft) => void 
         {!!recipe.variables.length && <div className="recipe-variables">{recipe.variables.map(name => {
           const isFile = name === "file" || /files?$/i.test(name);
           const setValue = (value: string) => { setValues({ ...values, [name]: value }); setShowPrompt(false); setError(""); };
-          return <label key={name}>{name}<input aria-label={`变量 ${name}`} value={values[name] || ""} onChange={e => setValue(e.target.value)} maxLength={50000} placeholder={isFile ? "拖入一个或多个文件，或粘贴完整路径" : "填写本次使用的值"}
+          const Field = isFile ? "textarea" : "input";
+          return <label key={name}>{name}<Field aria-label={`变量 ${name}`} aria-describedby={isFile ? `recipe-file-help-${name}` : undefined} value={values[name] || ""} onChange={e => setValue(e.target.value)} maxLength={50000} rows={isFile ? 2 : undefined} placeholder={isFile ? "拖入一个或多个文件，或粘贴完整路径" : "填写本次使用的值"}
             onDragOver={isFile ? e => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } : undefined}
             onDrop={isFile ? e => { e.preventDefault(); const raw = e.dataTransfer.getData("text/uri-list") || e.dataTransfer.getData("text/plain"); const paths = raw.split(/\r?\n/).flatMap(line => localFilePaths(line)); if (paths.length) setValue([...new Set(paths)].join("\n")); else setError("拖拽文件时浏览器没有提供原路径，请选择本地文件，或直接粘贴完整路径；文件不会被复制。"); } : undefined}
             onPaste={isFile ? e => { const paths = e.clipboardData.getData("text/plain").split(/\r?\n/).flatMap(line => localFilePaths(line)); if (paths.length) { e.preventDefault(); setValue([...new Set(paths)].join("\n")); } } : undefined}
-          /></label>;
+          />{isFile && <small id={`recipe-file-help-${name}`} className="recipe-file-help">拖拽后自动填入文件路径；支持多个文件。浏览器不提供原路径时，请粘贴完整路径，文件不会被复制。</small>}</label>;
         })}</div>}
         {variableError && <p className="section-note">{variableError}</p>}
         <details open={showPrompt} onToggle={e => setShowPrompt(e.currentTarget.open)}><summary>查看将载入的任务说明</summary><pre className="recipe-preview">{prompt || recipe.prompt}</pre></details>

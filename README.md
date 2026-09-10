@@ -19,7 +19,7 @@
 - **一个地方管理模型来源**：provider、account、route、fallback、thinking、vision、cache-sensitive transport 都在启动前可见。
 - **隔离但可恢复**：Claude/Codex session 使用 MMS 管理的 HOME / config seed，减少污染真实全局配置，同时保留 resume。
 - **Web UI 配配置**：不想手写 TOML 时，用 `mmf config web` 添加通道、拉模型、隐藏噪音模型、预览保存计划。
-- **按 session 注入能力包**：Caveman、CodeGraph、token-saver、TOON、Web automation bundle 等能力默认是 session-local，不改你的全局 hook。
+- **按 session 注入能力包**：CodeGraph、TOON、grill-me、Web automation bundle 等能力默认是 session-local，不改你的全局 hook；已移除 Caveman 与 token-saver 的内建安装。
 - **诊断优先**：在怀疑模型之前，先看 route、协议、cache、API Key、请求路径和 runtime exposure。
 
 MMS Pilot 是原 launcher 的可视交互入口。`chat`、`discuss` 和高上下文 helper 现在只作为 maintenance-only 表面；主线是把本地 coding CLI 启动、路由、隔离和诊断做好。
@@ -250,9 +250,9 @@ caveman_level = "light" # light | standard | full
 |---|---|---|
 | Caveman | 内建 | 低 token 沟通模式；确认页选择 Off/Light/Standard/Full |
 | CodeGraph | 内建 passive skill | 优先用 symbol graph 做代码定位、callers/callees、impact 分析 |
-| token-saver | 内建 | 长日志/测试输出/diff 存 ref + snippet；`token-gain` / `mms-gain` 看节省估算 |
 | TOON | 内建 | 压缩 agent-facing JSON / status / handoff |
-| Web automation bundle | 内建 | `weber` router + `web-access` 登录态 Chrome + `agent-browser` headless |
+| grill-me | 内建 | 逐题澄清目标、约束和验收，直接可用 |
+| Web automation bundle | 内建 | 只暴露 `weber` router；`web-access` 与 `agent-browser` 作为内部 backend |
 | NSR | 显式 `/nsr` 手动工作循环 | 沿用原 task 推进；不注册 Stop/compact hook、不跨 session 续跑 |
 | ECC / OMC | 可选安装 | Claude agent pack；启动确认页显式选择 |
 | Figma / Pilot MCP | 检测到也默认关闭 | 需要时用 `MMS_ENABLE_MCP_FIGMA=1` / `MMS_ENABLE_MCP_PILOT=1` 显式开启 |
@@ -267,7 +267,7 @@ NSR、Map、CodeGraph 的自动 hook 已退出默认路径。旧 `nsr-*-hook`、
 
 Figma 和 Pilot MCP 不再默认注入；即使检测到已安装 plugin/server，也需要用 `MMS_ENABLE_MCP_FIGMA=1`、`MMS_ENABLE_FIGMA_MCP=1`、`MMS_ENABLE_MCP_PILOT=1` 或 `MMS_ENABLE_PILOT_MCP=1` 显式 opt-in。
 
-安装器不再提供可选包。RTK、BrainKeeper、Map、CodeGraph、全局 token-saver、全局 TOON、ops-env-safe、ECC 与 OMC 的安装路径已移除；对应的 `--install-*` 参数会打印一条提示后忽略。token-saver、TOON、web-access、weber、agent-browser 仍作为内建 session assets 随 MMS 提供。
+安装器不再提供可选包。RTK、BrainKeeper、Map、CodeGraph、全局 token-saver、全局 TOON、ops-env-safe、ECC 与 OMC 的安装路径已移除；对应的 `--install-*` 参数会打印一条提示后忽略。TOON、grill-me、weber 仍作为内建 session assets 随 MMS 提供；`web-access` 与 `agent-browser` 仅作为 Weber 内部 backend。
 
 从旧版本升级时，仅将有 MMS 专属标记的 wrapper/命令、明确指向当前 MMS vendor 的 Skill 链接和安装目录内的旧 agent packs 移入 `~/.mms/retired-backup.*`，保留原文件供恢复。同名自定义 Skills、全局 hooks/MCP 设置及真实配置目录不自动修改，也不卸载第三方程序。全局退休 hook 可按上面的只读清理计划另行检查。想单独整理 MMS 条目而不重装：
 

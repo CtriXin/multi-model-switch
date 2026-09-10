@@ -1,11 +1,11 @@
 ---
 name: weber
-description: Use when the user wants web or browser automation but tool choice is unclear, including authorized browser interaction, local webapp UI testing, screenshots/traces, public crawling or scraping, batch data extraction, headless browser backends, anti-detection browsing, or choosing between web-access, Playwright, agent-browser, Camofox, Crawlee, Firecrawl/Browserless, Browser Use/Stagehand, and Obscura.
+description: Use when the user wants web or browser automation but tool choice is unclear. Weber presents one web skill and selects an available backend; Ego is preferred when its bridge is available, otherwise use the logged-in Chrome or isolated backend path.
 ---
 
 # Weber Skill
 
-Weber is a router, not a replacement for browser tools. Use it to choose the smallest reliable backend for an authorized web task, then load/follow the chosen tool's own skill or docs.
+Weber is the single user-facing web skill. It is a router, not a replacement for browser tools. Prefer the `ego-browser` bridge when it is available on the host. If no Ego bridge is available, use `web-access` for the user's logged-in Chrome, or an isolated backend for a task that does not need that login. `web-access` and `agent-browser` are bundled inside Weber and should not be selected as separate user skills.
 
 ## Hard Boundaries
 
@@ -17,7 +17,7 @@ Weber is a router, not a replacement for browser tools. Use it to choose the sma
 
 ## Host Chrome And Isolated Runtimes
 
-- If the task needs the user's logged-in Chrome, choose `web-access` CDP and repair that route before falling back to isolated backends.
+- If an Ego bridge is available, choose Ego first. If the task needs the user's logged-in Chrome and Ego is unavailable, choose `web-access` CDP and repair that route before falling back to isolated backends.
 - In MMS-launched sessions, prefer `MMS_HOST_CONTEXT_JSON` / `MMS_OPS_ENV_SAFE_CONFIG` for host path and WebAccess hints before guessing paths.
 - MMS/Codex sandboxes may rewrite `HOME`/`XDG_*`; do not assume `os.homedir()` points at the real Chrome profile.
 - Before declaring `web-access` unavailable from an isolated session, run the web-access dependency check with host-home hints; the current web-access scripts also read `WEB_ACCESS_HOST_HOME`, `HOST_HOME`, `REAL_HOME`, and `os.userInfo().homedir`:
@@ -38,6 +38,7 @@ Choose by task shape:
 
 | Need | Use |
 | --- | --- |
+| Any page operation when the Ego bridge is available | `ego-browser` |
 | Search, source discovery, known URL extraction, official docs lookup | `web-access` with search/fetch/curl/Jina as appropriate |
 | Logged-in user Chrome, internal sites, dynamic pages, social/content sites, exploratory browser navigation | `web-access` CDP |
 | Local webapp verification, UI flow debugging, screenshots, traces, accessibility snapshots, deterministic CLI steps | `playwright` skill / Playwright CLI wrapper; for visual/UI evidence, create QA-ready red annotated screenshots with labels outside the target region and connector lines |
