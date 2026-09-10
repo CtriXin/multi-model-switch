@@ -661,6 +661,12 @@ export function App() {
     const steps: Record<GuideAction, TourStep> = { settings: "settings", workspace: "workspace", model: "model", compose: "compose", materials: "materials", artifacts: "artifacts", runtime: "runtime" };
     beginGuideStep(steps[action]);
   }
+  /** Open a new session with a task already written out.
+   *  Unlike guideExample this starts no tour: the text is the whole point. */
+  function startTask(text: string) {
+    setSettingsOpen(false);
+    navigate("new", () => setGuideRequest({ nonce: newRequestId(), text }));
+  }
   function guideExample(text: string) {
     navigate("new", () => {
       setGuideRequest({ nonce: newRequestId(), text });
@@ -1748,6 +1754,7 @@ export function App() {
             connectionCompleted={connectionCompleted}
             tour={tour}
             requestNavigation={requestNavigation}
+            startTask={startTask}
             editStateChanged={setSettingsEdit}
             autoCollapseProcess={autoCollapseProcess}
             setAutoCollapseProcess={setAutoCollapseProcess}

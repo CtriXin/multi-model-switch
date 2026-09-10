@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ChevronDown, Copy, RefreshCw } from "lucide-react";
+import { Copy, RefreshCw, Wand2 } from "lucide-react";
 import { mutate, request } from "./api";
 import { copyText } from "./clipboard";
 import { QrCode } from "./QrCode";
@@ -21,15 +21,39 @@ interface State {
   port: number;
 }
 
-/** Turning this on is the one thing that makes Pilot reachable from another
- *  device, so the section says what that means before the switch, not after. */
-export function RemoteAccessSection() {
+/** What to hand the agent when someone asks it to set the tunnel up.
+ *
+ *  Written as a task rather than a page of instructions: the steps depend on
+ *  whose domain it is and where it is hosted, which the agent can ask and this
+ *  page cannot. It is told to ask before touching DNS or accounts. */
+function tunnelTask(port: number) {
+  return [
+    "帮我把这台电脑上的 MMS Pilot 配好，让我出门用流量也能访问。",
+    "",
+    `现在 Pilot 跑在 127.0.0.1:${port}，只有同一个网络里的设备能连。`,
+    "我要的是一条从公网到这台电脑的反向通道：这台机器主动往外建长连接，",
+    "外面的请求顺着它回来，所以不需要公网 IP，也不用在路由器上开端口。",
+    "",
+    "动手之前先问我这几件事，确认了再做：",
+    "1. 我有没有可用的域名，托管在哪里",
+    "2. 用 Cloudflare Tunnel 还是别的方案",
+    "",
+    "要求：",
+    "- 注册域名、改 DNS、建账号这类动作，每一步都要先让我确认",
+    "- 通道装成开机自启的服务，不要只在终端里前台跑",
+    "- 配好后用 --hostname <域名> 重启 Pilot，它的 Host 白名单只认它知道的名字",
+    "- 最后告诉我怎么验证，以及带 token 的链接从哪里拿",
+  ].join("\n");
+}
+
+/** Turning this on is the one setting here that reaches past this machine, so
+ *  the row says what that means before the switch rather than after. */
+export function RemoteAccessSection({ startTask }: { startTask: (text: string) => void }) {
   const [state, setState] = useState<State | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [chosen, setChosen] = useState("");
-  const [geek, setGeek] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -49,8 +73,7 @@ export function RemoteAccessSection() {
     setError("");
     setNotice("");
     try {
-      const next = await mutate<State>("/remote-access", payload);
-      setState(next);
+      setState(await mutate<State>("/remote-access", payload));
       setChosen("");
     } catch (problem) {
       setError(problem instanceof Error ? problem.message : "操作失败");
@@ -67,12 +90,8 @@ export function RemoteAccessSection() {
         <div>
           <h2>让手机或另一台电脑访问</h2>
           <p>
-            打开后，这台电脑会在自己的网络地址上多开一个入口，同一个 Wi-Fi
-            下的手机和电脑就能打开 Pilot。链接里带一串 token，没有它打不开。
-          </p>
-          <p className="preference-caution">
-            在公司、学校或咖啡馆这类共用网络里打开，同网段的人都能碰到这个入口。
-            token 挡得住，但要不要开由你决定。关掉后端口立刻关闭，网络上再也看不到。
+            用带 token 的链接从手机或另一台电脑打开。共用网络里同网段的人也能碰到；
+            关掉即关闭端口。
           </p>
         </div>
         <input
@@ -91,15 +110,13 @@ export function RemoteAccessSection() {
       )}
       {state?.mode === "all" && (
         <p className="section-note">
-          这次启动用了 <code>--listen all</code>，监听范围由命令行决定，开关不改它。
+          这次启动用了 <code>--listen all</code>，监听范围由命令行决定。
         </p>
       )}
       {state?.enabled && (
         <div className="remote-access">
           {ways.length === 0 ? (
-            <p className="section-note">
-              这台电脑现在没有可用的网络地址。连上 Wi-Fi 或网线后回来刷新。
-            </p>
+            <p className="section-note">现在没有可用的网络地址，连上 Wi-Fi 后回来看。</p>
           ) : (
             <>
               <div className="remote-ways" role="radiogroup" aria-label="选择一个地址">
@@ -109,9 +126,7 @@ export function RemoteAccessSection() {
                     type="button"
                     role="radio"
                     aria-checked={active?.host === way.host}
-                    className={
-                      "remote-way " + (active?.host === way.host ? "selected" : "")
-                    }
+                    className={"remote-way " + (active?.host === way.host ? "selected" : "")}
                     onClick={() => setChosen(way.host)}
                   >
                     <strong>{way.host}</strong>
@@ -123,7 +138,7 @@ export function RemoteAccessSection() {
                 <div className="remote-share">
                   <QrCode value={active.url} />
                   <div className="remote-share-copy">
-                    <p>用手机相机扫这个码，就会打开这个地址。</p>
+                    <p>用手机相机扫码打开。</p>
                     <code className="remote-url">{active.url}</code>
                     <div className="remote-actions">
                       <button
@@ -144,15 +159,15 @@ export function RemoteAccessSection() {
                         type="button"
                         className="button"
                         disabled={busy}
+                        title="之前发出去的链接和已打开的页面都会失效"
                         onClick={() => void change({ regenerate: true })}
                       >
                         <RefreshCw size={14} />
                         换一个 token
                       </button>
                     </div>
-                    {notice && <p className="section-note" role="status">{notice}</p>}
-                    <p className="section-note">
-                      换 token 之后，之前发出去的链接和已经打开的页面都会失效，需要重新扫码。
+                    <p className="section-note" role="status">
+                      {notice || "换 token 会让之前发出去的链接全部失效。"}
                     </p>
                   </div>
                 </div>
@@ -161,59 +176,28 @@ export function RemoteAccessSection() {
           )}
           {Object.keys(state.unavailable).length > 0 && (
             <p className="section-note">
-              这些地址没能打开入口，已经不再列出：
-              {Object.keys(state.unavailable).join("、")}
+              这些地址没能开出入口：{Object.keys(state.unavailable).join("、")}
             </p>
           )}
         </div>
       )}
-      <div className="preference-row geek-row">
+      <div className="preference-row">
         <div>
-          <button
-            type="button"
-            className="geek-toggle"
-            aria-expanded={geek}
-            onClick={() => setGeek((open) => !open)}
-          >
-            <ChevronDown size={14} className={geek ? "open" : ""} />
-            <h2>出门也要用（需要自己动手）</h2>
-          </button>
+          <h2>出门也要用</h2>
           <p>
-            上面那个开关只在同一个网络里有效。要在外面用流量访问，需要一条从公网到这台
-            电脑的通道。这部分我们不提供支持，下面是自己配的思路。
+            出门访问要一条从公网到这台电脑的通道，用你自己的域名。
+            我们不提供支持，可以交给 Pilot 陪你配。
           </p>
-          {geek && (
-            <div className="geek-body">
-              <p>
-                思路是反向连接：这台电脑上跑一个客户端，主动向外建一条长连接，外面的请求
-                顺着这条连接回来。所以不需要公网 IP，也不用在路由器上开端口。
-              </p>
-              <p>
-                以 Cloudflare Tunnel 为例，你需要一个接在 Cloudflare 上的域名和一个免费
-                账号，然后大致三步：
-              </p>
-              <ol>
-                <li>装 <code>cloudflared</code> 并登录你的 Cloudflare 账号。</li>
-                <li>
-                  建一条隧道并把域名指向它，让它转发到本机的 Pilot 端口
-                  <code>{` 127.0.0.1:${state?.port || 8765}`}</code>。
-                </li>
-                <li>
-                  用这个域名启动 Pilot，让它接受这个 Host：
-                  <code>{` mms-web --listen lan --hostname 你的域名`}</code>
-                </li>
-              </ol>
-              <p>
-                之后设置页里会多出一条带域名的入口，扫码方式一样。走域名是 HTTPS，所以
-                能装主屏幕图标、能用相机，局域网那条不行。
-              </p>
-              <p className="preference-caution">
-                域名不是秘密：证书一签发就会进公开的 Certificate Transparency 日志，几分钟
-                内就能被扫到。所以 token 依然是唯一的门禁，别把带 token 的链接贴到公开地方。
-              </p>
-            </div>
-          )}
         </div>
+        <button
+          type="button"
+          className="button"
+          disabled={!state}
+          onClick={() => startTask(tunnelTask(state?.port || 8765))}
+        >
+          <Wand2 size={14} />
+          交给 Pilot 配
+        </button>
       </div>
     </>
   );

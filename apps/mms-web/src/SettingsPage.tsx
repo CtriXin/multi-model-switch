@@ -34,7 +34,7 @@ export function SettingsPage({
   fontSize, setFontSize,
   boldText, setBoldText,
   selectToCopy, setSelectToCopy,
-  requestNavigation, editStateChanged,
+  requestNavigation, editStateChanged, startTask,
 }: {
   openUpdates: () => void;
   updateAvailable: boolean;
@@ -56,6 +56,7 @@ export function SettingsPage({
   workspaceId: string;
   effortChanged: (id: string) => void;
   requestNavigation: (action: () => void) => void;
+  startTask: (text: string) => void;
   editStateChanged: (state: {dirty: boolean; busy: boolean}) => void;
   autoCollapseProcess: boolean;
   setAutoCollapseProcess: (on: boolean) => void;
@@ -117,7 +118,7 @@ export function SettingsPage({
             <div><h2>显示命令行会话</h2><p>把用 <code>mmf</code> 在终端里开始的会话一起列出来。它们是只读的：可以查看，不能在这里继续。关掉后立即从列表消失。</p></div>
             <input type="checkbox" role="switch" aria-label="显示命令行会话" checked={showCliSessions} onChange={e => setShowCliSessions(e.target.checked)} />
           </label>
-          <RemoteAccessSection />
+          <RemoteAccessSection startTask={startTask} />
           <div className="preference-row">
             <div>
               <h2>外观</h2>
