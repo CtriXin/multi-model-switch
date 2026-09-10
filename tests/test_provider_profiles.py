@@ -319,7 +319,7 @@ def test_kimi_k3_profile_uses_reasoning_effort_without_k2_thinking_patch(monkeyp
         "k3",
         provider_id="kimi",
         base_url="https://api.kimi.com/coding/",
-    ) == 262_144
+    ) == 1_048_576
     assert profiles.profile_context_window(
         "k3[1m]",
         provider_id="kimi",
