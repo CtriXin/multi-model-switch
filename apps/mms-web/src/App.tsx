@@ -2331,7 +2331,11 @@ export function App() {
             <ModelPicker
               presets={data.presets}
               models={data.models}
-              workspaceId={adopt.session.workspaceId}
+              // Reading a channel's options needs a folder that exists, and a
+              // terminal session's own folder is not registered until it is
+              // adopted. This only picks where those options are read from;
+              // the adopted session still starts in its own directory.
+              workspaceId={adopt.session.workspaceId || workspaceId || "default"}
               value={adopt.presetId}
               change={(id) => setAdopt((old) => old && { ...old, presetId: id })}
               favorites={favorites}
