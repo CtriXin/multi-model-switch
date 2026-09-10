@@ -785,10 +785,13 @@ kbd {
 .recent-copy strong {
   font-size: max(11px, 0.9286rem);
   font-weight: 500;
-  display: block;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .recent-copy small {
   display: block;

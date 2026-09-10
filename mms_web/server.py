@@ -118,7 +118,17 @@ class WebApplication:
             return []
         try:
             from .cli_sessions import index, session_dir_for
-            return index(session_dir_for(self.config_root))
+            return index(session_dir_for(self.config_root),
+                         workspaces=self._known_workspaces())
+        except Exception:
+            return []
+
+    def _known_workspaces(self) -> list[dict]:
+        """The registered folders, for placing command-line sessions."""
+        if not self.catalog:
+            return []
+        try:
+            return self.catalog.workspaces()
         except Exception:
             return []
 
@@ -146,7 +156,8 @@ class WebApplication:
         wanted = session_id[len("cli:"):]
         if not self.config_root or not wanted:
             raise WebError("NOT_FOUND", "找不到这个会话。", 404)
-        row = next((s for s in index(session_dir_for(self.config_root), limit=2000)
+        row = next((s for s in index(session_dir_for(self.config_root), limit=2000,
+                                     workspaces=self._known_workspaces())
                     if s["piSessionId"] == wanted), None)
         if row is None:
             raise WebError("NOT_FOUND", "找不到这个会话。", 404)

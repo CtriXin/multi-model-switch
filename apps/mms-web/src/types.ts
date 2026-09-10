@@ -10,6 +10,9 @@ export interface Workspace {
   id: string;
   name: string;
   path: string;
+  /** A folder the sidebar shows because sessions ran there, not one the user
+   *  registered. It can be read and copied, but not renamed or removed. */
+  unregistered?: boolean;
 }
 export interface Model {
   id: string;

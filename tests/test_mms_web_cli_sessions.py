@@ -160,3 +160,104 @@ def test_a_missing_gateway_directory_does_not_break_the_list(tmp_path):
             app.get(["sessions", "cli:nope"])
     finally:
         app.close()
+
+
+@pytest.mark.parametrize("first_message, title", [
+    # A path's head is boilerplate every session shares; its end is the part
+    # someone means, so the cut goes in the middle.
+    ("/private/tmp/claude-501/-Users-xin-repo-multi-model-switch/run/scratchpad",
+     "/private/…/run/scratchpad"),
+    # A URL is recognised by its host, so that is the half that survives.
+    ("https://adsconflux.feishu.cn/wiki/AbCdEfGhIjKl 帮我看看这个文档",
+     "adsconflux.feishu.cn/… 帮我看看这个文档"),
+    # The scheme says nothing and costs eight characters.
+    ("https://adsconflux.feishu.cn/wiki/AbCdEfGhIjKl",
+     "adsconflux.feishu.cn/wiki/AbCdEfGhIjKl"),
+    # Cut on the space, never inside the word before it.
+    ("check the very long english sentence that keeps going past the limit",
+     "check the very long english sentence that…"),
+    # Chinese has no spaces; its punctuation is what keeps a cut off a phrase.
+    ("使用 stride 完成这个需求，先看一下上游是否有迭代，然后再决定下一步怎么走，注意兼容旧配置",
+     "使用 stride 完成这个需求，先看一下上游是否有迭代，然后再决定下一步怎么走，…"),
+])
+def test_a_long_title_keeps_the_part_that_identifies_it(tmp_path, first_message, title):
+    path = write(tmp_path, "a", [session("id-t"), message("user", first_message)])
+    assert summarize(path)["title"] == title
+
+
+def test_a_command_line_session_is_placed_in_the_folder_it_ran_in(tmp_path):
+    """Otherwise every project's terminal work piles into one group."""
+    from mms_web.cli_sessions import workspace_for
+
+    folders = [
+        {"id": "outer", "path": "/Users/x/code"},
+        {"id": "inner", "path": "/Users/x/code/repo"},
+        {"id": "blank", "path": ""},
+    ]
+    # The deepest registered folder wins, so a subdirectory does not land in
+    # the parent project.
+    assert workspace_for("/Users/x/code/repo/apps/web", folders) == "inner"
+    assert workspace_for("/Users/x/code/repo", folders) == "inner"
+    assert workspace_for("/Users/x/code/other", folders) == "outer"
+    # A near-miss is not a match: repo-two is its own directory.
+    assert workspace_for("/Users/x/code/repo-two", folders) == "outer"
+    assert workspace_for("/elsewhere", folders) == ""
+    assert workspace_for("", folders) == ""
+
+
+def test_folder_matching_resolves_symlinks(tmp_path):
+    """macOS reports one directory as both /tmp and /private/tmp."""
+    from mms_web.cli_sessions import workspace_for
+
+    real = tmp_path / "real"
+    real.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(real)
+    assert workspace_for(str(link), [{"id": "w", "path": str(real)}]) == "w"
+
+
+def test_listed_command_line_sessions_carry_their_registered_folder(tmp_path):
+    from mms_web.server import WebApplication
+
+    state_root = tmp_path / "state"
+    state_root.mkdir()
+    project = tmp_path / "project"
+    (project / "apps").mkdir(parents=True)
+    (state_root / "workspaces.json").write_text(
+        json.dumps([{"id": "proj", "name": "project", "path": str(project)}]),
+        encoding="utf-8")
+    config_root = tmp_path / "mms-next"
+    sessions = config_root / "pi-gateway" / "sessions"
+    sessions.mkdir(parents=True)
+    write(sessions, "inside", [session("cccc-1", cwd=str(project / "apps")),
+                               message("user", "在子目录里问的")])
+    write(sessions, "outside", [session("cccc-2", cwd="/somewhere/else"),
+                                message("user", "在别处问的")])
+
+    app = WebApplication(state_root=state_root, config_root=config_root)
+    try:
+        rows = {r["id"]: r for r in app.all_sessions(include_cli=True)}
+        assert rows["cli:cccc-1"]["workspaceId"] == "proj"
+        # No match stays empty, and the page groups it by its own directory.
+        assert rows["cli:cccc-2"]["workspaceId"] == ""
+        assert app.get(["sessions", "cli:cccc-1"])["session"]["workspaceId"] == "proj"
+    finally:
+        app.close()
+
+
+@pytest.mark.parametrize("first_message, title", [
+    # A link glued to the words in front of it, with no space between.
+    ("使用stride-v3完成https://applink.feishu.cn/client/message/open?token=abcd",
+     "使用stride-v3完成applink.feishu.cn/…"),
+    # Two ellipses in a row read as a rendering fault; one is the cut.
+    ("使用 stride 完成需求 https://applink.feishu.cn/client/message/open?token=abcd 然后检查结果对不对",
+     "使用 stride 完成需求 applink.feishu.cn/…"),
+    # Structure, not just a slash: this is text, and shortening it would
+    # destroy the words.
+    ("A/B测试方案需要重新评估一下具体的投放比例和人群定向",
+     "A/B测试方案需要重新评估一下具体的投放比例和人群定向"),
+])
+def test_a_link_inside_a_sentence_shrinks_without_taking_the_words_with_it(
+        tmp_path, first_message, title):
+    path = write(tmp_path, "a", [session("id-u"), message("user", first_message)])
+    assert summarize(path)["title"] == title

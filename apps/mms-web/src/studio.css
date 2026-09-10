@@ -476,6 +476,23 @@
   padding: clamp(40px, 10vh, 110px) 0 40px;
 }
 /* A session Pilot can read but not drive. Stated once, at the top. */
+/* Stands where the composer would, at the composer's own width and radius, so
+   the bottom of the page still reads as one block rather than a gap. */
+.composer-locked {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  padding: 15px 20px;
+  border: 1px dashed var(--line);
+  border-radius: 20px;
+  background: var(--soft);
+  color: var(--muted);
+  font-size: max(11px, 0.8571rem);
+}
+.composer-locked svg {
+  flex-shrink: 0;
+}
 .session-readonly {
   margin: 0 0 14px;
   padding: 10px 14px;
