@@ -95,3 +95,63 @@
     flex-direction: column;
   }
 }
+/* The name a tunnel only reveals once it is running. Sits with the addresses
+   because it is one more way in, not a separate feature. */
+.tunnel-hostnames {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+.tunnel-hostnames label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 220px;
+}
+.tunnel-hostnames label span {
+  color: var(--muted);
+  font-size: max(11px, 0.7857rem);
+}
+.tunnel-hostnames input {
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink);
+  font-size: max(11px, 0.8571rem);
+  min-width: 0;
+}
+.tunnel-list {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  flex-basis: 100%;
+}
+.tunnel-list li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: max(11px, 0.7857rem);
+}
+.tunnel-list button {
+  display: inline-flex;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 2px;
+  border-radius: 999px;
+}
+.tunnel-list button:hover:not(:disabled) {
+  color: var(--ink);
+  background: var(--soft);
+}

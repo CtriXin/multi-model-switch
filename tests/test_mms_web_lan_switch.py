@@ -225,7 +225,7 @@ def test_the_stored_switch_is_written_readable_only_by_this_user(tmp_path):
     for name in ("remote-access.json", "remote-access-token"):
         assert (tmp_path / name).stat().st_mode & 0o077 == 0, name
     saved = json.loads((tmp_path / "remote-access.json").read_text(encoding="utf-8"))
-    assert saved == {"mode": "lan"}
+    assert saved == {"mode": "lan", "hostnames": []}
 
 
 def test_threads_do_not_leak_when_the_switch_is_flipped():
@@ -242,3 +242,80 @@ def test_threads_do_not_leak_when_the_switch_is_flipped():
             break
         threading.Event().wait(0.05)
     assert threading.active_count() <= before
+
+# ── the name a tunnel only reveals once it is running ─────────────────────
+
+@pytest.mark.parametrize("pasted, kept", [
+    # What the tunnel actually prints, pasted whole.
+    ("https://wide-lions-run.trycloudflare.com", "wide-lions-run.trycloudflare.com"),
+    ("https://wide-lions-run.trycloudflare.com/?k=abc", "wide-lions-run.trycloudflare.com"),
+    ("PILOT.Example.COM:8443", "pilot.example.com"),
+    ("  pilot.evilsngx.ccwu.cc  ", "pilot.evilsngx.ccwu.cc"),
+    # Not names: an address comes from the machine itself, and the rest is junk.
+    ("192.168.1.5", ""),
+    ("localhost", ""),
+    ("not a host", ""),
+    ("", ""),
+])
+def test_a_pasted_tunnel_url_is_reduced_to_the_name(pasted, kept):
+    from mms_web.remote_access import clean_hostname
+
+    assert clean_hostname(pasted) == kept
+
+
+def test_a_tunnel_name_takes_effect_at_once_and_survives_a_restart(tmp_path):
+    """A quick tunnel's name is random per start, so requiring a restart to
+    accept it would make the no-domain path unusable."""
+    access = RemoteAccess(tmp_path, "lan")
+    assert access.accepts("wide-lions-run.trycloudflare.com", 8765) is False
+    assert access.add_hostname("https://wide-lions-run.trycloudflare.com/?k=x")
+    assert access.accepts("wide-lions-run.trycloudflare.com", 8765) is True
+    # And it is the first way offered: the only one that works off this network.
+    first = access.links(8765)[0]
+    assert first["kind"] == "hostname"
+    assert first["url"].startswith("https://wide-lions-run.trycloudflare.com/")
+
+    # A new process keeps it.
+    again = RemoteAccess(tmp_path, "lan")
+    assert again.accepts("wide-lions-run.trycloudflare.com", 8765) is True
+    again.remove_hostname("wide-lions-run.trycloudflare.com")
+    assert RemoteAccess(tmp_path, "lan").accepts(
+        "wide-lions-run.trycloudflare.com", 8765) is False
+
+
+def test_a_name_from_the_command_line_lasts_only_for_that_run(tmp_path):
+    access = RemoteAccess(tmp_path, "lan", ("pilot.example.com",))
+    assert access.accepts("pilot.example.com", 8765) is True
+    assert access.saved_hostnames == ()
+    # Nothing was persisted, so the next start without the flag does not answer to it.
+    assert RemoteAccess(tmp_path, "lan").accepts("pilot.example.com", 8765) is False
+
+
+def test_only_saved_names_can_be_taken_back_from_the_page(tmp_path):
+    access = RemoteAccess(tmp_path, "lan", ("fixed.example.com",))
+    access.add_hostname("added.example.com")
+    kinds = {entry["host"]: entry.get("removable") for entry in access.links(8765)
+             if entry["kind"] == "hostname"}
+    assert kinds == {"fixed.example.com": False, "added.example.com": True}
+
+
+def test_names_cannot_be_added_while_remote_access_is_off(app):
+    with pytest.raises(WebError) as refused:
+        app.post(["remote-access"], {"hostname": "x.example.com"})
+    assert refused.value.code == "REMOTE_ACCESS_OFF"
+
+
+def test_something_that_is_not_a_name_is_refused_with_a_reason(app):
+    app.post(["remote-access"], {"enabled": True})
+    with pytest.raises(WebError) as refused:
+        app.post(["remote-access"], {"hostname": "not a host"})
+    assert refused.value.code == "INVALID_HOSTNAME"
+
+
+def test_the_page_can_add_and_drop_a_tunnel_name(app):
+    app.post(["remote-access"], {"enabled": True})
+    state = app.post(["remote-access"], {"hostname": "https://x-y-z.trycloudflare.com"})
+    assert state["savedHostnames"] == ["x-y-z.trycloudflare.com"]
+    assert state["links"][0]["host"] == "x-y-z.trycloudflare.com"
+    dropped = app.post(["remote-access"], {"removeHostname": "x-y-z.trycloudflare.com"})
+    assert dropped["savedHostnames"] == []

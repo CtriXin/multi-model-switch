@@ -195,8 +195,18 @@ class WebApplication:
         return state
 
     def set_remote_access(self, payload: dict) -> dict:
-        """Turn remote access on or off, or replace the token."""
+        """Turn remote access on or off, manage tunnel names, or roll the token."""
         payload = dict(payload or {})
+        if payload.get("hostname"):
+            if self.access.mode == "loopback":
+                raise WebError("REMOTE_ACCESS_OFF", "先打开远程访问，再加隧道域名。", 409)
+            if not self.access.add_hostname(str(payload["hostname"])):
+                raise WebError("INVALID_HOSTNAME",
+                               "这不像一个域名。把隧道给你的地址整条粘进来就行。", 400)
+            return self.remote_access_state()
+        if payload.get("removeHostname"):
+            self.access.remove_hostname(str(payload["removeHostname"]))
+            return self.remote_access_state()
         if payload.get("regenerate") is True:
             if self.access.mode == "loopback":
                 raise WebError("REMOTE_ACCESS_OFF", "先打开远程访问，再换 token。", 409)

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Copy, RefreshCw, Wand2 } from "lucide-react";
+import { Copy, RefreshCw, Wand2, X } from "lucide-react";
 import { mutate, request } from "./api";
 import { copyText } from "./clipboard";
 import { QrCode } from "./QrCode";
@@ -9,40 +9,61 @@ interface Way {
   url: string;
   kind: "hostname" | "address";
   detail: string;
+  removable?: boolean;
 }
 interface State {
   mode: "loopback" | "lan" | "all";
   enabled: boolean;
   token: string;
   hostnames: string[];
+  savedHostnames: string[];
   links: Way[];
   listening: string[];
   unavailable: Record<string, string>;
   port: number;
 }
 
-/** What to hand the agent when someone asks it to set the tunnel up.
+/** What to hand the agent when someone asks it to set up outside access.
  *
- *  Written as a task rather than a page of instructions: the steps depend on
- *  whose domain it is and where it is hosted, which the agent can ask and this
- *  page cannot. It is told to ask before touching DNS or accounts. */
+ *  A task, not a page of instructions, because the right answer depends on
+ *  what the person already has, and most people have nothing. So it starts by
+ *  asking, and the branch for "nothing at all" is a real one: a quick tunnel
+ *  needs no account and no domain, and Pilot polls rather than streaming, so
+ *  the one thing quick tunnels cannot do does not matter here. */
 function tunnelTask(port: number) {
   return [
-    "帮我把这台电脑上的 MMS Pilot 配好，让我出门用流量也能访问。",
+    "帮我配好从外网访问这台电脑上的 MMS Pilot。",
     "",
-    `现在 Pilot 跑在 127.0.0.1:${port}，只有同一个网络里的设备能连。`,
-    "我要的是一条从公网到这台电脑的反向通道：这台机器主动往外建长连接，",
-    "外面的请求顺着它回来，所以不需要公网 IP，也不用在路由器上开端口。",
+    `Pilot 现在跑在 127.0.0.1:${port}，只有同一个网络里的设备能连。`,
+    "要的是一条从公网到这台电脑的反向通道：这台机器主动往外建长连接，",
+    "外面的请求顺着它回来。所以不需要公网 IP，也不用在路由器上开端口。",
     "",
-    "动手之前先问我这几件事，确认了再做：",
-    "1. 我有没有可用的域名，托管在哪里",
-    "2. 用 Cloudflare Tunnel 还是别的方案",
+    "先问我两个问题，别假设我有什么：",
+    "1. 我有没有域名？托管在哪里（Cloudflare / 其他 / 没有）",
+    "2. 我有没有自己的服务器？有没有装 Tailscale 之类的虚拟网？",
     "",
-    "要求：",
-    "- 注册域名、改 DNS、建账号这类动作，每一步都要先让我确认",
-    "- 通道装成开机自启的服务，不要只在终端里前台跑",
-    "- 配好后用 --hostname <域名> 重启 Pilot，它的 Host 白名单只认它知道的名字",
-    "- 最后告诉我怎么验证，以及带 token 的链接从哪里拿",
+    "按我的回答挑一条，并且告诉我为什么挑它：",
+    "",
+    "A. 什么都没有 —— Cloudflare 快速隧道",
+    "   `cloudflared tunnel --url http://127.0.0.1:" + port + "`",
+    "   不需要账号、不需要域名，跑起来就给一个 https://xxx.trycloudflare.com。",
+    "   代价：每次重启地址都会变；官方定位是调试用途，不保证可用性。",
+    "",
+    "B. 有 Tailscale 或愿意装 —— 免费、不需要域名、跨网络可用",
+    "   两台设备装同一个账号即可，Pilot 的设置页里已经会列出这个地址。",
+    "",
+    "C. 有域名且托管在 Cloudflare —— 具名隧道，地址固定",
+    "   建隧道、指 DNS、装成开机自启的服务。",
+    "",
+    "D. 有自己的服务器 —— 反向隧道到你的机器",
+    "",
+    "不管走哪条，配好之后：",
+    "- 把隧道给出的地址填进 Pilot 设置页的「隧道域名」，立即生效，不用重启",
+    "- 告诉我怎么验证，以及带 token 的链接从哪里拿",
+    "",
+    "规矩：",
+    "- 注册域名、改 DNS、建账号、装系统服务，每一步都要先问我",
+    "- 能装成开机自启就装，不要只在终端里前台跑，我关了终端就断",
   ].join("\n");
 }
 
@@ -180,6 +201,7 @@ export function RemoteAccessSection({ startTask }: { startTask: (text: string) =
               )}
             </>
           )}
+          <TunnelHostnames state={state} busy={busy} change={change} />
           {Object.keys(state.unavailable).length > 0 && (
             <p className="section-note">
               这些地址没能开出入口：{Object.keys(state.unavailable).join("、")}
@@ -203,5 +225,63 @@ export function RemoteAccessSection({ startTask }: { startTask: (text: string) =
         </button>
       </div>
     </>
+  );
+}
+
+/** The hostname a tunnel hands out, which it only knows once it is running.
+ *
+ *  Pilot answers to names it was told about and nothing else, and a quick
+ *  tunnel's name is random per start, so requiring a restart to accept it
+ *  would make the no-domain path useless. */
+function TunnelHostnames({
+  state,
+  busy,
+  change,
+}: {
+  state: State;
+  busy: boolean;
+  change: (payload: Record<string, unknown>) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState("");
+  return (
+    <form
+      className="tunnel-hostnames"
+      onSubmit={async (event) => {
+        event.preventDefault();
+        if (!draft.trim()) return;
+        await change({ hostname: draft });
+        setDraft("");
+      }}
+    >
+      <label>
+        <span>隧道域名</span>
+        <input
+          value={draft}
+          disabled={busy}
+          placeholder="粘贴隧道给你的地址，例如 https://xxx.trycloudflare.com"
+          onChange={(event) => setDraft(event.target.value)}
+        />
+      </label>
+      <button type="submit" className="button" disabled={busy || !draft.trim()}>
+        添加
+      </button>
+      {state.savedHostnames.length > 0 && (
+        <ul className="tunnel-list">
+          {state.savedHostnames.map((name) => (
+            <li key={name}>
+              <code>{name}</code>
+              <button
+                type="button"
+                disabled={busy}
+                aria-label={`不再接受 ${name}`}
+                onClick={() => void change({ removeHostname: name })}
+              >
+                <X size={13} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </form>
   );
 }

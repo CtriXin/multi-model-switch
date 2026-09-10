@@ -16,6 +16,7 @@ from __future__ import annotations
 import ipaddress
 import json
 import os
+import re
 import secrets
 from pathlib import Path
 
@@ -29,6 +30,33 @@ _TOKEN_BYTES = 32
 _MODES = ("loopback", "lan", "all")
 _PREFERENCE = "remote-access.json"
 _TOKEN_FILE = "remote-access-token"
+# A DNS name and nothing else: no scheme, no port, no path. A tunnel hands out
+# a name like "wide-lions-run.trycloudflare.com", and that is all that goes in
+# the allowlist.
+_HOSTNAME = re.compile(r"^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?"
+                       r"(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$")
+
+
+def clean_hostname(value: str) -> str:
+    """A hostname the allowlist can hold, or "" when it is not one.
+
+    People paste what the tunnel printed, which is a URL. The scheme, port and
+    path are stripped rather than refused, because refusing a paste that
+    contains the right answer is just an obstacle.
+    """
+    name = str(value or "").strip().lower()
+    name = re.sub(r"^[a-z][a-z0-9+.-]*://", "", name)
+    name = name.split("/")[0].split("?")[0]
+    name = name.rsplit(":", 1)[0] if name.count(":") == 1 else name
+    name = name.strip(".")
+    if not _HOSTNAME.match(name):
+        return ""
+    try:
+        # An address is not a hostname; those come from the machine itself.
+        ipaddress.ip_address(name)
+        return ""
+    except ValueError:
+        return name
 
 
 def _load_or_create(path: Path) -> str:
@@ -48,6 +76,14 @@ def _load_or_create(path: Path) -> str:
     return token
 
 
+def _stored(state_root: str | os.PathLike) -> dict:
+    try:
+        saved = json.loads((Path(state_root) / _PREFERENCE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return saved if isinstance(saved, dict) else {}
+
+
 def stored_mode(state_root: str | os.PathLike) -> str:
     """The mode the switch was last left in, or loopback.
 
@@ -55,11 +91,7 @@ def stored_mode(state_root: str | os.PathLike) -> str:
     network is a decision, not something that happens because Pilot was
     installed.
     """
-    try:
-        saved = json.loads((Path(state_root) / _PREFERENCE).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return "loopback"
-    mode = str(saved.get("mode") or "loopback")
+    mode = str(_stored(state_root).get("mode") or "loopback")
     return mode if mode in _MODES else "loopback"
 
 
@@ -72,7 +104,14 @@ class RemoteAccess:
             raise ValueError(f"unknown listen mode: {mode}")
         self.state_root = Path(state_root)
         self.mode = mode
-        self.hostnames = tuple(dict.fromkeys(h.strip().lower() for h in hostnames if h.strip()))
+        # Names given on the command line hold for this run only. Names added
+        # from the page are kept, because a tunnel's hostname is only known
+        # after it starts and restarting Pilot to accept it is a silly step.
+        self.fixed_hostnames = tuple(dict.fromkeys(
+            clean_hostname(h) for h in hostnames if clean_hostname(h)))
+        self.saved_hostnames = tuple(dict.fromkeys(
+            clean_hostname(h) for h in _stored(state_root).get("hostnames") or []
+            if clean_hostname(h)))
         self.addresses: list[str] = []
         self.token = ""
         self._apply()
@@ -90,12 +129,38 @@ class RemoteAccess:
         self.token = "" if self.mode == "loopback" else _load_or_create(
             self.state_root / _TOKEN_FILE)
 
+    @property
+    def hostnames(self) -> tuple[str, ...]:
+        """Every name this server answers to, whatever put it there."""
+        return tuple(dict.fromkeys(self.fixed_hostnames + self.saved_hostnames))
+
     def remember(self) -> None:
-        """Persist the mode so a restart comes back the way it was left."""
+        """Persist the choices so a restart comes back the way it was left."""
         path = self.state_root / _PREFERENCE
         path.parent.mkdir(parents=True, exist_ok=True)
         with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as handle:
-            json.dump({"mode": self.mode}, handle)
+            json.dump({"mode": self.mode, "hostnames": list(self.saved_hostnames)}, handle)
+
+    def add_hostname(self, value: str) -> str:
+        """Answer to one more name from now on, or "" if it is not a name.
+
+        A tunnel is pointless if its hostname is refused, and the name is only
+        knowable after the tunnel is up, so this takes effect immediately
+        rather than at the next start.
+        """
+        name = clean_hostname(value)
+        if not name:
+            return ""
+        if name not in self.saved_hostnames:
+            self.saved_hostnames = self.saved_hostnames + (name,)
+            self.remember()
+        return name
+
+    def remove_hostname(self, value: str) -> None:
+        name = clean_hostname(value)
+        if name in self.saved_hostnames:
+            self.saved_hostnames = tuple(h for h in self.saved_hostnames if h != name)
+            self.remember()
 
     def set_mode(self, mode: str) -> None:
         if mode not in _MODES:
@@ -195,6 +260,7 @@ class RemoteAccess:
             "enabled": self.mode != "loopback",
             "token": self.token,
             "hostnames": list(self.hostnames),
+            "savedHostnames": list(self.saved_hostnames),
             "links": self.links(port),
             "port": port,
         }
@@ -206,7 +272,9 @@ class RemoteAccess:
         that works away from this network.
         """
         entries = [{"host": name, "url": self.link(port, name), "kind": "hostname",
-                    "detail": "任何网络下都能打开"} for name in self.hostnames]
+                    "detail": "任何网络下都能打开",
+                    "removable": name in self.saved_hostnames}
+                   for name in self.hostnames]
         entries += [{"host": address, "url": self.link(port, address), "kind": "address",
                      "detail": describe(address)} for address in self.addresses]
         return entries
