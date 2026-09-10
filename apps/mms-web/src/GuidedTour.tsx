@@ -9,8 +9,8 @@ const content: Record<TourStep, StepContent> = {
   welcome: { target: ['textarea[aria-label="任务内容"]', '#mms-help-button'], title: "第一次用 AI？从这里开始", body: "把 AI 当作可以反复沟通的助手：告诉它你想做什么，它会回答，也能帮你处理文件。接下来，我们就在这个页面一起试一次。", tip: "亮起的地方可以直接点击。随时可以跳过，再点 ? 回来。" },
   connection: { target: ['[data-guide="connect"]'], title: "先让助手连接一个模型", body: "模型是负责回答你的 AI。点击亮起的「连接服务」，按提示填入服务商给你的 API 地址和 API Key，再选择模型并保存。", tip: "API Key 是服务商给你的连接密钥。没有这些信息时，可以先熟悉页面，之后再配置。" },
   workspace: { target: ['[data-guide="workspace"]', '.home-intro select'], title: "这次在哪个文件夹里工作？", body: "点这里输入项目名，就能查找最近用过的文件夹；也可以浏览电脑上的其他目录。你让 AI 读文件、写文章或改代码时，它会从这个位置开始。", tip: "已为你选好工作文件夹，普通聊天可以直接继续。换项目时再选择其他目录；已有会话保留原路径。" },
-  model: { target: ['.studio-popover:popover-open .quick-model-list', '.task-settings-trigger'], title: "选择帮你回答的模型", body: "点亮起的模型名称，在列表里搜索并点击一个模型即可。Pilot 会使用已设置的默认通道，需要时再展开「通道与高级选项」。", tip: "以后也能在这里换模型，已有对话会保留。点选就会生效，不会自动发送消息。" },
-  effort: { target: ['.studio-popover:popover-open [data-guide="effort"]', '.task-settings-trigger'], title: "effort：让它想得更深，还是更快？", body: "展开「通道与高级选项」，这里的「思考强度」就是 effort。简单问答可以选较低档，复杂分析再提高；第一次保留默认值即可。", tip: "只显示当前模型支持的档位。高档通常更慢、用量更多，不保证回答一定更好。不能调整时，以这里的状态说明为准。" },
+  model: { target: ['.studio-popover:popover-open .quick-model-list', '.task-settings-trigger'], title: "只显示模型，需要时再展开", body: "输入框底部默认只显示当前模型。点模型名称后搜索并选择即可快速切换；Pilot 会沿用已设置的默认通道。需要指定通道时，再展开「通道与高级选项」。", tip: "新会话和当前会话共用这个入口。当前会话切换会保留上下文，不会自动发送消息；执行或待确认时会先提示你等本轮结束或停止。" },
+  effort: { target: ['.studio-popover:popover-open [data-guide="effort"]', '.task-settings-trigger'], title: "effort：让它想得更深，还是更快？", body: "展开「通道与高级选项」，这里的「思考强度」就是 effort。简单问答可以选较低档，复杂分析再提高；第一次保留默认值即可。", tip: "只显示当前模型支持的档位。高档通常更慢、用量更多，不保证回答一定更好。切换模型后会回到新模型的默认 effort；已有会话的调整只影响后续工作。" },
   compose: { target: ['textarea[aria-label="任务内容"]'], title: "像和人说话一样，写下你的想法", body: "不用学特殊命令。说清楚「我想做什么、现在有什么、希望得到什么」就行。也可以先填入下面的简单示例，看看 AI 怎样回应。", tip: "示例会追加到已有草稿后面。你可以修改，填入不会自动发送。" },
   send: { target: ['button[aria-label="发送任务"]'], title: "准备好了？点这个箭头发送", body: "确认文件夹和模型后，点击亮起的发送箭头。AI 会开始回复；你可以继续补充要求，不必一次就问得完美。", tip: "发送可能产生所选服务的用量。灰色箭头表示还没准备好，查看输入框下方的原因。" },
   reply: { target: ['.conversation-turn:last-child', '.current-activity', 'textarea[aria-label="任务内容"]'], title: "回复会出现在这里", body: "等待 AI 回答后，可以继续问「说得简单一点」「给个例子」，或补充你的要求。结果不符合预期也没关系，接着沟通就好。", tip: "你已经认识基本操作。附件、Skills 和成果等功能，可以需要时再学。" },
@@ -20,7 +20,7 @@ const content: Record<TourStep, StepContent> = {
   artifacts: { target: ['.result-panel .panel-tabs button.active', 'button[aria-label="切换成果侧栏"]'], title: "成果：看看 AI 做出了什么", body: "在这里预览生成的文章、表格、图片或静态网页。还可以查看已记录的版本和差异，下载文件，引用文字选段或图片区域让 AI 修改。", tip: "先有会话才能打开成果。选段先进入草稿，发送后才处理；查看旧版本不会回滚电脑上的文件。" },
   runtime: { target: ['.result-panel .panel-tabs button.active'], title: "过程与运行详情：了解当前状态", body: "在这里看当前模型、上下文和用量。对话中的过程可以展开，查看工具做了什么；待确认的问题需要你在卡片里回答。", tip: "停止会结束本轮执行，已经发生的文件修改不会自动撤销。模型在正文里自报身份可能不准确，请核对运行详情。" },
   sessions: { target: ['.sidebar-sessions', '.sidebar'], title: "以前的对话都在这里", body: "左侧按工作文件夹收好会话。点标题就能接着聊；上方可以新建、搜索和筛选。工作文件夹和会话旁的更多菜单可排序、重命名、归档、导出或创建分支。", tip: "移除文件夹只从侧栏隐藏，旧会话仍能继续；归档也保留内容。对话分支不会复制或回滚项目文件。" },
-  settings: { target: ['.settings-tabs'], title: "设置：连接服务，调整使用习惯", body: "「模型与通道」管理连接和新会话默认值；「外观与使用」调整跟随系统的主题、强调色、字体、字号和过程折叠。Logo 旁和设置顶部都能看到当前版本。", tip: "设置中的长期默认 effort 用于之后的新会话；已有会话仍可单独调整。" },
+  settings: { target: ['.settings-tabs'], title: "设置：连接服务，调整使用习惯", body: "「模型与通道」管理连接和新会话默认值；「外观」调整主题、强调色、字体和字号；「使用」调整过程折叠、选择即复制和 Skills 来源。Logo 旁和设置顶部都能看到当前版本。", tip: "设置中的长期默认 effort 用于之后的新会话；已有会话仍可单独调整。" },
   finish: { target: ['#mms-help-button'], title: "忘了怎么用，随时点 ?", body: "你不用一次记住所有功能。这里可以重新开始悬浮引导，也能搜索功能说明，只了解眼下需要的部分。", tip: "现在可以回到对话，把你的第一个想法交给 AI。" },
 };
 interface Box { x: number; y: number; width: number; height: number }
