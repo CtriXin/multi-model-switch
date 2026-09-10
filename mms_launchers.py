@@ -2351,6 +2351,18 @@ _CLAUDE_OAUTH_UI_STATE_SEED_KEYS = (
     "opusProMigrationComplete",
     "sonnet1m45MigrationComplete",
     "voiceNoticeSeenCount",
+    "autoModeOptInDismissed",
+    "daemonInstallPromptDismissed",
+    "experimentNoticesSeenCount",
+    "fullscreenDownsellSeenCount",
+    "fullscreenUpsellSeenCount",
+    "passesUpsellSeenCount",
+    "projectOnboardingSeenCount",
+    "pushNotifUpsellSeenCount",
+    "rcLongTurnNudgeSeenCount",
+    "remoteControlUpsellSeenCount",
+    "transcriptShareDismissed",
+    "voiceFooterHintSeenCount",
 )
 _CLAUDE_OAUTH_STATE_SCALAR_DICT_ALLOWLIST = ("tipsHistory",)
 _CLAUDE_OAUTH_ACCOUNT_ALLOWLIST = (
