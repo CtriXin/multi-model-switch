@@ -2,7 +2,9 @@
 from __future__ import annotations
 import json
 import os
+import shutil
 import tempfile
+import time
 import uuid
 from pathlib import Path
 from .errors import WebError
@@ -34,16 +36,91 @@ def is_registry_root(root: Path) -> bool:
     return (Path(root) / "root-manifest.json").is_file()
 
 
+_ADOPTION_MARKER = "web-config-adopted.json"
+# Runtime scratch that belongs to the Web install, not to the configuration.
+_ADOPTION_SKIP_NAMES = frozenset({"previews", "launch-home", "runtimes", "sessions", "logs"})
+
+
+def _root_has_configuration(root: Path) -> bool:
+    if is_registry_root(root):
+        return True
+    if (root / "generated" / "model-registry.latest-approved.json").is_file():
+        return True
+    config_path = root / "config.toml"
+    try:
+        return config_path.is_file() and "[[providers]]" in config_path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+
+
+def _copy_root_contents(source: Path, destination: Path) -> None:
+    destination.mkdir(parents=True, exist_ok=True)
+    try:
+        destination.chmod(0o700)
+    except OSError:
+        pass
+    for entry in sorted(source.iterdir()):
+        if entry.name in _ADOPTION_SKIP_NAMES or entry.name.endswith(".lock"):
+            continue
+        target = destination / entry.name
+        if target.exists():
+            continue
+        if entry.is_dir():
+            shutil.copytree(entry, target, symlinks=False)
+        else:
+            shutil.copy2(entry, target)
+
+
+def adopt_web_owned_config(state_root: Path, shared: Path) -> Path:
+    """Move a Web-owned configuration into the shared root, once.
+
+    Installs made before the roots converged keep their channels inside the
+    Web data directory, where the CLI never looks. Copy that configuration
+    into the shared root when the shared root has none, verify the published
+    bundle there, and leave the original in place as a backup. Any failure
+    keeps the Web-owned root in use.
+    """
+    web_owned = Path(state_root) / "config"
+    if _root_has_configuration(shared):
+        return shared
+    staging = shared.parent / f".{shared.name}.adopting-{os.getpid()}"
+    try:
+        if staging.exists():
+            shutil.rmtree(staging)
+        _copy_root_contents(web_owned, staging)
+        private_json(
+            staging / _ADOPTION_MARKER,
+            {
+                "schema": "mms.web_config_adoption.v1",
+                "source": str(web_owned),
+                "adopted_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            },
+        )
+        from .catalog import _ensure_repo_on_path
+
+        _ensure_repo_on_path()
+        from mms_registry_cli import verify_approved_bundle
+
+        verified = verify_approved_bundle(config_dir=str(staging))
+        if not verified.get("verified"):
+            raise WebError("ADOPTION_UNVERIFIED", "采用的配置未通过校验", 409)
+        _copy_root_contents(staging, shared)
+    except Exception:
+        return web_owned
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+    return shared
+
+
 def default_config_root(state_root: Path) -> Path:
     """Pick the config root a Pilot without ``--config-root`` should use.
 
-    A Web install that already owns configuration keeps it: moving those
-    channels silently would orphan them. Anything else shares the v2 root the
-    CLI uses, so one setup serves both entrances.
+    Everything shares the v2 root the CLI uses, so one setup serves both
+    entrances. A Web install that already owns configuration has it adopted
+    into that shared root once; if the adoption cannot be verified, the
+    Web-owned root stays in use rather than losing those channels.
     """
     web_owned = Path(state_root) / "config"
-    if (web_owned / "config.toml").is_file() or (web_owned / "generated").is_dir():
-        return web_owned
     try:
         from .catalog import _ensure_repo_on_path
 
@@ -53,6 +130,8 @@ def default_config_root(state_root: Path) -> Path:
         shared = Path(mms_config_root_status()["preview_root"])
     except Exception:
         return web_owned
+    if _root_has_configuration(web_owned):
+        return adopt_web_owned_config(state_root, shared)
     if is_registry_root(shared) or not shared.exists():
         return shared
     return web_owned
