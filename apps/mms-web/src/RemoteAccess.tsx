@@ -89,9 +89,12 @@ export function RemoteAccessSection({ startTask }: { startTask: (text: string) =
       <label className="preference-row">
         <div>
           <h2>让手机或另一台电脑访问</h2>
+          {/* Where things stand, not what the feature is. The caveat that
+              only matters while it is on is said below, where it applies. */}
           <p>
-            用带 token 的链接从手机或另一台电脑打开。共用网络里同网段的人也能碰到；
-            关掉即关闭端口。
+            {state?.enabled
+              ? `已开启 —— 正在监听 ${state.listening.join("、") || "（暂无地址）"}。`
+              : "已关闭 —— 未监听任何网络端口。"}
           </p>
         </div>
         <input
@@ -119,6 +122,9 @@ export function RemoteAccessSection({ startTask }: { startTask: (text: string) =
             <p className="section-note">现在没有可用的网络地址，连上 Wi-Fi 后回来看。</p>
           ) : (
             <>
+              <p className="section-note">
+                带 token 的链接才能打开。共用网络里，同网段的人也能碰到这个入口。
+              </p>
               <div className="remote-ways" role="radiogroup" aria-label="选择一个地址">
                 {ways.map((way) => (
                   <button
@@ -184,10 +190,7 @@ export function RemoteAccessSection({ startTask }: { startTask: (text: string) =
       <div className="preference-row">
         <div>
           <h2>出门也要用</h2>
-          <p>
-            出门访问要一条从公网到这台电脑的通道，用你自己的域名。
-            我们不提供支持，可以交给 Pilot 陪你配。
-          </p>
+          <p>需要你自己的域名和一条公网通道。我们不提供支持。</p>
         </div>
         <button
           type="button"
