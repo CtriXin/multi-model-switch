@@ -5,6 +5,7 @@ import webbrowser
 from pathlib import Path
 
 from .server import WebApplication, create_server
+from .remote_access import QUERY
 
 
 def main(argv=None):
@@ -50,6 +51,8 @@ def main(argv=None):
     server = create_server(app, args.static_root, args.port)
     port = server.server_address[1]
     address = f"http://127.0.0.1:{port}"
+    if app.access.required:
+        address += f"/?{QUERY}={app.access.token}"
     print(f"MMS Pilot: {address}", flush=True)
     if app.access.required:
         # Say plainly what is reachable and print the one link that opens it.

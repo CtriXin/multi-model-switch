@@ -35,9 +35,7 @@ def serve(tmp_path):
 
 def fetch(port, path="/api/v1/sessions", host=None, token=None, cookie=None,
           redirect=True, remote=False):
-    """`remote=True` stands in for a phone: the test client is always on this
-    machine, and a request from this machine is deliberately exempt, so the
-    forwarding header a tunnel adds is what marks it as coming from outside."""
+    """Exercise both forwarding-header and plain TCP tunnel requests."""
     request = urllib.request.Request(
         f"http://127.0.0.1:{port}{path}" + (f"?{QUERY}={token}" if token else ""))
     request.add_header("Host", host or f"127.0.0.1:{port}")
@@ -141,11 +139,13 @@ def test_the_link_carries_the_token_and_prefers_the_public_hostname(tmp_path):
     assert access.link(8765) == f"https://pilot.example.com/?{QUERY}={access.token}"
 
 
-def test_a_browser_on_this_machine_needs_no_token(serve):
-    """Connecting from loopback already means being on the machine."""
+def test_remote_mode_requires_a_token_even_without_forwarding_headers(serve):
+    """A raw TCP tunnel is indistinguishable from a local browser."""
     app, port = serve("all")
     assert app.access.required is True
-    assert fetch(port)[0] == 200
+    assert fetch(port)[0] == 401
+    assert fetch(port, cookie=app.access.token)[0] == 200
+    assert fetch(port, token=app.access.token, redirect=False)[0] == 302
 
 
 def test_a_tunnel_also_arrives_from_loopback_and_is_not_exempt(serve):
