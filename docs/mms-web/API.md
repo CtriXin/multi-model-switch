@@ -15,11 +15,13 @@ interface Model { id: string; name: string; family: string; providerId: string; 
 interface Service { id: string; name: string; kind: string; status: 'configured'|'needs_key'|'error'; modelCount: number; detail: string }
 interface Preset { id: string; name: string; description: string; harness: Harness; modelId: string; providerId: string; channel: string; available: boolean; reason?: string }
 interface Session { id: string; title: string; workspaceId: string; harness: Harness; modelName: string; providerName: string; channel: string; state: State; activity?: Activity | null; updatedAt: string; owner: 'web'|'glint'|'external'; capabilities: {send: boolean; stop: boolean; approve: boolean}; summary?: string }
-interface Event { id: string; sequence: number; kind: 'user'|'assistant'|'tool'|'approval'|'notice'; text: string; title?: string; status?: 'running'|'done'|'error'; approvalId?: string; decision?: 'allow'|'deny'; createdAt: string }
+interface Event { id: string; sequence: number; kind: 'user'|'assistant'|'tool'|'approval'|'notice'; text: string; title?: string; status?: 'running'|'done'|'error'; approvalId?: string; decision?: 'allow'|'deny'; createdAt: string; updatedAt?: string }
 interface Artifact { id: string; name: string; kind: 'markdown'|'text'|'csv'|'html'|'image'; path: string; sha256: string; revision: number; versionCount: number; status: 'current'|'changed'|'missing'|'unavailable'; source: 'tool'|'observed'|'legacy' }
 interface SessionDetail { session: Session; events: Event[]; artifacts: Artifact[]; artifactNotice?: string }
 interface Diagnostic { code: string; message: string }
 ```
+
+Event.createdAt 是事件首次写入时间，updatedAt 是最后一次写入时间；界面用 updatedAt 与本轮首条 user 事件的 createdAt 计算回复用时，旧持久化记录没有 updatedAt 时不显示用时，也不回填猜测值。
 
 所有字段是普通文本，不渲染任意 HTML。id 必须稳定且不能包含 secret；model id 应区分同名不同 provider。available 表示当前 Web 路径可用，不是 provider 已实测连通；不能从有 Key 推导真实执行通过。Session state 来自进程/protocol，不能来自模型自述。列表可以包含非 Web owner，但不可给其伪造 send/stop 权限。
 

@@ -1124,6 +1124,25 @@ kbd {
   font-weight: 400;
   color: var(--muted);
 }
+.message-author .message-time,
+.message-author .message-duration {
+  font-size: max(11px, 0.7143rem);
+  font-weight: 400;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  margin-left: auto;
+}
+.message-author .message-time + .message-duration {
+  margin-left: 0;
+}
+.message-meta {
+  margin-top: 6px;
+  font-size: max(11px, 0.7143rem);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
 .markdown {
   font-size: max(11px, 1.0000rem);
   line-height: 1.85;
@@ -1791,7 +1810,8 @@ dialog:has(.dialog-body.sheet) .dialog-body.sheet > header {
   .markdown {
     font-size: max(11px, 0.9286rem);
   }
-  .message-author span {
+  .message-author span,
+  .message-author .message-time {
     font-size: max(11px, 0.6429rem);
   }
   .approval-event,

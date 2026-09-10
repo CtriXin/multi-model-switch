@@ -166,6 +166,7 @@ from mms_state_io import (
     resolve_mms_config_dir,
     resolve_real_user_home,
 )
+from mms_state_io import GATEWAY_SESSION_MARKER_ROOTS as _GATEWAY_SESSION_MARKER_ROOTS
 from mms_state_io import resolve_current_workdir as _safe_getcwd
 
 # Provider 调试日志（按需写入文件，不影响 TUI 输出）
@@ -270,38 +271,31 @@ SNAPSHOT_IGNORED_FILES = (
 
 _CONFIG_WRITE_PROCESS_LOCK = threading.Lock()
 
-_GATEWAY_SESSION_MARKERS = (
-    os.path.join(".config", "mms", "codex-gateway", "s") + os.sep,
-    os.path.join(".config", "mms", "claude-gateway", "s") + os.sep,
+_GATEWAY_SESSION_MARKERS = tuple(
+    marker for marker, _ in _GATEWAY_SESSION_MARKER_ROOTS if "accounts" not in marker
 )
 
 
-def _base_user_config_path_from_gateway(config_path):
-    if mms_config_root_is_explicit():
-        return ""
-    normalized = os.path.normpath(str(config_path or ""))
-    for marker in _GATEWAY_SESSION_MARKERS:
-        idx = normalized.find(marker)
-        if idx == -1:
-            continue
-        base_home = normalized[:idx]
-        if base_home:
-            return os.path.join(base_home, ".config", "mms", "config.toml")
-    return ""
-
-
 def _base_user_primary_dir_from_gateway(path):
+    """Map a gateway session path back to the config root that owns it."""
     if mms_config_root_is_explicit():
         return ""
     normalized = os.path.normpath(str(path or ""))
-    for marker in _GATEWAY_SESSION_MARKERS:
+    for marker, root_name in _GATEWAY_SESSION_MARKER_ROOTS:
+        if "accounts" in marker:
+            continue
         idx = normalized.find(marker)
         if idx == -1:
             continue
         base_home = normalized[:idx]
         if base_home:
-            return os.path.join(base_home, ".config", "mms")
+            return os.path.join(base_home, ".config", root_name)
     return ""
+
+
+def _base_user_config_path_from_gateway(config_path):
+    base_dir = _base_user_primary_dir_from_gateway(config_path)
+    return os.path.join(base_dir, "config.toml") if base_dir else ""
 
 
 def _merge_base_user_broker_profiles(cfg, config_path):
@@ -15699,13 +15693,157 @@ def _load_config_or_preview_bundle():
     return load_config()
 
 
+def _legacy_root_import_candidate():
+    """Return the stable root when it still holds an importable legacy config."""
+    status = mms_config_root_status(command=current_command())
+    stable_root = str(status.get("stable_root") or "")
+    if not stable_root or os.path.normpath(stable_root) == os.path.normpath(PRIMARY_CONFIG_DIR):
+        return ""
+    if not os.path.exists(os.path.join(stable_root, "config.toml")):
+        return ""
+    return stable_root
+
+
+def _import_legacy_root_into_v2(stable_root):
+    """Import an existing stable root into this v2 root, keeping the source read-only."""
+    from mms_registry_cli import preview_prepare
+
+    console.print(
+        f"[cyan]{_L('正在从', 'Importing from')} {stable_root} {_L('导入现有配置，源目录只读不会被修改…', 'into this root; the source stays read-only…')}[/cyan]"
+    )
+    try:
+        summary = preview_prepare(
+            config_dir=PRIMARY_CONFIG_DIR,
+            source_config_dir=stable_root,
+            include_secrets=True,
+            command_name=f"{current_command()} preview prepare",
+        )
+    except Exception as exc:
+        console.print(f"[red]{_L('导入失败', 'Import failed')}: {type(exc).__name__}: {exc}[/red]")
+        return None
+    cfg = _load_config_or_preview_bundle()
+    if cfg is None:
+        detail = str(summary.get("status") or summary.get("result") or "unknown")
+        console.print(
+            f"[yellow]{_L('导入完成但没有可用路由', 'Import finished without usable routes')}: {detail}[/yellow]"
+        )
+        return None
+    console.print(f"[green]✓ {_L('已导入现有配置', 'Existing config imported')}[/green]\n")
+    return cfg
+
+
+def _bootstrap_preview_root_config(ui_language=None):
+    """Configure an empty v2 root, writing DB truth instead of config.toml.
+
+    Imports an existing stable root when one is present, otherwise collects one
+    channel. Returns the freshly loaded runtime config, or None when the caller
+    should fall back to the read-only preview guidance.
+    """
+    if not sys.stdin.isatty():
+        return None
+    _ensure_rich()
+    language = normalize_language(ui_language) or "zh"
+    set_language(language)
+    title = display_title()
+
+    legacy_root = _legacy_root_import_candidate()
+    if legacy_root:
+        console.print(Panel(
+            f"[bold cyan]{_L('发现旧配置目录', 'Found an existing config root')}: {legacy_root}[/bold cyan]\n\n"
+            f"{_L('当前配置根使用配置库真值，可以一次性导入旧配置的通道、模型和 Key。', 'This root keeps DB truth; the channels, models and keys from the old root can be imported once.')}\n"
+            f"{_L('导入只读取旧目录，不会修改它。', 'The import only reads the old root and never modifies it.')}",
+            title=f"{title} Setup",
+        ))
+        if Confirm.ask(_L("现在导入", "Import now"), default=True):
+            cfg = _import_legacy_root_into_v2(legacy_root)
+            if cfg is not None:
+                return cfg
+            console.print(f"[dim]{_L('改为手动配置一个通道。', 'Falling back to configuring one channel manually.')}[/dim]\n")
+
+    console.print(Panel(
+        f"[bold cyan]{_L(f'欢迎使用 {title} — AI Coding CLI 统一启动器', f'Welcome to {title} — unified AI coding CLI launcher')}[/bold cyan]\n\n"
+        f"{_L('首次使用，需要配置 API 地址和认证信息', 'First-time setup needs an API endpoint and credentials')}\n"
+        f"{_L('这个配置根使用配置库真值，填写的内容会写入配置库和 secret backend', 'This config root keeps DB truth; your answers go into the registry database and the secret backend')}",
+        title=f"{title} Setup",
+    ))
+
+    cfg = _default_config()
+    cfg.setdefault("ui", {})["language"] = language
+    provider = get_provider_definition(cfg)
+    base_url, api_key, openai_base_url, anthropic_base_url = _prompt_provider_credentials(provider)
+
+    provider_ctx = dict(provider)
+    provider_ctx["base_url"] = base_url
+    provider_ctx["openai_base_url"] = openai_base_url
+    provider_ctx["anthropic_base_url"] = anthropic_base_url
+    provider_ctx["api_key"] = api_key
+    console.print(f"\n{_L('正在测试连接...', 'Testing the connection...')}", style="dim")
+    probe = _probe_models(provider_ctx)
+    models = probe.get("models") or []
+    if not models:
+        console.print(
+            f"[red]{_L('没有取到模型列表，配置未写入。请确认地址和 API Key 后重试。', 'No model list was returned; nothing was written. Check the endpoint and API key, then retry.')}[/red]"
+        )
+        return None
+    console.print(f"[green]✓ {_L('连接成功！发现', 'Connected. Found')} {len(models)} {_L('个可用模型', 'models')}[/green]")
+
+    working_url = str(probe.get("working_url") or "").strip()
+    if working_url and working_url != _provider_openai_base_url(provider_ctx):
+        console.print(f"[yellow]→ {_L('自动修正地址为', 'Corrected endpoint to')} {working_url}[/yellow]")
+        openai_base_url = working_url
+        base_url = working_url
+
+    payload_provider = dict(provider)
+    payload_provider.update({
+        "openai_base_url": openai_base_url,
+        "anthropic_base_url": anthropic_base_url,
+        "default_openai_base_url": openai_base_url,
+        "default_anthropic_base_url": anthropic_base_url,
+        "fallback_models": list(models),
+    })
+    cfg["providers"] = [payload_provider]
+    credential_updates = [{
+        "provider_id": payload_provider["id"],
+        "base_url": str(openai_base_url or anthropic_base_url or base_url).rstrip("/"),
+        "openai_base_url": str(openai_base_url).rstrip("/"),
+        "anthropic_base_url": str(anthropic_base_url).rstrip("/"),
+        "api_key": api_key,
+    }]
+
+    import mms_root_bootstrap
+
+    try:
+        summary = mms_root_bootstrap.bootstrap_v2_root(
+            config_dir=PRIMARY_CONFIG_DIR,
+            config_payload=cfg,
+            credential_updates=credential_updates,
+            command_name=current_command(),
+        )
+    except Exception as exc:
+        console.print(f"[red]{_L('写入配置库失败', 'Writing the config database failed')}: {type(exc).__name__}: {exc}[/red]")
+        return None
+    if not summary.get("ok"):
+        detail = str(summary.get("error") or "") or ", ".join(summary.get("blocked_reasons") or []) or "unknown"
+        console.print(f"[red]{_L('写入配置库失败', 'Writing the config database failed')}: {detail}[/red]")
+        return None
+
+    console.print(f"\n[green]✓ {_L('配置已写入', 'Config written to')} {PRIMARY_CONFIG_DIR}[/green]")
+    console.print(
+        f"[dim]{_L('模型与凭据保存在配置库和 secret backend，没有写入 config.toml。', 'Models and credentials live in the registry database and secret backend; config.toml was not written.')}[/dim]\n"
+    )
+    return _load_config_or_preview_bundle()
+
+
 def _load_command_config():
     cfg = _load_config_or_preview_bundle()
     if cfg is None:
         if _preview_root_missing_legacy_config():
-            _exit_preview_legacy_config_disabled(["launch"])
-        cfg = _default_config()
-        save_config(cfg)
+            cfg = _bootstrap_preview_root_config()
+            if cfg is None:
+                _exit_preview_legacy_config_disabled(["launch"])
+        else:
+            cfg = _default_config()
+            save_config(cfg)
     return apply_local_overrides(cfg)
 
 
@@ -17505,9 +17643,13 @@ def main():
 
     # Load or create config
     if user_cfg is None:
+        startup_language = _resolve_ui_language(None, args.lang or lang_override)
         if _preview_root_missing_legacy_config():
-            _exit_preview_legacy_config_disabled(["launch"])
-        user_cfg = setup_wizard(_resolve_ui_language(None, args.lang or lang_override))
+            user_cfg = _bootstrap_preview_root_config(startup_language)
+            if user_cfg is None:
+                _exit_preview_legacy_config_disabled(["launch"])
+        else:
+            user_cfg = setup_wizard(startup_language)
 
     cfg = apply_local_overrides(user_cfg)
     set_language(_resolve_ui_language(cfg, args.lang or lang_override))

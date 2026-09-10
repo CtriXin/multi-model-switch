@@ -57,11 +57,18 @@ DRY_RUN=0
 
 REAL_HOME_CANDIDATE="${REAL_HOME:-${MMS_REAL_HOME:-${ORIGINAL_HOME:-}}}"
 REAL_HOME="${REAL_HOME_CANDIDATE:-$HOME}"
-if [[ "$REAL_HOME" == */.config/mms/* ]]; then
+# A session HOME can sit under either config root, so strip both.
+if [[ "$REAL_HOME" == */.config/mms-next/* ]]; then
+    REAL_HOME="${REAL_HOME%%/.config/mms-next/*}"
+elif [[ "$REAL_HOME" == */.config/mms/* ]]; then
     REAL_HOME="${REAL_HOME%%/.config/mms/*}"
 fi
-if [ -z "$REAL_HOME_CANDIDATE" ] && [[ "$HOME" == */.config/mms/* ]]; then
-    REAL_HOME="${HOME%%/.config/mms/*}"
+if [ -z "$REAL_HOME_CANDIDATE" ]; then
+    if [[ "$HOME" == */.config/mms-next/* ]]; then
+        REAL_HOME="${HOME%%/.config/mms-next/*}"
+    elif [[ "$HOME" == */.config/mms/* ]]; then
+        REAL_HOME="${HOME%%/.config/mms/*}"
+    fi
 fi
 
 MMS_HOME="$REAL_HOME/.mms"
@@ -72,9 +79,14 @@ MMS_UV_BIN="$MMS_UV_BIN_DIR/uv"
 MMS_UV_PYTHON_DIR="$MMS_HOME/uv-python/install"
 MMS_UV_PYTHON_BIN_DIR="$MMS_HOME/uv-python/bin"
 MMS_UV_CACHE_DIR="$MMS_HOME/uv-cache"
-CREDENTIALS_PATH="$REAL_HOME/.config/mms/credentials.sh"
-CONFIG_PATH="$REAL_HOME/.config/mms/config.toml"
-VERSION_META_PATH="$REAL_HOME/.config/mms/version.json"
+# The default config root is mms-next, which keeps v2 DB truth. The legacy
+# root stays readable for import and for reading an older install's metadata.
+CONFIG_ROOT="$REAL_HOME/.config/mms-next"
+LEGACY_CONFIG_ROOT="$REAL_HOME/.config/mms"
+CREDENTIALS_PATH="$CONFIG_ROOT/credentials.sh"
+CONFIG_PATH="$CONFIG_ROOT/config.toml"
+VERSION_META_PATH="$CONFIG_ROOT/version.json"
+LEGACY_VERSION_META_PATH="$LEGACY_CONFIG_ROOT/version.json"
 
 cleanup() {
     if [ -n "$SOURCE_TMP_DIR" ] && [ -d "$SOURCE_TMP_DIR" ]; then
@@ -1707,13 +1719,20 @@ PY
 
 current_installed_ref() {
     local installed_ref=""
+    local meta_path="$VERSION_META_PATH"
 
-    if [ ! -f "$VERSION_META_PATH" ]; then
+    # An install made before the default root moved recorded its metadata in
+    # the legacy root; reading it keeps upgrades from looking like fresh ones.
+    if [ ! -f "$meta_path" ] && [ -f "$LEGACY_VERSION_META_PATH" ]; then
+        meta_path="$LEGACY_VERSION_META_PATH"
+    fi
+
+    if [ ! -f "$meta_path" ]; then
         return 0
     fi
 
     if command -v python3 >/dev/null 2>&1; then
-        installed_ref="$(python3 - "$VERSION_META_PATH" <<'PY'
+        installed_ref="$(python3 - "$meta_path" <<'PY'
 import json
 import sys
 
@@ -1731,7 +1750,7 @@ PY
         return 0
     fi
 
-    sed -n 's/.*"installed_ref"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$VERSION_META_PATH" | head -n 1
+    sed -n 's/.*"installed_ref"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$meta_path" | head -n 1
 }
 
 # An explicit --ref pins a version outright, so reporting a channel there would
@@ -1753,15 +1772,31 @@ print_planned_version() {
 # A newcomer running the plain command does not need the channel/ref matrix;
 # one line saying what is being installed is enough. The full overview stays for
 # --version, --check, and anyone who picked a channel or ref explicitly.
+# Decide by outcome, not by arguments. Landing on the newest stable release is
+# the ordinary case and deserves one line, however the caller expressed it: the
+# npm wrapper resolves the release itself and pins --ref so the script and the
+# sources it installs cannot drift apart, and that pin must not be mistaken for
+# a user deliberately choosing an unusual version.
 print_install_headline() {
     local installed_ref=""
+    local stable_ref=""
 
-    if [ -n "$REQUESTED_INSTALL_CHANNEL" ] || [ -n "$INSTALL_REF" ]; then
-        print_version_overview
-        return 0
-    fi
+    case "$REQUESTED_INSTALL_CHANNEL" in
+        dev|canary)
+            print_version_overview
+            return 0
+            ;;
+    esac
 
     ensure_install_ref_resolved
+    if [ -n "$INSTALL_REF" ]; then
+        stable_ref="$(resolve_latest_release_tag || true)"
+        if [ -z "$stable_ref" ] || [ "$RESOLVED_INSTALL_REF" != "$stable_ref" ]; then
+            print_version_overview
+            return 0
+        fi
+    fi
+
     installed_ref="$(current_installed_ref || true)"
     if [ -z "$installed_ref" ]; then
         echo "$(t "安装最新版本" "Installing the latest version"): ${RESOLVED_INSTALL_REF:-local-source}"
@@ -1795,7 +1830,7 @@ print_version_overview() {
 }
 
 legacy_config_has_route_candidates() {
-    "$(_python_bin)" - "$REAL_HOME/.config/mms" <<'PY' >/dev/null 2>&1
+    "$(_python_bin)" - "$LEGACY_CONFIG_ROOT" <<'PY' >/dev/null 2>&1
 import sys
 import tomllib
 from pathlib import Path
@@ -1903,7 +1938,7 @@ print_dry_run_plan() {
     echo "• $(t "MMS 安装目录" "MMS install dir"): $MMS_HOME"
     echo "• $(t "命令目录" "command dir"): $BIN_DIR"
     echo "• $(t "虚拟环境" "virtualenv"): $VENV_DIR"
-    echo "• $(t "配置目录" "config dir"): $REAL_HOME/.config/mms"
+    echo "• $(t "配置目录" "config dir"): $CONFIG_ROOT"
     echo "• $(t "会安装内建能力：网页访问、浏览器自动化、省 token 工具、Caveman、NSR" "would install the built-in tools: web access, browser automation, token savers, Caveman, NSR")"
 
     if [ -n "$INSTALL_CLI_LIST" ]; then

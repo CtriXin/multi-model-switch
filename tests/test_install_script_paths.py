@@ -1410,3 +1410,53 @@ def test_retired_skill_cleanup_preserves_custom_target_inside_install_root(tmp_p
     _run_retired_cleanup(home)
     assert (skills / "handover").resolve() == custom
     assert (skills / "offduty").read_text() == "user instructions"
+
+
+def _piped_dry_run(tmp_path, *args, stable_ref="v9.9.9"):
+    """Run the installer the way curl and npx do: piped, outside the repo."""
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+    env.update(_version_env_overrides(stable_ref=stable_ref, latest_tag_ref=stable_ref))
+    for name in ("REAL_HOME", "MMS_REAL_HOME", "ORIGINAL_HOME", "MMS_CONFIG_ROOT"):
+        env.pop(name, None)
+    return subprocess.run(
+        ["bash", "-s", "--", "--lang", "en", *args, "--dry-run"],
+        cwd=tmp_path,
+        env=env,
+        input=INSTALL_SCRIPT.read_text(encoding="utf-8"),
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+
+
+def test_headline_is_one_line_for_the_bare_command(tmp_path):
+    out = _piped_dry_run(tmp_path)
+
+    assert "Installing the latest version: v9.9.9" in out
+    assert "Version overview" not in out
+
+
+def test_headline_is_one_line_when_the_wrapper_pins_the_latest_release(tmp_path):
+    """The npm wrapper resolves the release itself and pins --ref so the script
+    and the sources cannot drift. That pin must read like the bare command."""
+    out = _piped_dry_run(tmp_path, "--ref", "v9.9.9")
+
+    assert "Installing the latest version: v9.9.9" in out
+    assert "Version overview" not in out
+
+
+def test_overview_is_shown_when_an_older_version_is_pinned(tmp_path):
+    out = _piped_dry_run(tmp_path, "--ref", "v4.2.0")
+
+    assert "Version overview" in out
+    assert "Planned install ref: v4.2.0" in out
+
+
+def test_overview_is_shown_for_the_dev_and_canary_channels(tmp_path):
+    for channel in ("dev", "canary"):
+        out = _piped_dry_run(tmp_path, "--channel", channel)
+        assert "Version overview" in out, channel
+        assert f"Install channel: {channel}" in out, channel

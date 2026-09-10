@@ -96,6 +96,7 @@ export interface SessionEvent {
   answer?: string;
   arguments?: Record<string, unknown>;
   createdAt: string;
+  updatedAt?: string;
   thinking?: string;
   skills?: { id: string; name: string; source: string }[];
   nativeEntryId?: string;

@@ -40,7 +40,12 @@ def main(argv=None):
     if not (args.static_root / "index.html").is_file():
         parser.error("Web assets are missing. Reinstall MMS v4, or run npm run build --workspace @mms/web in the source checkout.")
     lease = acquire_state_lock(root)
-    app = WebApplication(state_root=root, config_root=args.config_root,
+    config_root = args.config_root
+    if config_root is None:
+        from .runtime import default_config_root
+
+        config_root = default_config_root(root)
+    app = WebApplication(state_root=root, config_root=config_root,
                          listen=args.listen, hostnames=tuple(args.hostname))
     server = create_server(app, args.static_root, args.port)
     port = server.server_address[1]
