@@ -217,8 +217,11 @@ class WebApplication:
             raise WebError("INVALID_PARAMETER", "enabled 必须是 true 或 false。", 400)
         wanted = "lan" if payload["enabled"] else "loopback"
         # "all" is a deliberate command-line choice; the switch never widens
-        # past the machine's own addresses on its own.
-        if self.access.mode == "all" and wanted == "lan":
+        # past the machine's own addresses on its own, and it must not narrow
+        # it either: the wildcard socket stays bound for the life of the
+        # process, so dropping to loopback would only clear the token gate
+        # while the network can still reach every endpoint.
+        if self.access.mode == "all":
             return self.remote_access_state()
         self.access.set_mode(wanted)
         if self.listeners:

@@ -216,6 +216,13 @@ def test_the_command_line_still_wins_over_the_switch(tmp_path):
         # socket and opens no extras.
         assert state["listening"] == []
         assert application.access.bind_address() == "0.0.0.0"
+        # Turning the switch off must not narrow "all" either: the wildcard
+        # socket cannot be recalled, so the token gate has to stay in place.
+        state = application.post(["remote-access"], {"enabled": False})
+        assert state["mode"] == "all"
+        assert application.access.mode == "all"
+        assert application.access.required is True
+        assert application.access.token
     finally:
         application.close()
 
