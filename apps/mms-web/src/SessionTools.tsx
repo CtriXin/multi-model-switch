@@ -10,6 +10,7 @@ import {
   Settings2,
 } from "lucide-react";
 import { request } from "./api";
+import { copyText } from "./clipboard";
 import { RecipeExport } from "./Recipe";
 import { ContextEvidence } from "./ContextEvidence";
 import type { SessionDetail } from "./types";
@@ -411,13 +412,11 @@ export function MessageActions({
           aria-label={copied ? "已复制" : "复制"}
           onClick={() => {
             setError("");
-            void navigator.clipboard
-              .writeText(text)
-              .then(() => {
-                setCopied(true);
-                setTimeout(() => setCopied(false), 1500);
-              })
-              .catch(() => setError("复制失败，请选择文字后复制。"));
+            void copyText(text).then((done) => {
+              if (!done) return setError("这个浏览器不允许复制，请选择文字后复制。");
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1500);
+            });
           }}
         >
           <Copy size={13} />

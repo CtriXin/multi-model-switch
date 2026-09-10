@@ -1,5 +1,6 @@
 import type { Bootstrap, Session, SessionDetail } from "./types";
 import { previewBootstrap, previewDetails } from "./preview";
+import { newRequestId } from "./request-id";
 
 export const isPreview =
   new URLSearchParams(location.search).get("preview") === "1";
@@ -103,7 +104,7 @@ export async function mutate<T>(
   if (!isPreview) {
     const fingerprint = JSON.stringify([path, payload]);
     if (uncertainMutation?.fingerprint !== fingerprint)
-      uncertainMutation = { fingerprint, requestId: crypto.randomUUID() };
+      uncertainMutation = { fingerprint, requestId: newRequestId() };
     try {
       const result = await request<T>(path, {
         ...payload,
@@ -132,7 +133,7 @@ export async function mutate<T>(
       (item) => item.id === preset?.modelId,
     );
     if (!preset || !model) throw new Error("请选择有效的启动组合。");
-    const id = crypto.randomUUID();
+    const id = newRequestId();
     samples[id] = {
       session: {
         id,
@@ -168,7 +169,7 @@ export async function mutate<T>(
     detail.session.state = "idle";
     detail.session.capabilities.approve = false;
     detail.events.push({
-      id: crypto.randomUUID(),
+      id: newRequestId(),
       sequence: detail.events.length + 1,
       kind: "notice",
       text: "已记录预览选择，未执行文件写入。",
@@ -183,14 +184,14 @@ function appendPreviewMessage(
   time: string,
 ) {
   detail.events.push({
-    id: crypto.randomUUID(),
+    id: newRequestId(),
     sequence: detail.events.length + 1,
     kind: "user",
     text,
     createdAt: time,
   });
   detail.events.push({
-    id: crypto.randomUUID(),
+    id: newRequestId(),
     sequence: detail.events.length + 1,
     kind: "notice",
     text: "预览消息已保留在当前页面。连接 MMS 本地服务后，才能实际运行这个任务。",
