@@ -1095,6 +1095,41 @@ def test_config_web_preview_bundle_config_from_verified_files_replaces_redacted_
     provider = result["providers"][0]
     assert provider["secret_ref"] == "pending-webui:demo:api_key"
     assert provider["has_api_key"] is True
+    # The profile above never set models_endpoint: discovery stays available,
+    # matching the "/models" default the CLI and the publish plan use.
+    assert provider["models_endpoint"] == "/models"
+
+
+def test_config_web_preview_bundle_config_keeps_explicit_manual_models_endpoint(tmp_path):
+    config_root = tmp_path / "mms-next"
+    generated_dir = config_root / "generated"
+    generated_dir.mkdir(parents=True)
+    profile_path = generated_dir / "provider-profiles.generated.json"
+    router_path = generated_dir / "model-routes.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "profiles": {
+                    "relay": {"name": "Relay", "protocols": ["openai_chat_completions"], "models_endpoint": "manual"},
+                    "empty": {"name": "Empty", "protocols": ["openai_chat_completions"], "models_endpoint": ""},
+                },
+                "provider": {"default": "relay"},
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    router_path.write_text(json.dumps({"routes": {}}), encoding="utf-8")
+
+    result = mms_config_web._preview_bundle_config_from_verified_files(
+        {"profile": {"path": str(profile_path)}, "router": {"path": str(router_path)}},
+        config_root=str(config_root),
+    )
+
+    endpoints = {item["id"]: item["models_endpoint"] for item in result["providers"]}
+    # A relay kept in manual mode on purpose stays manual; a profile that was
+    # published without the field (registry writes "") is not turned manual.
+    assert endpoints == {"relay": "manual", "empty": "/models"}
 
 
 def test_config_web_snapshot_includes_read_only_model_source_status(tmp_path):

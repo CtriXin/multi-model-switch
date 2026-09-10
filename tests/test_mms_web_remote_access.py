@@ -162,3 +162,36 @@ def test_a_tunnel_also_arrives_from_loopback_and_is_not_exempt(serve):
         request.add_header("Cookie", f"{COOKIE}={app.access.token}")
         with urllib.request.urlopen(request, timeout=10) as response:
             assert response.status == 200
+
+
+def _post(port, host, origin, token, csrf):
+    request = urllib.request.Request(f"http://127.0.0.1:{port}/api/v1/does-not-exist",
+                                     data=b"{}", method="POST")
+    request.add_header("Host", host)
+    request.add_header("Origin", origin)
+    request.add_header("X-MMS-CSRF", csrf)
+    request.add_header("Content-Type", "application/json")
+    request.add_header("Cookie", f"{COOKIE}={token}")
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return response.status, response.read()
+    except urllib.error.HTTPError as error:
+        return error.code, error.read()
+
+
+def test_all_mode_accepts_a_mutation_from_any_interface_it_serves(serve):
+    """Browsers send Origin on every POST; it must pass wherever Host passes."""
+    app, port = serve("all")
+    host = f"10.0.0.5:{port}"  # a second interface the server never detected
+    status, body = _post(port, host, f"http://{host}", app.access.token, app.csrf_token)
+    assert status != 403, body
+    assert b"INVALID_ORIGIN" not in body
+    # A page served from somewhere else is still refused.
+    status, body = _post(port, host, "http://evil.example", app.access.token, app.csrf_token)
+    assert status == 403 and b"INVALID_ORIGIN" in body
+
+
+def test_lan_mode_still_narrows_the_origin_by_host(serve):
+    app, port = serve("lan")
+    status, body = _post(port, f"127.0.0.1:{port}", f"http://10.0.0.5:{port}", app.access.token, app.csrf_token)
+    assert status == 403 and b"INVALID_ORIGIN" in body

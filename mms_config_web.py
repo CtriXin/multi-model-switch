@@ -665,7 +665,10 @@ def _preview_bundle_config_from_verified_files(verified_files: dict[str, Any], *
                 "enabled": profile.get("enabled", True) is not False,
                 "role": _safe_text(profile.get("role") or "auto"),
                 "priority": int(profile.get("priority") or 0),
-                "models_endpoint": _safe_text(profile.get("models_endpoint") or "manual"),
+                # An unset endpoint means "/models" everywhere else (config
+                # normalisation, the CLI probe, the publish plan). Only an
+                # explicit "manual" turns model discovery off.
+                "models_endpoint": _safe_text(profile.get("models_endpoint") or "/models"),
                 "protocols": protocols,
                 "supported_clis": _normalize_model_list(profile.get("supported_clis")),
                 "openai_base_url": openai_base_url,

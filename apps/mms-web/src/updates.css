@@ -9,8 +9,10 @@
 .update-center header p, .update-muted { margin: 0; font-size: 13px; color: var(--muted); }
 .update-body { padding: 24px; }
 .update-check-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
-.update-preference { display: flex; align-items: flex-start; gap: 10px; margin-top: 24px; }
-.update-preference input { flex: 0 0 auto; width: 14px; height: 14px; margin-top: 4px; accent-color: var(--accent); }
+.update-preference { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-top: 24px; }
+/* The switch sits beside the first line of its label, not the middle of the
+   whole block, so a two-line description does not push it off centre. */
+.update-preference input { margin-top: 1px; }
 .update-preference small { display: block; margin-top: 4px; color: var(--muted); }
 .update-notes { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }
 .update-notes-body { font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; }

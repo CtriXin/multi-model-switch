@@ -495,7 +495,6 @@
 .turn-process > .turn-process-toggle { margin-left: 30px; margin-bottom: 6px; }
 .turn-process-footer { margin: -12px 0 24px 30px; }
 .transcript-process-actions { display: flex; gap: 8px; justify-content: flex-end; margin: 14px 0; }
-.preference-row input[role="switch"] { accent-color: var(--accent); width: 18px; height: 18px; cursor: pointer; }
 @media (max-width: 600px) { .turn-process > .turn-process-toggle, .turn-process-footer { margin-left: 0; } }
 
 .turn-process-toggle .process-failure { color: var(--danger, #b42318); font-weight: 600; }
