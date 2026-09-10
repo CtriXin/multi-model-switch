@@ -16,7 +16,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 
 上面的命令获取最新 stable Release，无需随版本修改。正在使用 Pilot 时，可点击设置里的版本号检查更新；发现新版时，? 旁也会出现更新入口；手动安装检测到目录正被 Pilot 使用时会停止，保留进程和会话。安装过程默认中文，自动设置命令 PATH；完成后只问一次是否打开 MMS Web，同意后在后台启动。没有交互终端时打印打开命令；`--launch-web` 可直接打开，`--no-launch-web` 可禁止打开。已有相同安装、版本和配置空间的 Web 会被复用，其他实例保留并使用新端口。
 
-之后随时运行 `mms web --open`；当前终端找不到命令时用 `~/.local/bin/mms web --open`。Web 默认使用自己的配置空间，直接在设置里连接服务即可。高级用户仍可显式指定已有 MMF 配置目录。
+之后随时运行 `mms web --open`；当前终端找不到命令时用 `~/.local/bin/mms web --open`。Web 默认使用命令行同一个配置根 `~/.config/mms-next`，所以在网页里配好的通道，`mms` 和 `mmf` 直接可用，反过来也一样。已经在旧版 Web 里配过通道的安装会保留自己的数据目录，不会被搬走。高级用户仍可用 `--config-root` 显式指定其他目录。
 
 字体安装提供 Fira Code 和 JetBrains Mono，失败不会影响 MMS，`--no-coding-fonts` 可关闭。退休可选包不再安装；可确认 MMS 来源的旧入口会备份移走，自定义同名内容、全局 hooks/MCP 设置与真实配置保留。
 
@@ -42,7 +42,7 @@ macOS 也可以在 Finder 打开 `~/.mms/MMS Pilot.command`。如果从 Finder �
 
 「检查最新能力」会列出当前值、建议值和来源：会覆盖手动设置的项、仅来自 OpenRouter 的建议默认不勾选。可用「全选／取消全选」批量操作，也可「恢复默认选择」；选中数量和手动覆盖数量会实时显示。点击「填入选中项」只修改草稿，仍需「检查并保存」才生效。
 
-普通 `mms web` 默认在独立 Web 数据目录中配置，不需要先做 CLI 配置。高级 `mms config web` 仍保留，负责 Web 尚未覆盖的 Registry、账号、协议等完整配置。
+普通 `mms web` 默认写共享配置根，保存走和 MMS 相同的 Registry 审阅计划，不会手写 config.toml；不需要先做 CLI 配置。高级 `mms config web` 仍保留，负责 Web 尚未覆盖的 Registry、账号、协议等完整配置。
 
 ## 已经在使用 MMF
 
