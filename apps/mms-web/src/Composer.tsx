@@ -24,6 +24,7 @@ import type { Attachment, FileSelection } from "./types";
 import { FilesPanel } from "./FilesPanel";
 import { localFilePaths } from "./local-file-paths";
 import { requiredSkillMatches } from "./recipe-core";
+import { sendsOnEnter } from "./composer-keys";
 const noRequiredSkills: string[] = [];
 import { droppedItems } from "./dropped-items";
 import { WorkspaceDialog } from "./LaunchOptions";
@@ -72,6 +73,7 @@ export function Composer({
   guideHandled,
   draftKey: providedDraftKey,
   placeholder = "继续补充你的想法…",
+  enterToSend = true,
 }: {
   initialText?: string;
   requiredSkillNames?: string[];
@@ -92,6 +94,7 @@ export function Composer({
   sessionId?: string;
   sessionAlive?: boolean;
   onCommand?: (command: string, args: string) => Promise<boolean>;
+  enterToSend?: boolean;
 }) {
   const draftKey =
     providedDraftKey ||
@@ -712,7 +715,7 @@ export function Composer({
                 else if (e.key === "ArrowUp")
                   setChoice((c) => (c + items.length - 1) % items.length);
                 else insertCommand(items[Math.min(choice, items.length - 1)]);
-              } else if (e.key === "Enter" && !e.shiftKey) {
+              } else if (sendsOnEnter(e, enterToSend)) {
                 e.preventDefault();
                 void submit();
               }
@@ -895,8 +898,10 @@ export function Composer({
         )}
         {help && (
           <p className="composer-help">
-            Enter 发送，Shift + Enter 换行。粘贴文件路径或截图，@
-            引用工作文件；输入 / 后可用方向键与 Enter
+            {enterToSend
+              ? "Enter 发送，Shift + Enter 换行。"
+              : "Enter 换行，⌘/Ctrl + Enter 发送。"}
+            粘贴文件路径或截图，@ 引用工作文件；输入 / 后可用方向键与 Enter
             选择命令。运行中可以补充消息或停止。
             <button
               type="button"

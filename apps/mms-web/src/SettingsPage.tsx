@@ -34,6 +34,7 @@ export function SettingsPage({
   fontSize, setFontSize,
   boldText, setBoldText,
   selectToCopy, setSelectToCopy,
+  enterToSend, setEnterToSend,
   requestNavigation, editStateChanged,
 }: {
   openUpdates: () => void;
@@ -72,6 +73,8 @@ export function SettingsPage({
   setBoldText: (on: boolean) => void;
   selectToCopy: boolean;
   setSelectToCopy: (on: boolean) => void;
+  enterToSend: boolean;
+  setEnterToSend: (on: boolean) => void;
 }) {
   const [tab, setTab] = useState("models");
   return (
@@ -269,6 +272,23 @@ export function SettingsPage({
         ) : (
         <section className="general-settings">
           <label className="preference-row">
+            <div>
+              <h2>按 Enter 发送</h2>
+              <p>
+                {enterToSend
+                  ? "Enter 发送，Shift + Enter 换行。习惯先写几行再发送的话，关掉它。"
+                  : "Enter 换行，⌘/Ctrl + Enter 发送。"}
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              role="switch"
+              aria-label="按 Enter 发送"
+              checked={enterToSend}
+              onChange={(e) => setEnterToSend(e.target.checked)}
+            />
+          </label>
+          <label className="preference-row">
             <div><h2>完成后自动收起过程</h2><p>保留最终回答，收起 thinking、工具记录与中间说明。每轮都可以手动展开。</p></div>
             <input type="checkbox" role="switch" aria-label="完成后自动收起过程" checked={autoCollapseProcess} onChange={e => setAutoCollapseProcess(e.target.checked)} />
           </label>
@@ -290,33 +310,14 @@ export function SettingsPage({
             />
           </label>
           <SkillSourcesSetting />
-          <div className="preference-row">
-            <div>
-              <h2>输入与快捷操作</h2>
-              <p>Enter 发送，Shift + Enter 换行。截图可粘贴；本地文件可粘贴完整路径。</p>
-              <p>输入 / 选择命令，@ 引用文件，⌘ K 搜索会话。</p>
-              <p>
-                未发送草稿在此浏览器保留 7
-                天，成功发送后清除。本地文件引用保留原路径，截图保存在本机服务中。
-              </p>
-            </div>
-          </div>
-          <div className="preference-row">
-            <div>
-              <h2>工作文件夹</h2>
-              <p>会话在选定文件夹中读写资料，位置在输入框上方显示。</p>
-            </div>
-          </div>
-          <div className="preference-row">
-            <div>
-              <h2>配置来源</h2>
-              <p>
-                {data.capabilities.configure
-                  ? "当前使用 Web 独立配置，可在模型与通道中连接服务。"
-                  : "当前读取已有 MMF 配置。收藏、通道备注与 Web 默认值保存于此浏览器。"}
-              </p>
-            </div>
-          </div>
+          {/* State, not documentation: it says which config the running Pilot
+              reads. The shortcut and workspace explanations that used to sit
+              here are in the guide and under the input box already. */}
+          <p className="settings-footnote">
+            {data.capabilities.configure
+              ? "当前使用 Web 独立配置，可在模型与通道中连接服务。"
+              : "当前读取已有 MMF 配置。收藏、通道备注与 Web 默认值保存于此浏览器。"}
+          </p>
         </section>
         )
       )}

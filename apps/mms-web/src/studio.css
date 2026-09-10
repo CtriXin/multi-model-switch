@@ -1065,6 +1065,15 @@
   margin-top: 3px;
   max-width: 52ch;
 }
+/* Which config the running Pilot reads. It is state worth showing, but it is
+   not a setting, so it sits under the rows instead of pretending to be one. */
+.settings-footnote {
+  color: var(--muted);
+  font-size: max(11px, 0.7857rem);
+  line-height: 1.6;
+  margin: 14px 0 0;
+  max-width: 52ch;
+}
 /* Two shapes of content, two rules.
    A single column, the channel table, scrolls with the pane: nesting a
    scroller there left the rows that need the most room inside a strip.
@@ -1405,6 +1414,11 @@
   .preference-row {
     flex-wrap: wrap;
     gap: 15px;
+  }
+  /* Once the row wraps, the control lands on its own line; keep it against the
+     right edge where it sits on a wide screen instead of under the heading. */
+  .preference-row > input[role="switch"] {
+    margin-left: auto;
   }
   .model-library .model-groups {
     min-height: 0;
