@@ -2111,7 +2111,7 @@ def test_sanitize_account_claude_settings_payload_strips_session_env():
             },
             "hooks": {"preToolUse": [{"matcher": "*"}]},
             "statusLine": {"type": "command", "command": "/tmp/status.sh"},
-            "permissions": {"allow": ["Read"], "deny": ["Bash(rm -rf /)*"]},
+            "permissions": {"allow": ["Read"], "deny": ["Bash(rm -rf /*)"]},
         }
     )
 

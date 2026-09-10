@@ -55,7 +55,7 @@ function Turn({events, completed, forced, report, ...props}: Props & {
       {controls}
       <ProcessEvents {...props} events={collapsed ? pinned : process} />
     </div>}
-    {answer && <EventView {...props} event={{...answer, thinking: undefined}} />}
+    {answer && <EventView {...props} event={{...answer, thinking: undefined}} turnStartedAt={user?.createdAt} />}
     {after.map(event => <EventView key={event.id} {...props} event={event} />)}
     {answer && !!process.length && !collapsed && <div className="turn-process-footer">{controls}</div>}
   </section>;

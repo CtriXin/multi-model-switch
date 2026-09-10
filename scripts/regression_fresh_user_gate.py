@@ -168,6 +168,11 @@ _SCENARIO_MATRIX = [
         "coverage": "stable release resolution, parameter precedence, matching script/source refs, pinned downloads and temporary cleanup on success/failure",
     },
     {
+        "id": "install-entry-parity",
+        "state": "the same install reached by curl and by the npm wrapper, which pins --ref to the release it resolved",
+        "coverage": "both print the same one-line headline; a genuinely pinned older ref or a dev/canary channel still prints the full version overview",
+    },
+    {
         "id": "one-question-install",
         "state": "installer run with no arguments, with and without a terminal",
         "coverage": "nothing that changes the install is asked; stable channel and shell PATH are the defaults; the only question offers to open MMS Web, which starts detached with a real config root, falls back off a taken port, reuses a running instance, and is skipped without a terminal",

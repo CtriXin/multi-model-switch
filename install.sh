@@ -1775,15 +1775,31 @@ print_planned_version() {
 # A newcomer running the plain command does not need the channel/ref matrix;
 # one line saying what is being installed is enough. The full overview stays for
 # --version, --check, and anyone who picked a channel or ref explicitly.
+# Decide by outcome, not by arguments. Landing on the newest stable release is
+# the ordinary case and deserves one line, however the caller expressed it: the
+# npm wrapper resolves the release itself and pins --ref so the script and the
+# sources it installs cannot drift apart, and that pin must not be mistaken for
+# a user deliberately choosing an unusual version.
 print_install_headline() {
     local installed_ref=""
+    local stable_ref=""
 
-    if [ -n "$REQUESTED_INSTALL_CHANNEL" ] || [ -n "$INSTALL_REF" ]; then
-        print_version_overview
-        return 0
-    fi
+    case "$REQUESTED_INSTALL_CHANNEL" in
+        dev|canary)
+            print_version_overview
+            return 0
+            ;;
+    esac
 
     ensure_install_ref_resolved
+    if [ -n "$INSTALL_REF" ]; then
+        stable_ref="$(resolve_latest_release_tag || true)"
+        if [ -z "$stable_ref" ] || [ "$RESOLVED_INSTALL_REF" != "$stable_ref" ]; then
+            print_version_overview
+            return 0
+        fi
+    fi
+
     installed_ref="$(current_installed_ref || true)"
     if [ -z "$installed_ref" ]; then
         echo "$(t "安装最新版本" "Installing the latest version"): ${RESOLVED_INSTALL_REF:-local-source}"
