@@ -444,17 +444,22 @@ kbd {
   color: var(--muted);
   margin-top: 4px;
 }
-.connection-dot {
-  width: 6px;
-  height: 6px;
-  background: var(--muted);
-  border-radius: 50%;
-  display: inline-block;
+.connection-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   flex-shrink: 0;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 8px;
+  color: var(--muted);
+  background: var(--surface);
+  font-size: max(10px, 0.7143rem);
+  white-space: nowrap;
 }
-.connection-dot.online {
-  background: var(--accent);
-}
+.connection-status span { font-size: 10px; }
+.connection-status.online { color: var(--success); border-color: color-mix(in srgb, var(--success) 35%, var(--line)); }
+.connection-status.offline { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, var(--line)); }
 .main-area {
   display: flex;
   flex-direction: column;
