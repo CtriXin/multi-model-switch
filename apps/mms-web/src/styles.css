@@ -2106,8 +2106,8 @@ dialog:has(.dialog-body.sheet) .dialog-body.sheet > header {
    latest message unfolds it. */
 .composer {
   transition:
-    padding 0.18s var(--ease-out),
-    border-radius 0.18s var(--ease-out);
+    padding 0.26s var(--ease-out),
+    border-radius 0.26s var(--ease-out);
 }
 .composer.collapsed {
   padding: 5px 12px;
@@ -2163,7 +2163,7 @@ dialog:has(.dialog-body.sheet) .dialog-body.sheet > header {
   color: var(--accent);
 }
 .session-composer {
-  transition: padding 0.18s var(--ease-out);
+  transition: padding 0.26s var(--ease-out);
 }
 .session-composer:has(.composer.collapsed) {
   padding-top: 2px;
