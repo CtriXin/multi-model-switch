@@ -2108,6 +2108,7 @@ export function App() {
                     workspaceId={detail.session.workspaceId}
                     sessionId={detail.session.id}
                     sessionAlive={!!detail.runtime?.alive}
+                    scroll={scroll}
                     onCommand={async (command, args) => {
                       if (command === "export") {
                         exportConversation(detail);

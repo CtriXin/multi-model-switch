@@ -2150,6 +2150,77 @@ dialog:has(.dialog-body.sheet) .dialog-body.sheet > header {
 .composer.dragging {
   border-color: var(--accent);
 }
+/* Scroll-aware fold: while the transcript is being read (upward scroll), the
+   composer folds to a one-line pill. Focus, click, or returning to the
+   latest message unfolds it. */
+.composer {
+  transition:
+    padding 0.26s var(--ease-out),
+    border-radius 0.26s var(--ease-out);
+}
+.composer.collapsed {
+  padding: 5px 12px;
+  border-radius: 22px;
+  cursor: text;
+}
+.composer.collapsed .composer-editor textarea {
+  min-height: 0 !important;
+  height: 30px !important;
+  max-height: 30px !important;
+  padding-right: 88px;
+  overflow: hidden;
+  resize: none;
+}
+.composer.collapsed .attachment-list,
+.composer.collapsed .selected-skills,
+.composer.collapsed .composer-tools,
+.composer.collapsed .composer-context,
+.composer.collapsed .composer-reason,
+.composer.collapsed .composer-file-hint,
+.composer.collapsed .composer-selections,
+.composer.collapsed .composer-footnote,
+.composer.collapsed .composer-help {
+  display: none;
+}
+/* Send/stop stay reachable in the folded state, pinned to the pill's right. */
+.composer.collapsed .composer-bottom {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  margin-top: 0;
+}
+.composer-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 0 88px 3px 2px;
+}
+.composer-summary .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--soft);
+  color: var(--muted);
+  border-radius: 99px;
+  padding: 1px 9px;
+  font-size: max(11px, 0.7857rem);
+  white-space: nowrap;
+}
+.composer-summary .chip.live {
+  color: var(--accent);
+}
+.session-composer {
+  transition: padding 0.26s var(--ease-out);
+}
+.session-composer:has(.composer.collapsed) {
+  padding-top: 2px;
+  padding-bottom: 6px;
+}
+.session-composer:has(.composer.collapsed) .session-workbar {
+  display: none;
+}
 .drop-overlay {
   position: absolute;
   inset: 0;
