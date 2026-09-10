@@ -383,8 +383,25 @@ export function RuntimePanel({
           进程与诊断信息
         </summary>
         <pre>{diagnostic || "正在读取…"}</pre>
+        {!!diagnostic && !diagnostic.startsWith("无法") && (
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() => {
+              const url = URL.createObjectURL(new Blob([diagnostic], { type: "application/json;charset=utf-8" }));
+              const link = document.createElement("a");
+              link.href = url;
+              link.download = `pilot-diagnostics-${detail.session.id}.json`;
+              link.click();
+              setTimeout(() => URL.revokeObjectURL(url), 1000);
+            }}
+          >
+            <Download size={14} />
+            导出脱敏诊断包
+          </button>
+        )}
         <p className="section-note">
-          仅展示当前会话的状态和脱敏日志，不显示 API Key 或完整环境变量。
+          仅展示当前会话的状态和脱敏日志，不显示 API Key、请求正文、thinking、文件内容或完整环境变量。
         </p>
       </details>
     </div>
