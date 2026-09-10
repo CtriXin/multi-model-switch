@@ -83,20 +83,79 @@ def test_index_is_newest_first_and_bounded(tmp_path):
     assert index(tmp_path / "missing") == []
 
 
-def test_transcript_keeps_the_tail_and_drops_non_messages(tmp_path):
+def tool_call(name: str, call_id: str, arguments: dict, ident: str = "t1") -> dict:
+    """One assistant turn whose content is a single tool call."""
+    return {"type": "message", "id": ident, "timestamp": "2026-09-10T02:00:01.000Z",
+            "message": {"role": "assistant", "content": [
+                {"type": "toolCall", "id": call_id, "name": name, "arguments": arguments}]}}
+
+
+def tool_result(call_id: str, text: str, ident: str = "r1", error: bool = False) -> dict:
+    return {"type": "message", "id": ident, "timestamp": "2026-09-10T02:00:02.000Z",
+            "message": {"role": "toolResult", "toolCallId": call_id, "toolName": "read",
+                        "isError": error, "content": [{"type": "text", "text": text}]}}
+
+
+def test_transcript_uses_the_kinds_the_page_already_renders(tmp_path):
+    """A tool must arrive as one collapsible event, not as a wall of text."""
     path = write(tmp_path, "a", [
         session("id-3"),
         {"type": "thinking_level_change", "level": "high"},
         message("user", "问题", "m1"),
         message("assistant", "回答", "m2"),
-        message("toolResult", "工具输出", "m3"),
+        tool_call("read", "call-1", {"path": "/tmp/a.txt"}),
+        tool_result("call-1", "文件内容"),
     ])
     rows = transcript(path)
-    assert [r["role"] for r in rows] == ["user", "assistant", "toolResult"]
+    assert [r["kind"] for r in rows] == ["user", "assistant", "tool"]
     assert rows[0]["text"] == "问题"
+    assert [r["sequence"] for r in rows] == [1, 2, 3]
+    tool = rows[2]
+    # The result is folded back into the call it belongs to.
+    assert tool["title"] == "read"
+    assert tool["arguments"] == {"path": "/tmp/a.txt"}
+    assert tool["text"] == "文件内容"
+    assert tool["status"] == "done"
+    assert transcript(tmp_path / "missing.jsonl") == []
+
+
+def test_a_tool_that_never_returned_is_not_reported_as_finished(tmp_path):
+    """A session killed mid-tool has no result; saying "done" would be a lie."""
+    path = write(tmp_path, "a", [
+        session("id-4"),
+        tool_call("bash", "call-2", {"command": "sleep 900"}),
+    ])
+    assert transcript(path)[0]["status"] == "running"
+
+
+def test_a_failed_tool_keeps_its_error_status(tmp_path):
+    path = write(tmp_path, "a", [
+        session("id-5"),
+        tool_call("read", "call-3", {"path": "/nope"}),
+        tool_result("call-3", "ENOENT", error=True),
+    ])
+    assert transcript(path)[0]["status"] == "error"
+
+
+def test_assistant_thinking_is_kept_beside_its_answer(tmp_path):
+    path = write(tmp_path, "a", [
+        session("id-6"),
+        {"type": "message", "id": "m5", "timestamp": "2026-09-10T02:00:00.000Z",
+         "message": {"role": "assistant", "content": [
+             {"type": "thinking", "thinking": "先想一下"},
+             {"type": "text", "text": "结论"}]}},
+    ])
+    row = transcript(path)[0]
+    assert row["text"] == "结论" and row["thinking"] == "先想一下"
+
+
+def test_transcript_keeps_the_tail(tmp_path):
+    path = write(tmp_path, "a", [session("id-7"),
+                                 message("user", "第一句", "m1"),
+                                 message("assistant", "第二句", "m2"),
+                                 message("user", "第三句", "m3")])
     # A long session is read from the end, which is what someone wants to see.
     assert [r["id"] for r in transcript(path, limit=2)] == ["m2", "m3"]
-    assert transcript(tmp_path / "missing.jsonl") == []
 
 
 def test_pilot_lists_command_line_sessions_beside_its_own(tmp_path):
@@ -119,7 +178,7 @@ def test_pilot_lists_command_line_sessions_beside_its_own(tmp_path):
         assert row["capabilities"] == {"send": False, "stop": False, "fork": False, "archive": False}
 
         detail = app.get(["sessions", "cli:aaaa-1"])
-        assert [e["role"] for e in detail["events"]] == ["user"]
+        assert [e["kind"] for e in detail["events"]] == ["user"]
         # Arrays the session view reads without checking must be present.
         assert detail["artifacts"] == [] and detail["approvals"] == []
         assert detail["events"][0]["text"] == "终端里问的问题"

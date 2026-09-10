@@ -250,34 +250,87 @@ def index(session_dir: str | os.PathLike, limit: int = 200,
     return summaries
 
 
-def transcript(path: str | os.PathLike, limit: int = 2000) -> list[dict]:
-    """Normalized events for rendering one transcript."""
-    events: list[dict] = []
+def _entries(path: str | os.PathLike):
+    """Parsed JSONL rows, skipping what a mid-write file leaves behind."""
     try:
-        with Path(path).open("r", encoding="utf-8", errors="replace") as handle:
-            for line in handle:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    event = json.loads(line)
-                except ValueError:
-                    continue
-                if not isinstance(event, dict) or event.get("type") != "message":
-                    continue
-                message = event.get("message")
-                if not isinstance(message, dict):
-                    continue
-                role = str(message.get("role") or "")
-                if role not in _ROLES:
-                    continue
-                events.append({
-                    "id": str(event.get("id") or ""),
-                    "role": role,
-                    "text": _text_of(message),
-                    "at": str(event.get("timestamp") or ""),
-                })
+        handle = Path(path).open("r", encoding="utf-8", errors="replace")
     except OSError:
-        return []
+        return
+    with handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(entry, dict):
+                yield entry
+
+
+def _blocks_of(message: dict, kind: str) -> str:
+    """Join every block of one type in a Pi message into plain text."""
+    content = message.get("content")
+    if not isinstance(content, list):
+        return ""
+    parts = [block[kind] for block in content
+             if isinstance(block, dict) and isinstance(block.get(kind), str)]
+    return "\n".join(parts).strip()
+
+
+def transcript(path: str | os.PathLike, limit: int = 2000) -> list[dict]:
+    """One transcript in the event shape Pilot's renderer already draws.
+
+    Pi records a turn as several messages: the assistant's prose and thinking,
+    each tool call, then a separate result message carrying the call's id. The
+    page needs a tool to be one collapsible event with its arguments and its
+    output, so the result is folded back into the call it belongs to.
+    """
+    events: list[dict] = []
+    calls: dict[str, dict] = {}
+    for entry in _entries(path):
+        if entry.get("type") != "message":
+            continue
+        message = entry.get("message")
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "")
+        at = str(entry.get("timestamp") or "")
+        ident = str(entry.get("id") or "")
+        if role == "user":
+            text = _text_of(message)
+            if text:
+                events.append({"id": ident or f"u-{len(events)}", "kind": "user",
+                               "text": text, "createdAt": at})
+        elif role == "assistant":
+            text = _text_of(message)
+            thinking = _blocks_of(message, "thinking")
+            if text or thinking:
+                events.append({"id": ident or f"a-{len(events)}", "kind": "assistant",
+                               "text": text, "thinking": thinking, "createdAt": at})
+            for block in message.get("content") or []:
+                if not isinstance(block, dict) or block.get("type") != "toolCall":
+                    continue
+                call_id = str(block.get("id") or "")
+                event = {"id": call_id or f"t-{len(events)}", "kind": "tool",
+                         "title": str(block.get("name") or "tool"),
+                         "arguments": block.get("arguments")
+                         if isinstance(block.get("arguments"), dict) else {},
+                         # No result seen yet. A session that was killed
+                         # mid-tool keeps this, which is the truth.
+                         "status": "running", "text": "", "createdAt": at}
+                events.append(event)
+                if call_id:
+                    calls[call_id] = event
+        elif role == "toolResult":
+            event = calls.get(str(message.get("toolCallId") or ""))
+            if event is None:
+                continue
+            event["text"] = _text_of(message)
+            event["status"] = "error" if message.get("isError") else "done"
     # Keep the tail: the end of a long session is what someone wants to see.
-    return events[-max(1, limit):]
+    events = events[-max(1, limit):]
+    for index, event in enumerate(events, start=1):
+        event["sequence"] = index
+    return events

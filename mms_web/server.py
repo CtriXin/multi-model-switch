@@ -161,17 +161,50 @@ class WebApplication:
                     if s["piSessionId"] == wanted), None)
         if row is None:
             raise WebError("NOT_FOUND", "找不到这个会话。", 404)
-        # Mapped onto the shape the transcript view already renders, so the
-        # page needs no second renderer for these.
-        events = [{"kind": "message", "role": e["role"], "text": e["text"],
-                   "at": e["at"], "id": e["id"]}
-                  for e in transcript(row["path"])]
         return {"session": {k: v for k, v in row.items() if k != "path"},
-                "events": events,
+                # Already in the shape the transcript view renders, so the page
+                # needs no second renderer and tools stay collapsible.
+                "events": transcript(row["path"]),
                 # Present and empty, not absent: the view reads these without
                 # checking, and an absent array is what blanked the page.
                 "artifacts": [], "artifactNotice": "", "approvals": [], "runtime": {},
                 "note": "这个会话是在命令行里开始的，这里只读。"}
+
+    def adopt_cli_session(self, session_id: str, payload: dict) -> dict:
+        """Continue a terminal-started session in Pilot from here on.
+
+        The transcript path is resolved from the read-only index, never taken
+        from the request, so a caller cannot point this at another file.
+        """
+        from .cli_sessions import index, session_dir_for
+        wanted = session_id[len("cli:"):] if session_id.startswith("cli:") else ""
+        if not self.config_root or not wanted:
+            raise WebError("NOT_FOUND", "只有终端里开始的会话需要接入。", 404)
+        service = self._sessions()
+        already = next((s for s in service.list_sessions()
+                        if str(s.get("piSessionId") or "") == wanted), None)
+        if already is not None:
+            # Idempotent: a second click opens the session the first one made.
+            return service.get_session(already["id"])
+        row = next((s for s in index(session_dir_for(self.config_root), limit=2000,
+                                     workspaces=self._known_workspaces())
+                    if s["piSessionId"] == wanted), None)
+        if row is None:
+            raise WebError("NOT_FOUND", "找不到这个会话。", 404)
+        payload = dict(payload or {})
+        workspace_id = str(payload.get("workspaceId") or "") or str(row.get("workspaceId") or "")
+        if not workspace_id:
+            # The folder it ran in is not registered. Register it, so the
+            # adopted session has the working folder its files come from.
+            if not self.catalog:
+                raise WebError("CAPABILITY_UNAVAILABLE", "本地服务尚未连接。", 409)
+            folder = str(row.get("cwd") or "")
+            if not folder or not Path(folder).is_dir():
+                raise WebError("WORKSPACE_REQUIRED",
+                               "这个会话原来的目录已经不在了，请选择一个工作文件夹。", 409)
+            workspace_id = str(self.catalog.add_workspace({"path": folder})["id"])
+        payload["workspaceId"] = workspace_id
+        return service.adopt(row, payload)
 
     def get(self, parts: list[str], query: dict[str, list[str]] | None = None) -> dict:
         include_cli = (query or {}).get("cli", ["0"])[0] == "1"
@@ -290,6 +323,8 @@ class WebApplication:
             if not service.capabilities().get("launch"):
                 raise WebError("CAPABILITY_UNAVAILABLE", "当前会话路径尚未就绪，未启动模型。", 409)
             return service.launch(payload)
+        if len(parts) == 3 and parts[0] == "sessions" and parts[2] == "adopt":
+            return self.adopt_cli_session(parts[1], payload)
         if len(parts) == 3 and parts[0] == "sessions":
             methods = {"messages": "send", "stop": "stop", "control": "control", "manage": "manage", "fork": "fork", "model": "switch_model", "artifacts": "artifact"}
             if parts[2] in methods:
