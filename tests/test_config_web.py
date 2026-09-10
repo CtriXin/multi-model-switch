@@ -4931,7 +4931,7 @@ def test_config_web_mmf_official_overrides_use_provider_profiles(monkeypatch, tm
     glm = result["model_capabilities"]["glm-5.2"]
     assert glm["context_window_tokens"] == 1_000_000
     assert glm["max_output_tokens"] == 131_072
-    assert glm["reasoning_effort"] == "high"
+    assert glm["reasoning_effort"] == "max"
 
     gpt = result["model_capabilities"]["gpt-5.5"]
     assert gpt["context_window_tokens"] == 1_000_000

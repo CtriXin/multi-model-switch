@@ -368,8 +368,8 @@ _PI_CAPABILITY_REFERENCE_PATH = (
 )
 
 _PI_MODEL_MAX_TOKENS_HINTS = {
-    "deepseek-v4-flash": 384000,
-    "deepseek-v4-pro": 384000,
+    "deepseek-v4-flash": 393216,
+    "deepseek-v4-pro": 393216,
     "gpt-5.3-codex": 128000,
     "gpt-5.3-codex-spark": 32000,
     "k3": 131072,
@@ -419,7 +419,6 @@ _PI_MODEL_INPUT_HINTS = {
     "qwen3.6-flash": ["text", "image"],
     "qwen3.7-max": ["text"],
     "deepseek-v4.1-flash-expires-on-0910": ["text", "image"],
-    "deepseek-v4-flash": ["text", "image"],
 }
 
 _PI_MODEL_UNSUPPORTED_HINTS = {
@@ -1137,8 +1136,9 @@ def _pi_model_thinking_level_map(runtime, profile_id, protocol, model_name, caps
         return {}
 
     # 2026-09-09: deepseek 档位改由 provider-profiles.json 驱动（v4.1 实测 7 档
-    # none/minimal/low/medium/high/xhigh/max；v4-pro/flash 由 model_overrides 钉住旧保守表）。
-    # 见 config/provider-profiles.json deepseek.effort + model_overrides。
+    # none/minimal/low/medium/high/xhigh/max）。
+    # 2026-09-10: v4-pro/flash 旧 model_overrides pin 已删（实测全家同 v4.1 后端，
+    # 枚举/区间一致），档位直通 profile。见 config/provider-profiles.json deepseek.effort。
 
     profile_caps = profile_thinking_capabilities(
         model_name,

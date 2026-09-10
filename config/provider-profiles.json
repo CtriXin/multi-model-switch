@@ -2001,7 +2001,7 @@
       "effort": {
         "openai_chat": {
           "path": "reasoning_effort",
-          "default": "high",
+          "default": "max",
           "allowed": [
             "none",
             "minimal",
@@ -2180,7 +2180,7 @@
       "effort": {
         "openai_chat": {
           "path": "reasoning_effort",
-          "default": "high",
+          "default": "max",
           "allowed": [
             "none",
             "minimal",
@@ -2189,7 +2189,10 @@
             "high",
             "xhigh",
             "max"
-          ]
+          ],
+          "official_default": "max",
+          "recommended_default": "max",
+          "request_default": "max"
         }
       },
       "context_windows": {

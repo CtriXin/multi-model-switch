@@ -37,7 +37,6 @@ def test_provider_profile_vision_reaches_pi_without_a_hint_entry():
 
 def test_models_without_declared_vision_stay_text_only():
     for model, profile in (
-        ("deepseek-v4-flash", "deepseek"),
         ("deepseek-v4-pro", "deepseek"),
         ("glm-5.2", "glm"),
     ):
@@ -86,8 +85,8 @@ def test_multimodal_start_keeps_pool_for_later_text_model(monkeypatch):
 
 
 def test_text_only_main_model_gets_the_channel_vision_models(monkeypatch):
-    runtime = _vision_runtime(monkeypatch, ["deepseek-v4-flash", "minimax-m3"])
-    plan = pi_support._pi_vision_plan(runtime, "deepseek-v4-flash")
+    runtime = _vision_runtime(monkeypatch, ["deepseek-v4-pro", "minimax-m3"])
+    plan = pi_support._pi_vision_plan(runtime, "deepseek-v4-pro")
     assert plan["main_model_vision"] is False
     assert [entry["selector"] for entry in plan["pool"]] == ["minimax-m3"]
 
@@ -95,27 +94,27 @@ def test_text_only_main_model_gets_the_channel_vision_models(monkeypatch):
 def test_pool_holds_every_vision_model_on_the_channel(monkeypatch):
     """No preferred model and no built-in name list: the pool is the capability."""
     runtime = _vision_runtime(
-        monkeypatch, ["deepseek-v4-flash", "k3", "minimax-m3", "glm-5.2"]
+        monkeypatch, ["deepseek-v4-pro", "k3", "minimax-m3", "glm-5.2"]
     )
-    plan = pi_support._pi_vision_plan(runtime, "deepseek-v4-flash")
+    plan = pi_support._pi_vision_plan(runtime, "deepseek-v4-pro")
     assert [entry["selector"] for entry in plan["pool"]] == ["k3", "minimax-m3"]
 
 
 def test_channel_without_minimax_still_has_a_pool(monkeypatch):
     """No MiniMax on this channel must not mean no image support at all."""
-    runtime = _vision_runtime(monkeypatch, ["deepseek-v4-flash", "k3"])
-    plan = pi_support._pi_vision_plan(runtime, "deepseek-v4-flash")
+    runtime = _vision_runtime(monkeypatch, ["deepseek-v4-pro", "k3"])
+    plan = pi_support._pi_vision_plan(runtime, "deepseek-v4-pro")
     assert [entry["selector"] for entry in plan["pool"]] == ["k3"]
 
 
 def test_channel_with_no_vision_model_reports_an_empty_pool(monkeypatch):
-    runtime = _vision_runtime(monkeypatch, ["deepseek-v4-flash", "glm-5.2"])
-    plan = pi_support._pi_vision_plan(runtime, "deepseek-v4-flash")
+    runtime = _vision_runtime(monkeypatch, ["deepseek-v4-pro", "glm-5.2"])
+    plan = pi_support._pi_vision_plan(runtime, "deepseek-v4-pro")
     assert plan["pool"] == []
 
 
 def test_disabled_vision_sidecar_registers_no_relay(monkeypatch):
-    runtime = _vision_runtime(monkeypatch, ["deepseek-v4-flash", "minimax-m3"])
+    runtime = _vision_runtime(monkeypatch, ["deepseek-v4-pro", "minimax-m3"])
     monkeypatch.setattr(pi_support, "_pi_vision_relay_enabled", lambda: False)
     plan = pi_support._pi_vision_plan(runtime, "deepseek-v4-flash")
     assert plan["pool"] == []
