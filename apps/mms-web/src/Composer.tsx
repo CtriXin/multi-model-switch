@@ -1,7 +1,7 @@
 import { appendGuidePrompt } from "./guide-content";
 import { readDraft, saveDraft, discardDraft } from "./drafts";
 import { useEffect, useRef, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
+import type { FormEvent, ReactNode, RefObject } from "react";
 import {
   CircleAlert,
   ArrowUp,
@@ -72,6 +72,7 @@ export function Composer({
   guideHandled,
   draftKey: providedDraftKey,
   placeholder = "继续补充你的想法…",
+  scroll,
 }: {
   initialText?: string;
   requiredSkillNames?: string[];
@@ -91,6 +92,8 @@ export function Composer({
   workspaceId?: string;
   sessionId?: string;
   sessionAlive?: boolean;
+  /** Transcript scroller; enables the scroll-aware fold when provided. */
+  scroll?: RefObject<HTMLDivElement | null>;
   onCommand?: (command: string, args: string) => Promise<boolean>;
 }) {
   const draftKey =
@@ -231,6 +234,31 @@ export function Composer({
   const [choice, setChoice] = useState(0);
   const [dismissed, setDismissed] = useState(false);
   const input = useRef<HTMLTextAreaElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  // Scroll-aware fold: a deliberate upward scroll in the transcript means
+  // "I am reading", so the composer folds to one line. Scrolling back down,
+  // reaching the latest message, focusing or clicking the box restores it.
+  const [collapsed, setCollapsed] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const collapsedRef = useRef(false);
+  collapsedRef.current = collapsed;
+  const canCollapseRef = useRef((): boolean => false);
+  function setCollapsedState(next: boolean) {
+    if (next) {
+      // Native top-layer popovers would stay floating over the transcript
+      // with their anchor folded away; dismiss them instead.
+      formRef.current
+        ?.querySelectorAll<HTMLElement>("[popover]")
+        .forEach((p) => {
+          try {
+            if (p.matches(":popover-open")) p.hidePopover();
+          } catch {
+            /* engines without the popover API */
+          }
+        });
+    }
+    setCollapsed(next);
+  }
   // The box grew with neither the text nor the window: three rows with an
   // inner scrollbar while the page below it sat empty. It now follows the
   // content up to a share of the viewport, and stops following as soon as the
@@ -238,7 +266,7 @@ export function Composer({
   const dragged = useRef(false);
   function fitToContent() {
     const el = input.current;
-    if (!el || dragged.current) return;
+    if (!el || dragged.current || collapsedRef.current) return;
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, Math.round(window.innerHeight * 0.4))}px`;
   }
@@ -290,6 +318,63 @@ export function Composer({
     else if (!files) dialog.current?.close();
   }, [files]);
   const menu = !dismissed && /^\/[\w:-]*$/.test(text);
+  // Anything that needs the reader's attention or holds an open surface
+  // vetoes the fold; evaluated lazily so the scroll listener never sees
+  // stale state.
+  canCollapseRef.current = () =>
+    !focused &&
+    !menu &&
+    !skillsOpen &&
+    !files &&
+    !help &&
+    !submitting &&
+    !uploading &&
+    !localFilesBusy &&
+    !error &&
+    !uploadErrors.length &&
+    !requirementIssues.length &&
+    !(disabled && reason);
+  useEffect(() => {
+    const el = scroll?.current;
+    if (!el) return;
+    let last = el.scrollTop;
+    let up = 0;
+    let down = 0;
+    const onScroll = () => {
+      const top = el.scrollTop;
+      const delta = top - last;
+      last = top;
+      if (el.scrollHeight - top - el.clientHeight < 48) {
+        up = down = 0;
+        setCollapsedState(false);
+        return;
+      }
+      // Hysteresis: fold only after a real upward intent, unfold eagerly.
+      if (delta < 0) {
+        up += -delta;
+        down = 0;
+      } else if (delta > 0) {
+        down += delta;
+        up = 0;
+      }
+      if (up > 48 && canCollapseRef.current()) {
+        setCollapsedState(true);
+        up = 0;
+      } else if (down > 24) {
+        setCollapsedState(false);
+        down = 0;
+      }
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, [scroll]);
+  // A guard flipping on (error, picker, upload…) cancels the fold at once.
+  useEffect(() => {
+    if (collapsed && !canCollapseRef.current()) setCollapsedState(false);
+  });
+  useEffect(() => {
+    if (!collapsed) fitToContent();
+  }, [collapsed]);
   const items = [
     ...commands.filter((c) => sessionId || ["help", "files"].includes(c.name)),
     ...nativeCommands.filter(
@@ -515,11 +600,21 @@ export function Composer({
         />
       )}
       <form
+        ref={formRef}
         className={
           "composer " +
+          (collapsed ? "collapsed " : "") +
           (disabled ? "unavailable " : "") +
           (dragging ? "dragging" : "")
         }
+        onMouseDownCapture={(e) => {
+          if (!collapsed) return;
+          // Buttons (send/stop) keep working in the folded state.
+          if ((e.target as HTMLElement).closest("button")) return;
+          e.preventDefault();
+          setCollapsedState(false);
+          requestAnimationFrame(() => input.current?.focus());
+        }}
         onSubmit={submit}
         onDragEnter={(e) => {
           if (e.dataTransfer.types.some(type => type === "Files" || type === "text/uri-list")) {
@@ -634,6 +729,47 @@ export function Composer({
               ))}
           </div>
         )}
+        {collapsed &&
+          (running ||
+            !!text.trim() ||
+            attachments.some((a) => referencedInText(a)) ||
+            !!references.length ||
+            !!fileSelections.length ||
+            !!selectedSkills.length) && (
+            <div className="composer-summary">
+              {running && (
+                <span className="chip live">
+                  <LoaderCircle size={11} className="spin" />
+                  执行中…
+                </span>
+              )}
+              {!!text.trim() && (
+                <span className="chip">草稿 {text.trim().length} 字</span>
+              )}
+              {attachments.filter((a) => referencedInText(a)).length +
+                references.length >
+                0 && (
+                <span className="chip">
+                  <Paperclip size={11} />
+                  {attachments.filter((a) => referencedInText(a)).length +
+                    references.length}{" "}
+                  个附件
+                </span>
+              )}
+              {!!fileSelections.length && (
+                <span className="chip">
+                  <AtSign size={11} />
+                  {fileSelections.length} 个选段
+                </span>
+              )}
+              {!!selectedSkills.length && (
+                <span className="chip">
+                  <BookOpen size={11} />
+                  {selectedSkills.length} 个 Skills
+                </span>
+              )}
+            </div>
+          )}
         <div className="composer-editor">
           {menu && (
             <div className="command-menu" role="listbox" aria-label="可用命令">
@@ -676,10 +812,15 @@ export function Composer({
               if (box.right - e.clientX < 18 && box.bottom - e.clientY < 18)
                 dragged.current = true;
             }}
+            onFocus={() => {
+              setFocused(true);
+              setCollapsedState(false);
+            }}
+            onBlur={() => setFocused(false)}
             placeholder={
               running ? "补充一条消息，将在当前执行完成后处理…" : placeholder
             }
-            rows={3}
+            rows={2}
             maxLength={50000}
             onPaste={(e) => {
               const paths = localFilePaths(
@@ -715,6 +856,10 @@ export function Composer({
               } else if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 void submit();
+              } else if (e.key === "Escape") {
+                // The fold only engages while unfocused; Escape explicitly
+                // hands focus back to the transcript.
+                e.currentTarget.blur();
               }
             }}
           />
