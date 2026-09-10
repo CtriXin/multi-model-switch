@@ -11,6 +11,7 @@ import {
   ChevronsUpDown,
   Copy,
   Download,
+  Eye,
   GitBranch,
   CircleAlert,
   Command,
@@ -32,8 +33,8 @@ import {
   ChevronDown,
   X,
 } from "lucide-react";
-import type { Bootstrap, Page, SessionDetail, FileSelection } from "./types";
-import { bootstrap, getSession, listSessions, isPreview, mutate, request } from "./api";
+import type { Bootstrap, Page, Session, SessionDetail, FileSelection, Workspace } from "./types";
+import { bootstrap, getSession, includeCliSessions, listSessions, isPreview, mutate, request } from "./api";
 import {
   Composer,
   Dialog,
@@ -320,12 +321,22 @@ export function App() {
   const [selectToCopy, setSelectToCopy] = useState(() =>
     readSetting("mms-web-select-to-copy", false),
   );
+  const [showCliSessions, setShowCliSessions] = useState(() =>
+    readSetting("mms-web-cli-sessions", false),
+  );
   const [favorites, setFavorites] = useState<string[]>(() => {
     const value = readSetting<unknown>("mms-web-favorites", []);
     return Array.isArray(value)
       ? value.filter((v) => typeof v === "string")
       : [];
   });
+  // Told to the API layer before anything reads a list, and reloaded right
+  // after, so turning it off empties the list immediately.
+  useEffect(() => {
+    saveSetting("mms-web-cli-sessions", showCliSessions);
+    includeCliSessions(showCliSessions);
+    void load();
+  }, [showCliSessions]);
   useEffect(() => { saveSetting("mms-web-auto-collapse-process", autoCollapseProcess); }, [autoCollapseProcess]);
   useEffect(() => { saveSetting("mms-web-workspace-sort", workspaceSort); }, [workspaceSort]);
   useEffect(() => { saveSetting("mms-web-workspace-order", workspaceOrder); }, [workspaceOrder]);
@@ -749,20 +760,34 @@ export function App() {
           s.state === attention ||
           (attention === "error" && s.activity?.phase === "error")),
   );
+  const registered = new Set(data.workspaces.map((w) => w.id));
+  // A terminal session was never assigned a folder here, so when the directory
+  // it ran in is not a registered one it gets its own group. Otherwise every
+  // project's terminal work piles into a single bucket.
+  const groupOf = (s: Session) =>
+    !registered.has(s.workspaceId) && s.owner === "cli" && s.cwd
+      ? "cwd:" + s.cwd
+      : s.workspaceId;
   const navWorkspaces = [...data.workspaces];
   for (const session of data.sessions) {
-    if (!navWorkspaces.some((w) => w.id === session.workspaceId))
-      navWorkspaces.push({
-        id: session.workspaceId,
-        name: "其他工作空间",
-        path: "",
-      });
+    const id = groupOf(session);
+    if (navWorkspaces.some((w) => w.id === id)) continue;
+    navWorkspaces.push(
+      id.startsWith("cwd:")
+        ? {
+            id,
+            name: session.cwd!.replace(/\/+$/, "").split("/").pop() || session.cwd!,
+            path: session.cwd!,
+            unregistered: true,
+          }
+        : { id, name: "其他工作空间", path: "" },
+    );
   }
   const lastEdited = new Map<string, string>();
   for (const session of data.sessions) {
-    const seen = lastEdited.get(session.workspaceId) || "";
-    if (session.updatedAt > seen)
-      lastEdited.set(session.workspaceId, session.updatedAt);
+    const id = groupOf(session);
+    const seen = lastEdited.get(id) || "";
+    if (session.updatedAt > seen) lastEdited.set(id, session.updatedAt);
   }
   navWorkspaces.sort((a, b) => {
     if (workspaceSort === "manual") {
@@ -814,7 +839,9 @@ export function App() {
   }
   async function copySessionId(id: string) {
     try {
-      await navigator.clipboard.writeText(id);
+      // A terminal session's id is prefixed here to keep it apart from
+      // Pilot's own. Copy the bare id, which is what `pi --session` takes.
+      await navigator.clipboard.writeText(id.replace(/^cli:/, ""));
       setWorkspaceNotice("已复制 Session ID");
     } catch {
       setWorkspaceNotice("浏览器拒绝了复制，请手动选择 ID");
@@ -854,6 +881,20 @@ export function App() {
       await load();
     } catch (error) {
       setWorkspaceNotice(error instanceof Error ? error.message : "重命名失败");
+    }
+  }
+  /** Register a folder the sidebar only knows from the sessions that ran in
+   *  it, which is what makes it usable for starting new work. */
+  async function registerWorkspace(path: string) {
+    try {
+      const added = await mutate<Workspace>("/workspaces", { path });
+      setData((old) => ({
+        ...old,
+        workspaces: [...old.workspaces.filter((w) => w.id !== added.id), added],
+      }));
+      await load();
+    } catch (error) {
+      setWorkspaceNotice(error instanceof Error ? error.message : "添加失败");
     }
   }
   async function submitWorkspaceRemove() {
@@ -1058,7 +1099,7 @@ export function App() {
             </div>
           ) : (
             navWorkspaces.map((w) => {
-              const sessions = filtered.filter((s) => s.workspaceId === w.id);
+              const sessions = filtered.filter((s) => groupOf(s) === w.id);
               return (
                 <section className="workspace-group" key={w.id}>
                   <button
@@ -1109,6 +1150,22 @@ export function App() {
                               <small>{w.path || "这些会话的目录已不在记录里"}</small>
                             </span>
                           </button>
+                          {w.unregistered && (
+                            <button
+                              type="button"
+                              className="filter-option"
+                              onClick={() => {
+                                void registerWorkspace(w.path);
+                                close();
+                              }}
+                            >
+                              <Plus size={14} />
+                              <span>
+                                <strong>添加为工作文件夹</strong>
+                                <small>加进侧栏后，就能在这里新建会话</small>
+                              </span>
+                            </button>
+                          )}
                           {workspaceSort === "manual" && (
                             <>
                               <button
@@ -1142,7 +1199,7 @@ export function App() {
                           <button
                             type="button"
                             className="filter-option"
-                            disabled={w.id === "default" || !w.path}
+                            disabled={w.id === "default" || !w.path || !!w.unregistered}
                             onClick={() => {
                               setRenameWorkspace({ id: w.id, name: w.name });
                               close();
@@ -1157,7 +1214,7 @@ export function App() {
                           <button
                             type="button"
                             className="filter-option danger"
-                            disabled={w.id === "default" || !w.path}
+                            disabled={w.id === "default" || !w.path || !!w.unregistered}
                             onClick={() => {
                               setRemoveWorkspace({
                                 id: w.id,
@@ -1173,7 +1230,9 @@ export function App() {
                               <small>
                                 {w.id === "default"
                                   ? "启动目录不能移除"
-                                  : "只从侧栏移除，文件和会话都保留"}
+                                  : w.unregistered
+                                    ? "这个目录还不在侧栏记录里"
+                                    : "只从侧栏移除，文件和会话都保留"}
                               </small>
                             </span>
                           </button>
@@ -1184,8 +1243,8 @@ export function App() {
                       type="button"
                       className="icon-button"
                       aria-label={`在 ${w.name} 新建会话`}
-                      title="在这个目录新建会话"
-                      disabled={!w.path}
+                      title={w.unregistered ? "先把这个目录添加为工作文件夹" : "在这个目录新建会话"}
+                      disabled={!w.path || !!w.unregistered}
                       onClick={() => {
                         setWorkspaceId(w.id);
                         navigate("new");
@@ -1237,6 +1296,14 @@ export function App() {
                               }
                             </span>
                             <span>·</span>
+                            {s.owner === "cli" && (
+                              // Its own separator, not a space inside the
+                              // label: the row's flex gap draws the rest.
+                              <>
+                                <span>终端</span>
+                                <span>·</span>
+                              </>
+                            )}
                             {s.modelName}
                           </small>
                         </span>
@@ -1267,6 +1334,8 @@ export function App() {
                                 <strong>复制 Session ID</strong>
                               </span>
                             </button>
+                            {s.owner !== "cli" && (
+                              <>
                             <button
                               type="button"
                               className="filter-option"
@@ -1306,6 +1375,8 @@ export function App() {
                                 </small>
                               </span>
                             </button>
+                              </>
+                            )}
                             <button
                               type="button"
                               className="filter-option"
@@ -1319,6 +1390,7 @@ export function App() {
                                 <strong>导出会话</strong>
                               </span>
                             </button>
+                            {s.owner !== "cli" && (
                             <button
                               type="button"
                               className="filter-option danger"
@@ -1348,6 +1420,7 @@ export function App() {
                                 </small>
                               </span>
                             </button>
+                            )}
                             <p className="session-row-time">
                               {new Date(s.updatedAt).toLocaleString()}
                             </p>
@@ -1427,7 +1500,12 @@ export function App() {
                 : detail
                   ? data.workspaces.find(
                       (w) => w.id === detail.session.workspaceId,
-                    )?.name || "工作空间"
+                    )?.name ||
+                    // A terminal session may have run in a folder the sidebar
+                    // does not have registered; name it after that folder
+                    // rather than falling back to a generic word.
+                    detail.session.cwd?.replace(/\/+$/, "").split("/").pop() ||
+                    "工作空间"
                   : workspace?.name || "工作空间"}
             </span>
             <ChevronRight size={14} />
@@ -1634,7 +1712,8 @@ export function App() {
                           <strong>{s.title}</strong>
                           <small>
                             {s.summary ||
-                              harnessNames[s.harness] + " · " + s.modelName}
+                              (s.owner === "cli" ? "终端 · " : "") +
+                                harnessNames[s.harness] + " · " + s.modelName}
                           </small>
                         </span>
                         <Status
@@ -1666,6 +1745,8 @@ export function App() {
           <SettingsPage
             key={guideSettingsKey}
             openUpdates={() => setUpdateOpen(true)}
+            showCliSessions={showCliSessions}
+            setShowCliSessions={setShowCliSessions}
             updateAvailable={!!updateStatus?.available}
             connectionCompleted={connectionCompleted}
             tour={tour}
@@ -1756,6 +1837,15 @@ export function App() {
                   )}
                   {detail && (
                     <div className="conversation-content">
+                      {detail.session.owner === "cli" && (
+                        // Say it before the transcript, not after: someone
+                        // scrolling a long session should not have to reach
+                        // the composer to find out it cannot be used.
+                        <p className="session-readonly" role="status">
+                          这个会话是在终端里用 <code>mmf</code> 开始的，这里只读。
+                          要继续，请回到那个终端。
+                        </p>
+                      )}
                       <Transcript
                         key={detail.session.id}
                         forced={processForced}
@@ -1869,6 +1959,14 @@ export function App() {
                       busy={busy}
                     />
                   </div>
+                  {detail.session.owner === "cli" ? (
+                    // Nothing in the composer can be used here, so none of it
+                    // is shown. The banner above the transcript says why.
+                    <p className="composer-locked" role="status">
+                      <Eye size={15} />
+                      只读会话 · 要继续，回到开始它的那个终端
+                    </p>
+                  ) : (
                   <Composer
                     key={detail.session.id}
                     selectionRequest={selectionRequest?.sessionId === detail.session.id ? selectionRequest : undefined}
@@ -1966,6 +2064,7 @@ export function App() {
                       }}
                     />
                   </Composer>
+                  )}
                 </div>
               )}
             </div>
@@ -2192,6 +2291,7 @@ export function App() {
                 <span>
                   <strong>{s.title}</strong>
                   <small>
+                    {s.owner === "cli" ? "终端 · " : ""}
                     {harnessNames[s.harness]} · {s.modelName}
                   </small>
                 </span>
