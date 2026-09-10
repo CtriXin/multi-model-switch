@@ -298,6 +298,7 @@ export function RuntimePanel({
         <input
           aria-label="自动压缩上下文"
           type="checkbox"
+          role="switch"
           checked={!!r.autoCompactionEnabled}
           disabled={locked || r.autoCompactionEnabled === undefined}
           onChange={(e) => void control("autoCompaction", e.target.checked)}

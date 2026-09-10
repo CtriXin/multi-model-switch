@@ -334,6 +334,9 @@ export function App() {
   const [selectToCopy, setSelectToCopy] = useState(() =>
     readSetting("mms-web-select-to-copy", false),
   );
+  const [enterToSend, setEnterToSend] = useState(() =>
+    readSetting("mms-web-enter-to-send", true),
+  );
   const [showCliSessions, setShowCliSessions] = useState(() =>
     readSetting("mms-web-cli-sessions", false),
   );
@@ -391,6 +394,7 @@ export function App() {
     void load();
   }, [showCliSessions]);
   useEffect(() => { saveSetting("mms-web-auto-collapse-process", autoCollapseProcess); }, [autoCollapseProcess]);
+  useEffect(() => { saveSetting("mms-web-enter-to-send", enterToSend); }, [enterToSend]);
   useEffect(() => { saveSetting("mms-web-workspace-sort", workspaceSort); }, [workspaceSort]);
   useEffect(() => { saveSetting("mms-web-workspace-order", workspaceOrder); }, [workspaceOrder]);
   const currentSelection = useRef("");
@@ -1693,6 +1697,7 @@ export function App() {
                 <button type="button" onClick={() => { setRecipe(null); setRecipeConfirmed(""); }}>退出模板草稿</button>
               </section>}
               <Composer
+                enterToSend={enterToSend}
                 key={`new:${workspaceId}:${recipe?.key || ""}`}
                 draftKey={`new:${workspaceId}:${recipe?.key || ""}`}
                 initialText={recipe?.draftPrompt}
@@ -1760,7 +1765,11 @@ export function App() {
                 </p>
               )}
               <div className="input-hint">
-                <span>Enter 发送 · Shift + Enter 换行</span>
+                <span>
+                  {enterToSend
+                    ? "Enter 发送 · Shift + Enter 换行"
+                    : "⌘/Ctrl + Enter 发送 · Enter 换行"}
+                </span>
               </div>
               {!modelReady && (
                 <div className="setup-inline">
@@ -1873,6 +1882,8 @@ export function App() {
             setBoldText={setBoldText}
             selectToCopy={selectToCopy}
             setSelectToCopy={setSelectToCopy}
+            enterToSend={enterToSend}
+            setEnterToSend={setEnterToSend}
             presetId={presetId}
             selectPreset={selectTaskPreset}
             workspaceId={workspaceId}
@@ -2090,6 +2101,7 @@ export function App() {
                     </div>
                   ) : (
                   <Composer
+                    enterToSend={enterToSend}
                     key={detail.session.id}
                     selectionRequest={selectionRequest?.sessionId === detail.session.id ? selectionRequest : undefined}
                     selectionHandled={() => setSelectionRequest(undefined)}
