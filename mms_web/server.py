@@ -385,14 +385,16 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
 
         def _check_origin(self, *, mutation=False):
             expected_port = self.server.server_address[1]
-            hosts = app.access.allowed_hosts(expected_port)
             if not app.access.accepts(self.headers.get("Host"), expected_port):
                 raise WebError("INVALID_HOST", "只允许访问本机服务地址。", 403)
             origin = self.headers.get("Origin")
-            if origin is not None and origin not in {
-                f"{scheme}://{host}" for host in hosts for scheme in ("http", "https")
-            }:
-                raise WebError("INVALID_ORIGIN", "请在 MMS 本地页面中执行此操作。", 403)
+            if origin is not None:
+                # The page that issued this request must live on a host this
+                # server answers to, judged by the same rule as the Host
+                # header so "--listen all" accepts every interface it serves.
+                parts = urlsplit(origin)
+                if parts.scheme not in ("http", "https") or not app.access.accepts(parts.netloc, expected_port):
+                    raise WebError("INVALID_ORIGIN", "请在 MMS 本地页面中执行此操作。", 403)
             if self.headers.get("Sec-Fetch-Site") == "cross-site":
                 raise WebError("INVALID_ORIGIN", "不允许跨站访问本地服务。", 403)
             if mutation and not secrets.compare_digest(
