@@ -57,7 +57,7 @@ caveman_mode = "enable"
 caveman_level = "light"
 
 [session_surfaces.disabled]
-skills = ["agent-browser"]
+skills = []
 mcp = []
 hooks = []
 
@@ -66,9 +66,8 @@ managed_enabled = true
 managed_root = "~/.local/share/mms/assets"
 
 [assets.roots]
-web_access = "~/my-skills/web-access"
 weber = "~/my-skills/weber"
-agent_browser = "~/my-skills/agent-browser"
+grill_me = "~/my-skills/grill-me"
 codegraph = "~/my-skills/codegraph"
 token_saver = "~/my-skills/token-saver"
 toon = "~/my-skills/toon"
@@ -107,7 +106,7 @@ mcp = []
 hooks = []
 ```
 
-`skills` accepts MMS dynamic skill names such as `web-access`, and CLI-scoped Global Skill filters such as `claude:frontend-design` or `codex:bugfix`. Scoped Global Skill filters only affect MMS-launched sessions; they do not delete or edit `~/.claude/skills` or `~/.codex/skills`.
+`skills` accepts MMS dynamic skill names such as `weber` or `grill-me`, and CLI-scoped Global Skill filters such as `claude:frontend-design` or `codex:bugfix`. Scoped Global Skill filters only affect MMS-launched sessions; they do not delete or edit `~/.claude/skills` or `~/.codex/skills`.
 
 `[launch] disabled_clis` accepts MMS launch targets such as:
 
@@ -140,7 +139,7 @@ Put symlinks here when possible. Launcher resolves this user override root first
 `[assets.roots]` accepts:
 
 ```text
-web_access, weber, agent_browser, codegraph, token_saver, toon, caveman, nsr, ecc, omc, auto_github_contributor
+weber, grill_me, codegraph, toon, nsr, ecc, omc, auto_github_contributor
 ```
 
 Env vars like `MMS_WEB_ACCESS_ROOT`, `MMS_ECC_ROOT`, and `MMS_MANAGED_ASSETS_ROOT` still take priority over `preferences.toml`. Figma and Pilot MCP are default-off even when installed; enable them per launch environment with `MMS_ENABLE_MCP_FIGMA=1` / `MMS_ENABLE_FIGMA_MCP=1` or `MMS_ENABLE_MCP_PILOT=1` / `MMS_ENABLE_PILOT_MCP=1`.
@@ -198,11 +197,10 @@ MMS 自带动态 assets 随当前包放在 `assets/session-assets`；安装版�
 Common roots:
 
 ```text
-~/.mms/assets/session-assets/packs/caveman
-~/.mms/assets/session-assets/skills/web-access
 ~/.mms/assets/session-assets/skills/weber
-~/.mms/assets/session-assets/skills/agent-browser
-~/.mms/assets/session-assets/skills/token-saver
+~/.mms/assets/session-assets/skills/weber/backends-web-access
+~/.mms/assets/session-assets/skills/weber/backends-agent-browser
+~/.mms/assets/session-assets/skills/grill-me
 ~/.mms/assets/session-assets/skills/toon
 ~/.mms/hooks/nsr-stop-wrapper.py
 ~/.mms/hooks/nsr-loop-hook.py

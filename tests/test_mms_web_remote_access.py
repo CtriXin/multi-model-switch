@@ -35,9 +35,7 @@ def serve(tmp_path):
 
 def fetch(port, path="/api/v1/sessions", host=None, token=None, cookie=None,
           redirect=True, remote=False):
-    """`remote=True` stands in for a phone: the test client is always on this
-    machine, and a request from this machine is deliberately exempt, so the
-    forwarding header a tunnel adds is what marks it as coming from outside."""
+    """Exercise both forwarding-header and plain TCP tunnel requests."""
     request = urllib.request.Request(
         f"http://127.0.0.1:{port}{path}" + (f"?{QUERY}={token}" if token else ""))
     request.add_header("Host", host or f"127.0.0.1:{port}")
@@ -151,11 +149,13 @@ def test_the_link_carries_the_token_and_prefers_the_public_hostname(tmp_path):
     assert access.link(8765) == f"https://pilot.example.com/?{QUERY}={access.token}"
 
 
-def test_a_browser_on_this_machine_needs_no_token(serve):
-    """Connecting from loopback already means being on the machine."""
+def test_remote_mode_requires_a_token_even_without_forwarding_headers(serve):
+    """A raw TCP tunnel is indistinguishable from a local browser."""
     app, port = serve("all")
     assert app.access.required is True
-    assert fetch(port)[0] == 200
+    assert fetch(port)[0] == 401
+    assert fetch(port, cookie=app.access.token)[0] == 200
+    assert fetch(port, token=app.access.token, redirect=False)[0] == 302
 
 
 def test_a_tunnel_also_arrives_from_loopback_and_is_not_exempt(serve):
@@ -172,3 +172,36 @@ def test_a_tunnel_also_arrives_from_loopback_and_is_not_exempt(serve):
         request.add_header("Cookie", f"{COOKIE}={app.access.token}")
         with urllib.request.urlopen(request, timeout=10) as response:
             assert response.status == 200
+
+
+def _post(port, host, origin, token, csrf):
+    request = urllib.request.Request(f"http://127.0.0.1:{port}/api/v1/does-not-exist",
+                                     data=b"{}", method="POST")
+    request.add_header("Host", host)
+    request.add_header("Origin", origin)
+    request.add_header("X-MMS-CSRF", csrf)
+    request.add_header("Content-Type", "application/json")
+    request.add_header("Cookie", f"{COOKIE}={token}")
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return response.status, response.read()
+    except urllib.error.HTTPError as error:
+        return error.code, error.read()
+
+
+def test_all_mode_accepts_a_mutation_from_any_interface_it_serves(serve):
+    """Browsers send Origin on every POST; it must pass wherever Host passes."""
+    app, port = serve("all")
+    host = f"10.0.0.5:{port}"  # a second interface the server never detected
+    status, body = _post(port, host, f"http://{host}", app.access.token, app.csrf_token)
+    assert status != 403, body
+    assert b"INVALID_ORIGIN" not in body
+    # A page served from somewhere else is still refused.
+    status, body = _post(port, host, "http://evil.example", app.access.token, app.csrf_token)
+    assert status == 403 and b"INVALID_ORIGIN" in body
+
+
+def test_lan_mode_still_narrows_the_origin_by_host(serve):
+    app, port = serve("lan")
+    status, body = _post(port, f"127.0.0.1:{port}", f"http://10.0.0.5:{port}", app.access.token, app.csrf_token)
+    assert status == 403 and b"INVALID_ORIGIN" in body

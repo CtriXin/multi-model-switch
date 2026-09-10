@@ -29,9 +29,8 @@ _CLI_LABELS = {
 }
 
 _MMS_MANAGED_NAMES = {
-    "agent-browser",
     "auto-github-contributor",
-    "caveman",
+    "grill-me",
     "ecc",
     "hive",
     "nsr",
@@ -39,8 +38,6 @@ _MMS_MANAGED_NAMES = {
     "pilot",
     "rtk opencode plugin",
     "toon",
-    "token-saver",
-    "web-access",
     "weber",
 }
 
@@ -51,18 +48,15 @@ _KIND_LABELS = {
 }
 
 _ASSET_SUMMARIES = {
-    "agent-browser": "轻量浏览器自动化，适合不需要登录态的页面检查、截图和本地 WebUI 验证。",
     "auto-github-contributor": "GitHub 贡献辅助能力，安装后才会出现；默认不改用户全局配置。",
-    "caveman": "低 token 沟通模式，适合长会话压缩表达；只有启用 Caveman 时才生效。",
     "ecc": "Claude 工程工作流能力包，包含规则、命令和质量检查；适合更重的工程约束。",
     "hive": "多 agent 执行/评审入口，适合把复杂任务拆分给 worker。",
+    "grill-me": "先逐题澄清目标和约束，适合把模糊想法变成可执行计划。",
     "nsr": "长任务 continuation 钩子，降低目标中断；默认不挂 startup/prompt 噪音钩子。",
     "omc": "Claude 编排能力包，包含 team / verify loop 等更主动的工作流。",
     "pilot": "规划和执行包生成入口；MCP 默认关闭，只有显式 opt-in 时才注入。",
     "rtk opencode plugin": "OpenCode 的 token 节省插件，自动压缩或改写高噪音命令输出。",
     "toon": "把结构化 JSON、状态包和 handoff 压成更省 token 的格式。",
-    "token-saver": "长日志、大 diff、重复状态的省 token 工具；多数时候由 agent 自动使用。",
-    "web-access": "联网和登录态浏览能力，适合搜索、网页读取、公司后台或需要真实 Chrome 的任务。",
     "weber": "网页任务路由器：帮 agent 判断该用本地 WebUI、登录态浏览器还是轻量抓取。",
 }
 
@@ -430,11 +424,9 @@ def _managed_roots(home: str) -> list[dict[str, Any]]:
     install_root = _safe_text(install.get("real_root"))
     install_surface = {"Skill": "skills", "能力包": "packs", "MCP": "mcp"}
     specs = [
-        ("web-access", "Skill", "_resolve_web_access_root"),
         ("weber", "Skill", "_resolve_weber_root"),
-        ("agent-browser", "Skill", "_resolve_agent_browser_root"),
+        ("grill-me", "Skill", "_resolve_grill_me_root"),
         ("toon", "Skill", "_resolve_toon_root"),
-        ("token-saver", "Skill", "_resolve_token_saver_root"),
         ("auto-github-contributor", "Skill", "_resolve_auto_github_contributor_root"),
         ("caveman", "能力包", "_resolve_caveman_root"),
         ("nsr", "能力包", "_resolve_nsr_root"),

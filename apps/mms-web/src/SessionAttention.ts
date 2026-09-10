@@ -181,5 +181,10 @@ export function useSessionAttention(
     connected,
     unread[detail?.session.id || ""],
   ]);
+  useEffect(() => {
+    const count = Object.keys(unread).length;
+    document.title = count ? `(${count}) Pilot` : "MMS Pilot";
+    return () => { document.title = "MMS Pilot"; };
+  }, [unread]);
   return { unread, flashes };
 }

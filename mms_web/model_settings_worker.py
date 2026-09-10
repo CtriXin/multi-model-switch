@@ -220,12 +220,38 @@ def refresh_proposal(known, merged, reports):
             "reports": reports}
 
 
+def _delete_channel_draft(rows, remove_id, revision):
+    """Drop one channel from the draft so the audited writer records provider_removed.
+
+    Kept channels keep their published routes untouched: no route scope is set, so
+    the preview writer preserves their existing model rows. Refuses to remove the
+    last channel, which would leave no usable model.
+    """
+    victim = next((p for p in rows if p["id"] == remove_id), None)
+    if victim is None:
+        raise WebError("PROVIDER_NOT_FOUND", "这个通道已不存在，请刷新。", 404)
+    remaining = [p for p in rows if p["id"] != remove_id]
+    if not remaining:
+        raise WebError("LAST_CHANNEL", "这是最后一个通道，删除后将没有可用模型。请先连接另一个通道。", 409)
+    for p in remaining:
+        # Preserve every published route on the channels we keep; deletion of one
+        # channel must not rewrite another channel's model list.
+        p["fallback_models"] = list(p.get("approved_route_models") or p.get("fallback_models") or [])
+        p["models"] = [{"id": m["id"], "visible": m.get("visible", True)} for m in p["models"]]
+    changes = [{"kind": "channel-remove", "model": victim.get("name") or remove_id, "channels": [remove_id]}]
+    payload = {"draft": {"providers": remaining}, "expected_bundle_revision": revision}
+    return payload, changes
+
+
 def draft_for(rows, request, revision):
     provider_id = request.get("providerId")
     rows = copy.deepcopy(rows)
     target = next((p for p in rows if p["id"] == provider_id), None)
     if target is None:
         raise WebError("PROVIDER_NOT_FOUND", "这个通道已不存在，请刷新。", 404)
+    remove_id = str(request.get("removeProviderId") or "").strip()
+    if remove_id:
+        return _delete_channel_draft(rows, remove_id, revision)
     selected = request.get("models")
     if not isinstance(selected, list) or len(selected) > 5000 or not all(isinstance(m, str) and m.strip() == m and 0 < len(m) <= 200 and not any(ord(c) < 32 for c in m) for m in selected):
         raise WebError("INVALID_MODELS", "请填写有效的模型 ID。", 400)

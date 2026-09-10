@@ -2409,13 +2409,18 @@ def test_opencode_gateway_env_materializes_session_assets(monkeypatch, tmp_path)
     assert "plugin" not in payload
     assert (config_dir / "plugins" / "mms-rtk.ts").is_symlink()
     assert (config_dir / "plugins" / "mms-rtk.ts").resolve() == rtk_plugin
-    for name in ("caveman", "web-access", "weber", "codegraph", "toon", "token-saver"):
+    for name in ("caveman", "weber", "codegraph", "toon"):
         assert (config_dir / "skills" / name).is_symlink()
         assert (config_dir / "skills" / name / "SKILL.md").exists()
+    # web-access lives inside Weber and token-saver is retired: neither is a separate session skill.
+    for name in ("web-access", "token-saver"):
+        assert not (config_dir / "skills" / name).exists()
+        assert not (config_dir / "skills" / name).is_symlink()
     packet = json.loads(Path(env["MMS_SESSION_PACKET_JSON"]).read_text(encoding="utf-8"))
     features = {row["name"]: row["status"] for row in packet["features"]}
     assert features["caveman"] == "enabled"
     assert features["opencode_rtk"] == "enabled"
+    # The web-access backend still resolves (inside Weber), so the capability stays reported.
     assert features["web_access"] == "enabled"
     assert features["codegraph"] == "enabled"
 

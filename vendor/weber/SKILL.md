@@ -1,11 +1,19 @@
 ---
 name: weber
-description: Use when the user wants web or browser automation but tool choice is unclear, including authorized browser interaction, local webapp UI testing, screenshots/traces, public crawling or scraping, batch data extraction, headless browser backends, anti-detection browsing, or choosing between web-access, Playwright, agent-browser, Camofox, Crawlee, Firecrawl/Browserless, Browser Use/Stagehand, and Obscura.
+description: Use when the user wants web or browser automation but tool choice is unclear. Weber is the single web skill in MMS sessions; it prefers ego-browser when that command is available, then the user's logged-in Chrome through the bundled web-access backend, then an isolated backend for tasks that need no login. Direct known routes do not need this router.
 ---
 
 # Weber Skill
 
-Weber is a router, not a replacement for browser tools. Use it to choose the smallest reliable backend for an authorized web task, then load/follow the chosen tool's own skill or docs.
+Weber is the single user-facing web skill. It is a router, not a replacement for browser tools: pick the smallest reliable backend for an authorized web task, then follow that backend's own instructions. `web-access` and `agent-browser` ship inside this skill as `backends-web-access/` and `backends-agent-browser/`; never look for them as separate user skills.
+
+Backend precedence:
+
+1. `ego-browser` when `command -v ego-browser` succeeds. It runs in its own task space, reuses the user's login state, and can hand the page to the user.
+2. `web-access` CDP when the task specifically needs the user's current Chrome tab or profile and Ego is unavailable.
+3. An isolated backend (`agent-browser`, Playwright, a crawler) when the task needs no login at all.
+
+Public search, documentation lookup, static URL reading and supported structured API/CLI operations use the existing purpose-built tool; they do not need a browser or this router.
 
 ## Hard Boundaries
 
@@ -14,22 +22,31 @@ Weber is a router, not a replacement for browser tools. Use it to choose the sma
 - Before adding dependencies, changing global config, installing a browser engine, or using a paid/cloud API, explicitly tell the user what will change, where, and why.
 - Prefer existing local tools before installing anything.
 - Do not export cookies, tokens, localStorage, credentials, or private page data into reusable artifacts.
+- For account mutation or public publishing, require user authorization for that scope. An adapter's technical capability is not permission.
+
+## Chrome Resource Management
+
+- Ordinary API/search work creates no browser. Spawn an isolated Chromium only for a task that needs it.
+- For `ego-browser`, reuse one task space per user goal and always close or complete it when done. Use `{ keep: true }` only when the user should see the resulting page.
+- After `agent-browser` or Playwright tasks, close only the task-owned named session with that backend's own close command and verify it is gone. Never use `close-all`, `kill-all`, broad `pkill`, or `killall` for routine cleanup: they can terminate the user's browser or a concurrent agent's session.
+- Never leave Chrome for Testing running when the task is done.
 
 ## Host Chrome And Isolated Runtimes
 
-- If the task needs the user's logged-in Chrome, choose `web-access` CDP and repair that route before falling back to isolated backends.
-- In MMS-launched sessions, prefer `MMS_HOST_CONTEXT_JSON` / `MMS_OPS_ENV_SAFE_CONFIG` for host path and WebAccess hints before guessing paths.
-- MMS/Codex sandboxes may rewrite `HOME`/`XDG_*`; do not assume `os.homedir()` points at the real Chrome profile.
-- Before declaring `web-access` unavailable from an isolated session, run the web-access dependency check with host-home hints; the current web-access scripts also read `WEB_ACCESS_HOST_HOME`, `HOST_HOME`, `REAL_HOME`, and `os.userInfo().homedir`:
+- MMS sessions export `WEBER_SKILL_DIR`, `WEB_ACCESS_SKILL_DIR` and `AGENT_BROWSER_SKILL_DIR`. Use them before guessing paths; outside MMS the backends are the `backends-*` folders next to this file.
+- MMS sessions also export `WEB_ACCESS_HOST_HOME` / `REAL_HOME` / `HOST_HOME`; MMS and Codex sandboxes may rewrite `HOME`/`XDG_*`, so do not assume `os.homedir()` points at the real Chrome profile. Prefer `MMS_HOST_CONTEXT_JSON` for host hints when present.
+- Before declaring `web-access` unavailable from an isolated session, run its dependency check with host-home hints:
 
 ```bash
-WEB_ACCESS_HOST_HOME="$(python3 -c 'import os,pwd; print(pwd.getpwuid(os.getuid()).pw_dir)')" \
-  node "${WEB_ACCESS_SKILL_DIR:-$WEB_ACCESS_HOST_HOME/.codex/skills/web-access}/scripts/check-deps.mjs"
+WEBER_DIR="${WEBER_SKILL_DIR:-$(cd "$(dirname "$0")" 2>/dev/null && pwd)}"
+WEB_ACCESS_BACKEND_DIR="${WEB_ACCESS_SKILL_DIR:-$WEBER_DIR/backends-web-access}"
+WEB_ACCESS_HOST_HOME="${WEB_ACCESS_HOST_HOME:-$(python3 -c 'import os,pwd; print(pwd.getpwuid(os.getuid()).pw_dir)')}" \
+  node "$WEB_ACCESS_BACKEND_DIR/scripts/check-deps.mjs"
 ```
 
 - If the proxy is stale, kill only the `3456` listener and rerun `check-deps`; do not kill/restart the user's Chrome unless explicitly asked.
 - Treat `3456` as the CDP proxy and `9222` as the real Chrome debug endpoint; if `9222` is already listening, keep Chrome running and reconnect the proxy.
-- Do not switch to Playwright, `agent-browser`, Camofox, or Obscura for a logged-in-user task just because the isolated agent cannot see the host Chrome profile.
+- Do not switch to Playwright, `agent-browser`, Camofox, or Obscura for a logged-in-user task just because the isolated agent cannot see the host Chrome profile. Diagnose the failed route once, then choose a bounded alternative instead of an open-ended repair loop.
 - If using the unified adapter for a logged-in-user task, pass `requireLoggedInChrome: true` so fallback cannot jump to an isolated backend.
 
 ## Default Routing
@@ -38,16 +55,18 @@ Choose by task shape:
 
 | Need | Use |
 | --- | --- |
-| Search, source discovery, known URL extraction, official docs lookup | `web-access` with search/fetch/curl/Jina as appropriate |
-| Logged-in user Chrome, internal sites, dynamic pages, social/content sites, exploratory browser navigation | `web-access` CDP |
-| Local webapp verification, UI flow debugging, screenshots, traces, accessibility snapshots, deterministic CLI steps | `playwright` skill / Playwright CLI wrapper; for visual/UI evidence, create QA-ready red annotated screenshots with labels outside the target region and connector lines |
-| Fast headless interaction with ref-based CLI, simple extraction, isolated sessions, no user Chrome login needed | `agent-browser` |
+| Any live page interaction, screenshots, clicks/forms, exploratory reading, or user handoff when `ego-browser` is installed | `ego-browser` in an ego lite task space |
+| Search, source discovery, known URL extraction, official docs lookup | `web-access` search/fetch/curl/Jina, no browser |
+| The user's current Chrome tab or profile is required and Ego is unavailable | `web-access` CDP (bundled backend) |
+| Repeated supported-site command or reusable adapter, when `opencli` is installed | `OpenCLI`; fall back to `web-access` for one-off inspection |
+| Local webapp verification, UI flow debugging, traces, accessibility snapshots, deterministic CLI steps | `playwright` skill / Playwright CLI; annotate visual evidence in red with labels outside the target region |
+| Fast headless interaction with a ref-based CLI, isolated sessions, no login needed | `agent-browser` (bundled backend) |
 | Large URL queues, site crawl, retries, concurrency, structured datasets in a Node project | `Crawlee` or project-native crawler code |
 | Managed crawling/scraping/search API is acceptable and API keys/cost are approved | `Firecrawl` or `Browserless` |
 | Production automation mixing code with natural-language page handling | `Stagehand` |
 | Autonomous browser agent experiments with an LLM loop | `Browser Use` |
-| Authorized pages blocked by bot-detection heuristics, geo-specific public scraping with approved proxy | `Camofox` — fingerprint-consistent browser backend, REST API, compact a11y snapshots |
-| Python crawling, adaptive element tracking, large-scale structured scraping with checkpoint/resume | `Scrapling` — Python framework, anti-detect fetchers, MCP built-in, install-on-demand |
+| Authorized pages blocked by bot-detection heuristics, geo-specific public scraping with approved proxy | `Camofox` |
+| Python crawling, adaptive element tracking, large-scale structured scraping with checkpoint/resume | `Scrapling` |
 | Experimental lightweight CDP-compatible engine for high-volume isolated headless work | `Obscura`, installed only when a concrete task justifies it |
 
 When uncertain, start with the least invasive option that can prove progress, then escalate only when evidence shows it is insufficient.
@@ -55,24 +74,44 @@ When uncertain, start with the least invasive option that can prove progress, th
 ## Execution Loop
 
 1. Define success: the exact data, UI state, screenshot, trace, or artifact needed.
-2. Check available local tools before installing: `command -v agent-browser`, `command -v npx`, `command -v obscura`, and project package files.
+2. Check available local tools before installing: `command -v ego-browser`, `command -v opencli`, `command -v agent-browser`, `command -v npx`, and project package files.
 3. Pick one primary backend and keep the first attempt small.
 4. Validate with evidence: extracted rows/counts, current URL/title, snapshot, screenshot, trace, or output file.
-5. For visual/UI evidence, annotate full-page screenshots by marking the exact changed, broken, or verified region in red; prefer browser/Playwright locator bounding boxes, keep labels outside important content, and use connector lines.
-6. If blocked, re-route based on the blocker instead of repeatedly retrying the same backend.
+5. If blocked, re-route based on the blocker instead of repeatedly retrying the same backend.
 
-## Installed Baseline Checks
+## Core Backend: ego-browser
 
-Use these commands to refresh assumptions; versions change over time:
+Use `ego-browser` for general live-browser work in ego lite task spaces. It is the default local browser backend when the task needs a real page, DOM snapshot, click/form interaction, screenshot, or user handoff, and does not specifically require the user's current Chrome tab.
+
+Safe route:
 
 ```bash
-agent-browser --version
-npx --yes --package @playwright/cli@latest playwright-cli --version
-npm view playwright @playwright/cli @playwright/mcp agent-browser version --json
-curl -s http://localhost:9377/health  # Camofox
+command -v ego-browser && ego-browser --version
+ego-browser nodejs <<'EOF_EGO'
+const task = await useOrCreateTaskSpace('inspect example page')
+await openOrReuseTab('https://example.com', { wait: true, timeout: 20 })
+cliLog(await snapshotText())
+await completeTaskSpace(task.id, { keep: false })
+EOF_EGO
 ```
 
-The ClawSkills `thesethrose/agent-browser` entry is the same tool family as the local `agent-browser` skill/CLI. Do not install it again if `agent-browser --version` works.
+Rules:
+- Prefer the app-bundled `ego-browser` command; a copied JavaScript wrapper is not enough unless the native ego lite runtime binding is available.
+- Use `handOffTaskSpace(...)` for login, CAPTCHA, manual confirmation, or when the user needs to take over. If the user takes control, do not seize it back; wait for an explicit "continue" before `takeOverTaskSpace(...)`.
+- Use `web-access` search/fetch instead for static reading or source discovery that does not need a browser.
+- Use Playwright instead for deterministic repo tests, traces, and CI-friendly UI evidence.
+
+## Bundled Backend: web-access
+
+`backends-web-access/` is the CDP route into the user's logged-in Chrome plus search/fetch helpers. Read `backends-web-access/SKILL.md` only after choosing it. Run `scripts/check-deps.mjs` with `WEB_ACCESS_HOST_HOME` set (see above) before declaring it unavailable.
+
+## Bundled Backend: agent-browser
+
+`backends-agent-browser/` is a ref-based headless CLI for isolated sessions that need no login. Read `backends-agent-browser/SKILL.md` only after choosing it, and close the task-owned session when done.
+
+## Optional Backend: OpenCLI
+
+Use `OpenCLI` when `command -v opencli` works and the task is or should become a stable command surface instead of one-off page driving. Prefer it over raw browser control when an adapter exists and a same-session smoke test returns complete data; fall back to `web-access` after one small diagnostic instead of looping retries. Do not run account-mutating commands without explicit user confirmation of the exact target/content/action.
 
 ## Optional Backend: Scrapling
 

@@ -72,14 +72,14 @@ export function UpdateCenter({ ready, open, setOpen, onStatus }: {
       <div className="update-body">
         <div className="update-check-row"><span>{data?.checking ? "正在检查…" : data?.updateAvailable ? `发现新版 ${data.latest.tag}` : data?.checkedAt && !data.error ? "已是最新稳定版" : "检查 Pilot 的最新版本"}</span><button type="button" className="text-button" disabled={busy || isPreview || !data} onClick={() => void act("check")}><RefreshCw size={14} />检查更新</button></div>
         {data?.checkedAt ? <p className="update-muted">上次检查：{new Date(data.checkedAt * 1000).toLocaleString()}</p> : null}
-        <label className="update-preference"><input type="checkbox" checked={data?.enabled ?? false} disabled={pending || isPreview || !data} onChange={e => void act("preferences", { enabled: e.target.checked })} /><span>自动检查更新<small>每 6 小时检查一次；发现新版后由你决定是否更新。</small></span></label>
+        <label className="update-preference"><span>自动检查更新<small>每 6 小时检查一次；发现新版后由你决定是否更新。</small></span><input type="checkbox" role="switch" aria-label="自动检查更新" checked={data?.enabled ?? false} disabled={pending || isPreview || !data} onChange={e => void act("preferences", { enabled: e.target.checked })} /></label>
         {data?.latest.notes && <section className="update-notes" aria-label="更新内容"><h3>{data.latest.tag} 更新内容</h3>{/* Release notes are Markdown. Rendering them into a paragraph showed
             the asterisks, the list dashes and the code fence as literal text. */}
         <div className="update-notes-body"><Markdown remarkPlugins={[remarkGfm]} skipHtml>{data.latest.notes}</Markdown></div>{data.latest.url && <a href={data.latest.url} target="_blank" rel="noreferrer">查看完整发布说明</a>}</section>}
         {data?.operation.message && <p className="update-progress" role="status">{data.operation.message}</p>}
         {(error || data?.error) && <p className="update-error" role="alert">{error || data?.error}</p>}
         {isPreview && <p className="update-muted">预览模式不检查或安装更新。</p>}
-        {data?.canUpgrade && !activePhases.has(phase) && <label className="update-preference"><input type="checkbox" checked={allowIdleRestart} disabled={pending} onChange={e => setAllowIdleRestart(e.target.checked)} /><span>允许重启空闲会话<small>历史和文件保留，续聊时恢复 Pi。执行中、待确认或有排队消息时仍会等待；不勾选则保留所有活跃进程。</small></span></label>}
+        {data?.canUpgrade && !activePhases.has(phase) && <label className="update-preference"><span>允许重启空闲会话<small>历史和文件保留，续聊时恢复 Pi。关掉时保留所有活跃进程。执行中、待确认或有排队消息的会话仍会等待。</small></span><input type="checkbox" role="switch" aria-label="允许重启空闲会话" checked={allowIdleRestart} disabled={pending} onChange={e => setAllowIdleRestart(e.target.checked)} /></label>}
       </div>
       <footer>
         <p>更新前检查会话并备份记录。有任务执行、等待确认或排队消息时，会等待完成后再更新。</p>

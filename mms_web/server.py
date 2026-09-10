@@ -164,13 +164,10 @@ class WebApplication:
                     if s["piSessionId"] == wanted), None)
         if row is None:
             raise WebError("NOT_FOUND", "找不到这个会话。", 404)
-        # Mapped onto the shape the transcript view already renders, so the
-        # page needs no second renderer for these.
-        events = [{"kind": "message", "role": e["role"], "text": e["text"],
-                   "at": e["at"], "id": e["id"]}
-                  for e in transcript(row["path"])]
         return {"session": {k: v for k, v in row.items() if k != "path"},
-                "events": events,
+                # Already in the shape the transcript view renders, so the page
+                # needs no second renderer and tools stay collapsible.
+                "events": transcript(row["path"]),
                 # Present and empty, not absent: the view reads these without
                 # checking, and an absent array is what blanked the page.
                 "artifacts": [], "artifactNotice": "", "approvals": [], "runtime": {},
@@ -228,6 +225,42 @@ class WebApplication:
             self.listeners.sync(self.access.extra_binds())
         return self.remote_access_state()
 
+    def adopt_cli_session(self, session_id: str, payload: dict) -> dict:
+        """Continue a terminal-started session in Pilot from here on.
+
+        The transcript path is resolved from the read-only index, never taken
+        from the request, so a caller cannot point this at another file.
+        """
+        from .cli_sessions import index, session_dir_for
+        wanted = session_id[len("cli:"):] if session_id.startswith("cli:") else ""
+        if not self.config_root or not wanted:
+            raise WebError("NOT_FOUND", "只有终端里开始的会话需要接入。", 404)
+        service = self._sessions()
+        already = next((s for s in service.list_sessions()
+                        if str(s.get("piSessionId") or "") == wanted), None)
+        if already is not None:
+            # Idempotent: a second click opens the session the first one made.
+            return service.get_session(already["id"])
+        row = next((s for s in index(session_dir_for(self.config_root), limit=2000,
+                                     workspaces=self._known_workspaces())
+                    if s["piSessionId"] == wanted), None)
+        if row is None:
+            raise WebError("NOT_FOUND", "找不到这个会话。", 404)
+        payload = dict(payload or {})
+        workspace_id = str(payload.get("workspaceId") or "") or str(row.get("workspaceId") or "")
+        if not workspace_id:
+            # The folder it ran in is not registered. Register it, so the
+            # adopted session has the working folder its files come from.
+            if not self.catalog:
+                raise WebError("CAPABILITY_UNAVAILABLE", "本地服务尚未连接。", 409)
+            folder = str(row.get("cwd") or "")
+            if not folder or not Path(folder).is_dir():
+                raise WebError("WORKSPACE_REQUIRED",
+                               "这个会话原来的目录已经不在了，请选择一个工作文件夹。", 409)
+            workspace_id = str(self.catalog.add_workspace({"path": folder})["id"])
+        payload["workspaceId"] = workspace_id
+        return service.adopt(row, payload)
+
     def get(self, parts: list[str], query: dict[str, list[str]] | None = None) -> dict:
         include_cli = (query or {}).get("cli", ["0"])[0] == "1"
         if parts == ["update", "identity"]:
@@ -239,6 +272,11 @@ class WebApplication:
             return self.remote_access_state()
         if parts == ["model-settings"]:
             return self._model_settings().read()
+        if parts == ["skill-preferences"]:
+            return self._sessions().skills.preferences()
+        if parts == ["ui-preferences"]:
+            from .ui_preferences import UiPreferences
+            return UiPreferences(self.state_root).read()
         if parts == ["sessions"]:
             return {"sessions": self.all_sessions(include_cli)}
         if len(parts) == 2 and parts[0] == "attachments":
@@ -300,6 +338,11 @@ class WebApplication:
                     shutil.rmtree(root)
         if parts == ["skills"]:
             return self._sessions().skills.snapshot(str(payload.get("workspaceId") or ""))
+        if parts == ["skill-preferences"]:
+            return self._sessions().skills.set_preferences(payload)
+        if parts == ["ui-preferences"]:
+            from .ui_preferences import UiPreferences
+            return UiPreferences(self.state_root).update(payload)
         if parts == ["project-materials"]:
             return self._sessions().materials.snapshot(str(payload.get("workspaceId") or ""))
         if parts == ["project-materials", "change"]:
@@ -349,6 +392,8 @@ class WebApplication:
             if not service.capabilities().get("launch"):
                 raise WebError("CAPABILITY_UNAVAILABLE", "当前会话路径尚未就绪，未启动模型。", 409)
             return service.launch(payload)
+        if len(parts) == 3 and parts[0] == "sessions" and parts[2] == "adopt":
+            return self.adopt_cli_session(parts[1], payload)
         if len(parts) == 3 and parts[0] == "sessions":
             methods = {"messages": "send", "stop": "stop", "control": "control", "manage": "manage", "fork": "fork", "model": "switch_model", "artifacts": "artifact"}
             if parts[2] in methods:
@@ -389,21 +434,6 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
             # Request paths/bodies can contain private task data. No access log.
             return
 
-        def _is_local_browser(self):
-            """A browser on this machine, which needs no token to get in.
-
-            Being able to connect from loopback already means being on the
-            machine, so a token adds nothing there. The peer address alone is
-            not enough to decide it: a tunnel also connects from loopback. It
-            announces itself with forwarding headers, and a browser on this
-            machine sends none, so both conditions are required.
-            """
-            peer = (self.client_address[0] if self.client_address else "")
-            if peer not in {"127.0.0.1", "::1"}:
-                return False
-            return not any(self.headers.get(name) for name in
-                           ("X-Forwarded-For", "X-Forwarded-Proto", "CF-Connecting-IP"))
-
         def _presented_token(self):
             """The token this request carries, from the cookie or the query."""
             from http.cookies import SimpleCookie
@@ -416,14 +446,16 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
 
         def _check_origin(self, *, mutation=False):
             expected_port = self.server.server_address[1]
-            hosts = app.access.allowed_hosts(expected_port)
             if not app.access.accepts(self.headers.get("Host"), expected_port):
                 raise WebError("INVALID_HOST", "只允许访问本机服务地址。", 403)
             origin = self.headers.get("Origin")
-            if origin is not None and origin not in {
-                f"{scheme}://{host}" for host in hosts for scheme in ("http", "https")
-            }:
-                raise WebError("INVALID_ORIGIN", "请在 MMS 本地页面中执行此操作。", 403)
+            if origin is not None:
+                # The page that issued this request must live on a host this
+                # server answers to, judged by the same rule as the Host
+                # header so "--listen all" accepts every interface it serves.
+                parts = urlsplit(origin)
+                if parts.scheme not in ("http", "https") or not app.access.accepts(parts.netloc, expected_port):
+                    raise WebError("INVALID_ORIGIN", "请在 MMS 本地页面中执行此操作。", 403)
             if self.headers.get("Sec-Fetch-Site") == "cross-site":
                 raise WebError("INVALID_ORIGIN", "不允许跨站访问本地服务。", 403)
             if mutation and not secrets.compare_digest(
@@ -473,7 +505,9 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
             is redirected without it, so the token does not sit in history,
             in the address bar, or in a Referer header on the way out.
             """
-            if not app.access.required or self._is_local_browser():
+            # A tunnel can reach this socket over loopback without forwarding
+            # headers. Remote mode therefore authenticates every connection.
+            if not app.access.required:
                 return True
             presented, from_query = self._presented_token()
             if not app.access.valid(presented):
