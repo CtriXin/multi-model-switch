@@ -363,21 +363,6 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
             # Request paths/bodies can contain private task data. No access log.
             return
 
-        def _is_local_browser(self):
-            """A browser on this machine, which needs no token to get in.
-
-            Being able to connect from loopback already means being on the
-            machine, so a token adds nothing there. The peer address alone is
-            not enough to decide it: a tunnel also connects from loopback. It
-            announces itself with forwarding headers, and a browser on this
-            machine sends none, so both conditions are required.
-            """
-            peer = (self.client_address[0] if self.client_address else "")
-            if peer not in {"127.0.0.1", "::1"}:
-                return False
-            return not any(self.headers.get(name) for name in
-                           ("X-Forwarded-For", "X-Forwarded-Proto", "CF-Connecting-IP"))
-
         def _presented_token(self):
             """The token this request carries, from the cookie or the query."""
             from http.cookies import SimpleCookie
@@ -447,7 +432,9 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
             is redirected without it, so the token does not sit in history,
             in the address bar, or in a Referer header on the way out.
             """
-            if not app.access.required or self._is_local_browser():
+            # A tunnel can reach this socket over loopback without forwarding
+            # headers. Remote mode therefore authenticates every connection.
+            if not app.access.required:
                 return True
             presented, from_query = self._presented_token()
             if not app.access.valid(presented):
