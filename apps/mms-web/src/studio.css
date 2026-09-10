@@ -479,21 +479,57 @@
    the page reads better as two columns. The list keeps its own name so the
    view transition carries it across rather than fading it out and in. */
 .home-content.home-split {
-  width: min(1260px, calc(100% - 72px));
+  width: min(1320px, calc(100% - 72px));
+  /* The heading spans both columns and stays at the top; the composer and the
+     recent list share the row under it at 7:3. Rows are assigned explicitly
+     because the optional children would otherwise shift the pairing. */
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
-  column-gap: 34px;
+  grid-template-columns: minmax(0, 7fr) minmax(290px, 3fr);
+  column-gap: 32px;
   align-items: start;
+  padding-top: 26px;
 }
-.home-content.home-split > * {
+.home-content.home-split > .home-intro {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin-bottom: 20px;
+  padding-bottom: 14px;
+  background: var(--bg);
+}
+/* Compressed: at this size the page is for writing, not for being greeted. */
+.home-content.home-split > .home-intro h1 {
+  font-size: max(11px, 1.5714rem);
+  line-height: 1.25;
+}
+.home-content.home-split > .home-intro p {
+  margin-top: 6px;
+  font-size: max(11px, 0.9286rem);
+}
+.home-content.home-split > .recipe-access {
   grid-column: 1;
+  grid-row: 2;
+}
+.home-content.home-split > .composer {
+  grid-column: 1;
+  grid-row: 3;
+}
+.home-content.home-split > .input-hint {
+  grid-column: 1;
+  grid-row: 4;
+}
+.home-content.home-split > .diagnostics {
+  grid-column: 1;
+  grid-row: 5;
 }
 .home-content.home-split > .recent-section {
   grid-column: 2;
-  grid-row: 1 / -1;
+  grid-row: 2 / 6;
   align-self: start;
   position: sticky;
-  top: 0;
+  top: 108px;
 }
 .home-content.home-split > .recent-section .recent-row {
   padding-inline: 12px;

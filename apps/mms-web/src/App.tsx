@@ -203,7 +203,7 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [page, setPage] = useState<Page>("new");
   const [guideOpen, setGuideOpen] = useState(false);
-  const homeRef = useRef<HTMLDivElement>(null);
+  const [homeNode, setHomeNode] = useState<HTMLDivElement | null>(null);
   // A composer dragged tall pushes the recent list off the bottom. Past a
   // point the page is better as two columns than as one tall one, so the list
   // moves beside the composer instead of under it.
@@ -328,10 +328,7 @@ export function App() {
       : [];
   });
   useEffect(() => {
-    const root = homeRef.current;
-    if (page !== "new" || !root) return;
-    const composer = root.querySelector<HTMLElement>("form.composer");
-    if (!composer) return;
+    if (!homeNode) return;
     const apply = (next: boolean) => {
       if (homeSplitRef.current === next) return;
       homeSplitRef.current = next;
@@ -343,15 +340,23 @@ export function App() {
       else commit();
     };
     const decide = () => {
+      const composer = homeNode.querySelector<HTMLElement>("form.composer");
       const twoColumnsFit = window.innerWidth >= 1180;
       const composerIsTall =
+        !!composer &&
         composer.getBoundingClientRect().height > window.innerHeight * 0.42;
       apply(
-        twoColumnsFit && composerIsTall && !!root.querySelector(".recent-section"),
+        twoColumnsFit &&
+          composerIsTall &&
+          !!homeNode.querySelector(".recent-section"),
       );
     };
+    // Watching the whole home area covers the composer mounting later and
+    // growing afterwards, without a second observer to keep in sync.
     const observer = new ResizeObserver(decide);
-    observer.observe(composer);
+    observer.observe(homeNode);
+    const composer = homeNode.querySelector<HTMLElement>("form.composer");
+    if (composer) observer.observe(composer);
     window.addEventListener("resize", decide);
     decide();
     return () => {
@@ -361,7 +366,7 @@ export function App() {
       homeSplitRef.current = false;
       setHomeSplit(false);
     };
-  }, [page, data.sessions.length]);
+  }, [homeNode, data.sessions.length]);
   useEffect(() => { saveSetting("mms-web-auto-collapse-process", autoCollapseProcess); }, [autoCollapseProcess]);
   useEffect(() => { saveSetting("mms-web-workspace-sort", workspaceSort); }, [workspaceSort]);
   useEffect(() => { saveSetting("mms-web-workspace-order", workspaceOrder); }, [workspaceOrder]);
@@ -1525,7 +1530,7 @@ export function App() {
           <div className="home-scroll">
             <div
               className={"home-content" + (homeSplit ? " home-split" : "")}
-              ref={homeRef}
+              ref={setHomeNode}
             >
               <div className="home-intro">
                 <WorkspacePicker
