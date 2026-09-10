@@ -5,6 +5,7 @@ import { Dialog } from "./components";
 import { parseRecipe, prepareExport, renderRecipe, scrubSharedText, variableNames, RECIPE_BYTES } from "./recipe-core";
 import type { Recipe } from "./recipe-core";
 import { recipeExamples } from "./recipe-examples";
+import { localFilePaths } from "./local-file-paths";
 export type { Recipe } from "./recipe-core";
 export interface RecipeDraft { recipe: Recipe; draftPrompt: string; key: string; savedAt: number }
 const draftStorage = "mms-web-template-draft-v2";
@@ -83,7 +84,15 @@ export function RecipeImport({ loaded }: { loaded: (draft: RecipeDraft) => void 
       <div className="recipe-dialog">
         <p className="section-note">填写后载入可编辑草稿，再核对当前项目的 Skills 和模型。发送任务时才开始执行。</p>
         <Requirements recipe={recipe} />
-        {!!recipe.variables.length && <div className="recipe-variables">{recipe.variables.map(name => <label key={name}>{name}<input aria-label={`变量 ${name}`} value={values[name] || ""} onChange={e => { setValues({ ...values, [name]: e.target.value }); setShowPrompt(false); }} maxLength={50000} placeholder={name === "file" ? "文件名或路径，例如 data.csv" : "填写本次使用的值"} /></label>)}</div>}
+        {!!recipe.variables.length && <div className="recipe-variables">{recipe.variables.map(name => {
+          const isFile = name === "file" || /files?$/i.test(name);
+          const setValue = (value: string) => { setValues({ ...values, [name]: value }); setShowPrompt(false); setError(""); };
+          return <label key={name}>{name}<input aria-label={`变量 ${name}`} value={values[name] || ""} onChange={e => setValue(e.target.value)} maxLength={50000} placeholder={isFile ? "拖入一个或多个文件，或粘贴完整路径" : "填写本次使用的值"}
+            onDragOver={isFile ? e => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } : undefined}
+            onDrop={isFile ? e => { e.preventDefault(); const raw = e.dataTransfer.getData("text/uri-list") || e.dataTransfer.getData("text/plain"); const paths = raw.split(/\r?\n/).flatMap(line => localFilePaths(line)); if (paths.length) setValue([...new Set(paths)].join("\n")); else setError("拖拽文件时浏览器没有提供原路径，请选择本地文件，或直接粘贴完整路径；文件不会被复制。"); } : undefined}
+            onPaste={isFile ? e => { const paths = e.clipboardData.getData("text/plain").split(/\r?\n/).flatMap(line => localFilePaths(line)); if (paths.length) { e.preventDefault(); setValue([...new Set(paths)].join("\n")); } } : undefined}
+          /></label>;
+        })}</div>}
         {variableError && <p className="section-note">{variableError}</p>}
         <details open={showPrompt} onToggle={e => setShowPrompt(e.currentTarget.open)}><summary>查看将载入的任务说明</summary><pre className="recipe-preview">{prompt || recipe.prompt}</pre></details>
         <p className="section-note">载入会替换当前模板草稿。模板不会安装 Skills、读取变量中的文件或导入连接凭据。</p>
