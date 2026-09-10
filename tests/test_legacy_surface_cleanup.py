@@ -1094,7 +1094,9 @@ def test_mmf_missing_preview_config_does_not_run_legacy_setup(monkeypatch, tmp_p
     assert not (preview_root / "config.toml").exists()
     out = capsys.readouterr().out
     assert "Preview root uses v2 DB truth" in out
-    assert "mmf preview prepare" in out
+    # The legacy root is retired: the guidance is Pilot, not a legacy import.
+    assert "mmf web" in out
+    assert "preview prepare --from ~/.config/mms" not in out
 
 
 def test_mmf_config_mutation_is_blocked_from_legacy_config_path(monkeypatch, tmp_path, capsys) -> None:

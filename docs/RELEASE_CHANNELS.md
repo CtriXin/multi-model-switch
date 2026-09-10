@@ -6,7 +6,7 @@ MMS 采用 Stable / Dev / Canary 三通道。目标是把“普通用户能放�
 
 除非人类明确要求修改 release/channel contract，否则 LLM / agent 不要重命名、重映射或混用以下关系：
 
-- `Stable == main == MMD/mmd`：纯稳定上线版本；等待 stable 追到当前能力后，`main` 就是默认稳定分支。
+- `Stable == main`：纯稳定上线版本；等待 stable 追到当前能力后，`main` 就是默认稳定分支。`mmd` / `mmm` 本机观察入口已退休（2026-09-10）。
 - `Dev == dev branch == MMF/mmf`：日常开发通道；给作者工作机常用，但仍要保持“开发中稳定”。
 - `Canary == canary branch == MMG/mmg`：每天测试的实验通道；小步迭代、频繁 commit，方便随时回滚。
 
@@ -14,15 +14,15 @@ MMS 采用 Stable / Dev / Canary 三通道。目标是把“普通用户能放�
 
 - 本机维护者命令由 `scripts/link_local_channel_commands.sh` 生成到 `~/.local/bin`。
 - `mms` 固定为 public installed copy，只用于公开版本复现，不作为日常本地开发入口。
-- `mmd` 指向 stable worktree；`mmf` 指向 dev worktree；`mmg` 指向 canary worktree；`mmm` 指向 main worktree。
-- 默认 config root 是 `~/.config/mms-next`，保存 v2 DB 真值。`mms` / `mmf` / `mmg` 都落在这个根上，Pilot 网页默认也用它，所以一处配置在命令行和网页都生效。
-- `mmd` / `mmm` 由包装器显式钉在 legacy `~/.config/mms` 上（`MMS_CONFIG_ROOT` 加 `MMS_CONFIG_ROOT_MODE=stable`），用于观察旧 stable 配置；不显式钉住就会跟随新默认。
+- `mmf` 指向 dev worktree；`mmg` 指向 canary worktree。`mmd` / `mmm` 已退休，`scripts/link_local_channel_commands.sh` 会删除它写过的这两个包装器。
+- 唯一的 config root 是 `~/.config/mms-next`，保存 v2 DB 真值。`mms` / `mmf` / `mmg` 和 Pilot 网页都落在这个根上，所以一处配置在命令行和网页都生效。
+- legacy `~/.config/mms` 已退出配置来源：任何入口都不再读取或自动导入它，`MMS_CONFIG_ROOT_MODE=stable` 被忽略。gateway 会话目录仍可位于 `~/.config/mms/*-gateway/`，那是运行时状态，不是配置。
 
 ## 通道定义
 
 | Channel | 固定关系 | Git source | 安装参数 | 用户 | 规则 |
 |---|---|---|---|---|---|
-| Stable | Stable == `main` == `mmd` | `main` / GitHub Release / `release/stable-*` | `--channel stable` / `--stable` | 普通用户、生产环境 | 纯稳定上线版本，只收验证过的修复和兼容功能 |
+| Stable | Stable == `main` | `main` / GitHub Release / `release/stable-*` | `--channel stable` / `--stable` | 普通用户、生产环境 | 纯稳定上线版本，只收验证过的修复和兼容功能 |
 | Dev | Dev == `dev` == `mmf` | `dev` | `--channel dev` / `--dev` | 作者日常工作机、需要最新修复的人 | 开发中稳定，小步提交，targeted tests 通过 |
 | Canary | Canary == `canary` == `mmg` | `canary` | `--channel canary` / `--canary` | 测试机、夜间试验 | 最快实验分支，小步高频 commit，必须方便回滚 |
 
@@ -46,7 +46,7 @@ MMS 采用 Stable / Dev / Canary 三通道。目标是把“普通用户能放�
 - `dev` 和 `canary` 已从当前 main 切出；后续新功能优先进入 `dev` / `canary`，再按验证结果进入 Stable。
 - `release/stable-v3.3-no-db` 继续作为 stable 维护线，逐步 cherry-pick 已验证的 Web UI / Thinking / model route 修复。
 - 开发过程中发现的 bug 必须先修复，再进入 Stable；Stable 不接收“已知会破坏主流程”的变更。
-- 等 stable 追上当前主功能后，目标语义是 `main == Stable/default == mmd`；日常开发不要继续直接把 `main` 当 Dev。
+- 等 stable 追上当前主功能后，目标语义是 `main == Stable/default`；日常开发不要继续直接把 `main` 当 Dev。
 
 ## 本机命令矩阵
 
@@ -55,12 +55,10 @@ MMS 采用 Stable / Dev / Canary 三通道。目标是把“普通用户能放�
 | Command | 语义 | 当前目标 | Config root | 用途 |
 |---|---|---|---|---|
 | `mms` | Public installed MMS | `~/.mms/mms` | 默认 `~/.config/mms-next` | 只用于公开版本问题复现 |
-| `mmd` | Stable | `.worktrees/stable-v3.3-no-db/mms` | 钉住 `~/.config/mms` | stable 线验证 |
 | `mmf` | Dev | 仓库根目录 `dev` checkout 的 `mmf` | 强制 `~/.config/mms-next` | 日常开发 / DB preview |
 | `mmg` | Canary | `.worktrees/canary/mms` | 强制 `~/.config/mms-next` | 每日实验 / 快速回滚 |
-| `mmm` | Main | 当前 main worktree `mms` | 钉住 `~/.config/mms` | main 过渡观察入口 |
 
-- `main`：未来等同 Stable/default branch；当前用 `mmm` 明确区分 main 过渡入口。
+- `main`：未来等同 Stable/default branch。
 - `dev`：作者平时常用的开发通道；固定对应 `MMF/mmf`，且维护者默认从仓库根目录进入这个 clean `dev` checkout。
 - `canary`：最激进的金丝雀通道；固定对应 `MMG/mmg`。
 - 重新生成本机命令时运行：`scripts/link_local_channel_commands.sh`。
@@ -75,10 +73,8 @@ MMS 采用 Stable / Dev / Canary 三通道。目标是把“普通用户能放�
 | Command | 检查频率 | 默认动作 | 手动更新 |
 |---|---|---|---|
 | `mms` | daily | 只提示 public installed copy，不自动更新 | `mms update` 只说明走 installer/release 更新 |
-| `mmd` | weekly | fetch 后提示；stable 不自动更新 | `mmd update` 仅允许 clean worktree fast-forward |
 | `mmf` | daily | fetch 后提示 dev 更新 | `mmf update` 仅允许 clean worktree fast-forward |
 | `mmg` | every launch | 每次 fetch 并提示 canary ahead/behind/diverged | `mmg update` 仅允许 clean worktree fast-forward |
-| `mmm` | daily | fetch 后提示 main 更新 | `mmm update` 仅允许 clean worktree fast-forward |
 
 安全规则：dirty worktree 拒绝更新；只允许 `git merge --ff-only`；分叉时只提示，不自动 merge/reset；检查状态写到 `~/.local/state/mms/channel-updates.json`，不写 `~/.config/mms/**`。
 

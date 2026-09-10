@@ -25,10 +25,11 @@ _GATEWAY_SESSION_SUBPATHS = (
     "accounts" + os.sep,
 )
 
-# A session HOME inside a gateway directory resolves back to the root that
-# gateway belongs to, so both roots have to be recognized here.
+# A session HOME inside a gateway directory resolves back to the config root.
+# Gateway homes still live under both directory names, but there is only one
+# config root now, so both markers map to it.
 GATEWAY_SESSION_MARKER_ROOTS = tuple(
-    (os.path.join(".config", root_name, subpath), root_name)
+    (os.path.join(".config", root_name, subpath), DEFAULT_CONFIG_ROOT_NAME)
     for root_name in (DEFAULT_CONFIG_ROOT_NAME, LEGACY_CONFIG_ROOT_NAME)
     for subpath in _GATEWAY_SESSION_SUBPATHS
 )
@@ -102,11 +103,17 @@ def resolve_mms_config_dir(env=None):
     env = env or os.environ
     explicit_root = str(env.get("MMS_CONFIG_ROOT") or "").strip()
     if explicit_root:
-        return _path_from_env_value(explicit_root)
+        candidate = _path_from_env_value(explicit_root)
+        if _is_real_legacy_root(candidate, env):
+            return os.path.join(resolve_real_user_home(env), ".config", DEFAULT_CONFIG_ROOT_NAME)
+        return candidate
 
     explicit = str(env.get("MMS_CONFIG_DIR") or "").strip()
     if explicit:
-        return _path_from_env_value(explicit)
+        candidate = _path_from_env_value(explicit)
+        if _is_real_legacy_root(candidate, env):
+            return os.path.join(resolve_real_user_home(env), ".config", DEFAULT_CONFIG_ROOT_NAME)
+        return candidate
 
     xdg_config_home = str(env.get("XDG_CONFIG_HOME") or "").strip()
     if xdg_config_home:
@@ -121,6 +128,13 @@ def resolve_mms_config_dir(env=None):
         return os.path.join(normalized_xdg, DEFAULT_CONFIG_ROOT_NAME)
 
     return os.path.join(resolve_real_user_home(env), ".config", DEFAULT_CONFIG_ROOT_NAME)
+
+
+def _is_real_legacy_root(path, env=None):
+    env = env or os.environ
+    candidate = os.path.normpath(str(path or ""))
+    expected = os.path.normpath(os.path.join(resolve_real_user_home(env), ".config", LEGACY_CONFIG_ROOT_NAME))
+    return candidate == expected
 
 
 def mms_config_root_source(env=None):
@@ -140,19 +154,23 @@ def mms_config_root_is_explicit(env=None):
 
 
 def mms_config_root_mode(config_dir=None, env=None):
-    env = env or os.environ
-    # Explicit pin, used by the maintainer channels that stay on the legacy
-    # stable root after the default moved to mms-next.
-    override = str(env.get("MMS_CONFIG_ROOT_MODE") or "").strip().lower()
-    if override in {"stable", "preview"}:
-        return override
-    marker = str(env.get("MMS_PREVIEW_MODE") or env.get("MMS_COMMAND_NAME") or "").strip().lower()
-    root = os.path.normpath(str(config_dir or resolve_mms_config_dir(env)))
-    if marker == "mmf" or os.path.basename(root) == "mms-next":
-        return "preview"
-    if mms_config_root_is_explicit(env):
-        return "preview"
-    return "stable"
+    """Every entrance keeps DB truth in one root, so the mode is always preview.
+
+    The legacy stable root (~/.config/mms) is retired as a config source; the
+    ``MMS_CONFIG_ROOT_MODE=stable`` pin the old ``mmd``/``mmm`` wrappers used is
+    ignored instead of switching a process back to config.toml truth.
+    """
+    return "preview"
+
+
+def is_retired_legacy_root(config_dir):
+    """True for the retired ~/.config/mms directory (or any root named like it).
+
+    It is no longer a config source, and it must not be turned into a v2 root
+    by accident either: gateway session state still lives under it.
+    """
+    root = os.path.normpath(str(config_dir or ""))
+    return os.path.basename(root) == LEGACY_CONFIG_ROOT_NAME
 
 
 def mms_config_root_status(command=None, config_dir=None, env=None):
@@ -162,6 +180,7 @@ def mms_config_root_status(command=None, config_dir=None, env=None):
     return {
         "command": str(command or env.get("MMS_COMMAND_NAME") or "mms"),
         "mode": mms_config_root_mode(root, env),
+        "legacy_root": is_retired_legacy_root(root),
         "root_source": mms_config_root_source(env),
         "config_root": root,
         "config_path": os.path.join(root, "config.toml"),

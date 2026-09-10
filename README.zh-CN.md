@@ -53,7 +53,7 @@ v4 各版累积下来的能力：
 
 | 通道 | 固定关系 | 安装命令 | 适合谁 | 更新节奏 | 质量预期 |
 |---|---|---|---|---|---|
-| Stable | `Stable == main == MMD/mmd` | `--channel stable` | 普通用户、主力生产环境 | 慢，最终固定到 `main` | 纯稳定上线版本，完整 smoke 后推进 |
+| Stable | `Stable == main` | `--channel stable` | 普通用户、主力生产环境 | 慢，最终固定到 `main` | 纯稳定上线版本，完整 smoke 后推进 |
 | Dev | `Dev == dev branch == MMF/mmf` | `--channel dev` | 作者自己的日常工作机、需要最新修复的人 | 快，跟随 `dev` 分支 | 开发中稳定，targeted tests 通过 |
 | Canary | `Canary == canary branch == MMG/mmg` | `--channel canary` | 每天测试的实验机器 / session | 最快，可每日同步 | 小步高频 commit，允许短期破，但必须方便回滚 |
 
@@ -61,7 +61,7 @@ v4 各版累积下来的能力：
 
 v4.0.0 是 MMS Pilot 的首个大版本，之后 4.x 沿 Dev 继续推进。下列 3.x 轨道为此前分支发布历史，不代表 v4 已晋级各分支：Stable/Main `3.4.z`、Dev `3.5.z`、Canary `3.6.z`。`z` 是各 channel 内的 release 计数：单 commit release 就 `z+1`，复合多个已验证 commits 的 release 也只 bump 一次；未 tag 的日常小步 commit 继续用 git hash 追踪。
 
-当前本机维护者命令已固定：`mms` 是 public installed copy，只用于公开版本复现；`mmd` 指 stable worktree；`mmf` 指 dev worktree；`mmg` 指 canary worktree；`mmm` 指 main worktree。默认 config root 是 `~/.config/mms-next`，`mms` / `mmf` / `mmg` 和 Pilot 网页都落在它上面；`mmd` / `mmm` 被显式钉在 legacy `~/.config/mms`。重新生成本机命令用 `scripts/link_local_channel_commands.sh`。
+当前本机维护者命令已固定：`mms` 是 public installed copy，只用于公开版本复现；`mmf` 指 dev worktree；`mmg` 指 canary worktree。`mmd` / `mmm` 已退休。唯一的 config root 是 `~/.config/mms-next`，`mms` / `mmf` / `mmg` 和 Pilot 网页都落在它上面；legacy `~/.config/mms` 不再被任何入口读取。重新生成本机命令用 `scripts/link_local_channel_commands.sh`。
 
 ## 维护者开发入口
 
@@ -138,19 +138,17 @@ mms test --provider <provider-id> --cli codex
 
 ```text
 mms -> public installed copy  # 只用于公开版本复现
-mmd -> Stable worktree        # 钉住 legacy ~/.config/mms
 mmf -> Dev worktree           # preview DB root，固定 ~/.config/mms-next
 mmg -> Canary worktree        # preview DB root，固定 ~/.config/mms-next
-mmm -> Main worktree          # main 过渡观察入口，钉住 legacy ~/.config/mms
 ```
 
 当前本机用 `scripts/link_local_channel_commands.sh` 把 5 个命令写到 `~/.local/bin`。另一台家里工作机如果要和白天电脑保持一致，建议同样准备 dev/canary/stable/main worktree 后运行这个脚本；如果只是普通用户安装，仍使用公开 `mms` 安装命令。
 
-启动更新提醒默认只提醒、手动确认更新：`mmg` 每次启动检查，`mmf` / `mmm` 每日检查，`mmd` 每周检查，`mms` 每日只提示 public installed copy。手动运行 `mmf update` / `mmg update` / `mmd update` / `mmm update` 时只允许 clean worktree fast-forward；dirty 或分叉会拒绝。
+启动更新提醒默认只提醒、手动确认更新：`mmg` 每次启动检查，`mmf` 每日检查，`mms` 每日只提示 public installed copy。手动运行 `mmf update` / `mmg update` 时只允许 clean worktree fast-forward；dirty 或分叉会拒绝。
 
 ## 配置 Web UI 教程：从通道到模型可见性
 
-这一节讲的是 `mmf config web` 的配置页面，不是 MMS Pilot。配置 Web UI 是现在最适合做教程的入口，比 TUI 更容易截图和解释。注意：`mmf` / `mmg` 都是 preview DB 入口，所以预览 DB 保存跟 `~/.config/mms-next` workflow 绑定；`mms` 现在也默认落在同一个 preview DB root 上，所以保存同样走 `写入预览 DB + 发布`；只有显式钉在 legacy root 的 `mmd` / `mmm` 才会看到 `保存配置` 这种 legacy audited save。等价入口：
+这一节讲的是 `mmf config web` 的配置页面，不是 MMS Pilot。配置 Web UI 是现在最适合做教程的入口，比 TUI 更容易截图和解释。注意：`mmf` / `mmg` 都是 preview DB 入口，所以预览 DB 保存跟 `~/.config/mms-next` workflow 绑定；`mms` 也落在同一个 preview DB root 上，所以保存同样走 `写入预览 DB + 发布`；legacy root 与 `mmd` / `mmm` 已退休，不再有 legacy audited save 入口。等价入口：
 
 ```bash
 mmf config web

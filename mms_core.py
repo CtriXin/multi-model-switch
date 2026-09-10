@@ -15693,51 +15693,13 @@ def _load_config_or_preview_bundle():
     return load_config()
 
 
-def _legacy_root_import_candidate():
-    """Return the stable root when it still holds an importable legacy config."""
-    status = mms_config_root_status(command=current_command())
-    stable_root = str(status.get("stable_root") or "")
-    if not stable_root or os.path.normpath(stable_root) == os.path.normpath(PRIMARY_CONFIG_DIR):
-        return ""
-    if not os.path.exists(os.path.join(stable_root, "config.toml")):
-        return ""
-    return stable_root
-
-
-def _import_legacy_root_into_v2(stable_root):
-    """Import an existing stable root into this v2 root, keeping the source read-only."""
-    from mms_registry_cli import preview_prepare
-
-    console.print(
-        f"[cyan]{_L('正在从', 'Importing from')} {stable_root} {_L('导入现有配置，源目录只读不会被修改…', 'into this root; the source stays read-only…')}[/cyan]"
-    )
-    try:
-        summary = preview_prepare(
-            config_dir=PRIMARY_CONFIG_DIR,
-            source_config_dir=stable_root,
-            include_secrets=True,
-            command_name=f"{current_command()} preview prepare",
-        )
-    except Exception as exc:
-        console.print(f"[red]{_L('导入失败', 'Import failed')}: {type(exc).__name__}: {exc}[/red]")
-        return None
-    cfg = _load_config_or_preview_bundle()
-    if cfg is None:
-        detail = str(summary.get("status") or summary.get("result") or "unknown")
-        console.print(
-            f"[yellow]{_L('导入完成但没有可用路由', 'Import finished without usable routes')}: {detail}[/yellow]"
-        )
-        return None
-    console.print(f"[green]✓ {_L('已导入现有配置', 'Existing config imported')}[/green]\n")
-    return cfg
-
-
 def _bootstrap_preview_root_config(ui_language=None):
     """Configure an empty v2 root, writing DB truth instead of config.toml.
 
-    Imports an existing stable root when one is present, otherwise collects one
-    channel. Returns the freshly loaded runtime config, or None when the caller
-    should fall back to the read-only preview guidance.
+    Collects one channel interactively. The legacy ~/.config/mms root is never
+    read: Pilot (`mms web`) and this prompt are the only ways to fill the root.
+    Returns the freshly loaded runtime config, or None when the caller should
+    fall back to the read-only preview guidance.
     """
     if not sys.stdin.isatty():
         return None
@@ -15746,23 +15708,9 @@ def _bootstrap_preview_root_config(ui_language=None):
     set_language(language)
     title = display_title()
 
-    legacy_root = _legacy_root_import_candidate()
-    if legacy_root:
-        console.print(Panel(
-            f"[bold cyan]{_L('发现旧配置目录', 'Found an existing config root')}: {legacy_root}[/bold cyan]\n\n"
-            f"{_L('当前配置根使用配置库真值，可以一次性导入旧配置的通道、模型和 Key。', 'This root keeps DB truth; the channels, models and keys from the old root can be imported once.')}\n"
-            f"{_L('导入只读取旧目录，不会修改它。', 'The import only reads the old root and never modifies it.')}",
-            title=f"{title} Setup",
-        ))
-        if Confirm.ask(_L("现在导入", "Import now"), default=True):
-            cfg = _import_legacy_root_into_v2(legacy_root)
-            if cfg is not None:
-                return cfg
-            console.print(f"[dim]{_L('改为手动配置一个通道。', 'Falling back to configuring one channel manually.')}[/dim]\n")
-
     console.print(Panel(
         f"[bold cyan]{_L(f'欢迎使用 {title} — AI Coding CLI 统一启动器', f'Welcome to {title} — unified AI coding CLI launcher')}[/bold cyan]\n\n"
-        f"{_L('首次使用，需要配置 API 地址和认证信息', 'First-time setup needs an API endpoint and credentials')}\n"
+        f"{_L('首次使用，需要配置 API 地址和认证信息；也可以运行', 'First-time setup needs an API endpoint and credentials; alternatively run')} `{current_command()} web` {_L('在 Pilot 页面里完成', 'and finish it in Pilot')}\n"
         f"{_L('这个配置根使用配置库真值，填写的内容会写入配置库和 secret backend', 'This config root keeps DB truth; your answers go into the registry database and the secret backend')}",
         title=f"{title} Setup",
     ))
@@ -17135,7 +17083,7 @@ def _exit_preview_legacy_config_disabled(args_rest=None):
     console.print("[red]Preview root uses v2 DB truth; legacy config.toml writes are disabled.[/red]")
     console.print(f"[dim]config_root={root}[/dim]")
     console.print(f"[cyan]下一步:[/cyan] {current_command()} config doctor --json")
-    console.print("[dim]准备预览 root: mmf preview prepare --from ~/.config/mms --json[/dim]")
+    console.print(f"[dim]在 Pilot 里添加通道: {current_command()} web[/dim]")
     console.print(
         f"[dim]已审核 plan 后写入预览 DB: {current_command()} config apply-plan "
         "--plan-json <plan.json> --apply --confirm-preview-apply --json[/dim]"

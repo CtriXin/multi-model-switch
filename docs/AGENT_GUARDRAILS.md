@@ -137,6 +137,16 @@
 - 为了实现新功能，直接覆盖已有选择流程、确认流程或 bridge 路由
 - 把一次性的实验逻辑直接变成默认行为，且没有显式开关或任务上下文说明
 
+## Single Config Root（2026-09-10，#177）
+
+配置只有一个来源：`~/.config/mms-next`。这条高于任何"兼容旧目录"的实现倾向：
+
+- `mms` / `mmf` / `mmg` / Pilot 都读写同一个根；Pilot 保存通道后 terminal 读到的是同一份 approved bundle。
+- legacy `~/.config/mms` 已退出配置来源：不做自动导入，不做回退，`MMS_CONFIG_ROOT_MODE=stable` 被忽略；`mmd` / `mmm` 包装器已退休。
+- `~/.config/mms/*-gateway/`、`accounts/`、`fake-upstream/` 仍是运行时 / 会话状态目录，不是配置；Codex gateway `CODEX_HOME` 契约不变。
+- 安装脚本会请任何占用默认端口的 Pilot 退出（不按安装目录区分），并用 `source|config_root|version` 判断已有实例，避免第二个 8766 实例和跨进程 403。
+- 新增一处读取 `~/.config/mms` 作为配置来源属于回归；`tests/test_single_config_root.py` 与 fresh-user gate 覆盖这条契约。
+
 ## Global OAuth Hard Cut
 
 这条规则高于一般“方便复用”的实现倾向：

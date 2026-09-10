@@ -2145,7 +2145,7 @@ def _incident_log_path(server=None):
         try:
             config_root = resolve_mms_config_dir()
         except Exception:
-            config_root = os.path.join(os.path.expanduser("~"), ".config", "mms")
+            config_root = os.path.join(os.path.expanduser("~"), ".config", "mms-next")
     return os.path.join(str(config_root), "logs", "incidents.jsonl")
 
 

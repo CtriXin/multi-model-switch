@@ -517,7 +517,7 @@ def _model_context_overrides_path():
     try:
         config_root = _resolve_mms_config_dir()
     except Exception:
-        config_root = _real_user_path(".config", "mms")
+        config_root = _real_user_path(".config", "mms-next")
     return os.path.join(config_root, "model-context-overrides.json")
 
 
@@ -1174,7 +1174,7 @@ def _selected_mms_config_root(env):
     try:
         return _resolve_mms_config_dir(merged_env)
     except Exception:
-        return _real_user_path(".config", "mms")
+        return _real_user_path(".config", "mms-next")
 
 
 def _config_root_is_explicit(env):

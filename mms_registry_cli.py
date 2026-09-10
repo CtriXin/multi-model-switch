@@ -518,7 +518,7 @@ def _model_source_readiness(
     route_count = int(candidates.get("provider_route_count") or 0)
     missing_keys = int(bundle.get("router_missing_api_key_count") or 0)
     missing_urls = int(bundle.get("router_missing_base_url_count") or 0)
-    if root_status.get("mode") != "preview":
+    if root_status.get("legacy_root"):
         status = "stable_root_read_only"
         headline = "Stable root: v2 DB-truth writes stay human-only; use mmf for preview."
         next_action = {"label": "Open preview root status", "command": "./mmf config source --json"}
@@ -757,13 +757,13 @@ def registry_v2_save_plan(
     guard_blocked = bool(guard) and guard.get("ok") is False
     backup_dir = root / "backups" / "db"
     blocked_reasons: list[str] = []
-    if mode != "preview":
+    if root_status.get("legacy_root"):
         blocked_reasons.append("stable_root_human_only")
     if not has_changes:
         blocked_reasons.append("no_draft_changes")
     if guard_blocked:
         blocked_reasons.append(str(guard.get("reason") or "route_publish_guard_blocked"))
-    can_write_preview = bool(has_changes and mode == "preview" and not guard_blocked)
+    can_write_preview = bool(has_changes and mode == "preview" and not root_status.get("legacy_root") and not guard_blocked)
     plan_json_name = "webui-plan.json"
     cli_apply_command = f"./mmf config apply-plan --plan-json <{plan_json_name}> --apply --confirm-preview-apply --json"
     return {
@@ -790,7 +790,7 @@ def registry_v2_save_plan(
         },
         "would_write": {
             "db_candidate_revision": can_write_preview,
-            "secret_backend": bool(credentials and mode == "preview" and not guard_blocked),
+            "secret_backend": bool(credentials and mode == "preview" and not root_status.get("legacy_root") and not guard_blocked),
             "generated_latest_approved_bundle": can_write_preview,
             "legacy_compat_files": {
                 "config_toml": bool(summary.get("will_write_config")),
@@ -822,7 +822,7 @@ def registry_v2_save_plan(
             "cli_apply_command": cli_apply_command,
             "cli_dry_run_command": f"./mmf config apply-plan --plan-json <{plan_json_name}> --json",
             "requires_preview_root": True,
-            "blocked_in_current_root": mode != "preview",
+            "blocked_in_current_root": bool(root_status.get("legacy_root")),
             "credential_note": "Downloaded WebUI plan JSON is redacted; credential updates should be applied through WebUI or a local secret-bearing plan file that is not shared.",
         },
         "next_implementation_step": "WebUI and mms config apply-plan are wired; next: TUI/native save and stable promotion after human-gated validation",
@@ -849,8 +849,8 @@ def preview_doctor(
     checks = [
         {
             "id": "preview_root",
-            "ok": root_status.get("mode") == "preview",
-            "detail": root_status.get("mode") or "unknown",
+            "ok": not root_status.get("legacy_root"),
+            "detail": "stable" if root_status.get("legacy_root") else (root_status.get("mode") or "unknown"),
         },
         {
             "id": "registry_db",
@@ -875,7 +875,7 @@ def preview_doctor(
     ]
 
     next_actions: list[dict[str, str]] = []
-    if root_status.get("mode") != "preview":
+    if root_status.get("legacy_root"):
         overall = "wrong_root"
         next_actions.append({"label": "Use mmf preview root", "command": "./mmf config root --json"})
     elif registry_db.get("status") != "ok":
@@ -1155,7 +1155,7 @@ def config_v2_promotion_plan(
         "registry_db": stable_root / "registry" / "model-registry.sqlite",
     }
     blocked_reasons = ["stable_root_human_only", "promotion_apply_not_implemented"]
-    if preview_root_status.get("mode") != "preview":
+    if preview_root_status.get("legacy_root"):
         blocked_reasons.append("preview_root_required")
     if not preview_ready:
         blocked_reasons.append("preview_not_runtime_ready")
@@ -1665,7 +1665,7 @@ def init_config_root(
     root = root.expanduser()
     command = command_name.split()[0] if command_name else "mms"
     root_status = mms_config_root_status(command=command, config_dir=root)
-    if root_status.get("mode") != "preview" and not allow_stable:
+    if root_status.get("legacy_root") and not allow_stable:
         raise mms_registry.RegistryValidationError(
             "refusing to initialize stable config root without --allow-stable"
         )
@@ -2845,7 +2845,7 @@ def write_registry_v2_webui_secret_backend(
     root = Path(config_dir) if config_dir is not None else Path(resolve_mms_config_dir())
     root = root.expanduser()
     root_status = mms_config_root_status(command=command_name.split()[0] if command_name else "mms", config_dir=root)
-    if root_status.get("mode") != "preview" and not allow_stable:
+    if root_status.get("legacy_root") and not allow_stable:
         raise mms_registry.RegistryValidationError("refusing to write registry v2 WebUI secrets into stable config root without --allow-stable")
     update_entries = _registry_v2_webui_secret_entries(credential_updates)
     if not update_entries:
@@ -3077,7 +3077,7 @@ def import_legacy_config(
     root = root.expanduser()
     source_root = Path(source_config_dir).expanduser() if source_config_dir is not None else root
     root_status = mms_config_root_status(command=command_name.split()[0] if command_name else "mms", config_dir=root)
-    if root_status.get("mode") != "preview" and not allow_stable:
+    if root_status.get("legacy_root") and not allow_stable:
         raise mms_registry.RegistryValidationError("refusing to import into stable config root without --allow-stable")
     report = legacy_import_report(config_dir=source_root)
     payload = _legacy_import_payload(report)
@@ -3153,7 +3153,7 @@ def apply_registry_v2_save_candidate(
     root = Path(config_dir) if config_dir is not None else Path(resolve_mms_config_dir())
     root = root.expanduser()
     root_status = mms_config_root_status(command=command_name.split()[0] if command_name else "mms", config_dir=root)
-    if root_status.get("mode") != "preview" and not allow_stable:
+    if root_status.get("legacy_root") and not allow_stable:
         raise mms_registry.RegistryValidationError("refusing to write registry v2 save candidate into stable config root without --allow-stable")
     config_payload = config_payload if isinstance(config_payload, Mapping) else {}
     candidate_payload = _registry_v2_candidate_payload(
@@ -3360,13 +3360,13 @@ def apply_registry_v2_plan(
         "stable_apply_policy": {
             "apply_enabled": False,
             "allow_stable_requested": bool(allow_stable),
-            "human_gate_required": root_status.get("mode") != "preview",
+            "human_gate_required": root_status.get("legacy_root"),
             "promotion_plan_command": "./mmf promote --json",
             "note": "Stable apply-plan writes are not implemented; review the promotion plan and stop at the human gate.",
         },
         "blocked_reasons": [],
     }
-    if root_status.get("mode") != "preview":
+    if root_status.get("legacy_root"):
         summary["blocked_reasons"].append("stable_root_human_only")
         if apply:
             summary["blocked_reasons"].append("stable_apply_not_implemented")

@@ -46,7 +46,7 @@ macOS 也可以在 Finder 打开 `~/.mms/MMS Pilot.command`。如果从 Finder �
 
 ## 已经在使用 MMF
 
-`mmf` 指向开发工作树，`mmd` 指向 stable，`mmg` 指向 canary，`mmm` 指向 main，`mms` 是公开安装副本。这些命令的通道意义没有改变。只有包含 v4 代码的工作树才能运行新的 `web` 子命令。
+`mmf` 指向开发工作树，`mmg` 指向 canary，`mms` 是公开安装副本；`mmd` / `mmm` 已退休，所有入口只读 `~/.config/mms-next`。只有包含 v4 代码的工作树才能运行新的 `web` 子命令。
 
 如果对应的 MMF 工作树已经更新到 v4：
 
