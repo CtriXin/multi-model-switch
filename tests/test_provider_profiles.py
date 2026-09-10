@@ -142,7 +142,7 @@ def test_qwen_chat_template_profile_is_explicit_overlay_only(monkeypatch, tmp_pa
     assert payload["chat_template_kwargs"] == {"enable_thinking": True}
 
 
-def test_deepseek_effort_maps_xhigh_to_max_and_disables_cleanly(monkeypatch, tmp_path):
+def test_deepseek_effort_passes_through_and_disables_cleanly(monkeypatch, tmp_path):
     profiles = _profiles(monkeypatch, tmp_path)
     payload = {
         "model": "deepseek-v4-pro",
@@ -162,7 +162,7 @@ def test_deepseek_effort_maps_xhigh_to_max_and_disables_cleanly(monkeypatch, tmp
     )
     assert profile_id == "deepseek"
     assert payload["thinking"] == {"type": "enabled"}
-    assert payload["output_config"] == {"effort": "max", "format": "markdown"}
+    assert payload["output_config"] == {"effort": "xhigh", "format": "markdown"}
 
     profiles.apply_profile_body_patches(
         payload,
@@ -458,11 +458,11 @@ def test_deepseek_context_and_wire_model_are_profile_driven(monkeypatch, tmp_pat
     assert profiles.profile_context_window(
         "deepseek-v4-pro",
         provider_id="newapi-personal-tokyo",
-    ) == 1_000_000
+    ) == 1_048_576
     assert profiles.profile_context_window(
         "deepseek-v4-flash",
         provider_id="newapi-personal-tokyo",
-    ) == 1_000_000
+    ) == 1_048_576
     assert profiles.profile_model_alias(
         "deepseek-v4-pro",
         protocol="anthropic_messages",
@@ -528,7 +528,7 @@ def test_glm_capabilities_are_profile_driven(monkeypatch, tmp_path):
 
     assert caps["profile"] == "glm"
     assert caps["thinking_supported"] is True
-    assert caps["effort_supported"] is False
+    assert caps["effort_supported"] is True
     assert profile_id == "glm"
     assert payload["thinking"] == {"type": "disabled"}
 
