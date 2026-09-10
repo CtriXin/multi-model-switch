@@ -174,8 +174,9 @@ export function Composer({
   const [error, setError] = useState("");
   useEffect(() => {
     const controller = new AbortController();
-    for (const attachment of draft?.attachments || []) {
+    for (const attachment of attachments) {
       if (draft?.thumbnails[attachment.id]) continue;
+      if (!attachment.mimeType.startsWith("image/")) continue;
       request<{ dataUrl?: string }>(
         "/attachments/" + encodeURIComponent(attachment.id),
         undefined,
@@ -195,6 +196,25 @@ export function Composer({
             );
         });
     }
+    return () => controller.abort();
+  }, [draftKey, attachments]);
+  // Recipe variables and restored drafts can already contain absolute paths.
+  // Resolve those lines once so the composer can show the same removable
+  // preview cards as a direct file drop.
+  useEffect(() => {
+    if (draft?.attachments?.length || !initialText) return;
+    const paths = initialText.split(/\r?\n/).flatMap((line) => localFilePaths(line));
+    if (!paths.length || !workspaceId) return;
+    const controller = new AbortController();
+    request<{ attachments: Attachment[] }>("/files/reference-local", { paths }, controller.signal)
+      .then((result) => {
+        if (controller.signal.aborted) return;
+        setAttachments((old) => {
+          const known = new Set(old.map((item) => item.localPath));
+          return [...old, ...result.attachments.filter((item) => !known.has(item.localPath))].slice(0, 8);
+        });
+      })
+      .catch(() => {});
     return () => controller.abort();
   }, [draftKey]);
   const [help, setHelp] = useState(false);
@@ -515,9 +535,9 @@ export function Composer({
             引用文件或文件夹
           </div>
         )}
-        {(attachments.some(a => !a.localPath) || references.length > 0) && (
+        {(attachments.filter(a => referencedInText(a)).length > 0 || references.length > 0) && (
           <div className="attachment-list">
-            {attachments.filter(a => !a.localPath).map((a) => (
+            {attachments.filter(a => referencedInText(a)).map((a) => (
               <div className="attachment-chip" key={a.id}>
                 {thumbnails[a.id] ? (
                   <img src={thumbnails[a.id]} alt={a.name} />
@@ -536,9 +556,17 @@ export function Composer({
                 <button
                   type="button"
                   aria-label={"移除附件 " + a.name}
-                  onClick={() =>
-                    setAttachments((old) => old.filter((x) => x.id !== a.id))
-                  }
+                  onClick={() => {
+                    if (a.localPath) {
+                      const quoted = JSON.stringify(a.localPath);
+                      setText((old) => old.split(/\r?\n/).filter((line) => {
+                        const value = line.trim();
+                        return value !== a.localPath && value !== quoted;
+                      }).join("\n").replace(/\n{3,}/g, "\n\n").trim());
+                    }
+                    setAttachments((old) => old.filter((x) => x.id !== a.id));
+                    setThumbnails((old) => { const next = { ...old }; delete next[a.id]; return next; });
+                  }}
                 >
                   <X size={13} />
                 </button>
