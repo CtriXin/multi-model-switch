@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import {
   Archive,
   ArrowDown,
@@ -202,6 +203,12 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [page, setPage] = useState<Page>("new");
   const [guideOpen, setGuideOpen] = useState(false);
+  const homeRef = useRef<HTMLDivElement>(null);
+  // A composer dragged tall pushes the recent list off the bottom. Past a
+  // point the page is better as two columns than as one tall one, so the list
+  // moves beside the composer instead of under it.
+  const [homeSplit, setHomeSplit] = useState(false);
+  const homeSplitRef = useRef(false);
   const [updateOpen, setUpdateOpen] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<{ available: boolean; active: boolean }>();
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -320,6 +327,41 @@ export function App() {
       ? value.filter((v) => typeof v === "string")
       : [];
   });
+  useEffect(() => {
+    const root = homeRef.current;
+    if (page !== "new" || !root) return;
+    const composer = root.querySelector<HTMLElement>("form.composer");
+    if (!composer) return;
+    const apply = (next: boolean) => {
+      if (homeSplitRef.current === next) return;
+      homeSplitRef.current = next;
+      const commit = () => setHomeSplit(next);
+      // A view transition morphs the list from below the composer to beside
+      // it; without support the layout simply changes.
+      const start = document.startViewTransition?.bind(document);
+      if (start) start(() => flushSync(commit));
+      else commit();
+    };
+    const decide = () => {
+      const twoColumnsFit = window.innerWidth >= 1180;
+      const composerIsTall =
+        composer.getBoundingClientRect().height > window.innerHeight * 0.42;
+      apply(
+        twoColumnsFit && composerIsTall && !!root.querySelector(".recent-section"),
+      );
+    };
+    const observer = new ResizeObserver(decide);
+    observer.observe(composer);
+    window.addEventListener("resize", decide);
+    decide();
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", decide);
+      // Leaving the page is not a moment to animate a reflow.
+      homeSplitRef.current = false;
+      setHomeSplit(false);
+    };
+  }, [page, data.sessions.length]);
   useEffect(() => { saveSetting("mms-web-auto-collapse-process", autoCollapseProcess); }, [autoCollapseProcess]);
   useEffect(() => { saveSetting("mms-web-workspace-sort", workspaceSort); }, [workspaceSort]);
   useEffect(() => { saveSetting("mms-web-workspace-order", workspaceOrder); }, [workspaceOrder]);
@@ -1481,7 +1523,10 @@ export function App() {
         )}
         {page === "new" && (
           <div className="home-scroll">
-            <div className="home-content">
+            <div
+              className={"home-content" + (homeSplit ? " home-split" : "")}
+              ref={homeRef}
+            >
               <div className="home-intro">
                 <WorkspacePicker
                   workspaces={data.workspaces}

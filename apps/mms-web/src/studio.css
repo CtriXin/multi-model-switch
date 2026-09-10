@@ -475,6 +475,37 @@
   width: min(800px, calc(100% - 88px));
   padding: clamp(40px, 10vh, 110px) 0 40px;
 }
+/* Once the composer is dragged tall enough to push the list off the bottom,
+   the page reads better as two columns. The list keeps its own name so the
+   view transition carries it across rather than fading it out and in. */
+.home-content.home-split {
+  width: min(1260px, calc(100% - 72px));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
+  column-gap: 34px;
+  align-items: start;
+}
+.home-content.home-split > * {
+  grid-column: 1;
+}
+.home-content.home-split > .recent-section {
+  grid-column: 2;
+  grid-row: 1 / -1;
+  align-self: start;
+  position: sticky;
+  top: 0;
+}
+.home-content.home-split > .recent-section .recent-row {
+  padding-inline: 12px;
+}
+.recent-section {
+  view-transition-name: recent-sessions;
+}
+@media (prefers-reduced-motion: reduce) {
+  .recent-section {
+    view-transition-name: none;
+  }
+}
 .home-intro {
   border: 0;
   padding: 0;
