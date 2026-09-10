@@ -596,9 +596,12 @@ kbd {
   border: 0;
   width: 100%;
   background: transparent;
+  /* The corner stays draggable for a deliberate height; the script sizes the
+     box to its content until someone uses it. The cap is a share of the
+     window so a tall screen gets a tall box. */
   resize: vertical;
   min-height: 75px;
-  max-height: 240px;
+  max-height: 55vh;
   line-height: 1.8;
   padding: 0;
   font-size: max(11px, 1.0000rem);

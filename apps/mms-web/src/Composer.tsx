@@ -192,6 +192,25 @@ export function Composer({
   const [choice, setChoice] = useState(0);
   const [dismissed, setDismissed] = useState(false);
   const input = useRef<HTMLTextAreaElement>(null);
+  // The box grew with neither the text nor the window: three rows with an
+  // inner scrollbar while the page below it sat empty. It now follows the
+  // content up to a share of the viewport, and stops following as soon as the
+  // person drags the corner, so a chosen height is not overwritten on typing.
+  const dragged = useRef(false);
+  function fitToContent() {
+    const el = input.current;
+    if (!el || dragged.current) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, Math.round(window.innerHeight * 0.4))}px`;
+  }
+  // Keyed on the text rather than the change handler, so a restored draft, an
+  // imported template and an inserted file path all size the box too.
+  useEffect(fitToContent, [text]);
+  useEffect(() => {
+    const refit = () => fitToContent();
+    window.addEventListener("resize", refit);
+    return () => window.removeEventListener("resize", refit);
+  }, []);
   const consumedSelection = useRef("");
   const consumedGuide = useRef("");
   useEffect(() => {
@@ -594,6 +613,14 @@ export function Composer({
               setDismissed(false);
               if (/(^|\s)@$/.test(e.target.value) && workspaceId)
                 setFiles(true);
+            }}
+            onMouseDown={(e) => {
+              // The only pointer target inside a textarea that is not text is
+              // the resize corner, so a press there means a manual height.
+              const el = e.currentTarget;
+              const box = el.getBoundingClientRect();
+              if (box.right - e.clientX < 18 && box.bottom - e.clientY < 18)
+                dragged.current = true;
             }}
             placeholder={
               running ? "补充一条消息，将在当前执行完成后处理…" : placeholder

@@ -544,11 +544,16 @@
     0 0 0 2px color-mix(in srgb, var(--accent) 6%, transparent);
 }
 .home-content .composer textarea {
-  min-height: 84px;
+  /* The home screen is where a whole task gets written, and it has the room,
+     so it starts taller than the in-session composer. */
+  min-height: 132px;
   font-size: max(11px, 1.0714rem);
 }
+/* The corner is the way to keep a height that differs from the content, for
+   example while reading a long prompt back. Auto-sizing covers the normal
+   case, so this only has to be available, not the primary control. */
 .composer-editor textarea {
-  resize: none;
+  resize: vertical;
 }
 .home-content .composer-bottom,
 .composer-bottom {
