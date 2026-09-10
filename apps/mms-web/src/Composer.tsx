@@ -344,11 +344,7 @@ export function Composer({
       const top = el.scrollTop;
       const delta = top - last;
       last = top;
-      if (el.scrollHeight - top - el.clientHeight < 48) {
-        up = down = 0;
-        setCollapsedState(false);
-        return;
-      }
+      const gap = el.scrollHeight - top - el.clientHeight;
       // Hysteresis: fold only after a real upward intent, unfold eagerly.
       if (delta < 0) {
         up += -delta;
@@ -357,7 +353,17 @@ export function Composer({
         down += delta;
         up = 0;
       }
-      if (up > 48 && canCollapseRef.current()) {
+      // The fold itself shrinks the composer and grows the scroller's
+      // clientHeight, moving the gap by ~100px. Gating every transition on
+      // the scroll direction — unfold only on a real downward delta, fold
+      // only when the gap clearly exceeds the layout shift — keeps that
+      // self-inflicted movement from bouncing the state back and forth.
+      if (delta > 0 && gap < 48) {
+        up = down = 0;
+        setCollapsedState(false);
+        return;
+      }
+      if (up > 48 && gap > 240 && canCollapseRef.current()) {
         setCollapsedState(true);
         up = 0;
       } else if (down > 24) {
