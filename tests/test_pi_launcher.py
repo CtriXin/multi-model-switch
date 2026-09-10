@@ -420,7 +420,7 @@ def test_launch_pi_writes_openai_models_config_and_uses_wrapper(monkeypatch, tmp
     assert settings_payload["retry"] == {"enabled": True, "maxRetries": 8, "baseDelayMs": 1000}
     assert settings_payload["quietStartup"] is True
     assert settings_payload["extensions"][0].endswith("scripts/pi-retry-extension.mjs")
-    assert not (real_home / ".config" / "mms" / "pi-gateway").exists()
+    assert not (real_home / ".config" / "mms-next" / "pi-gateway").exists()
 
 
 def test_launch_pi_rewrites_deprecated_antigravity_gemini_alias_to_live_replacement(monkeypatch, tmp_path):
@@ -526,7 +526,7 @@ def test_get_export_env_for_pi_writes_anthropic_models_config(monkeypatch, tmp_p
     assert exports["MMS_PI_BIN"] == "/tmp/pi-wrapper"
     assert exports["MMS_PI_NPX_CACHE"].endswith(".ai/cache/pi-npx")
     assert exports["MMS_PI_SETTINGS_JSON"].endswith("settings.json")
-    models_path = real_home / ".config" / "mms" / "pi-gateway" / "exports" / "relay-b-claude-sonnet-4-6" / "agent" / "models.json"
+    models_path = real_home / ".config" / "mms-next" / "pi-gateway" / "exports" / "relay-b-claude-sonnet-4-6" / "agent" / "models.json"
     payload = json.loads(models_path.read_text(encoding="utf-8"))
     provider = payload["providers"]["mms-relay-b"]
     assert provider["api"] == "anthropic-messages"

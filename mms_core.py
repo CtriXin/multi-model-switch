@@ -166,6 +166,7 @@ from mms_state_io import (
     resolve_mms_config_dir,
     resolve_real_user_home,
 )
+from mms_state_io import GATEWAY_SESSION_MARKER_ROOTS as _GATEWAY_SESSION_MARKER_ROOTS
 from mms_state_io import resolve_current_workdir as _safe_getcwd
 
 # Provider 调试日志（按需写入文件，不影响 TUI 输出）
@@ -270,38 +271,31 @@ SNAPSHOT_IGNORED_FILES = (
 
 _CONFIG_WRITE_PROCESS_LOCK = threading.Lock()
 
-_GATEWAY_SESSION_MARKERS = (
-    os.path.join(".config", "mms", "codex-gateway", "s") + os.sep,
-    os.path.join(".config", "mms", "claude-gateway", "s") + os.sep,
+_GATEWAY_SESSION_MARKERS = tuple(
+    marker for marker, _ in _GATEWAY_SESSION_MARKER_ROOTS if "accounts" not in marker
 )
 
 
-def _base_user_config_path_from_gateway(config_path):
-    if mms_config_root_is_explicit():
-        return ""
-    normalized = os.path.normpath(str(config_path or ""))
-    for marker in _GATEWAY_SESSION_MARKERS:
-        idx = normalized.find(marker)
-        if idx == -1:
-            continue
-        base_home = normalized[:idx]
-        if base_home:
-            return os.path.join(base_home, ".config", "mms", "config.toml")
-    return ""
-
-
 def _base_user_primary_dir_from_gateway(path):
+    """Map a gateway session path back to the config root that owns it."""
     if mms_config_root_is_explicit():
         return ""
     normalized = os.path.normpath(str(path or ""))
-    for marker in _GATEWAY_SESSION_MARKERS:
+    for marker, root_name in _GATEWAY_SESSION_MARKER_ROOTS:
+        if "accounts" in marker:
+            continue
         idx = normalized.find(marker)
         if idx == -1:
             continue
         base_home = normalized[:idx]
         if base_home:
-            return os.path.join(base_home, ".config", "mms")
+            return os.path.join(base_home, ".config", root_name)
     return ""
+
+
+def _base_user_config_path_from_gateway(config_path):
+    base_dir = _base_user_primary_dir_from_gateway(config_path)
+    return os.path.join(base_dir, "config.toml") if base_dir else ""
 
 
 def _merge_base_user_broker_profiles(cfg, config_path):
