@@ -228,6 +228,28 @@
 .workspace-group:focus-within .workspace-heading > span:last-child {
   opacity: 0;
 }
+/* A touch device has no hover, and a tap on a row opens the session, so
+   nothing ever revealed either menu: every per-session and per-folder action
+   was unreachable on a phone. They stay visible there instead.
+
+   The folder row shows only its menu, not the second "new session here"
+   button: two buttons cover the session count, and starting work in a folder
+   is already one tap away through the composer's folder picker. */
+@media (hover: none) {
+  .session-row .session-row-menu {
+    visibility: visible;
+  }
+  .workspace-row-actions {
+    opacity: 1;
+    pointer-events: auto;
+    /* Always-on controls should not fade in; the fade only exists to soften
+       a pointer arriving and leaving. */
+    transition: none;
+  }
+  .workspace-row-actions .new-in-folder {
+    display: none;
+  }
+}
 .workspace-tools {
   display: flex;
   align-items: center;

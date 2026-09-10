@@ -36,6 +36,8 @@ import {
 } from "lucide-react";
 import type { Bootstrap, Page, Session, SessionDetail, FileSelection, Workspace } from "./types";
 import { bootstrap, getSession, includeCliSessions, listSessions, isPreview, mutate, request } from "./api";
+import { copyText } from "./clipboard";
+import { newRequestId } from "./request-id";
 import {
   Composer,
   Dialog,
@@ -475,9 +477,9 @@ export function App() {
       )) return;
       const text = selection.toString();
       if (!text.trim()) return;
-      void navigator.clipboard?.writeText(text).catch(() => {
-        // A browser that refuses the write should not break selecting text.
-      });
+      // A browser with no clipboard at all, which is any plain-http origin,
+      // must not break selecting text either.
+      void copyText(text);
     };
     document.addEventListener("mouseup", copy);
     return () => document.removeEventListener("mouseup", copy);
@@ -716,9 +718,15 @@ export function App() {
     const steps: Record<GuideAction, TourStep> = { settings: "settings", workspace: "workspace", model: "model", compose: "compose", materials: "materials", artifacts: "artifacts", runtime: "runtime" };
     beginGuideStep(steps[action]);
   }
+  /** Open a new session with a task already written out.
+   *  Unlike guideExample this starts no tour: the text is the whole point. */
+  function startTask(text: string) {
+    setSettingsOpen(false);
+    navigate("new", () => setGuideRequest({ nonce: newRequestId(), text }));
+  }
   function guideExample(text: string) {
     navigate("new", () => {
-      setGuideRequest({ nonce: crypto.randomUUID(), text });
+      setGuideRequest({ nonce: newRequestId(), text });
       setGuideStep("compose");
     });
   }
@@ -887,22 +895,17 @@ export function App() {
     setWorkspaceSort("manual");
   }
   async function copyWorkspacePath(path: string) {
-    try {
-      await navigator.clipboard.writeText(path);
-      setWorkspaceNotice("已复制路径");
-    } catch {
-      setWorkspaceNotice("浏览器拒绝了复制，请手动选择路径");
-    }
+    setWorkspaceNotice(
+      (await copyText(path)) ? "已复制路径" : "这个浏览器不允许复制，请手动选择路径",
+    );
   }
   async function copySessionId(id: string) {
-    try {
-      // A terminal session's id is prefixed here to keep it apart from
-      // Pilot's own. Copy the bare id, which is what `pi --session` takes.
-      await navigator.clipboard.writeText(id.replace(/^cli:/, ""));
-      setWorkspaceNotice("已复制 Session ID");
-    } catch {
-      setWorkspaceNotice("浏览器拒绝了复制，请手动选择 ID");
-    }
+    // A terminal session's id is prefixed here to keep it apart from Pilot's
+    // own. Copy the bare id, which is what `pi --session` takes.
+    const bare = id.replace(/^cli:/, "");
+    setWorkspaceNotice(
+      (await copyText(bare)) ? "已复制 Session ID" : "这个浏览器不允许复制，请手动选择 ID",
+    );
   }
   async function exportSession(id: string) {
     // The sidebar only holds summaries; the export needs the full transcript.
@@ -1338,7 +1341,7 @@ export function App() {
                     </Popover>
                     <button
                       type="button"
-                      className="icon-button"
+                      className="icon-button new-in-folder"
                       aria-label={`在 ${w.name} 新建会话`}
                       title={w.unregistered ? "先把这个目录添加为工作文件夹" : "在这个目录新建会话"}
                       disabled={!w.path || !!w.unregistered}
@@ -1866,6 +1869,7 @@ export function App() {
             connectionCompleted={connectionCompleted}
             tour={tour}
             requestNavigation={requestNavigation}
+            startTask={startTask}
             editStateChanged={setSettingsEdit}
             autoCollapseProcess={autoCollapseProcess}
             setAutoCollapseProcess={setAutoCollapseProcess}
@@ -2245,7 +2249,7 @@ export function App() {
                       )}
                       <ArtifactView key={`${detail!.session.id}:${artifact.id}`} artifact={artifact} sessionId={detail!.session.id}
                         onSelect={selection => {
-                          setSelectionRequest({ nonce: crypto.randomUUID(), sessionId: detail!.session.id, selection });
+                          setSelectionRequest({ nonce: newRequestId(), sessionId: detail!.session.id, selection });
                           if (window.matchMedia("(max-width: 1200px)").matches) setPanel(false);
                         }} />
                       {detail?.artifactNotice && <p className="section-note">{detail.artifactNotice}</p>}

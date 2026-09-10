@@ -88,13 +88,13 @@ def _spotlight_directories(name: str, home: Path) -> list[Path]:
 
 
 def _scan_directories(name: str, plans: list[tuple[Path, int]]) -> list[Path]:
-    """Sweep the likeliest roots first and stop as soon as one of them answers."""
+    """Sweep likely roots within one budget, retaining same-name alternatives."""
     deadline = time.monotonic() + _SCAN_SECONDS
     found: list[Path] = []
     seen: set[str] = set()
     visited = 0
     for root, depth_limit in plans:
-        if found or visited >= _SCAN_BUDGET or time.monotonic() > deadline:
+        if visited >= _SCAN_BUDGET or time.monotonic() > deadline:
             break
         frontier = [(root, 0)]
         while frontier and visited < _SCAN_BUDGET and time.monotonic() < deadline:
@@ -149,7 +149,7 @@ def _named_directories(catalog, name: str, *, deep: bool) -> list[Path]:
         except (OSError, subprocess.TimeoutExpired, UnicodeError):
             pass
     found.extend(path for path in _spotlight_directories(name, home) if path.name == name)
-    if deep and not found:
+    if deep:
         plans = [(root, _SCAN_DEPTH_KNOWN) for root in roots if root != home]
         plans += [(root.parent, _SCAN_DEPTH_HOME) for root in roots if root.parent not in (home, root)]
         plans.append((home, _SCAN_DEPTH_HOME))
@@ -201,8 +201,8 @@ def _confident(matches: list[dict], children: set) -> bool:
     """Only skip the picker when one folder plainly is the one that was dropped."""
     if not matches:
         return False
-    if len(matches) == 1:
-        return not children or matches[0]["score"] > 0
-    if not children:
+    # A shared README/src entry is not enough to identify a directory. A
+    # missing fingerprint (including a timed-out browser read) needs a choice.
+    if not children or matches[0]["score"] != len(children):
         return False
-    return matches[0]["score"] == len(children) and matches[0]["score"] > matches[1]["score"]
+    return len(matches) == 1 or matches[0]["score"] > matches[1]["score"]

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Upload } from "lucide-react";
 import type { SessionDetail } from "./types";
+import { newRequestId } from "./request-id";
 import { Dialog } from "./components";
 import { parseRecipe, prepareExport, renderRecipe, scrubSharedText, variableNames, RECIPE_BYTES } from "./recipe-core";
 import type { Recipe } from "./recipe-core";
@@ -134,7 +135,7 @@ export function RecipeImport({ loaded, workspaceId = "" }: { loaded: (draft: Rec
         <details open={showPrompt} onToggle={e => setShowPrompt(e.currentTarget.open)}><summary>查看将载入的任务说明</summary><pre className="recipe-preview">{prompt || recipe.prompt}</pre></details>
         <p className="section-note">载入会替换当前模板草稿。模板不会安装 Skills、读取变量中的文件或导入连接凭据。</p>
         <button className="button primary" type="button" disabled={!!variableError} onClick={() => {
-          loaded({ recipe, draftPrompt: prompt, key: crypto.randomUUID(), savedAt: Date.now() });
+          loaded({ recipe, draftPrompt: prompt, key: newRequestId(), savedAt: Date.now() });
           setRecipe(undefined);
         }}>载入草稿</button>
       </div>

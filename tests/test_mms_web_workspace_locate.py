@@ -61,6 +61,41 @@ def test_ambiguous_folders_are_offered_instead_of_guessed(tmp_path):
     assert missing == {'matches': [], 'sure': False}
 
 
+@pytest.mark.parametrize('children', [[], ['README.md', 'expected-file.txt']])
+def test_single_partial_or_missing_fingerprint_needs_a_choice(tmp_path, children):
+    folder = tmp_path / 'tts'
+    folder.mkdir()
+    (folder / 'README.md').touch()
+    result = locate_folder(_catalog(folder), {'name': 'tts', 'children': children})
+    assert result['matches']
+    assert result['sure'] is False
+
+
+def test_known_candidate_does_not_hide_a_better_match_in_another_root(tmp_path):
+    first = tmp_path / 'first' / 'tts'
+    second = tmp_path / 'second' / 'nested' / 'tts'
+    for folder in (first, second):
+        folder.mkdir(parents=True)
+        (folder / 'README.md').touch()
+    (second / 'expected-file.txt').touch()
+    result = locate_folder(_catalog(first, tmp_path / 'second'),
+                           {'name': 'tts', 'children': ['README.md', 'expected-file.txt']})
+    assert len(result['matches']) == 2
+    assert result['matches'][0]['path'] == str(second.resolve())
+    assert result['sure'] is True
+
+
+def test_same_fingerprint_in_two_scan_roots_stays_ambiguous(tmp_path):
+    roots = [tmp_path / 'first', tmp_path / 'second']
+    for root in roots:
+        folder = root / 'nested' / 'tts'
+        folder.mkdir(parents=True)
+        (folder / 'README.md').touch()
+    result = locate_folder(_catalog(*roots), {'name': 'tts', 'children': ['README.md']})
+    assert len(result['matches']) == 2
+    assert result['sure'] is False
+
+
 def test_a_folder_name_can_never_carry_a_path(tmp_path):
     for name in ('', '..', 'a/b', 'bad\x00name', 'x' * 201):
         with pytest.raises(WebError):

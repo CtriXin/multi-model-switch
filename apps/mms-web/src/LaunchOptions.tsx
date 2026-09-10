@@ -127,7 +127,7 @@ export function WorkspaceDialog({ close, added, reference, initialQuery = "", su
       <form className="workspace-form" onSubmit={e => { e.preventDefault(); if (shown[choice]) void select(shown[choice]); }}>
         <label className="workspace-search-input">
           <Search size={18} />
-          <input autoFocus value={query} onChange={e => setQuery(e.target.value)}
+          <input autoFocus value={query} onChange={e => { setQuery(e.target.value); setResults([]); setChoice(0); }}
             placeholder="输入项目名，如 runtimia 或 multi" autoComplete="off" aria-label="搜索项目文件夹"
             role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls="workspace-matches"
             aria-activedescendant={shown[choice] ? `workspace-match-${choice}` : undefined}
