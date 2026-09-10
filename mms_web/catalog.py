@@ -246,6 +246,21 @@ class CatalogService:
     def _local_setup(self) -> bool:
         return bool(self._config_root and self._config_root.resolve() == (self._state_root / "config").resolve())
 
+    def _registry_published_root(self) -> bool:
+        """True when the config root keeps v2 registry truth rather than config.toml.
+
+        The marker is the root manifest, written only by the v2 initializer,
+        which refuses stable roots. A published bundle alone is not enough: a
+        stable root can export one while config.toml remains its truth.
+        """
+        if self._config_root is None:
+            return False
+        return (self._config_root / "root-manifest.json").is_file()
+
+    def _registry_owned(self) -> bool:
+        """True when saves publish through the Registry: Web-owned or v2 root."""
+        return self._local_setup() or self._registry_published_root()
+
     def _load_bundle(self, diagnostics: list) -> dict:
         """Load the verified latest-approved bundle; secrets stay in-process."""
         root = self._require_config_root()
@@ -255,7 +270,7 @@ class CatalogService:
 
             bundle = mms_registry.load_latest_approved_bundle(config_dir=root, include_secret=True)
         except FileNotFoundError:
-            if self._local_setup():
+            if self._registry_owned():
                 return {}
             diagnostics.append(
                 {
@@ -319,7 +334,7 @@ class CatalogService:
         root = self._require_config_root()
         if payload.get("command") == "resolve-launch":
             from .runtime import snapshot_config
-            root = snapshot_config(root, self._state_root, published_credentials_only=self._local_setup())
+            root = snapshot_config(root, self._state_root, published_credentials_only=self._registry_owned())
             payload = {**payload, "config_root": str(root)}
         env = {
             "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
@@ -372,9 +387,12 @@ class CatalogService:
         if self._config_root is None:
             return {"catalogRead": False, "configure": False}
         read = (self._config_root / "config.toml").exists() or (self._config_root / "generated").exists()
-        if self._is_protected_real_root() or self._state_root_protected():
-            # Real MMS roots may be displayed but never written by the web UI;
-            # a state root inside the protected subtree is equally fail-closed.
+        if self._state_root_protected():
+            return {"catalogRead": read, "configure": False}
+        if self._is_protected_real_root() and not self._registry_published_root():
+            # A legacy stable root stays human-gated: the web UI would have to
+            # write config.toml and credentials.sh by hand. A v2 root publishes
+            # through the Registry, which is the same path MMS itself uses.
             return {"catalogRead": read, "configure": False}
         return {"catalogRead": read, "configure": True}
 
@@ -395,7 +413,7 @@ class CatalogService:
             }
 
         cfg = self._raw_config()
-        if not cfg and not self._local_setup():
+        if not cfg and not self._registry_owned():
             diagnostics.append(
                 {"code": "CONFIG_MISSING", "message": "config root 下缺少 config.toml 或文件不可读"}
             )
@@ -471,7 +489,7 @@ class CatalogService:
             return leaves
 
         def _provider_has_key(provider_id: str) -> bool:
-            if self._local_setup() and bundle:
+            if self._registry_owned() and bundle:
                 return any(leaf.get("api_key") for leaf in _provider_leaves(provider_id))
             prefix = re.sub(r"[^A-Za-z0-9]+", "_", provider_id).upper().strip("_") or "DEFAULT"
             return bool(credentials.get(f"MMS_PROVIDER_{prefix}_API_KEY")
@@ -482,7 +500,7 @@ class CatalogService:
             configured = (credentials.get(f"MMS_PROVIDER_{prefix}_BASE_URL")
                           or credentials.get(f"MMS_PROVIDER_{prefix}_OPENAI_BASE_URL")
                           or credentials.get(f"MMS_PROVIDER_{prefix}_ANTHROPIC_BASE_URL"))
-            if configured and not (self._local_setup() and bundle):
+            if configured and not (self._registry_owned() and bundle):
                 return configured
             return next((leaf.get("openai_base_url") or leaf.get("anthropic_base_url")
                          for leaf in _provider_leaves(provider_id)
@@ -848,7 +866,7 @@ class CatalogService:
             )
 
     def _published_config(self, cfg: dict, bundle: dict) -> dict:
-        if not self._local_setup() or not bundle:
+        if not self._registry_owned() or not bundle:
             return cfg
         payloads = bundle.get("payloads") or {}
         profiles = (payloads.get("profile") or {}).get("profiles") or {}
@@ -907,7 +925,7 @@ class CatalogService:
         name, base_url, api_key, models, warnings = self._validate_service_payload(payload)
 
         bundle = self._load_bundle([])
-        published = self._local_setup() and bool(bundle)
+        published = self._registry_owned() and bool(bundle)
         cfg = self._published_config(self._raw_config(), bundle)
         providers = cfg.get("providers") if isinstance(cfg.get("providers"), list) else []
         providers_by_id = {
@@ -1076,7 +1094,7 @@ class CatalogService:
                             "providerId": record.get("providerId"),
                             "service": record.get("service"),
                             "expectedRevision": record.get("revision"),
-                            "standalone": self._local_setup(),
+                            "standalone": self._registry_owned(),
                         }
                     )
                 except WebError as exc:

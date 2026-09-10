@@ -24,6 +24,52 @@ def require_private_root(root: Path) -> Path:
     return root
 
 
+def is_registry_root(root: Path) -> bool:
+    """True when the root keeps v2 registry truth instead of legacy config files.
+
+    The marker is the root manifest, written only by the v2 initializer, which
+    refuses stable roots. A published bundle alone is not enough: a stable root
+    can export one while config.toml remains its truth.
+    """
+    return (Path(root) / "root-manifest.json").is_file()
+
+
+def default_config_root(state_root: Path) -> Path:
+    """Pick the config root a Pilot without ``--config-root`` should use.
+
+    A Web install that already owns configuration keeps it: moving those
+    channels silently would orphan them. Anything else shares the v2 root the
+    CLI uses, so one setup serves both entrances.
+    """
+    web_owned = Path(state_root) / "config"
+    if (web_owned / "config.toml").is_file() or (web_owned / "generated").is_dir():
+        return web_owned
+    try:
+        from .catalog import _ensure_repo_on_path
+
+        _ensure_repo_on_path()
+        from mms_state_io import mms_config_root_status
+
+        shared = Path(mms_config_root_status()["preview_root"])
+    except Exception:
+        return web_owned
+    if is_registry_root(shared) or not shared.exists():
+        return shared
+    return web_owned
+
+
+def require_publishable_root(root: Path) -> Path:
+    """Config roots the Web may publish into: its own private root, or a v2 root.
+
+    A v2 root is written through the Registry publish path, the same one MMS
+    uses, so sharing it with the CLI does not reintroduce hand-written config.
+    A legacy stable root stays human-gated.
+    """
+    if is_registry_root(root):
+        return Path(root).resolve()
+    return require_private_root(root)
+
+
 def private_json(path: Path, payload) -> None:
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=".web-", suffix=".tmp")
