@@ -49,7 +49,8 @@
   margin-bottom: 8px;
   font-size: max(11px, 0.7857rem);
 }
-.conversation-content .message-author span {
+.conversation-content .message-author span,
+.conversation-content .message-author .message-time {
   font-size: max(11px, 0.7857rem);
 }
 .conversation-content .message.continuation {
@@ -106,6 +107,12 @@
   border: 1px solid color-mix(in srgb, var(--accent) 12%, var(--line));
   border-radius: 16px 16px 4px 16px;
   background: color-mix(in srgb, var(--accent) 5%, var(--surface));
+}
+.conversation-content .message.user .message-meta {
+  font-size: max(11px, 0.7143rem);
+  color: var(--muted);
+  text-align: right;
+  margin-top: 4px;
 }
 .conversation-content .message.user.message-located .message-body {
   outline: 2px solid color-mix(in srgb, var(--accent) 40%, transparent);

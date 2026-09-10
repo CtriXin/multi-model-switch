@@ -133,6 +133,7 @@ class _LiveSession:
             "kind": str(fields.get("kind") or "notice"),
             "text": str(fields.get("text") or ""),
             "createdAt": now(),
+            "updatedAt": now(),
         }
         for key in ("title", "status", "approvalId", "decision", "arguments", "method", "options", "placeholder", "prefill", "answer", "thinking", "nativeTimestamp", "modelName", "usage", "attachments", "references", "skills", "fileSelections", "contextUsage"):
             if fields.get(key) is not None:
@@ -157,6 +158,8 @@ class _LiveSession:
                 existing[key] = fields[key]
         if fields.get("thinkingAppend") is not None:
             existing["thinking"] = str(existing.get("thinking") or "") + str(fields["thinkingAppend"])
+        # Last write wins as the event's end time; the reply duration reads it.
+        existing["updatedAt"] = now()
         self.updated_at = now()
         return existing
 
