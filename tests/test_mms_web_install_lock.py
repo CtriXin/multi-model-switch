@@ -77,3 +77,30 @@ def test_install_lease_outlives_python_and_prevents_concurrent_runtime(tmp_path)
     command='guard_live_pilot_install\npython3 -c '+shlex.quote(code)+' "$MMS_HOME"'
     result=guard(home,command)
     assert result.returncode!=0 and '安装正在进行' in result.stderr
+
+
+def test_installer_stops_a_pilot_started_with_the_mms_web_subcommand(tmp_path):
+    """`mms web` serves in-process, so its argv is the CLI entry plus `web`."""
+    home=tmp_path/'installation';(home/'mms_web').mkdir(parents=True)
+    (home/'mms_web/__main__.py').write_text('fixture')
+    process=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)',str(home/'mms'),'web'],
+                             stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    time.sleep(1)
+    try:
+        result=guard(home,command='guard_live_pilot_install\necho "STOPPED=$STOPPED_PILOT"')
+        assert result.returncode==0,result.stdout+result.stderr
+        assert 'STOPPED=1' in result.stdout
+        assert process.wait(timeout=10)is not None
+    finally:
+        if process.poll()is None:
+            process.kill();process.wait(timeout=10)
+
+
+def test_keep_running_pilot_flag_does_not_swallow_the_next_argument():
+    """The option loop shifts once per iteration; a case body must not shift again."""
+    text=(ROOT/'install.sh').read_text()
+    start=text.index('        --keep-running-pilot)')
+    body=text[start:text.index(';;',start)]
+    assert 'shift' not in body,body
+    loop=text[text.index('while [[ $# -gt 0 ]]; do'):]
+    assert '\n    esac\n    shift\n' in loop

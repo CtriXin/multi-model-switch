@@ -2083,6 +2083,10 @@ def is_server(command):
             return True
         if Path(token).name in ('mms-web', 'MMS Pilot.command'):
             return True
+        # `mms web` runs the server in-process, so the argv is the CLI entry
+        # followed by the web subcommand.
+        if Path(token).name == 'mms' and index + 1 < len(argv) and argv[index + 1] in ('web', 'webui', 'setup.web', 'setup-web'):
+            return True
     return False
 
 
@@ -2516,7 +2520,6 @@ while [[ $# -gt 0 ]]; do
             ;;
         --keep-running-pilot)
             KEEP_RUNNING_PILOT=1
-            shift
             ;;
         --no-launch-web)
             LAUNCH_WEB_MODE="never"
