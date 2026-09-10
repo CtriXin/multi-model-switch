@@ -21,10 +21,106 @@ import time
 from pathlib import Path
 
 VERBS = ("status", "url", "start", "stop", "restart")
+HELP_FLAGS = ("help", "-h", "--help")
 DEFAULT_PORT_BASE = 8765
 PORT_SEARCH_LIMIT = 20
 START_TIMEOUT = 30
 STOP_TIMEOUT = 20
+
+
+def command_label() -> str:
+    """How this entry point is spelled, so examples can be pasted as printed."""
+    invoked = Path(sys.argv[0] or "").name
+    if invoked == "mms-web":
+        return "mms-web"
+    named = str(os.environ.get("MMS_COMMAND_NAME") or "").strip()
+    if named:
+        return f"{named} web"
+    if invoked in ("mms", "mmf", "mmg", "mmd", "mmm"):
+        return f"{invoked} web"
+    return "mms web"
+
+
+def wants_help(argv: list[str]) -> bool:
+    """True when the command was typed with nothing to do.
+
+    A bare `mms web` reaches this module as ``--config-root <root>`` because
+    mms_core prepends the selected root, so "bare" means "no option that asks
+    for a server", not an empty list.
+    """
+    rest: list[str] = []
+    skip = False
+    for token in argv:
+        if skip:
+            skip = False
+            continue
+        if token == "--config-root":
+            skip = True
+            continue
+        if token.startswith("--config-root="):
+            continue
+        rest.append(token)
+    if not rest:
+        return True
+    return any(token in HELP_FLAGS for token in rest)
+
+
+def _display_width(text: str) -> int:
+    """Terminal columns, counting the wide forms CJK punctuation renders as."""
+    import unicodedata
+
+    return sum(2 if unicodedata.east_asian_width(char) in ("W", "F") else 1 for char in text)
+
+
+def _rows(pairs: list[tuple[str, str]], indent: str = "  ", gap: int = 3) -> str:
+    """Two columns that stay aligned whatever the entry point is called."""
+    width = max(_display_width(left) for left, _ in pairs) + gap
+    return "\n".join(f"{indent}{left}{' ' * (width - _display_width(left))}{right}"
+                     for left, right in pairs)
+
+
+def help_text(command: str | None = None) -> str:
+    from mms_version import VERSION
+
+    name = command or command_label()
+    usage = _rows([
+        (f"{name} <命令> [选项]", "管理后台运行的 Pilot"),
+        (f"{name} [选项]", "在当前终端前台启动，Ctrl+C 停止"),
+    ])
+    verbs = _rows([
+        ("start", "启动。已经在跑就直接返回地址，不会起第二个"),
+        ("status", "本机在跑的 Pilot：地址、版本、pid、数据目录、配置根"),
+        ("url", "只打印当前实例的地址，方便复制"),
+        ("stop", "请当前实例退出；加 --all 停掉本机全部 Pilot"),
+        ("restart", "先停再起"),
+    ])
+    examples = _rows([
+        (f"{name} start --open", "后台启动并打开浏览器"),
+        (f"{name} url", "拿地址"),
+        (f"{name} status", "分不清哪个实例是自己的时候看这个"),
+        (f"{name} stop", "收工"),
+        (f"{name} --open", "前台启动，日志直接打在终端"),
+    ])
+    options = _rows([
+        ("--open", "启动后打开浏览器"),
+        ("--port N", "起始端口，默认 8765，被占用就往后找"),
+        ("--state-root DIR", "会话与 Web 配置，默认 ~/.local/share/mms-web"),
+        ("--config-root DIR", "MMS 配置根，默认 ~/.config/mms-next"),
+        ("--listen loopback|lan|all", "仅本次启动的访问范围；不给就用设置里的开关"),
+        ("--hostname HOST", "额外允许的访问域名，可重复"),
+        ("--json", "让上面五个命令输出 JSON"),
+    ])
+    return (
+        f"MMS Pilot {VERSION} — 在浏览器里用 MMS 的模型、通道和会话\n\n"
+        f"用法\n{usage}\n\n"
+        f"命令\n{verbs}\n\n"
+        f"例子\n{examples}\n\n"
+        f"选项\n{options}\n\n"
+        "后台启动的日志在 <state-root>/logs/mms-web.log。\n"
+        "手机或另一台电脑访问：设置 → 使用 → 让手机或另一台电脑访问。\n"
+        f"每个命令还有自己的 --help，例如 {name} stop --help。\n"
+        "更多说明：docs/mms-web/GETTING-STARTED.md"
+    )
 
 
 def default_state_root() -> Path:
@@ -250,7 +346,7 @@ def stop(*, state_root: Path, port_base: int, limit: int, everyone: bool, quiet:
 def run(verb: str, argv: list[str]) -> int:
     import argparse
 
-    parser = argparse.ArgumentParser(prog=f"mms web {verb}")
+    parser = argparse.ArgumentParser(prog=f"{command_label()} {verb}")
     parser.add_argument("--state-root", type=Path, default=default_state_root())
     parser.add_argument("--config-root", type=Path, default=None,
                         help="Passed through to the server on start; discovery does not need it")
