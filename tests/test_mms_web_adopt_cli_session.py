@@ -180,6 +180,40 @@ def test_the_same_request_replays_instead_of_starting_a_second_process(adopting)
     assert len(service.list_sessions()) == 1
 
 
+def test_adoption_uses_the_selected_channels_default_effort(adopting, monkeypatch):
+    service, row, _path, _work, _fallback, catalog = adopting
+    resolve = catalog.resolve_launch
+
+    def configured(*args):
+        result = resolve(*args)
+        result["launchOptions"]["defaultThinkingLevel"] = "low"
+        return result
+
+    monkeypatch.setattr(catalog, "resolve_launch", configured)
+    service._launch_plan_builder = launch_bridge.fixed_command_plan_builder(
+        [sys.executable, FIXTURE_CHILD, "--reasoning"])
+    detail = service.adopt(row, {"requestId": "adopt-default", "presetId": "preset",
+                                 "workspaceId": "ws"})
+    assert detail["runtime"]["thinkingLevel"] == "low"
+
+
+def test_displayed_history_uses_the_same_snapshot_as_pi(adopting, monkeypatch):
+    service, row, path, _work, _fallback, _catalog = adopting
+    copy = service._copy_transcript
+
+    def copy_then_append(source, target):
+        copy(source, target)
+        with source.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps({"type": "message", "id": "later",
+                                    "message": {"role": "user", "content": "later terminal turn"}}) + "\n")
+
+    monkeypatch.setattr(service, "_copy_transcript", copy_then_append)
+    detail = service.adopt(row, {"requestId": "adopt-snapshot", "presetId": "preset",
+                                 "workspaceId": "ws"})
+    assert "later terminal turn" not in [event.get("text") for event in detail["events"]]
+    assert "later terminal turn" in path.read_text()
+
+
 def test_a_deleted_working_folder_falls_back_and_says_so(adopting):
     service, row, _path, work, fallback, _catalog = adopting
     row = {**row, "cwd": str(work / "gone")}

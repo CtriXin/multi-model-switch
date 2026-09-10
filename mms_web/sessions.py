@@ -433,6 +433,7 @@ class SessionService(SessionActions):
         if not root:
             raise WebError("CAPABILITY_UNAVAILABLE", "缺少独立运行目录，无法接入。", 409)
         options = resolved.get("launchOptions") or {}
+        effort = effort or options.get("defaultThinkingLevel")
         if effort and options and effort not in options.get("supportedThinkingLevels", []):
             raise WebError("EFFORT_UNSUPPORTED", "这条通道不支持所选 effort，请重新选择。", 409)
         # Start where the terminal was working. A folder that has since been
@@ -458,7 +459,7 @@ class SessionService(SessionActions):
         live.state = "idle"
         # Assigned, not appended: append_event would restamp every turn with
         # the adoption time and lose when the conversation actually happened.
-        live.events = self._adopted_events(source)
+        live.events = self._adopted_events(Path(root) / "conversation.jsonl")
         live.event_index = {e["id"]: e for e in live.events}
         live.last_sequence = len(live.events)
         live.append_event({"kind": "notice", "text": (

@@ -125,6 +125,7 @@ class ChildRuntime:
     def __init__(self) -> None:
         self.queue: queue.Queue = queue.Queue()
         self.stream_deadline = time.monotonic() + 30.0
+        self.thinking_level = "high"
 
     # -- stdin ----------------------------------------------------------
 
@@ -193,6 +194,11 @@ class ChildRuntime:
             self.handle_abort(command)
             return
 
+        if ctype == "set_thinking_level" and "--reasoning" in sys.argv:
+            self.thinking_level = command.get("level")
+            _respond(req_id, ctype, data={"level": self.thinking_level})
+            return
+
         if ctype == "get_state":
             _respond(
                 req_id,
@@ -200,7 +206,8 @@ class ChildRuntime:
                 # A real Pi reports the model it loaded; the launch path checks
                 # for it before treating the session as usable.
                 data={"isStreaming": False, "sessionId": "fake", "messageCount": 0,
-                      "model": {"id": "fake-model"}},
+                      "thinkingLevel": self.thinking_level,
+                      "model": {"id": "fake-model", "reasoning": "--reasoning" in sys.argv}},
             )
             return
 
