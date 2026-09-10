@@ -601,9 +601,12 @@ kbd {
   border: 0;
   width: 100%;
   background: transparent;
+  /* The corner stays draggable for a deliberate height; the script sizes the
+     box to its content until someone uses it. The cap is a share of the
+     window so a tall screen gets a tall box. */
   resize: vertical;
   min-height: 75px;
-  max-height: 240px;
+  max-height: 55vh;
   line-height: 1.8;
   padding: 0;
   font-size: max(11px, 1.0000rem);
@@ -697,6 +700,35 @@ kbd {
 }
 .section-heading > .muted {
   font-size: max(11px, 0.7857rem);
+}
+/* Sized like the muted count it replaces, so the row reads the same until
+   someone reaches for it. */
+.section-heading-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: max(11px, 0.7857rem);
+  padding: 4px 6px;
+  margin-right: -6px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color var(--duration-fast) var(--ease-out),
+    background var(--duration-fast) var(--ease-out);
+}
+.section-heading-link:hover {
+  color: var(--accent);
+  background: var(--soft);
+}
+.section-heading-link svg {
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+.section-heading-link:hover svg {
+  transform: translateX(2px);
 }
 .text-button {
   border: 0;

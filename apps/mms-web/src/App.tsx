@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import {
   Archive,
   ArrowDown,
@@ -206,6 +207,12 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [page, setPage] = useState<Page>("new");
   const [guideOpen, setGuideOpen] = useState(false);
+  const [homeNode, setHomeNode] = useState<HTMLDivElement | null>(null);
+  // A composer dragged tall pushes the recent list off the bottom. Past a
+  // point the page is better as two columns than as one tall one, so the list
+  // moves beside the composer instead of under it.
+  const [homeSplit, setHomeSplit] = useState(false);
+  const homeSplitRef = useRef(false);
   const [updateOpen, setUpdateOpen] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<{ available: boolean; active: boolean }>();
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -336,6 +343,46 @@ export function App() {
       ? value.filter((v) => typeof v === "string")
       : [];
   });
+  useEffect(() => {
+    if (!homeNode) return;
+    const apply = (next: boolean) => {
+      if (homeSplitRef.current === next) return;
+      homeSplitRef.current = next;
+      const commit = () => setHomeSplit(next);
+      // A view transition morphs the list from below the composer to beside
+      // it; without support the layout simply changes.
+      const start = document.startViewTransition?.bind(document);
+      if (start) start(() => flushSync(commit));
+      else commit();
+    };
+    const decide = () => {
+      const composer = homeNode.querySelector<HTMLElement>("form.composer");
+      const twoColumnsFit = window.innerWidth >= 1180;
+      const composerIsTall =
+        !!composer &&
+        composer.getBoundingClientRect().height > window.innerHeight * 0.42;
+      apply(
+        twoColumnsFit &&
+          composerIsTall &&
+          !!homeNode.querySelector(".recent-section"),
+      );
+    };
+    // Watching the whole home area covers the composer mounting later and
+    // growing afterwards, without a second observer to keep in sync.
+    const observer = new ResizeObserver(decide);
+    observer.observe(homeNode);
+    const composer = homeNode.querySelector<HTMLElement>("form.composer");
+    if (composer) observer.observe(composer);
+    window.addEventListener("resize", decide);
+    decide();
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", decide);
+      // Leaving the page is not a moment to animate a reflow.
+      homeSplitRef.current = false;
+      setHomeSplit(false);
+    };
+  }, [homeNode, data.sessions.length]);
   // Told to the API layer before anything reads a list, and reloaded right
   // after, so turning it off empties the list immediately.
   useEffect(() => {
@@ -1611,7 +1658,10 @@ export function App() {
         )}
         {page === "new" && (
           <div className="home-scroll">
-            <div className="home-content">
+            <div
+              className={"home-content" + (homeSplit ? " home-split" : "")}
+              ref={setHomeNode}
+            >
               <div className="home-intro">
                 <WorkspacePicker
                   workspaces={data.workspaces}
@@ -1729,7 +1779,21 @@ export function App() {
                 <section className="recent-section">
                   <div className="section-heading">
                     <h2>最近在做</h2>
-                    <span className="muted">{data.sessions.length} 个会话</span>
+                    {/* The count reads as "see all" next to a list of three,
+                        so it is the way to the flat list of every session,
+                        which is what the search surface already shows with an
+                        empty query. The sidebar only groups them by folder. */}
+                    <button
+                      className="section-heading-link"
+                      aria-label={`查看全部 ${data.sessions.length} 个会话`}
+                      onClick={() => {
+                        setQuery("");
+                        setSearch(true);
+                      }}
+                    >
+                      全部 {data.sessions.length} 个会话
+                      <ChevronRight size={14} />
+                    </button>
                   </div>
                   {data.sessions
                     .filter((s) => !s.archived)

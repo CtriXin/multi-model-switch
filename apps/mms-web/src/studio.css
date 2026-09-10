@@ -475,6 +475,73 @@
   width: min(800px, calc(100% - 88px));
   padding: clamp(40px, 10vh, 110px) 0 40px;
 }
+/* Once the composer is dragged tall enough to push the list off the bottom,
+   the page reads better as two columns. The list keeps its own name so the
+   view transition carries it across rather than fading it out and in. */
+.home-content.home-split {
+  width: min(1320px, calc(100% - 72px));
+  /* The heading spans both columns and stays at the top; the composer and the
+     recent list share the row under it at 7:3. Rows are assigned explicitly
+     because the optional children would otherwise shift the pairing. */
+  display: grid;
+  grid-template-columns: minmax(0, 7fr) minmax(290px, 3fr);
+  column-gap: 32px;
+  align-items: start;
+  padding-top: 26px;
+}
+.home-content.home-split > .home-intro {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin-bottom: 20px;
+  padding-bottom: 14px;
+  background: var(--bg);
+}
+/* Compressed: at this size the page is for writing, not for being greeted. */
+.home-content.home-split > .home-intro h1 {
+  font-size: max(11px, 1.5714rem);
+  line-height: 1.25;
+}
+.home-content.home-split > .home-intro p {
+  margin-top: 6px;
+  font-size: max(11px, 0.9286rem);
+}
+.home-content.home-split > .recipe-access {
+  grid-column: 1;
+  grid-row: 2;
+}
+.home-content.home-split > .composer {
+  grid-column: 1;
+  grid-row: 3;
+}
+.home-content.home-split > .input-hint {
+  grid-column: 1;
+  grid-row: 4;
+}
+.home-content.home-split > .diagnostics {
+  grid-column: 1;
+  grid-row: 5;
+}
+.home-content.home-split > .recent-section {
+  grid-column: 2;
+  grid-row: 2 / 6;
+  align-self: start;
+  position: sticky;
+  top: 108px;
+}
+.home-content.home-split > .recent-section .recent-row {
+  padding-inline: 12px;
+}
+.recent-section {
+  view-transition-name: recent-sessions;
+}
+@media (prefers-reduced-motion: reduce) {
+  .recent-section {
+    view-transition-name: none;
+  }
+}
 /* A session Pilot can read but not drive. Stated once, at the top. */
 /* Stands where the composer would, at the composer's own width and radius, so
    the bottom of the page still reads as one block rather than a gap. */
@@ -605,11 +672,16 @@
     0 0 0 2px color-mix(in srgb, var(--accent) 6%, transparent);
 }
 .home-content .composer textarea {
-  min-height: 84px;
+  /* The home screen is where a whole task gets written, and it has the room,
+     so it starts taller than the in-session composer. */
+  min-height: 132px;
   font-size: max(11px, 1.0714rem);
 }
+/* The corner is the way to keep a height that differs from the content, for
+   example while reading a long prompt back. Auto-sizing covers the normal
+   case, so this only has to be available, not the primary control. */
 .composer-editor textarea {
-  resize: none;
+  resize: vertical;
 }
 .home-content .composer-bottom,
 .composer-bottom {
