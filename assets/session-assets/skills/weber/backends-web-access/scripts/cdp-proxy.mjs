@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import net from 'node:net';
-import { selectBrowser, findFallbackPort, browserEnvironment } from './browser-discovery.mjs';
+import { selectBrowser, findFallbackPort, productMatchesBrowser, browserEnvironment } from './browser-discovery.mjs';
 
 // --- 解析命令行 --browser 参数（本次启动用哪个浏览器）---
 function parseBrowserArg() {
@@ -61,12 +61,16 @@ async function discoverChromePort() {
     if (pinnedBrowserId && pinnedBrowserId !== result.browser.id) {
       throw new Error(
         `本次连接的浏览器已经是 ${pinnedBrowserId}，不会自动切到 ${result.browser.id}。` +
-        `如果想换成 ${result.browser.id}，请先在终端运行 pkill -f cdp-proxy.mjs 重置。`
+        `如果想换成 ${result.browser.id}，请先核对并停止当前 web-access proxy 的精确 PID。`
       );
     }
     pinnedBrowserId = result.browser.id;
     connectedBrowser = { id: result.browser.id, label: result.browser.label, source: result.source };
-    const tag = result.source === 'override' ? '[--browser 指定]' : '[config.env 偏好]';
+    const tag = result.source === 'override'
+      ? '[--browser 指定]'
+      : result.source === 'fallback'
+        ? '[固定端口候选，连接后验证]'
+        : '[config.env 偏好]';
     console.log(`[CDP Proxy] 选用 ${result.browser.label} (端口 ${result.browser.port}${result.browser.wsPath ? '，带 wsPath' : ''}) ${tag}`);
     return { port: result.browser.port, wsPath: result.browser.wsPath };
   }
@@ -86,15 +90,15 @@ async function discoverChromePort() {
       `本次连接的浏览器是 ${pinnedBrowserId}，但现在没连上。Agent 处理顺序：` +
       `(1) 先用系统命令打开 ${pinnedBrowserId}（按平台选择），稍等后重试请求；` +
       `(2) 若仍失败，告知用户在地址栏访问 ${pinnedBrowserId}://inspect/#remote-debugging 重新勾选允许。` +
-      `若想换成其他浏览器，请先在终端运行 pkill -f cdp-proxy.mjs 重置。`
+      `若想换成其他浏览器，请先核对并停止当前 web-access proxy 的精确 PID。`
     );
   }
   // 仅在「从未成功连接 + 无偏好/override」时允许固定端口兜底（手动 --remote-debugging-port 启动场景）
   const fallbackPort = await findFallbackPort();
   if (fallbackPort !== null) {
-    connectedBrowser = { id: 'unknown', label: '未知（通过手动调试端口连接）', source: 'fallback' };
-    console.log(`[CDP Proxy] 通过手动调试端口连接: ${fallbackPort}`);
-    return { port: fallbackPort, wsPath: null };
+    connectedBrowser = { id: 'unknown', label: '未知（通过固定端口候选）', source: 'fallback' };
+    console.log(`[CDP Proxy] 使用固定端口候选: ${fallbackPort.port}`);
+    return { port: fallbackPort.port, wsPath: fallbackPort.wsPath };
   }
   return null;
 }
@@ -131,11 +135,32 @@ async function connect() {
   return connectingPromise = new Promise((resolve, reject) => {
     ws = new WS(wsUrl);
 
-    const onOpen = () => {
+    const onOpen = async () => {
       cleanup();
-      connectingPromise = null;
-      console.log(`[CDP Proxy] 已连接浏览器 (端口 ${chromePort})`);
-      resolve();
+      try {
+        // Keep a single browser connection: this is both the permission-bearing connection and the CDP proof.
+        const version = await sendCDP('Browser.getVersion');
+        const product = version.result?.product;
+        if (typeof product !== 'string') throw new Error('CDP Browser.getVersion 未返回浏览器产品信息');
+        if (
+          connectedBrowser?.source === 'fallback'
+          && connectedBrowser.id !== 'unknown'
+          && !productMatchesBrowser(product, connectedBrowser.id)
+        ) {
+          throw new Error(`固定端口返回 ${product}，与请求的 ${connectedBrowser.id} 不一致`);
+        }
+        connectedBrowser = { ...connectedBrowser, product };
+        connectingPromise = null;
+        console.log(`[CDP Proxy] 已连接浏览器 (端口 ${chromePort}, ${product})`);
+        resolve();
+      } catch (error) {
+        connectingPromise = null;
+        ws?.close();
+        ws = null;
+        chromePort = null;
+        chromeWsPath = null;
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
     };
     const onError = (e) => {
       cleanup();
@@ -342,6 +367,194 @@ const server = http.createServer(async (req, res) => {
       const resp = await sendCDP('Target.getTargets');
       const pages = resp.result.targetInfos.filter(t => t.type === 'page');
       res.end(JSON.stringify(pages, null, 2));
+    }
+
+    // GET /extension-status?name=...&version=... - 只读核验指定 extension
+    else if (pathname === '/extension-status') {
+      const expectedName = String(q.name || '').trim();
+      const expectedVersion = String(q.version || '').trim();
+      const expectedBuildHash = String(q.buildHash || '').trim();
+      if (!expectedName) {
+        res.statusCode = 400;
+        res.end(JSON.stringify({ status: 'blocked', error: 'name is required' }));
+        return;
+      }
+      const resp = await sendCDP('Target.getTargets');
+      const extensionTargets = resp.result.targetInfos.filter(t =>
+        ['service_worker', 'background_page'].includes(t.type)
+        && t.url.startsWith('chrome-extension://')
+      );
+      const observed = [];
+      for (const target of extensionTargets) {
+        try {
+          const sid = await ensureSession(target.targetId);
+          const evaluated = await sendCDP('Runtime.evaluate', {
+            expression: `JSON.stringify({
+              manifest: chrome.runtime.getManifest(),
+              attestation: globalThis.AdPlacementInspectorBuildAttestation || null
+            })`,
+            returnByValue: true,
+          }, sid);
+          const raw = evaluated.result?.result?.value;
+          const runtime = raw ? JSON.parse(raw) : null;
+          const manifest = runtime?.manifest;
+          if (!manifest) continue;
+          observed.push({
+            id: new URL(target.url).hostname,
+            name: manifest.name,
+            version: manifest.version,
+            buildHash: runtime?.attestation?.buildHash || null,
+            targetType: target.type,
+          });
+        } catch { /* inactive or protected extension target */ }
+      }
+      const matched = observed.find(item =>
+        item.name === expectedName
+        && (!expectedVersion || item.version === expectedVersion)
+        && (!expectedBuildHash || item.buildHash === expectedBuildHash)
+      );
+      res.end(JSON.stringify({
+        status: matched ? 'passed' : 'blocked',
+        expected: {
+          name: expectedName,
+          version: expectedVersion || null,
+          buildHash: expectedBuildHash || null,
+        },
+        matched: matched || null,
+        observedCount: observed.length,
+      }, null, 2));
+    }
+
+    // POST /extension-acceptance - 通过指定 extension service worker 对目标 tab 运行固定的广告位验收消息。
+    // body: { name, version, targetUrl, manifest }
+    else if (pathname === '/extension-acceptance') {
+      if (req.method !== 'POST') {
+        res.statusCode = 400;
+        res.end(JSON.stringify({ status: 'blocked', error: 'POST is required' }));
+        return;
+      }
+      const body = JSON.parse(await readBody(req));
+      const expectedName = String(body.name || '').trim();
+      const expectedVersion = String(body.version || '').trim();
+      const expectedBuildHash = String(body.buildHash || '').trim();
+      const targetUrl = String(body.targetUrl || '').trim();
+      const manifest = body.manifest;
+      if (
+        !expectedName
+        || !targetUrl
+        || manifest?.schema !== 'ad-placement-inspector.manifest.v1'
+        || !Array.isArray(manifest?.placements)
+        || !manifest.placements.length
+      ) {
+        res.statusCode = 400;
+        res.end(JSON.stringify({
+          status: 'blocked',
+          error: 'name, targetUrl and a non-empty ad-placement-inspector.manifest.v1 are required',
+        }));
+        return;
+      }
+      const targets = await sendCDP('Target.getTargets');
+      const extensionTargets = targets.result.targetInfos.filter(target =>
+        ['service_worker', 'background_page'].includes(target.type)
+        && target.url.startsWith('chrome-extension://')
+      );
+      let matchedTarget = null;
+      let matchedManifest = null;
+      for (const target of extensionTargets) {
+        try {
+          const sid = await ensureSession(target.targetId);
+          const evaluated = await sendCDP('Runtime.evaluate', {
+            expression: `JSON.stringify({
+              manifest: chrome.runtime.getManifest(),
+              attestation: globalThis.AdPlacementInspectorBuildAttestation || null
+            })`,
+            returnByValue: true,
+          }, sid);
+          const raw = evaluated.result?.result?.value;
+          const runtime = raw ? JSON.parse(raw) : null;
+          const extensionManifest = runtime?.manifest;
+          if (
+            extensionManifest?.name === expectedName
+            && (!expectedVersion || extensionManifest.version === expectedVersion)
+            && (!expectedBuildHash || runtime?.attestation?.buildHash === expectedBuildHash)
+          ) {
+            matchedTarget = target;
+            matchedManifest = {
+              ...extensionManifest,
+              buildHash: runtime?.attestation?.buildHash || null,
+            };
+            break;
+          }
+        } catch { /* inactive or protected extension target */ }
+      }
+      if (!matchedTarget) {
+        res.end(JSON.stringify({
+          status: 'blocked',
+          error: 'expected extension runtime was not found',
+        }));
+        return;
+      }
+      const sid = await ensureSession(matchedTarget.targetId);
+      const payload = JSON.stringify({ targetUrl, manifest });
+      const expression = `(async () => {
+        const input = ${payload};
+        const tabs = await chrome.tabs.query({});
+        const tab = tabs.find(item => item.url === input.targetUrl);
+        if (!tab?.id) return { status: 'blocked', error: 'target tab not found' };
+        const originPattern = new URL(input.targetUrl).origin + '/*';
+        const granted = await chrome.permissions.contains({ origins: [originPattern] });
+        if (!granted) return {
+          status: 'blocked',
+          error: 'extension origin permission is not granted',
+          originPattern,
+        };
+        try {
+          await chrome.tabs.sendMessage(tab.id, { type: 'ADI_GET_SNAPSHOT' });
+        } catch (error) {
+          return {
+            status: 'blocked',
+            error: 'declared content script is not reachable',
+            detail: String(error),
+            tabId: tab.id,
+            originPattern,
+          };
+        }
+        const acceptance = await chrome.tabs.sendMessage(tab.id, {
+          type: 'ADI_RUN_ACCEPTANCE',
+          manifest: input.manifest,
+        });
+        return {
+          status: acceptance?.allPass ? 'passed' : 'failed',
+          tabId: tab.id,
+          originPattern,
+          acceptance,
+        };
+      })()`;
+      const evaluated = await sendCDP('Runtime.evaluate', {
+        expression,
+        returnByValue: true,
+        awaitPromise: true,
+      }, sid);
+      if (evaluated.result?.exceptionDetails) {
+        res.statusCode = 500;
+        res.end(JSON.stringify({
+          status: 'blocked',
+          error: evaluated.result.exceptionDetails.text,
+        }));
+        return;
+      }
+      res.end(JSON.stringify({
+        ...(evaluated.result?.result?.value || {
+          status: 'blocked',
+          error: 'extension acceptance returned no value',
+        }),
+        extension: {
+          id: new URL(matchedTarget.url).hostname,
+          name: matchedManifest.name,
+          version: matchedManifest.version,
+          buildHash: matchedManifest.buildHash,
+        },
+      }, null, 2));
     }
 
     // POST /new (body=URL) - 创建新后台 tab
@@ -556,6 +769,40 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify(resp.result?.result?.value || {}));
     }
 
+    // POST /setViewport?target=xxx — 仅允许 task-owned tab 设置 CDP 设备视口。
+    else if (pathname === '/setViewport') {
+      if (req.method !== 'POST') {
+        res.statusCode = 400;
+        res.end(JSON.stringify({ error: 'POST body 需要 viewport JSON' }));
+        return;
+      }
+      if (!q.target || !managedTabs.has(q.target)) {
+        res.statusCode = 403;
+        res.end(JSON.stringify({ error: '只允许对通过 /new 创建的 task-owned tab 设置 viewport' }));
+        return;
+      }
+      const body = JSON.parse(await readBody(req));
+      const width = Number(body.width);
+      const height = Number(body.height);
+      const deviceScaleFactor = body.deviceScaleFactor === undefined ? 1 : Number(body.deviceScaleFactor);
+      if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width > 3840 || height > 3840 || !Number.isFinite(deviceScaleFactor) || deviceScaleFactor < 0 || deviceScaleFactor > 4) {
+        res.statusCode = 400;
+        res.end(JSON.stringify({ error: 'viewport width/height 必须是 1-3840 的整数，deviceScaleFactor 必须在 0-4 之间' }));
+        return;
+      }
+      const sid = await ensureSession(q.target);
+      await sendCDP('Emulation.setDeviceMetricsOverride', {
+        width,
+        height,
+        deviceScaleFactor,
+        mobile: body.mobile === true,
+        screenWidth: width,
+        screenHeight: height,
+      }, sid);
+      touchTab(q.target);
+      res.end(JSON.stringify({ status: 'ok', targetId: q.target, width, height, deviceScaleFactor, mobile: body.mobile === true }));
+    }
+
     // POST /setFiles?target=xxx — 给 file input 设置本地文件（绕过文件对话框）
     // body: JSON { "selector": "input[type=file]", "files": ["/path/to/file1.png", "/path/to/file2.png"] }
     else if (pathname === '/setFiles') {
@@ -644,6 +891,8 @@ const server = http.createServer(async (req, res) => {
         endpoints: {
           '/health': 'GET - 健康检查',
           '/targets': 'GET - 列出所有页面 tab',
+          '/extension-status?name=...&version=...': 'GET - 核验指定 Chrome extension 的 service worker manifest',
+          '/extension-acceptance': 'POST JSON - 通过指定 extension 对目标 tab 运行广告位 manifest 验收',
           '/new': 'POST body=URL - 创建新后台 tab（自动等待加载）',
           '/close?target=': 'GET - 关闭 tab',
           '/navigate?target=': 'POST body=URL - 导航（自动等待加载）',
@@ -656,6 +905,7 @@ const server = http.createServer(async (req, res) => {
           '/key?target=': 'POST JSON {action?,key,code?,text?,modifiers?} - 真实 CDP 键盘事件',
           '/insertText?target=': 'POST body=文本 - 向已进入编辑态的元素输入文本',
           '/viewport?target=': 'GET - CSS 视口、devicePixelRatio 和 visualViewport',
+          '/setViewport?target=': 'POST JSON {width,height,deviceScaleFactor?,mobile?} - 仅 task-owned tab 的 CDP 设备视口',
           '/scroll?target=&y=&direction=': 'GET - 滚动页面',
           '/screenshot?target=&file=': 'GET - 截图',
         },

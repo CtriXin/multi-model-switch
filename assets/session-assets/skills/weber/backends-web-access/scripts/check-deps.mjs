@@ -18,6 +18,7 @@ import { selectBrowser, knownBrowsers, findFallbackPort, browserEnvironment } fr
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PROXY_SCRIPT = path.join(ROOT, 'scripts', 'cdp-proxy.mjs');
 const PROXY_PORT = Number(process.env.CDP_PROXY_PORT || 3456);
+const PROXY_HEALTH_URL = `http://127.0.0.1:${PROXY_PORT}/health`;
 const CONFIG_PATH = path.join(ROOT, 'config.env');
 const CONFIG_TEMPLATE = path.join(ROOT, 'templates', 'config.env.template');
 
@@ -61,6 +62,20 @@ function httpGetJson(url, timeoutMs = 3000) {
     .catch(() => null);
 }
 
+export function isConnectedProxyHealth(health) {
+  return health?.status === 'ok' && health.connected === true;
+}
+
+function isCompatibleProxyHealth(health, expectedBrowserId) {
+  return isConnectedProxyHealth(health)
+    && (!expectedBrowserId || health.browser?.id === expectedBrowserId);
+}
+
+async function connectedProxyHealth() {
+  const health = await httpGetJson(PROXY_HEALTH_URL);
+  return isConnectedProxyHealth(health) ? health : null;
+}
+
 function startProxyDetached(browserOverride) {
   const logFile = path.join(os.tmpdir(), 'cdp-proxy.log');
   const logFd = fs.openSync(logFile, 'a');
@@ -76,17 +91,16 @@ function startProxyDetached(browserOverride) {
 }
 
 async function ensureProxy(expectedBrowserId, browserOverride) {
-  const healthUrl = `http://127.0.0.1:${PROXY_PORT}/health`;
   const targetsUrl = `http://127.0.0.1:${PROXY_PORT}/targets`;
 
   // 复用：proxy 已运行 + 已连接浏览器 → 校验 expected vs actual
-  const health = await httpGetJson(healthUrl);
-  if (health?.status === 'ok' && health.connected) {
+  const health = await connectedProxyHealth();
+  if (health) {
     const runningId = health.browser?.id;
     const runningLabel = health.browser?.label || runningId || 'unknown';
     if (expectedBrowserId && runningId && runningId !== 'unknown' && runningId !== expectedBrowserId) {
       console.log(`proxy: 浏览器不一致 — 当前已连着 ${runningLabel}，但本次需要 ${expectedBrowserId}`);
-      console.log('  请在终端运行 pkill -f cdp-proxy.mjs 重置后再试');
+      console.log('  请先核对并停止当前 web-access proxy 的精确 PID，再重试');
       return false;
     }
     console.log(`proxy: ready (${runningLabel})`);
@@ -101,7 +115,7 @@ async function ensureProxy(expectedBrowserId, browserOverride) {
   for (let i = 1; i <= 15; i++) {
     const result = await httpGetJson(targetsUrl, 8000);
     if (Array.isArray(result)) {
-      const newHealth = await httpGetJson(healthUrl);
+      const newHealth = await httpGetJson(PROXY_HEALTH_URL);
       const label = newHealth?.browser?.label || 'unknown';
       console.log(`proxy: ready (${label})`);
       return true;
@@ -135,7 +149,11 @@ async function resolveAndReport(override) {
 
   switch (result.kind) {
     case 'ok': {
-      const sourceTag = result.source === 'override' ? '[--browser 指定]' : '[config.env 偏好]';
+      const sourceTag = result.source === 'override'
+        ? '[--browser 指定]'
+        : result.source === 'fallback'
+          ? '[固定端口候选，连接后验证]'
+          : '[config.env 偏好]';
       console.log(`browser: ok (${result.browser.label}, port ${result.browser.port}) ${sourceTag}`);
       return { proceed: true, browserId: result.browser.id };
     }
@@ -167,7 +185,7 @@ async function resolveAndReport(override) {
       // 末路兜底：尝试常见固定端口（用户手动 --remote-debugging-port=9222 启动的场景）
       const fallbackPort = await findFallbackPort();
       if (fallbackPort) {
-        console.log(`browser: ok (port ${fallbackPort}) [通过手动调试端口连接]`);
+        console.log(`browser: candidate (port ${fallbackPort.port}) [由 proxy CDP 握手验证]`);
         return { proceed: true };
       }
       console.log('browser: 未连接 — 没有任何浏览器打开远程调试开关');
@@ -178,10 +196,32 @@ async function resolveAndReport(override) {
   }
 }
 
+function reportSitePatterns() {
+  const patternsDir = path.join(ROOT, 'references', 'site-patterns');
+  try {
+    const sites = fs.readdirSync(patternsDir)
+      .filter(f => f.endsWith('.md'))
+      .map(f => f.replace(/\.md$/, ''));
+    if (sites.length) {
+      console.log(`\nsite-patterns: ${sites.join(', ')}`);
+    }
+  } catch {}
+}
+
 // --- main ---
 
-async function main() {
+export async function main() {
   const opts = parseArgs(process.argv.slice(2));
+
+  // A connected proxy is authoritative and remains reachable when sandbox TCC blocks DevToolsActivePort.
+  const health = await connectedProxyHealth();
+  if (isCompatibleProxyHealth(health, opts.browser)) {
+    const label = health.browser?.label || health.browser?.id || 'unknown';
+    console.log(`proxy: ready (${label})`);
+    reportSitePatterns();
+    return;
+  }
+
   ensureConfigExists();
   checkNode();
 
@@ -200,16 +240,10 @@ async function main() {
   const proxyOk = await ensureProxy(browserId, opts.browser);
   if (!proxyOk) process.exit(1);
 
-  // 列出已有站点经验
-  const patternsDir = path.join(ROOT, 'references', 'site-patterns');
-  try {
-    const sites = fs.readdirSync(patternsDir)
-      .filter(f => f.endsWith('.md'))
-      .map(f => f.replace(/\.md$/, ''));
-    if (sites.length) {
-      console.log(`\nsite-patterns: ${sites.join(', ')}`);
-    }
-  } catch {}
+  reportSitePatterns();
 }
 
-await main();
+const isDirectExecution = process.argv[1]
+  && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url));
+
+if (isDirectExecution) await main();

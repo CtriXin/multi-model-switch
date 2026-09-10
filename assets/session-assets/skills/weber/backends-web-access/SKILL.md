@@ -1,13 +1,13 @@
 ---
 name: web-access
 license: MIT
-github: https://github.com/eze-is/web-access
+github: https://github.com/CtriXin/web-access
 description:
   所有联网操作必须通过此 skill 处理，包括：搜索、网页抓取、登录后操作、网络交互等。
   触发场景：用户要求搜索信息、查看网页内容、访问需要登录的网站、操作网页界面、抓取社交媒体内容（小红书、微博、推特等）、读取动态渲染页面、以及任何需要真实浏览器环境的网络任务。
 metadata:
-  author: 一泽Eze
-  version: "2.5.3-mmf.1"
+  author: 一泽Eze; CtriXin distribution
+  version: "2.6.0-ctrixin.1"
 ---
 
 # web-access Skill
@@ -17,6 +17,8 @@ metadata:
 `web-access` is a browser backend. When an agent enters through Weber/Webber, Weber chooses whether to use this backend; when an agent explicitly loads `web-access`, it may proceed directly.
 
 For MMF, Codex, and other isolated sessions, export `WEB_ACCESS_HOST_HOME` (or `HOST_HOME` / `REAL_HOME`) as the host user's home directory before running the precheck. Browser discovery then reads the host `DevToolsActivePort`, while the agent never copies the host Chrome profile or cookie database. If the session HOME is isolated and no host-home handoff is available, `check-deps.mjs` hard-fails rather than guessing a Chrome profile or starting a browser.
+
+When a host Chrome has remote debugging enabled on a fixed port but does not expose `DevToolsActivePort`, the precheck may identify a standard local listener as a candidate. It must not open a separate probe connection: the task-owned CDP Proxy performs one `Browser.getVersion` round trip on its final connection, verifies the configured browser product, and keeps that authorized connection alive. A TCP listener or an HTTP response alone is never reported as usable CDP, and an already connected proxy is always reused before any discovery.
 
 ## 前置检查
 
@@ -35,7 +37,36 @@ node "${CLAUDE_SKILL_DIR}/scripts/check-deps.mjs"
 
 支持参数 `--browser <chrome|edge>` 表达本次临时覆盖（不写 config.env）。
 
-切换浏览器时，proxy 是长驻进程，需先 `pkill -f cdp-proxy.mjs` 再重跑 check-deps。
+切换浏览器时，proxy 是长驻进程。先用 `ps` 核对其精确 PID 和脚本路径，只停止该
+task-owned proxy，再重跑 check-deps；禁止使用全局 `pkill`。
+
+### 广告位验收前置
+
+广告位、广告 source fidelity、复制站广告验证必须使用 canonical 最新插件目录
+`${WEB_ACCESS_HOST_HOME:-$HOME}/auto-skills/CtriXin-repo/chrome-extensions/ad-placement-inspector/`，
+并在目标 URL 上运行：
+
+```bash
+node "${CLAUDE_SKILL_DIR}/scripts/check-ad-placement-inspector.mjs" \
+  --url "<local-or-production-url>" \
+  --manifest "<source-bound-ad-placement-manifest.json>" \
+  --evidence-dir "<artifact-root>/evidence/runtime"
+```
+
+批量广告位验收时，必须只创建一个 task-owned 后台 tab，再让每条 case 传同一个
+`--target <targetId>`。该命令会在这个 tab 内导航并执行验收，绝不能为每条 case 重复创建 tab
+或重启 Proxy；结束后只关闭这个 task-owned tab。`--target` 不得指向用户已有 tab。
+
+当 source-bound manifest 声明 `viewportClass: "mobile"` 时，检查器会通过 Proxy 的
+`/setViewport` 为这个 task-owned tab 应用 `390 x 844` 的 CDP emulation，再导航到目标页。
+该接口拒绝用户已有 tab，不会新增 Chrome 连接或触发逐 case 授权；Desktop tab 保持真实窗口视口。
+
+只有同时满足真实 Chrome CDP 已连接、extension service worker manifest 的 name/version/build hash
+匹配 canonical source、目标页面 content-script handshake 同 hash，并且 extension 在目标 tab 上执行
+`ADI_RUN_ACCEPTANCE` 后逐广告位 `placement_acceptance.acceptance.allPass=true` 才是
+pass。只证明插件安装不等于位置验收。未安装、未启用、版本/build 漂移、origin permission
+缺失或任一 placement mismatch 均必须停止；不得用普通 DOM 检查或 Playwright 独立
+profile 替代。
 
 **隔离环境硬规则：** 已有登录态的任务必须先通过 `check-deps.mjs` 连接宿主 Chrome。不得从隔离 HOME 启动个人 Chrome binary，也不得回退到 Playwright 独立 Profile；必须命令启动时使用 `mms-chrome-host`。
 

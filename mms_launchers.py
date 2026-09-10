@@ -1084,6 +1084,24 @@ _SESSION_GUARD_MARKER_NAME = ".mms-session-guard.json"
 _SESSION_GUARD_LOCK_NAME = ".mms-session-guard.lock"
 
 
+def _inject_weber_backend_hints(env):
+    """Tell the bundled Weber skill where its backends live; explicit env wins."""
+    for key, resolver in (
+        ("WEBER_SKILL_DIR", _resolve_weber_root),
+        ("WEB_ACCESS_SKILL_DIR", _resolve_web_access_root),
+        ("AGENT_BROWSER_SKILL_DIR", _resolve_agent_browser_root),
+    ):
+        if str(env.get(key) or "").strip():
+            continue
+        try:
+            root = str(resolver() or "").strip()
+        except Exception:
+            root = ""
+        if root:
+            env[key] = root
+    return env
+
+
 def _inject_real_home_hints(env, *, include_xdg=False):
     real_home = _real_user_home()
     env["MMS_REAL_HOME"] = real_home
@@ -1092,6 +1110,7 @@ def _inject_real_home_hints(env, *, include_xdg=False):
     env["WEB_ACCESS_HOST_HOME"] = real_home
     env["HOST_HOME"] = real_home
     env["GH_CONFIG_DIR"] = _real_user_path(".config", "gh")
+    _inject_weber_backend_hints(env)
     _inject_rescue_launch_env(env)
     if include_xdg:
         env["XDG_CONFIG_HOME"] = _real_user_path(".config")
