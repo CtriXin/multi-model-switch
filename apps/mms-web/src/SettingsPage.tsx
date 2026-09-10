@@ -1,6 +1,7 @@
 import { type ReactNode, useState } from "react";
 import { Sun, Moon, Monitor, Minus, Plus, SlidersHorizontal, Palette, Settings2 } from "lucide-react";
 import type { Bootstrap } from "./types";
+import { RemoteAccessSection } from "./RemoteAccess";
 import { Models } from "./Models";
 import { FONT_FAMILIES } from "./App";
 import { AppVersion, Dialog } from "./components";
@@ -35,7 +36,7 @@ export function SettingsPage({
   boldText, setBoldText,
   selectToCopy, setSelectToCopy,
   enterToSend, setEnterToSend,
-  requestNavigation, editStateChanged,
+  requestNavigation, editStateChanged, startTask,
 }: {
   openUpdates: () => void;
   updateAvailable: boolean;
@@ -57,6 +58,7 @@ export function SettingsPage({
   workspaceId: string;
   effortChanged: (id: string) => void;
   requestNavigation: (action: () => void) => void;
+  startTask: (text: string) => void;
   editStateChanged: (state: {dirty: boolean; busy: boolean}) => void;
   autoCollapseProcess: boolean;
   setAutoCollapseProcess: (on: boolean) => void;
@@ -309,6 +311,7 @@ export function SettingsPage({
               onChange={(e) => setSelectToCopy(e.target.checked)}
             />
           </label>
+          <RemoteAccessSection startTask={startTask} />
           <SkillSourcesSetting />
           {/* State, not documentation: it says which config the running Pilot
               reads. The shortcut and workspace explanations that used to sit

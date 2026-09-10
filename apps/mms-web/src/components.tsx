@@ -13,6 +13,7 @@ import type { FormEvent, ReactNode } from "react";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { remarkReadable } from "./remarkReadable";
+import { copyText } from "./clipboard";
 import { ToolEvent } from "./ToolEvent";
 import { messageAnchor } from "./ConversationOutline";
 import { MessageActions } from "./SessionTools";
@@ -68,13 +69,11 @@ function CodeBlock({ children }: { children?: ReactNode }) {
     <div className="code-block">
       <button
         onClick={() => {
-          void navigator.clipboard
-            .writeText(ref.current?.textContent || "")
-            .then(() => {
-              setState("已复制");
-              setTimeout(() => setState("复制代码"), 1500);
-            })
-            .catch(() => setState("请选中文字复制"));
+          void copyText(ref.current?.textContent || "").then((done) => {
+            if (!done) return setState("请选中文字复制");
+            setState("已复制");
+            setTimeout(() => setState("复制代码"), 1500);
+          });
         }}
       >
         {state}
