@@ -197,7 +197,10 @@ class ChildRuntime:
             _respond(
                 req_id,
                 "get_state",
-                data={"isStreaming": False, "sessionId": "fake", "messageCount": 0},
+                # A real Pi reports the model it loaded; the launch path checks
+                # for it before treating the session as usable.
+                data={"isStreaming": False, "sessionId": "fake", "messageCount": 0,
+                      "model": {"id": "fake-model"}},
             )
             return
 

@@ -493,6 +493,35 @@
 .composer-locked svg {
   flex-shrink: 0;
 }
+/* The one action that works sits at the far end, where the send button was. */
+.composer-locked > span {
+  flex: 1;
+  min-width: 0;
+}
+.composer-locked .button {
+  flex-shrink: 0;
+}
+.adopt-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 0 0 12px;
+  font-size: max(11px, 0.8571rem);
+}
+.adopt-field > span:first-child {
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.adopt-field .model-picker-trigger {
+  min-width: 0;
+  max-width: 60%;
+}
+.adopt-path {
+  min-width: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
 .session-readonly {
   margin: 0 0 14px;
   padding: 10px 14px;

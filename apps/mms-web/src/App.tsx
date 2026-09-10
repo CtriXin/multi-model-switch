@@ -68,7 +68,7 @@ import { SettingsPage } from "./SettingsPage";
 import { TaskSettings, SessionSettings } from "./TaskSettings";
 import { Popover } from "./Popover";
 import { useLaunchFacts, readRoutePreferences } from "./ModelExplorer";
-import { WorkspaceDialog } from "./LaunchOptions";
+import { ModelPicker, WorkspaceDialog } from "./LaunchOptions";
 
 const empty: Bootstrap = {
   version: "1",
@@ -227,6 +227,12 @@ export function App() {
   useEffect(() => { saveRecipeDraft(recipe); }, [recipe]);
   const [planMode, setPlanMode] = useState(!!recipe?.recipe.planning);
   const [addFolder, setAddFolder] = useState(false);
+  const [adopt, setAdopt] = useState<{
+    session: Session;
+    presetId: string;
+    busy: boolean;
+    error: string;
+  } | null>(null);
   const [presetId, setPresetId] = useState(() =>
     readSetting("mms-web-preset", ""),
   );
@@ -895,6 +901,46 @@ export function App() {
       await load();
     } catch (error) {
       setWorkspaceNotice(error instanceof Error ? error.message : "添加失败");
+    }
+  }
+  /** The model the terminal was using, when this Pilot has it available.
+   *  Continuing with a different model is allowed, but it should be a choice,
+   *  not what happens by default. */
+  function presetForModel(modelName: string) {
+    const wanted = modelName.trim().toLowerCase();
+    if (!wanted) return presetId;
+    const match = data.presets.find(
+      (p) =>
+        p.available &&
+        p.harness === "pi" &&
+        (p.name.toLowerCase() === wanted ||
+          p.modelId.toLowerCase().endsWith(":" + wanted) ||
+          p.modelId.toLowerCase() === wanted),
+    );
+    return match?.id || presetId;
+  }
+  /** Continue a terminal-started session here, from its own history.
+   *  The terminal's transcript is copied, not shared: two processes appending
+   *  to one file would corrupt it, so that session stays exactly as it is. */
+  async function submitAdopt() {
+    if (!adopt || adopt.busy) return;
+    setAdopt({ ...adopt, busy: true, error: "" });
+    try {
+      const result = await mutate<SessionDetail>(
+        "/sessions/" + encodeURIComponent(adopt.session.id) + "/adopt",
+        { presetId: adopt.presetId },
+      );
+      setAdopt(null);
+      openSession(result.session.id);
+      void load();
+    } catch (error) {
+      setAdopt((old) =>
+        old && {
+          ...old,
+          busy: false,
+          error: error instanceof Error ? error.message : "接入失败",
+        },
+      );
     }
   }
   async function submitWorkspaceRemove() {
@@ -1843,7 +1889,8 @@ export function App() {
                         // the composer to find out it cannot be used.
                         <p className="session-readonly" role="status">
                           这个会话是在终端里用 <code>mmf</code> 开始的，这里只读。
-                          要继续，请回到那个终端。
+                          回到那个终端可以照常继续；也可以用下面的「接入 Pilot」
+                          把这段对话复制过来，之后在这里做。
                         </p>
                       )}
                       <Transcript
@@ -1960,12 +2007,27 @@ export function App() {
                     />
                   </div>
                   {detail.session.owner === "cli" ? (
-                    // Nothing in the composer can be used here, so none of it
-                    // is shown. The banner above the transcript says why.
-                    <p className="composer-locked" role="status">
+                    // Nothing in the composer can be used until this session is
+                    // adopted, so none of it is shown; the one action that does
+                    // work takes its place.
+                    <div className="composer-locked" role="status">
                       <Eye size={15} />
-                      只读会话 · 要继续，回到开始它的那个终端
-                    </p>
+                      <span>这条会话在终端里进行，Pilot 只能查看。</span>
+                      <button
+                        type="button"
+                        className="button primary"
+                        onClick={() =>
+                          setAdopt({
+                            session: detail.session,
+                            presetId: presetForModel(detail.session.modelName),
+                            busy: false,
+                            error: "",
+                          })
+                        }
+                      >
+                        接入 Pilot 继续
+                      </button>
+                    </div>
                   ) : (
                   <Composer
                     key={detail.session.id}
@@ -2247,6 +2309,63 @@ export function App() {
               type="button"
               className="button"
               onClick={() => setRemoveWorkspace(null)}
+            >
+              取消
+            </button>
+          </div>
+        </Dialog>
+      )}
+      {adopt && (
+        <Dialog
+          title="接入这条终端会话"
+          close={() => {
+            if (!adopt.busy) setAdopt(null);
+          }}
+        >
+          <p className="dialog-intro">
+            会把上面的对话复制一份到 Pilot，用你选的模型接着往下做。终端里那条记录不动，
+            回到那个终端仍能继续；两边从此各走各的，这个列表只留 Pilot 这条。
+          </p>
+          <label className="adopt-field">
+            <span>接着用哪个模型</span>
+            <ModelPicker
+              presets={data.presets}
+              models={data.models}
+              workspaceId={adopt.session.workspaceId}
+              value={adopt.presetId}
+              change={(id) => setAdopt((old) => old && { ...old, presetId: id })}
+              favorites={favorites}
+              toggleFavorite={favorite}
+            />
+          </label>
+          <p className="adopt-field">
+            <span>工作文件夹</span>
+            <span className="adopt-path">
+              {adopt.session.cwd || "未记录"}
+              {!registered.has(adopt.session.workspaceId) && adopt.session.cwd
+                ? "，会一并加进侧栏"
+                : ""}
+            </span>
+          </p>
+          {adopt.error && (
+            <p className="form-error" role="alert">
+              {adopt.error}
+            </p>
+          )}
+          <div className="workspace-form">
+            <button
+              type="button"
+              className="button primary"
+              disabled={adopt.busy || !adopt.presetId}
+              onClick={() => void submitAdopt()}
+            >
+              {adopt.busy ? "正在接入…" : "接入并继续"}
+            </button>
+            <button
+              type="button"
+              className="button"
+              disabled={adopt.busy}
+              onClick={() => setAdopt(null)}
             >
               取消
             </button>
