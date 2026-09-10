@@ -1,6 +1,10 @@
 import type { Bootstrap, SessionDetail, SessionEvent } from "./types";
 
 const time = "2026-09-08T09:00:00Z";
+// Preview turns carry plausible clocks so the timestamp and reply duration
+// read the same way they do in a live session.
+const at = (seconds: number) =>
+  new Date(Date.parse(time) + seconds * 1000).toISOString();
 const event = (
   id: string,
   kind: SessionEvent["kind"],
@@ -40,23 +44,25 @@ export const previewDetails: Record<string, SessionDetail> = {
         "2",
         "assistant",
         "我先看了项目里现有的使用说明和配置流程。最需要减少的，是第一次启动前连续选择工具、服务商、模型和通道的过程。",
+        { createdAt: at(19), updatedAt: at(34) },
       ),
       event(
         "3",
         "tool",
         "README.md\ndocs/getting-started.md\ndocs/MODEL_CONFIG_CONTRACT.md",
-        { title: "阅读了 3 份项目文档", status: "done" },
+        { title: "阅读了 3 份项目文档", status: "done", createdAt: at(36), updatedAt: at(88) },
       ),
       event(
         "4",
         "assistant",
         "建议把第一次使用收敛成三个步骤：\n\n1. **连接自己的模型服务**，只填写必要信息。\n2. **选择工作文件夹**，明确 AI 在哪里工作。\n3. **说出想做的事**，复用一套可用的启动组合。\n\n流程草案已经放在右侧。高级设置保留在运行详情中，需要时再展开。",
+        { createdAt: at(90), updatedAt: at(133) },
       ),
       event(
         "5",
         "approval",
         "将首次使用流程保存到 docs/first-run.md，便于团队一起评审。",
-        { title: "写入一份项目文档", approvalId: "sample-write" },
+        { title: "写入一份项目文档", approvalId: "sample-write", createdAt: at(135) },
       ),
     ],
     artifacts: [
@@ -92,6 +98,7 @@ export const previewDetails: Record<string, SessionDetail> = {
         "2",
         "assistant",
         "已按上手、体验和稳定性整理成可讨论的清单。每个问题都保留了原始描述，便于团队核对。\n\n你可以在右侧阅读示例结果。",
+        { createdAt: at(14), updatedAt: at(47) },
       ),
     ],
     artifacts: [

@@ -2448,7 +2448,7 @@ _CLAUDE_DEFAULT_PERMISSION_ALLOW = [
 ]
 
 _CLAUDE_DEFAULT_PERMISSION_DENY = [
-    "Bash(rm -rf /)*",
+    "Bash(rm -rf /*)",
     "Bash(git push --force *)",
 ]
 

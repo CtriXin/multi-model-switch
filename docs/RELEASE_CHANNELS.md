@@ -15,7 +15,8 @@ MMS 采用 Stable / Dev / Canary 三通道。目标是把“普通用户能放�
 - 本机维护者命令由 `scripts/link_local_channel_commands.sh` 生成到 `~/.local/bin`。
 - `mms` 固定为 public installed copy，只用于公开版本复现，不作为日常本地开发入口。
 - `mmd` 指向 stable worktree；`mmf` 指向 dev worktree；`mmg` 指向 canary worktree；`mmm` 指向 main worktree。
-- `mmf` / `mmg` 都强制使用 `~/.config/mms-next` preview DB root；`mms` / `mmd` / `mmm` 使用默认 stable root。
+- 默认 config root 是 `~/.config/mms-next`，保存 v2 DB 真值。`mms` / `mmf` / `mmg` 都落在这个根上，Pilot 网页默认也用它，所以一处配置在命令行和网页都生效。
+- `mmd` / `mmm` 由包装器显式钉在 legacy `~/.config/mms` 上（`MMS_CONFIG_ROOT` 加 `MMS_CONFIG_ROOT_MODE=stable`），用于观察旧 stable 配置；不显式钉住就会跟随新默认。
 
 ## 通道定义
 
@@ -53,11 +54,11 @@ MMS 采用 Stable / Dev / Canary 三通道。目标是把“普通用户能放�
 
 | Command | 语义 | 当前目标 | Config root | 用途 |
 |---|---|---|---|---|
-| `mms` | Public installed MMS | `~/.mms/mms` | 默认 `~/.config/mms` | 只用于公开版本问题复现 |
-| `mmd` | Stable | `.worktrees/stable-v3.3-no-db/mms` | 默认 `~/.config/mms` | stable 线验证 |
+| `mms` | Public installed MMS | `~/.mms/mms` | 默认 `~/.config/mms-next` | 只用于公开版本问题复现 |
+| `mmd` | Stable | `.worktrees/stable-v3.3-no-db/mms` | 钉住 `~/.config/mms` | stable 线验证 |
 | `mmf` | Dev | 仓库根目录 `dev` checkout 的 `mmf` | 强制 `~/.config/mms-next` | 日常开发 / DB preview |
 | `mmg` | Canary | `.worktrees/canary/mms` | 强制 `~/.config/mms-next` | 每日实验 / 快速回滚 |
-| `mmm` | Main | 当前 main worktree `mms` | 默认 `~/.config/mms` | main 过渡观察入口 |
+| `mmm` | Main | 当前 main worktree `mms` | 钉住 `~/.config/mms` | main 过渡观察入口 |
 
 - `main`：未来等同 Stable/default branch；当前用 `mmm` 明确区分 main 过渡入口。
 - `dev`：作者平时常用的开发通道；固定对应 `MMF/mmf`，且维护者默认从仓库根目录进入这个 clean `dev` checkout。
