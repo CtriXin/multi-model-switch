@@ -399,3 +399,40 @@ def test_review_protects_unsaved_edits_and_compares_with_the_draft(settings):
     assert by_field["context"]["before"] == "524288"
     assert by_field["effort"]["before"] == "high"
     assert settings.fingerprint() == before
+
+
+def test_delete_channel_removes_provider_and_keeps_others(settings):
+    before = {p["id"] for p in settings.read()["providers"]}
+    assert {"channel-a", "channel-b"} <= before
+    snap = settings.read()
+    preview = settings.preview({
+        "fingerprint": snap["fingerprint"], "revision": snap["revision"],
+        "providerId": "channel-b", "removeProviderId": "channel-b",
+    })
+    assert preview["changes"] == [{"kind": "channel-remove", "model": "channel-b", "channels": ["channel-b"]}]
+    # A confirm phrase is still required before anything is written.
+    with pytest.raises(WebError, match="确认"):
+        settings.apply({"previewId": preview["previewId"]})
+    result = settings.apply({"previewId": preview["previewId"], "confirmPhrase": "写入预览DB"})
+    assert result["applied"]
+    after = settings.read()
+    ids = {p["id"] for p in after["providers"]}
+    assert "channel-b" not in ids and "channel-a" in ids
+    # channel-a keeps its published models untouched by the deletion.
+    keep = next(p for p in after["providers"] if p["id"] == "channel-a")
+    assert {m["id"] for m in keep["models"] if m["visible"]} == {"gpt-5", "gpt-4.1"}
+
+
+def test_delete_last_channel_is_refused(settings):
+    snap = settings.read()
+    settings.apply({"previewId": settings.preview({
+        "fingerprint": snap["fingerprint"], "revision": snap["revision"],
+        "providerId": "channel-b", "removeProviderId": "channel-b",
+    })["previewId"], "confirmPhrase": "写入预览DB"})
+    snap = settings.read()
+    assert [p["id"] for p in snap["providers"]] == ["channel-a"]
+    with pytest.raises(WebError, match="最后一个通道"):
+        settings.preview({
+            "fingerprint": snap["fingerprint"], "revision": snap["revision"],
+            "providerId": "channel-a", "removeProviderId": "channel-a",
+        })

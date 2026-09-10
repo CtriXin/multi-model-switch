@@ -1084,6 +1084,24 @@ _SESSION_GUARD_MARKER_NAME = ".mms-session-guard.json"
 _SESSION_GUARD_LOCK_NAME = ".mms-session-guard.lock"
 
 
+def _inject_weber_backend_hints(env):
+    """Tell the bundled Weber skill where its backends live; explicit env wins."""
+    for key, resolver in (
+        ("WEBER_SKILL_DIR", _resolve_weber_root),
+        ("WEB_ACCESS_SKILL_DIR", _resolve_web_access_root),
+        ("AGENT_BROWSER_SKILL_DIR", _resolve_agent_browser_root),
+    ):
+        if str(env.get(key) or "").strip():
+            continue
+        try:
+            root = str(resolver() or "").strip()
+        except Exception:
+            root = ""
+        if root:
+            env[key] = root
+    return env
+
+
 def _inject_real_home_hints(env, *, include_xdg=False):
     real_home = _real_user_home()
     env["MMS_REAL_HOME"] = real_home
@@ -1092,6 +1110,7 @@ def _inject_real_home_hints(env, *, include_xdg=False):
     env["WEB_ACCESS_HOST_HOME"] = real_home
     env["HOST_HOME"] = real_home
     env["GH_CONFIG_DIR"] = _real_user_path(".config", "gh")
+    _inject_weber_backend_hints(env)
     _inject_rescue_launch_env(env)
     if include_xdg:
         env["XDG_CONFIG_HOME"] = _real_user_path(".config")
@@ -3636,12 +3655,10 @@ def _managed_asset_root_candidates(surface, *names):
 
 
 _BUILTIN_MANAGED_SESSION_SKILLS = {
-    "web-access",
     "weber",
-    "agent-browser",
     "codegraph",
     "toon",
-    "token-saver",
+    "grill-me",
     "auto-github-contributor",
 }
 
@@ -3847,9 +3864,10 @@ def _resolve_web_access_root():
     if pref:
         candidates.append(os.path.abspath(os.path.expanduser(pref)))
     candidates.extend(_managed_asset_root_candidates("skills", "web-access", "web_access"))
-    candidates.extend(_bundled_asset_root_candidates("skills", "web-access", "web_access"))
+    candidates.extend(_bundled_asset_root_candidates("skills", "weber/backends-web-access", "web_access"))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "web-access"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "weber", "backends-web-access"),
         _real_user_path("auto-skills", "vendor", "web-access"),
         _real_user_path("vendor", "web-access"),
     ])
@@ -3900,9 +3918,10 @@ def _resolve_agent_browser_root():
     if pref:
         candidates.append(os.path.abspath(os.path.expanduser(pref)))
     candidates.extend(_managed_asset_root_candidates("skills", "agent-browser", "agent_browser"))
-    candidates.extend(_bundled_asset_root_candidates("skills", "agent-browser", "agent_browser"))
+    candidates.extend(_bundled_asset_root_candidates("skills", "weber/backends-agent-browser", "agent_browser"))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "agent-browser"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "weber", "backends-agent-browser"),
         _real_user_path("auto-skills", "installed-skills", "agent-browser"),
         _real_user_path("auto-skills", "vendor", "agent-browser"),
         _real_user_path("vendor", "agent-browser"),
@@ -3941,6 +3960,24 @@ def _resolve_codegraph_root():
             continue
         seen.add(candidate)
         if os.path.isfile(os.path.join(candidate, "SKILL.md")):
+            return candidate
+    return ""
+
+
+def _resolve_grill_me_root():
+    candidates = []
+    explicit = str(os.environ.get("MMS_GRILL_ME_ROOT") or "").strip()
+    if explicit:
+        candidates.append(os.path.abspath(os.path.expanduser(explicit)))
+    candidates.extend(_managed_asset_root_candidates("skills", "grill-me", "grill_me"))
+    candidates.extend(_bundled_asset_root_candidates("skills", "grill-me", "grill_me"))
+    candidates.extend([
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "grill-me"),
+        _real_user_path(".codex", "skills", "grill-me"),
+        _real_user_path(".agents", "skills", "grill-me"),
+    ])
+    for candidate in dict.fromkeys(candidates):
+        if candidate and os.path.isfile(os.path.join(candidate, "SKILL.md")):
             return candidate
     return ""
 
@@ -5472,12 +5509,9 @@ def _overlay_omc_session_entries(parent_dir, session_home, *, enable_omc=False, 
 
 
 def _overlay_web_access_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
-    web_access_root = _resolve_web_access_root()
-    if not web_access_root:
-        return
-    overlay_root = os.path.join(session_home, ".mms-web-access-overlay")
-    os.makedirs(overlay_root, exist_ok=True)
-    _overlay_session_skill_dir(parent_dir, overlay_root, "web-access", web_access_root, disabled_session_surfaces=disabled_session_surfaces)
+    # web-access is a Weber backend, not a user-facing session skill.
+    # Keep the resolver for Weber internals and avoid exposing a second entry.
+    return None
 
 
 def _overlay_weber_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
@@ -5490,12 +5524,8 @@ def _overlay_weber_session_entries(parent_dir, session_home, *, disabled_session
 
 
 def _overlay_agent_browser_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
-    agent_browser_root = _resolve_agent_browser_root()
-    if not agent_browser_root:
-        return
-    overlay_root = os.path.join(session_home, ".mms-agent-browser-overlay")
-    os.makedirs(overlay_root, exist_ok=True)
-    _overlay_session_skill_dir(parent_dir, overlay_root, "agent-browser", agent_browser_root, disabled_session_surfaces=disabled_session_surfaces)
+    # agent-browser is a Weber backend, not a user-facing session skill.
+    return None
 
 
 def _overlay_codegraph_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
@@ -5517,29 +5547,24 @@ def _overlay_toon_session_entries(parent_dir, session_home, *, disabled_session_
 
 
 def _overlay_token_saver_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
-    token_saver_root = _resolve_token_saver_root()
-    if not token_saver_root:
+    # Removed from the bundled product. Keep this no-op for old callers and
+    # session records so an upgrade cannot recreate the retired asset.
+    return None
+
+
+def _overlay_grill_me_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
+    grill_me_root = _resolve_grill_me_root()
+    if not grill_me_root or _session_skill_disabled(disabled_session_surfaces, "grill-me"):
         return
-    overlay_root = os.path.join(session_home, ".mms-token-saver-overlay")
+    overlay_root = os.path.join(session_home, ".mms-grill-me-overlay")
     os.makedirs(overlay_root, exist_ok=True)
-    if _session_skill_disabled(disabled_session_surfaces, "token-saver"):
-        _overlay_session_skill_dir(
-            parent_dir,
-            overlay_root,
-            "token-saver",
-            token_saver_root,
-            disabled_session_surfaces=disabled_session_surfaces,
-        )
-        _overlay_session_entry_dir(
-            parent_dir,
-            overlay_root,
-            "commands",
-            token_saver_root,
-            exclude_names={"token-saver", "token-saver.toml"},
-        )
-        return
-    _overlay_session_skill_dir(parent_dir, overlay_root, "token-saver", token_saver_root, disabled_session_surfaces=disabled_session_surfaces)
-    _overlay_session_entry_dir(parent_dir, overlay_root, "commands", token_saver_root)
+    _overlay_session_skill_dir(
+        parent_dir,
+        overlay_root,
+        "grill-me",
+        grill_me_root,
+        disabled_session_surfaces=disabled_session_surfaces,
+    )
 
 
 def _overlay_managed_dynamic_skill_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
@@ -5698,6 +5723,7 @@ def _overlay_agy_session_assets(
     _overlay_agent_browser_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_codegraph_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_toon_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
+    _overlay_grill_me_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_token_saver_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_managed_dynamic_skill_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_auto_github_contributor_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
@@ -5717,6 +5743,7 @@ def _overlay_opencode_session_assets(config_dir, session_home, *, enable_caveman
         overlay_codegraph_session_entries=_overlay_codegraph_session_entries,
         overlay_toon_session_entries=_overlay_toon_session_entries,
         overlay_token_saver_session_entries=_overlay_token_saver_session_entries,
+        overlay_grill_me_session_entries=_overlay_grill_me_session_entries,
         overlay_managed_dynamic_skill_entries=_overlay_managed_dynamic_skill_entries,
         overlay_opencode_nsr_plugin=_overlay_opencode_nsr_plugin,
     )
@@ -7535,6 +7562,11 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
                 session_home,
                 disabled_session_surfaces=disabled_session_surfaces,
             )
+            _overlay_grill_me_session_entries(
+                os.path.join(session_home, ".codex"),
+                session_home,
+                disabled_session_surfaces=disabled_session_surfaces,
+            )
             _overlay_token_saver_session_entries(
                 os.path.join(session_home, ".codex"),
                 session_home,
@@ -7574,12 +7606,12 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
             model_info=model_info,
             session_home=session_home,
             features={
-                "web_access": bool(_resolve_web_access_root()) and not _session_skill_disabled(disabled_session_surfaces, "web-access"),
+                "web_access": False,  # Weber backend; never exposed as a separate user skill.
                 "weber": bool(_resolve_weber_root()) and not _session_skill_disabled(disabled_session_surfaces, "weber"),
-                "agent_browser": bool(_resolve_agent_browser_root()) and not _session_skill_disabled(disabled_session_surfaces, "agent-browser"),
+                "agent_browser": False,  # Weber backend; never exposed as a separate user skill.
                 "codegraph": bool(_resolve_codegraph_root()) and not _session_skill_disabled(disabled_session_surfaces, "codegraph"),
                 "toon": bool(_resolve_toon_root()) and not _session_skill_disabled(disabled_session_surfaces, "toon"),
-                "token_saver": bool(_resolve_token_saver_root()) and not _session_skill_disabled(disabled_session_surfaces, "token-saver"),
+                "token_saver": False,  # retired bundled asset; keep packet schema compatible.
                 "auto_github_contributor": bool(_resolve_auto_github_contributor_root()) and not _session_skill_disabled(disabled_session_surfaces, "auto-github-contributor"),
             },
             extra_paths={"host_context": host_context_env.get("MMS_HOST_CONTEXT_JSON", "")},
@@ -10907,11 +10939,11 @@ def _claude_gateway_env(
                 "ecc": enable_ecc,
                 "omc": enable_omc,
                 "agent_pack": agent_pack,
-                "web_access": bool(_resolve_web_access_root()) and not _session_skill_disabled(disabled_session_surfaces, "web-access"),
+                "web_access": False,  # Weber backend; never exposed as a separate user skill.
                 "weber": bool(_resolve_weber_root()) and not _session_skill_disabled(disabled_session_surfaces, "weber"),
                 "codegraph": bool(_resolve_codegraph_root()) and not _session_skill_disabled(disabled_session_surfaces, "codegraph"),
                 "toon": bool(_resolve_toon_root()) and not _session_skill_disabled(disabled_session_surfaces, "toon"),
-                "token_saver": bool(_resolve_token_saver_root()) and not _session_skill_disabled(disabled_session_surfaces, "token-saver"),
+                "token_saver": False,  # retired bundled asset; keep packet schema compatible.
                 "auto_github_contributor": bool(_resolve_auto_github_contributor_root()) and not _session_skill_disabled(disabled_session_surfaces, "auto-github-contributor"),
             },
             extra_paths=session_packet_extra_paths,
@@ -10958,6 +10990,7 @@ def _claude_gateway_env(
         _overlay_weber_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
         _overlay_codegraph_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
         _overlay_toon_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
+        _overlay_grill_me_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
         _overlay_token_saver_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
         _overlay_managed_dynamic_skill_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
         _overlay_auto_github_contributor_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
@@ -11414,6 +11447,7 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
     _overlay_agent_browser_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_codegraph_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_toon_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
+    _overlay_grill_me_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_token_saver_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_managed_dynamic_skill_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_auto_github_contributor_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
@@ -11447,12 +11481,12 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
         features={
             "caveman": enable_caveman,
             "nsr": enable_nsr,
-            "web_access": bool(_resolve_web_access_root()) and not _session_skill_disabled(disabled_session_surfaces, "web-access"),
+            "web_access": False,  # Weber backend; never exposed as a separate user skill.
             "weber": bool(_resolve_weber_root()) and not _session_skill_disabled(disabled_session_surfaces, "weber"),
-            "agent_browser": bool(_resolve_agent_browser_root()) and not _session_skill_disabled(disabled_session_surfaces, "agent-browser"),
+            "agent_browser": False,  # Weber backend; never exposed as a separate user skill.
             "codegraph": bool(_resolve_codegraph_root()) and not _session_skill_disabled(disabled_session_surfaces, "codegraph"),
             "toon": bool(_resolve_toon_root()) and not _session_skill_disabled(disabled_session_surfaces, "toon"),
-            "token_saver": bool(_resolve_token_saver_root()) and not _session_skill_disabled(disabled_session_surfaces, "token-saver"),
+            "token_saver": False,  # retired bundled asset; keep packet schema compatible.
             "auto_github_contributor": bool(_resolve_auto_github_contributor_root()) and not _session_skill_disabled(disabled_session_surfaces, "auto-github-contributor"),
         },
         extra_paths={"host_context": host_context_env.get("MMS_HOST_CONTEXT_JSON", "")},

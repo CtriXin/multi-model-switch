@@ -1515,19 +1515,14 @@ export function App() {
           </button>
           <span
             className={
-              "connection-dot " + (connected && !statusesStale ? "online" : "")
+              "connection-status " + (connected && !statusesStale ? "online" : "offline")
             }
-            title={
-              connected && !statusesStale
-                ? "本地服务已连接"
-                : "等待连接本地服务"
-            }
-            aria-label={
-              connected && !statusesStale
-                ? "本地服务已连接"
-                : "等待连接本地服务"
-            }
-          />
+            title={connected && !statusesStale ? "本地 Pilot Web 服务已连接" : "本地 Pilot Web 服务等待连接"}
+            aria-label={connected && !statusesStale ? "服务在线" : "服务断开，等待连接"}
+          >
+            <span aria-hidden="true">{connected && !statusesStale ? "●" : "!"}</span>
+            {connected && !statusesStale ? "服务在线" : "需要连接"}
+          </span>
         </div>
       </aside>
       <main className="main-area">
@@ -1632,6 +1627,7 @@ export function App() {
               <div className="recipe-access">
                 {!isPreview && workspaceId && <ProjectMaterials key={workspaceId} workspaceId={workspaceId} />}
                 <RecipeImport
+                  workspaceId={workspaceId}
                   loaded={(item) => {
                     setRecipe(item); setRecipeConfirmed("");
                     setPlanMode(item.recipe.planning);

@@ -12,7 +12,7 @@ class _FakeCore:
     def load_user_preferences(self):
         return {
             "launch": {"defaults": {"bypass": True, "caveman_mode": "enable", "nsr_mode": "disable", "agent_pack": "none"}},
-            "session_surfaces": {"disabled": {"skills": ["agent-browser"], "mcp": ["pilot"], "hooks": []}},
+            "session_surfaces": {"disabled": {"skills": [], "mcp": ["pilot"], "hooks": []}},
             "assets": {"managed_enabled": True, "managed_root": f"{self.home}/.local/share/mms/assets", "roots": {}},
         }
 
@@ -38,7 +38,7 @@ class _FakeCore:
         return {
             "allow_execution_surfaces": True,
             "skills": {
-                "always": [{"title": "web-access", "summary": "Session skill", "details": [("Path", f"{self.home}/.mms/vendor/web-access/SKILL.md")], "disable_key": "web-access"}],
+                "always": [{"title": "weber", "summary": "浏览器网页路由", "details": [("Path", f"{self.home}/.mms/vendor/weber/SKILL.md")], "disable_key": "weber"}],
                 "caveman": [{"title": "caveman", "summary": "compact mode", "details": [("Path", f"{self.home}/.mms/vendor/caveman/SKILL.md")]}] if has_caveman else [],
                 "ecc": [{"title": "ECC 能力包", "summary": "3 skills", "details": [("Path", f"{self.home}/.mms/agent-packs/ecc")]}] if has_ecc else [],
             },
@@ -64,10 +64,10 @@ def test_session_assets_snapshot_is_read_only_inventory(monkeypatch, tmp_path):
         skill_dir = tmp_path / rel
         skill_dir.mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text(f"---\ndescription: {rel}\n---\n", encoding="utf-8")
-    managed_root = tmp_path / "auto-skills" / "installed-skills" / "web-access"
+    managed_root = tmp_path / "auto-skills" / "installed-skills" / "grill-me"
     managed_root.mkdir(parents=True)
-    (managed_root / "SKILL.md").write_text("# web-access\n", encoding="utf-8")
-    monkeypatch.setattr(mms_launchers, "_resolve_web_access_root", lambda: str(managed_root))
+    (managed_root / "SKILL.md").write_text("# grill-me\n", encoding="utf-8")
+    monkeypatch.setattr(mms_launchers, "_resolve_grill_me_root", lambda: str(managed_root))
     snapshot = mms_session_assets.build_session_assets_snapshot(
         {},
         config_path="/tmp/mms/config.toml",
@@ -88,16 +88,16 @@ def test_session_assets_snapshot_is_read_only_inventory(monkeypatch, tmp_path):
     assert snapshot["bundled_install"]["root"].endswith("assets/session-assets")
     assert snapshot["configuration_contract"]["bundled_assets_root"].endswith("assets/session-assets")
     assert snapshot["launch_defaults"]["bypass"] is True
-    assert snapshot["disabled_defaults"]["skills"] == ["agent-browser"]
+    assert snapshot["disabled_defaults"]["skills"] == []
     assert snapshot["disabled_defaults"]["mcp"] == ["pilot"]
     assert isinstance(snapshot["rows"], list)
     assert isinstance(snapshot["managed_roots"], list)
-    managed_web = next(root for root in snapshot["managed_roots"] if root["name"] == "web-access")
-    assert managed_web["surface"] == "Skill"
-    assert managed_web["exists"] is True
-    assert managed_web["root_kind"] == "安装/管理镜像"
-    assert managed_web["install_path"].endswith(".local/share/mms/assets/skills/web-access")
-    assert managed_web["skill_count"] == 1
+    managed_grill = next(root for root in snapshot["managed_roots"] if root["name"] == "grill-me")
+    assert managed_grill["surface"] == "Skill"
+    assert managed_grill["exists"] is True
+    assert managed_grill["root_kind"] == "安装/管理镜像"
+    assert managed_grill["install_path"].endswith(".local/share/mms/assets/skills/grill-me")
+    assert managed_grill["skill_count"] == 1
     assert isinstance(snapshot["global_roots"], list)
     assert snapshot["confirm_reference"]["title"] == "TUI 确认页对照"
     assert {panel["id"] for panel in snapshot["confirm_reference"]["panels"]} == {"summary", "mcp", "skills", "hooks"}
@@ -149,7 +149,7 @@ def test_session_asset_rows_have_user_facing_fields(monkeypatch, tmp_path):
     assert sample["group"] in {"mms_dynamic", "global", "other"}
     assert sample["kind_label"] in {"技能", "MCP 服务", "自动钩子"}
     assert sample["group_label"] in {"MMS 动态注入", "全局继承", "其它检测项"}
-    assert "web" in sample["title"]
+    assert "web" in sample["title"] or "grill" in sample["title"]
     assert "联网" in sample["summary"] or "浏览" in sample["summary"]
 
 

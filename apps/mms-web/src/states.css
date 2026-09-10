@@ -90,7 +90,8 @@
   inset: 0;
   border-radius: inherit;
   pointer-events: none;
-  border: 1px solid var(--accent);
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
   animation: result-flash 2.2s ease-out both;
 }
 @keyframes result-flash {

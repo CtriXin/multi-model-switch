@@ -19,6 +19,7 @@ import { Popover } from "./Popover";
 import { SkillPicker } from "./SkillPicker";
 import type { Skill } from "./SkillPicker";
 import { request } from "./api";
+import { SKILL_PREFERENCES_EVENT } from "./SkillSources";
 import type { Attachment, FileSelection } from "./types";
 import { FilesPanel } from "./FilesPanel";
 import { localFilePaths } from "./local-file-paths";
@@ -114,6 +115,12 @@ export function Composer({
         : [...old, id].slice(0, 20),
     );
   }
+  const [skillsRevision, setSkillsRevision] = useState(0);
+  useEffect(() => {
+    const bump = () => setSkillsRevision(n => n + 1);
+    window.addEventListener(SKILL_PREFERENCES_EVENT, bump);
+    return () => window.removeEventListener(SKILL_PREFERENCES_EVENT, bump);
+  }, []);
   useEffect(() => {
     let cancelled = false;
     setSkills([]);
@@ -137,7 +144,7 @@ export function Composer({
     return () => {
       cancelled = true;
     };
-  }, [workspaceId, requiredSkillKey]);
+  }, [workspaceId, requiredSkillKey, skillsRevision]);
   const requirementIssues = requiredSkillNames.length ? (skillsReady ? requiredSkillMatches(requiredSkillNames, skills, selectedSkills).issues : [skillError || "正在核对模板所需的 Skills。"]) : [];
   const [text, setText] = useState(() => {
     const original = draft?.text ?? initialText;
@@ -174,8 +181,9 @@ export function Composer({
   const [error, setError] = useState("");
   useEffect(() => {
     const controller = new AbortController();
-    for (const attachment of draft?.attachments || []) {
+    for (const attachment of attachments) {
       if (draft?.thumbnails[attachment.id]) continue;
+      if (!attachment.mimeType.startsWith("image/")) continue;
       request<{ dataUrl?: string }>(
         "/attachments/" + encodeURIComponent(attachment.id),
         undefined,
@@ -195,6 +203,25 @@ export function Composer({
             );
         });
     }
+    return () => controller.abort();
+  }, [draftKey, attachments]);
+  // Recipe variables and restored drafts can already contain absolute paths.
+  // Resolve those lines once so the composer can show the same removable
+  // preview cards as a direct file drop.
+  useEffect(() => {
+    if (draft?.attachments?.length || !initialText) return;
+    const paths = initialText.split(/\r?\n/).flatMap((line) => localFilePaths(line));
+    if (!paths.length || !workspaceId) return;
+    const controller = new AbortController();
+    request<{ attachments: Attachment[] }>("/files/reference-local", { paths }, controller.signal)
+      .then((result) => {
+        if (controller.signal.aborted) return;
+        setAttachments((old) => {
+          const known = new Set(old.map((item) => item.localPath));
+          return [...old, ...result.attachments.filter((item) => !known.has(item.localPath))].slice(0, 8);
+        });
+      })
+      .catch(() => {});
     return () => controller.abort();
   }, [draftKey]);
   const [help, setHelp] = useState(false);
@@ -366,7 +393,7 @@ export function Composer({
       }
       setAttachments((old) => [...old.filter(a => referencedInText(a)), ...imported]);
       insertPaths(imported.flatMap(item => item.localPath ? [item.localPath] : []));
-      if (imported.length) setFilePathHint("文件已保存到项目的 .pilot/attachments，路径已插入正文，可在其他会话继续引用。");
+      if (imported.length) setFilePathHint("文件已保存到项目的 .pilot/attachments，路径已插入正文，可在其他会话继续引用。30 天内没有任何会话引用的副本会自动清理。");
     } catch (e) {
       failures.push((e as Error).message);
     } finally {
@@ -515,9 +542,9 @@ export function Composer({
             引用文件或文件夹
           </div>
         )}
-        {(attachments.some(a => !a.localPath) || references.length > 0) && (
+        {(attachments.filter(a => referencedInText(a)).length > 0 || references.length > 0) && (
           <div className="attachment-list">
-            {attachments.filter(a => !a.localPath).map((a) => (
+            {attachments.filter(a => referencedInText(a)).map((a) => (
               <div className="attachment-chip" key={a.id}>
                 {thumbnails[a.id] ? (
                   <img src={thumbnails[a.id]} alt={a.name} />
@@ -536,9 +563,17 @@ export function Composer({
                 <button
                   type="button"
                   aria-label={"移除附件 " + a.name}
-                  onClick={() =>
-                    setAttachments((old) => old.filter((x) => x.id !== a.id))
-                  }
+                  onClick={() => {
+                    if (a.localPath) {
+                      const quoted = JSON.stringify(a.localPath);
+                      setText((old) => old.split(/\r?\n/).filter((line) => {
+                        const value = line.trim();
+                        return value !== a.localPath && value !== quoted;
+                      }).join("\n").replace(/\n{3,}/g, "\n\n").trim());
+                    }
+                    setAttachments((old) => old.filter((x) => x.id !== a.id));
+                    setThumbnails((old) => { const next = { ...old }; delete next[a.id]; return next; });
+                  }}
                 >
                   <X size={13} />
                 </button>

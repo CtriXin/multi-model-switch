@@ -31,13 +31,21 @@ export function Popover({
         onClick={(event) => {
           const box = event.currentTarget.getBoundingClientRect();
           const width = Math.min(wide ? 400 : 340, window.innerWidth - 24);
-          const above = window.innerHeight - box.bottom < 360 && box.top > 300;
+          // Room on each side, minus the 10px gap to the trigger and a 12px viewport margin.
+          const roomBelow = window.innerHeight - box.bottom - 22;
+          const roomAbove = box.top - 22;
+          // Prefer below; flip when it cannot fit there and the other side has more room.
+          const above = roomBelow < 360 && roomAbove > roomBelow;
           setStyle({
             width,
             left: Math.max(
               12,
               Math.min(box.right - width, window.innerWidth - width - 12),
             ),
+            // Never extend past the viewport edge: the panel scrolls instead.
+            maxHeight: Math.max(160, above ? roomAbove : roomBelow),
+            // Lets content size its own scroll region to the room actually available.
+            ["--popover-room" as string]: `${Math.max(160, above ? roomAbove : roomBelow)}px`,
             ...(above
               ? { bottom: window.innerHeight - box.top + 10, top: "auto" }
               : { top: box.bottom + 10, bottom: "auto" }),
