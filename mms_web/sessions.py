@@ -15,6 +15,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
 import re
 import threading
 import uuid
@@ -133,6 +134,7 @@ class _LiveSession:
             "kind": str(fields.get("kind") or "notice"),
             "text": str(fields.get("text") or ""),
             "createdAt": now(),
+            "updatedAt": now(),
         }
         for key in ("title", "status", "approvalId", "decision", "arguments", "method", "options", "placeholder", "prefill", "answer", "thinking", "nativeTimestamp", "modelName", "usage", "attachments", "references", "skills", "fileSelections", "contextUsage"):
             if fields.get(key) is not None:
@@ -157,6 +159,8 @@ class _LiveSession:
                 existing[key] = fields[key]
         if fields.get("thinkingAppend") is not None:
             existing["thinking"] = str(existing.get("thinking") or "") + str(fields["thinkingAppend"])
+        # Last write wins as the event's end time; the reply duration reads it.
+        existing["updatedAt"] = now()
         self.updated_at = now()
         return existing
 
@@ -207,6 +211,10 @@ class _LiveSession:
         }
         if self.meta.get("summary"):
             view["summary"] = self.meta["summary"]
+        # The Pi session this one continues, if it was adopted from a terminal.
+        # The list drops the read-only row for a session that is claimed here.
+        if self.meta.get("piSessionId"):
+            view["piSessionId"] = self.meta["piSessionId"]
         return view
 
     def detail_view(self) -> dict:
@@ -366,6 +374,162 @@ class SessionService(SessionActions):
                 if entry is not None:
                     entry["sessionId"] = live.meta["id"]
         return detail
+
+    def adopt(self, row: dict, payload: dict) -> dict:
+        """Continue a session that was started in a terminal, here.
+
+        `row` comes from the read-only index, never from the request, so the
+        transcript path is never something a caller can choose.
+        """
+        self._require_open()
+        payload = self._object_payload(payload)
+        request_id = self._validate_request_id(payload.get("requestId"))
+        op_payload = {"op": "adopt", "piSessionId": row.get("piSessionId"),
+                      "presetId": payload.get("presetId"),
+                      "workspaceId": payload.get("workspaceId"),
+                      "thinkingLevel": payload.get("thinkingLevel")}
+        with self._request_scope(request_id, op_payload) as replay:
+            if replay is not None:
+                with replay.lock:
+                    return replay.detail_view()
+            detail, live = self._do_adopt(row, payload)
+            with self._lock:
+                entry = self._requests.get(request_id)
+                if entry is not None:
+                    entry["sessionId"] = live.meta["id"]
+        return detail
+
+    def _do_adopt(self, row: dict, payload: dict) -> tuple[dict, _LiveSession]:
+        """Take a copy of the terminal transcript and start Pi on the copy.
+
+        A copy, not the original: the terminal may still be running against
+        that file, and two processes appending to one transcript would corrupt
+        it. So the terminal keeps its session and this one continues from the
+        same history.
+        """
+        if not self.capabilities()["launch"]:
+            raise WebError("CAPABILITY_UNAVAILABLE", "当前环境未启用真实 Pi 会话启动", status=409)
+        source = Path(str(row.get("path") or ""))
+        if not source.is_file():
+            raise WebError("NOT_FOUND", "这个会话的记录已经不在了。", 404)
+        workspace_id = str(payload.get("workspaceId") or "").strip()
+        preset_id = str(payload.get("presetId") or "").strip()
+        if not workspace_id or not preset_id:
+            raise WebError("INVALID_REQUEST", "workspaceId 与 presetId 必填", status=400)
+        effort = payload.get("thinkingLevel")
+        if effort is not None and effort not in ("off", "minimal", "low", "medium", "high", "xhigh", "max"):
+            raise WebError("INVALID_PARAMETER", "请选择有效的 effort。", 400)
+
+        try:
+            resolved = self._catalog.resolve_launch(preset_id, workspace_id)
+        except WebError:
+            raise
+        except Exception as exc:
+            raise WebError("LAUNCH_RESOLVE_FAILED", "无法解析所选启动组合", status=400) from exc
+        if not isinstance(resolved, dict) or str(resolved.get("harness") or "") != "pi":
+            raise WebError("CAPABILITY_UNAVAILABLE", "只有 Pi 会话可以接入。", status=409)
+        runtime = resolved.get("runtime") if isinstance(resolved.get("runtime"), dict) else {}
+        root = runtime.get("_webConfigRoot")
+        if not root:
+            raise WebError("CAPABILITY_UNAVAILABLE", "缺少独立运行目录，无法接入。", 409)
+        options = resolved.get("launchOptions") or {}
+        effort = effort or options.get("defaultThinkingLevel")
+        if effort and options and effort not in options.get("supportedThinkingLevels", []):
+            raise WebError("EFFORT_UNSUPPORTED", "这条通道不支持所选 effort，请重新选择。", 409)
+        # Start where the terminal was working. A folder that has since been
+        # deleted falls back to the chosen workspace rather than failing.
+        cwd = str(row.get("cwd") or "")
+        notes = []
+        if not cwd or not Path(cwd).is_dir():
+            cwd = str(resolved.get("cwd") or self._state_root)
+            notes.append("原来的工作目录已经不在，改用所选工作文件夹。")
+
+        model_info = resolved.get("modelInfo") or resolved.get("model_info")
+        session_id = f"s-{uuid.uuid4().hex[:12]}"
+        meta = self._build_meta(session_id, "pi", workspace_id,
+                                str(row.get("title") or "命令行会话"), model_info, runtime)
+        meta.update(cwd=cwd, presetId=preset_id, runtimeRoot=str(root),
+                    piSessionId=str(row.get("piSessionId") or ""))
+        from .runtime import private_json
+        self._copy_transcript(source, Path(root) / "conversation.jsonl")
+        private_json(Path(root) / "resume.json",
+                     {"modelInfo": model_info, "runtime": runtime, "cwd": cwd})
+
+        live = _LiveSession(meta, self._state_root)
+        live.state = "idle"
+        # Assigned, not appended: append_event would restamp every turn with
+        # the adoption time and lose when the conversation actually happened.
+        live.events = self._adopted_events(Path(root) / "conversation.jsonl")
+        live.event_index = {e["id"]: e for e in live.events}
+        live.last_sequence = len(live.events)
+        live.append_event({"kind": "notice", "text": (
+            "这条会话原来在终端里，已经接入 MMS Pilot。之前的内容都在上面，"
+            "可以直接继续。终端里那条记录没有改动。" + ("".join(" " + n for n in notes))
+        )}, self._now)
+
+        sink = _DriverSink(self, live)
+        try:
+            plan = self._launch_plan_builder("pi", model_info, runtime, cwd)
+            if plan is None:
+                raise LaunchSeamUnavailable("无法为该组合构建启动计划")
+            driver = self._spawn_driver(plan, sink)
+        except (LaunchSeamUnavailable, DriverClosedError) as exc:
+            raise WebError("CAPABILITY_UNAVAILABLE", f"Pi 启动接缝不可用: {exc}", status=409)
+        except FileNotFoundError as exc:
+            raise WebError("LAUNCH_FAILED", "Pi 可执行文件不存在", status=502) from exc
+        except OSError as exc:
+            raise WebError("LAUNCH_FAILED", "Pi 子进程无法启动", status=502) from exc
+        live.driver = driver
+        try:
+            state = driver.get_state()
+            if not state.get("model"):
+                raise DriverClosedError("Pi 没有加载所选模型")
+        except (DriverClosedError, RpcTimeoutError):
+            driver.close(graceful_timeout=0.5)
+            raise WebError("LAUNCH_FAILED", "MMS 未能启动所选模型，请检查本机 Pi 和模型服务。", 502)
+        if effort:
+            from .launch_options import set_thinking
+            try:
+                set_thinking(self, live, effort)
+            except WebError:
+                driver.close(graceful_timeout=0.5)
+                raise
+        with self._lock:
+            self._sessions[session_id] = live
+        with live.lock:
+            live.persist(self._state_dir)
+            return live.detail_view(), live
+
+    @staticmethod
+    def _copy_transcript(source: Path, target: Path) -> None:
+        """Copy a Pi transcript, dropping a line the writer had not finished.
+
+        The terminal may be mid-append while this reads, which leaves the last
+        line as half a JSON object. Pi has to be able to parse every line of
+        the file it is handed, so the partial one does not travel.
+        """
+        content = source.read_bytes()
+        end = content.rfind(b"\n")
+        content = content[: end + 1] if end >= 0 else b""
+        handle = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(handle, "wb") as stream:
+            stream.write(content)
+
+    def _adopted_events(self, source: Path) -> list[dict]:
+        """The terminal history, so the adopted session is not a blank page."""
+        from .cli_sessions import transcript
+        events = []
+        for index, event in enumerate(transcript(source, limit=_MAX_EVENTS - 1), start=1):
+            event = dict(event)
+            event["sequence"] = index
+            event.setdefault("id", f"h-{index}")
+            # A tool still marked running belongs to a turn that ended when the
+            # terminal stopped; nothing here will ever report it complete.
+            if event.get("kind") == "tool" and event.get("status") == "running":
+                event["status"] = "error"
+                event["text"] = (event.get("text") or "") + "这一步在终端里结束时还没有回报结果。"
+            events.append(event)
+        return events
 
     def send(self, session_id: str, payload: dict) -> dict:
         self._require_open()

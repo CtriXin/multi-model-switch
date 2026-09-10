@@ -9,6 +9,8 @@ import { SkillSourcesSetting } from "./SkillSources";
 export function SettingsPage({
   openUpdates,
   updateAvailable,
+  showCliSessions,
+  setShowCliSessions,
   connectionCompleted,
   tour,
   data,
@@ -36,6 +38,8 @@ export function SettingsPage({
 }: {
   openUpdates: () => void;
   updateAvailable: boolean;
+  showCliSessions: boolean;
+  setShowCliSessions: (on: boolean) => void;
   connectionCompleted: () => void;
   tour?: ReactNode;
   data: Bootstrap;
@@ -267,6 +271,10 @@ export function SettingsPage({
           <label className="preference-row">
             <div><h2>完成后自动收起过程</h2><p>保留最终回答，收起 thinking、工具记录与中间说明。每轮都可以手动展开。</p></div>
             <input type="checkbox" role="switch" aria-label="完成后自动收起过程" checked={autoCollapseProcess} onChange={e => setAutoCollapseProcess(e.target.checked)} />
+          </label>
+          <label className="preference-row">
+            <div><h2>显示命令行会话</h2><p>把用 <code>mmf</code> 在终端里开始的会话一起列出来。它们是只读的：可以查看，不能在这里继续。关掉后立即从列表消失。</p></div>
+            <input type="checkbox" role="switch" aria-label="显示命令行会话" checked={showCliSessions} onChange={e => setShowCliSessions(e.target.checked)} />
           </label>
           <label className="preference-row">
             <div>

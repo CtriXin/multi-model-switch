@@ -10,10 +10,11 @@ import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlsplit
+from urllib.parse import unquote, urlsplit, parse_qs
 
 from mms_version import VERSION
 
+from . import remote_access as access
 from .errors import WebError
 
 MAX_BODY = 12 * 1024 * 1024
@@ -30,9 +31,13 @@ def _adapter(module: str, name: str, **kwargs):
 
 
 class WebApplication:
-    def __init__(self, *, state_root: Path, config_root: Path | None = None):
+    def __init__(self, *, state_root: Path, config_root: Path | None = None,
+                 listen: str = "loopback", hostnames: tuple[str, ...] = ()):
         from .runtime import require_private_root
         state_root = require_private_root(state_root)
+        # Loopback-only is the default and needs no token, so nothing changes
+        # for a browser on this machine.
+        self.access = access.RemoteAccess(state_root, listen, hostnames)
         if config_root is None:
             config_root = state_root / "config"
         self.config_root = config_root
@@ -62,7 +67,7 @@ class WebApplication:
             self.model_settings = ModelSettings(self.catalog)
         return self.model_settings
 
-    def bootstrap(self) -> dict:
+    def bootstrap(self, include_cli: bool = False) -> dict:
         snapshot = self.catalog.snapshot() if self.catalog else {
             "models": [], "services": [], "presets": [], "workspaces": [],
             "diagnostics": [{"code": "CATALOG_UNAVAILABLE",
@@ -100,10 +105,109 @@ class WebApplication:
         return {
             **snapshot, "version": "1", "appVersion": VERSION, "mode": "live",
             "capabilities": capabilities, "csrfToken": self.csrf_token,
-            "sessions": self.sessions.list_sessions() if self.sessions else [],
+            "sessions": self.all_sessions(include_cli),
         }
 
-    def get(self, parts: list[str]) -> dict:
+    def _cli_sessions(self) -> list[dict]:
+        """Sessions started from the command line, read from Pi's own files.
+
+        Read-only and best-effort: a missing directory or an unreadable file
+        must never take the session list down with it.
+        """
+        if not self.config_root:
+            return []
+        try:
+            from .cli_sessions import index, session_dir_for
+            return index(session_dir_for(self.config_root),
+                         workspaces=self._known_workspaces())
+        except Exception:
+            return []
+
+    def _known_workspaces(self) -> list[dict]:
+        """The registered folders, for placing command-line sessions."""
+        if not self.catalog:
+            return []
+        try:
+            return self.catalog.workspaces()
+        except Exception:
+            return []
+
+    def all_sessions(self, include_cli: bool = False) -> list[dict]:
+        """Pilot's own sessions, and the command-line ones when asked for.
+
+        The caller decides, so the page's own switch takes effect on its next
+        read with no restart and no server-side preference to keep in sync.
+        """
+        own = self._sessions().list_sessions() if self.sessions else []
+        if not include_cli:
+            return own
+        # A session resumed here owns its Pi session, so drop the read-only
+        # row for it rather than showing the same conversation twice.
+        claimed = {str(s.get("piSessionId") or "") for s in own}
+        claimed.discard("")
+        merged = own + [s for s in self._cli_sessions()
+                        if s["piSessionId"] not in claimed]
+        merged.sort(key=lambda view: view.get("updatedAt") or "", reverse=True)
+        return merged
+
+    def cli_session_detail(self, session_id: str) -> dict:
+        """A read-only transcript for one command-line session."""
+        from .cli_sessions import index, session_dir_for, transcript
+        wanted = session_id[len("cli:"):]
+        if not self.config_root or not wanted:
+            raise WebError("NOT_FOUND", "找不到这个会话。", 404)
+        row = next((s for s in index(session_dir_for(self.config_root), limit=2000,
+                                     workspaces=self._known_workspaces())
+                    if s["piSessionId"] == wanted), None)
+        if row is None:
+            raise WebError("NOT_FOUND", "找不到这个会话。", 404)
+        return {"session": {k: v for k, v in row.items() if k != "path"},
+                # Already in the shape the transcript view renders, so the page
+                # needs no second renderer and tools stay collapsible.
+                "events": transcript(row["path"]),
+                # Present and empty, not absent: the view reads these without
+                # checking, and an absent array is what blanked the page.
+                "artifacts": [], "artifactNotice": "", "approvals": [], "runtime": {},
+                "note": "这个会话是在命令行里开始的，这里只读。"}
+
+    def adopt_cli_session(self, session_id: str, payload: dict) -> dict:
+        """Continue a terminal-started session in Pilot from here on.
+
+        The transcript path is resolved from the read-only index, never taken
+        from the request, so a caller cannot point this at another file.
+        """
+        from .cli_sessions import index, session_dir_for
+        wanted = session_id[len("cli:"):] if session_id.startswith("cli:") else ""
+        if not self.config_root or not wanted:
+            raise WebError("NOT_FOUND", "只有终端里开始的会话需要接入。", 404)
+        service = self._sessions()
+        already = next((s for s in service.list_sessions()
+                        if str(s.get("piSessionId") or "") == wanted), None)
+        if already is not None:
+            # Idempotent: a second click opens the session the first one made.
+            return service.get_session(already["id"])
+        row = next((s for s in index(session_dir_for(self.config_root), limit=2000,
+                                     workspaces=self._known_workspaces())
+                    if s["piSessionId"] == wanted), None)
+        if row is None:
+            raise WebError("NOT_FOUND", "找不到这个会话。", 404)
+        payload = dict(payload or {})
+        workspace_id = str(payload.get("workspaceId") or "") or str(row.get("workspaceId") or "")
+        if not workspace_id:
+            # The folder it ran in is not registered. Register it, so the
+            # adopted session has the working folder its files come from.
+            if not self.catalog:
+                raise WebError("CAPABILITY_UNAVAILABLE", "本地服务尚未连接。", 409)
+            folder = str(row.get("cwd") or "")
+            if not folder or not Path(folder).is_dir():
+                raise WebError("WORKSPACE_REQUIRED",
+                               "这个会话原来的目录已经不在了，请选择一个工作文件夹。", 409)
+            workspace_id = str(self.catalog.add_workspace({"path": folder})["id"])
+        payload["workspaceId"] = workspace_id
+        return service.adopt(row, payload)
+
+    def get(self, parts: list[str], query: dict[str, list[str]] | None = None) -> dict:
+        include_cli = (query or {}).get("cli", ["0"])[0] == "1"
         if parts == ["update", "identity"]:
             from .update_handoff import path_identity, session_inventory
             return {"version": VERSION, "processId": os.getpid(), "instance": self.instance, "identity": path_identity(Path(__file__).resolve().parent.parent, self.state_root, self.config_root, Path.cwd()), "sessions": session_inventory(self.sessions)}
@@ -117,7 +221,7 @@ class WebApplication:
             from .ui_preferences import UiPreferences
             return UiPreferences(self.state_root).read()
         if parts == ["sessions"]:
-            return {"sessions": self._sessions().list_sessions()}
+            return {"sessions": self.all_sessions(include_cli)}
         if len(parts) == 2 and parts[0] == "attachments":
             return self._sessions().files.preview_attachment(parts[1])
         if len(parts) == 3 and parts[0] == "sessions":
@@ -128,8 +232,10 @@ class WebApplication:
             if parts[2] == "commands":
                 return self._sessions().command_catalog(parts[1])
         if parts == ["bootstrap"]:
-            return self.bootstrap()
+            return self.bootstrap(include_cli)
         if len(parts) == 2 and parts[0] == "sessions":
+            if parts[1].startswith("cli:"):
+                return self.cli_session_detail(parts[1])
             return self._sessions().get_session(parts[1])
         raise WebError("NOT_FOUND", "找不到这个接口。", 404)
 
@@ -227,6 +333,8 @@ class WebApplication:
             if not service.capabilities().get("launch"):
                 raise WebError("CAPABILITY_UNAVAILABLE", "当前会话路径尚未就绪，未启动模型。", 409)
             return service.launch(payload)
+        if len(parts) == 3 and parts[0] == "sessions" and parts[2] == "adopt":
+            return self.adopt_cli_session(parts[1], payload)
         if len(parts) == 3 and parts[0] == "sessions":
             methods = {"messages": "send", "stop": "stop", "control": "control", "manage": "manage", "fork": "fork", "model": "switch_model", "artifacts": "artifact"}
             if parts[2] in methods:
@@ -265,13 +373,25 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
             # Request paths/bodies can contain private task data. No access log.
             return
 
+        def _presented_token(self):
+            """The token this request carries, from the cookie or the query."""
+            from http.cookies import SimpleCookie
+            query = parse_qs(urlsplit(self.path).query)
+            if query.get(access.QUERY):
+                return query[access.QUERY][0], True
+            jar = SimpleCookie(self.headers.get("Cookie", ""))
+            morsel = jar.get(access.COOKIE)
+            return (morsel.value if morsel else ""), False
+
         def _check_origin(self, *, mutation=False):
             expected_port = self.server.server_address[1]
-            hosts = {f"127.0.0.1:{expected_port}", f"localhost:{expected_port}"}
-            if self.headers.get("Host") not in hosts:
+            hosts = app.access.allowed_hosts(expected_port)
+            if not app.access.accepts(self.headers.get("Host"), expected_port):
                 raise WebError("INVALID_HOST", "只允许访问本机服务地址。", 403)
             origin = self.headers.get("Origin")
-            if origin is not None and origin not in {f"http://{host}" for host in hosts}:
+            if origin is not None and origin not in {
+                f"{scheme}://{host}" for host in hosts for scheme in ("http", "https")
+            }:
                 raise WebError("INVALID_ORIGIN", "请在 MMS 本地页面中执行此操作。", 403)
             if self.headers.get("Sec-Fetch-Site") == "cross-site":
                 raise WebError("INVALID_ORIGIN", "不允许跨站访问本地服务。", 403)
@@ -315,9 +435,41 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
                 raise WebError("NOT_FOUND", "找不到这个接口。", 404)
             return path.removeprefix("/api/v1/").split("/")
 
+        def _gate(self):
+            """Return True when the request may proceed.
+
+            A valid token in the query is exchanged for a cookie and the URL
+            is redirected without it, so the token does not sit in history,
+            in the address bar, or in a Referer header on the way out.
+            """
+            # A tunnel can reach this socket over loopback without forwarding
+            # headers. Remote mode therefore authenticates every connection.
+            if not app.access.required:
+                return True
+            presented, from_query = self._presented_token()
+            if not app.access.valid(presented):
+                self._send(401, b"401", "text/plain; charset=utf-8")
+                return False
+            if from_query and self.command == "GET":
+                split = urlsplit(self.path)
+                query = "&".join(part for part in split.query.split("&")
+                                 if not part.startswith(f"{access.QUERY}="))
+                secure = self.headers.get("X-Forwarded-Proto", "").lower() == "https"
+                self.send_response(302)
+                self.send_header("Location", split.path + (f"?{query}" if query else ""))
+                self.send_header("Set-Cookie",
+                                 f"{access.COOKIE}={presented}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000"
+                                 + ("; Secure" if secure else ""))
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return False
+            return True
+
         def do_GET(self):
             try:
                 self._check_origin()
+                if not self._gate():
+                    return
                 path = unquote(urlsplit(self.path).path)
                 if path.startswith("/api/"):
                     parts = self._parts()
@@ -329,7 +481,7 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
                             raise WebError("PREVIEW_UNAVAILABLE", "这个成果不是 HTML。", 400)
                         from .artifact_preview import offline_html
                         return self._send(200, offline_html(item["content"]), "text/html; charset=utf-8", preview=True)
-                    return self._json(200, app.get(parts))
+                    return self._json(200, app.get(parts, parse_qs(urlsplit(self.path).query)))
                 file = (root / (path.lstrip("/") or "index.html")).resolve()
                 if not file.is_relative_to(root) or not file.is_file():
                     raise WebError("NOT_FOUND", "页面资源不存在。请先构建 MMS Pilot。", 404)
@@ -346,6 +498,8 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
         def do_POST(self):
             try:
                 self._check_origin(mutation=True)
+                if not self._gate():
+                    return
                 if self.headers.get_content_type() != "application/json":
                     raise WebError("INVALID_BODY", "请求必须使用 JSON。", 415)
                 try:
@@ -367,6 +521,6 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
             except Exception as exc:
                 self._error(exc)
 
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    server = ThreadingHTTPServer((app.access.bind_address(), port), Handler)
     server.daemon_threads = True
     return server

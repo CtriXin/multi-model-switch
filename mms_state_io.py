@@ -13,11 +13,26 @@ except ImportError:  # pragma: no cover - non-POSIX fallback
 
 
 _STATE_FILE_PROCESS_LOCK = threading.RLock()
-_GATEWAY_SESSION_MARKERS = (
-    os.path.join(".config", "mms", "codex-gateway", "s") + os.sep,
-    os.path.join(".config", "mms", "claude-gateway", "s") + os.sep,
-    os.path.join(".config", "mms", "accounts") + os.sep,
+
+# The default config root. `mms-next` keeps v2 DB truth; `mms` is the legacy
+# stable root, still reachable by pointing MMS_CONFIG_ROOT at it.
+DEFAULT_CONFIG_ROOT_NAME = "mms-next"
+LEGACY_CONFIG_ROOT_NAME = "mms"
+
+_GATEWAY_SESSION_SUBPATHS = (
+    os.path.join("codex-gateway", "s") + os.sep,
+    os.path.join("claude-gateway", "s") + os.sep,
+    "accounts" + os.sep,
 )
+
+# A session HOME inside a gateway directory resolves back to the root that
+# gateway belongs to, so both roots have to be recognized here.
+GATEWAY_SESSION_MARKER_ROOTS = tuple(
+    (os.path.join(".config", root_name, subpath), root_name)
+    for root_name in (DEFAULT_CONFIG_ROOT_NAME, LEGACY_CONFIG_ROOT_NAME)
+    for subpath in _GATEWAY_SESSION_SUBPATHS
+)
+_GATEWAY_SESSION_MARKERS = tuple(marker for marker, _ in GATEWAY_SESSION_MARKER_ROOTS)
 
 
 def resolve_real_user_home(env=None):
@@ -96,16 +111,16 @@ def resolve_mms_config_dir(env=None):
     xdg_config_home = str(env.get("XDG_CONFIG_HOME") or "").strip()
     if xdg_config_home:
         normalized_xdg = _path_from_env_value(xdg_config_home)
-        for marker in _GATEWAY_SESSION_MARKERS:
+        for marker, root_name in GATEWAY_SESSION_MARKER_ROOTS:
             idx = normalized_xdg.find(marker)
             if idx == -1:
                 continue
             base_home = normalized_xdg[:idx]
             if base_home:
-                return os.path.join(base_home, ".config", "mms")
-        return os.path.join(normalized_xdg, "mms")
+                return os.path.join(base_home, ".config", root_name)
+        return os.path.join(normalized_xdg, DEFAULT_CONFIG_ROOT_NAME)
 
-    return os.path.join(resolve_real_user_home(env), ".config", "mms")
+    return os.path.join(resolve_real_user_home(env), ".config", DEFAULT_CONFIG_ROOT_NAME)
 
 
 def mms_config_root_source(env=None):
@@ -126,6 +141,11 @@ def mms_config_root_is_explicit(env=None):
 
 def mms_config_root_mode(config_dir=None, env=None):
     env = env or os.environ
+    # Explicit pin, used by the maintainer channels that stay on the legacy
+    # stable root after the default moved to mms-next.
+    override = str(env.get("MMS_CONFIG_ROOT_MODE") or "").strip().lower()
+    if override in {"stable", "preview"}:
+        return override
     marker = str(env.get("MMS_PREVIEW_MODE") or env.get("MMS_COMMAND_NAME") or "").strip().lower()
     root = os.path.normpath(str(config_dir or resolve_mms_config_dir(env)))
     if marker == "mmf" or os.path.basename(root) == "mms-next":

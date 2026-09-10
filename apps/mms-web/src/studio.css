@@ -475,6 +475,67 @@
   width: min(800px, calc(100% - 88px));
   padding: clamp(40px, 10vh, 110px) 0 40px;
 }
+/* A session Pilot can read but not drive. Stated once, at the top. */
+/* Stands where the composer would, at the composer's own width and radius, so
+   the bottom of the page still reads as one block rather than a gap. */
+.composer-locked {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  padding: 15px 20px;
+  border: 1px dashed var(--line);
+  border-radius: 20px;
+  background: var(--soft);
+  color: var(--muted);
+  font-size: max(11px, 0.8571rem);
+}
+.composer-locked svg {
+  flex-shrink: 0;
+}
+/* The one action that works sits at the far end, where the send button was. */
+.composer-locked > span {
+  flex: 1;
+  min-width: 0;
+}
+.composer-locked .button {
+  flex-shrink: 0;
+}
+.adopt-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 0 0 12px;
+  font-size: max(11px, 0.8571rem);
+}
+.adopt-field > span:first-child {
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.adopt-field .model-picker-trigger {
+  min-width: 0;
+  max-width: 60%;
+}
+.adopt-path {
+  min-width: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.session-readonly {
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--soft);
+  color: var(--muted);
+  font-size: max(11px, 0.8571rem);
+  line-height: 1.6;
+}
+.session-readonly code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+}
 .home-intro {
   border: 0;
   padding: 0;

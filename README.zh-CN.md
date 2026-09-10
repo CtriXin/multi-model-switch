@@ -61,7 +61,7 @@ v4 各版累积下来的能力：
 
 v4.0.0 是 MMS Pilot 的首个大版本，之后 4.x 沿 Dev 继续推进。下列 3.x 轨道为此前分支发布历史，不代表 v4 已晋级各分支：Stable/Main `3.4.z`、Dev `3.5.z`、Canary `3.6.z`。`z` 是各 channel 内的 release 计数：单 commit release 就 `z+1`，复合多个已验证 commits 的 release 也只 bump 一次；未 tag 的日常小步 commit 继续用 git hash 追踪。
 
-当前本机维护者命令已固定：`mms` 是 public installed copy，只用于公开版本复现；`mmd` 指 stable worktree；`mmf` 指 dev worktree；`mmg` 指 canary worktree；`mmm` 指 main worktree。`mmf` / `mmg` 都使用 `~/.config/mms-next` preview DB root。重新生成本机命令用 `scripts/link_local_channel_commands.sh`。
+当前本机维护者命令已固定：`mms` 是 public installed copy，只用于公开版本复现；`mmd` 指 stable worktree；`mmf` 指 dev worktree；`mmg` 指 canary worktree；`mmm` 指 main worktree。默认 config root 是 `~/.config/mms-next`，`mms` / `mmf` / `mmg` 和 Pilot 网页都落在它上面；`mmd` / `mmm` 被显式钉在 legacy `~/.config/mms`。重新生成本机命令用 `scripts/link_local_channel_commands.sh`。
 
 ## 维护者开发入口
 
@@ -120,7 +120,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 - 创建 `~/.mms/.venv`；系统 Python 不够新时，用 MMS-managed Python 兜底。
 - 发现 PATH、Homebrew、NVM 下的 `claude` / `codex` / `opencode` / `agy`。
 - 安装内建 session assets，但不会静默改写真实 provider/account 配置。
-- 写入 `~/.config/mms/version.json`，记录安装 ref、channel 和语言。
+- 写入 `~/.config/mms-next/version.json`，记录安装 ref、channel 和语言；旧版本写在 `~/.config/mms` 的记录仍可读。
 
 安装后检查：
 
@@ -138,10 +138,10 @@ mms test --provider <provider-id> --cli codex
 
 ```text
 mms -> public installed copy  # 只用于公开版本复现
-mmd -> Stable worktree        # stable/root，默认 ~/.config/mms
+mmd -> Stable worktree        # 钉住 legacy ~/.config/mms
 mmf -> Dev worktree           # preview DB root，固定 ~/.config/mms-next
 mmg -> Canary worktree        # preview DB root，固定 ~/.config/mms-next
-mmm -> Main worktree          # main 过渡观察入口，默认 ~/.config/mms
+mmm -> Main worktree          # main 过渡观察入口，钉住 legacy ~/.config/mms
 ```
 
 当前本机用 `scripts/link_local_channel_commands.sh` 把 5 个命令写到 `~/.local/bin`。另一台家里工作机如果要和白天电脑保持一致，建议同样准备 dev/canary/stable/main worktree 后运行这个脚本；如果只是普通用户安装，仍使用公开 `mms` 安装命令。
@@ -150,7 +150,7 @@ mmm -> Main worktree          # main 过渡观察入口，默认 ~/.config/mms
 
 ## 配置 Web UI 教程：从通道到模型可见性
 
-这一节讲的是 `mmf config web` 的配置页面，不是 MMS Pilot。配置 Web UI 是现在最适合做教程的入口，比 TUI 更容易截图和解释。注意：`mmf` / `mmg` 都是 preview DB 入口，所以预览 DB 保存跟 `~/.config/mms-next` workflow 绑定；如果你打开的是 `mms config web`，保存页会显示 `保存配置`，这是 stable/current root 的 legacy audited save；要看到 `写入预览 DB + 发布`，请启动：
+这一节讲的是 `mmf config web` 的配置页面，不是 MMS Pilot。配置 Web UI 是现在最适合做教程的入口，比 TUI 更容易截图和解释。注意：`mmf` / `mmg` 都是 preview DB 入口，所以预览 DB 保存跟 `~/.config/mms-next` workflow 绑定；`mms` 现在也默认落在同一个 preview DB root 上，所以保存同样走 `写入预览 DB + 发布`；只有显式钉在 legacy root 的 `mmd` / `mmm` 才会看到 `保存配置` 这种 legacy audited save。等价入口：
 
 ```bash
 mmf config web
@@ -269,7 +269,7 @@ bash install.sh --install-cli claude,codex
 - Claude 语义在 route 支持时优先走 `Anthropic /v1/messages`。
 - `OpenAI /v1/chat/completions` 是 fallback transport，不是等价默认值。
 - Web UI / TUI 写配置前应先生成 preview / diff / backup / audit evidence。
-- 真实 `~/.config/mms/**`，尤其 Claude 相关字段，仍然是 human-gated 配置。
+- legacy `~/.config/mms/**`，尤其 Claude 相关字段，仍然是 human-gated 配置：Web 不写它。默认根 `~/.config/mms-next` 的写入统一走 Registry 审阅计划。
 
 ## 更多文档
 

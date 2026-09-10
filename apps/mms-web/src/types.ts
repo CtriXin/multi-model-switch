@@ -10,6 +10,9 @@ export interface Workspace {
   id: string;
   name: string;
   path: string;
+  /** A folder the sidebar shows because sessions ran there, not one the user
+   *  registered. It can be read and copied, but not renamed or removed. */
+  unregistered?: boolean;
 }
 export interface Model {
   id: string;
@@ -69,7 +72,7 @@ export interface Session {
     turnStartedAt?: string;
   } | null;
   updatedAt: string;
-  owner: "web" | "glint" | "external";
+  owner: "web" | "cli" | "glint" | "external";
   capabilities: { send: boolean; stop: boolean; approve: boolean };
   summary?: string;
   archived?: boolean;
@@ -93,6 +96,7 @@ export interface SessionEvent {
   answer?: string;
   arguments?: Record<string, unknown>;
   createdAt: string;
+  updatedAt?: string;
   thinking?: string;
   skills?: { id: string; name: string; source: string }[];
   nativeEntryId?: string;

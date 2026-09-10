@@ -39,8 +39,21 @@ def test_claude_kimi_k3_context_env_uses_selector_window(monkeypatch):
 
     monkeypatch.setattr(mms_launchers, "_capability_context_window", fake_capability_context_window)
 
-    assert mms_launchers._lookup_context_window("k3", provider_id="kimi") == 262_144
+    assert mms_launchers._lookup_context_window("k3", provider_id="kimi") == 1_000_000
     assert mms_launchers._lookup_context_window("k3[1m]", provider_id="kimi") == 1_048_576
+
+
+def test_claude_kimi_k3_without_policy_keeps_safe_base_window(monkeypatch):
+    import mms_launchers
+
+    monkeypatch.setattr(
+        mms_launchers,
+        "_load_model_context_overrides",
+        lambda: {"models": {}, "provider_overrides": {}},
+    )
+    monkeypatch.setattr(mms_launchers, "_capability_context_window", lambda *_a, **_k: None)
+
+    assert mms_launchers._lookup_context_window("k3", provider_id="kimi") == 262_144
 
 
 def test_get_export_env_for_claude_kimi_k3_sets_effort_and_context(monkeypatch):

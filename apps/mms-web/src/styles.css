@@ -790,10 +790,13 @@ kbd {
 .recent-copy strong {
   font-size: max(11px, 0.9286rem);
   font-weight: 500;
-  display: block;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .recent-copy small {
   display: block;
@@ -1125,6 +1128,25 @@ kbd {
   font-size: max(11px, 0.7143rem);
   font-weight: 400;
   color: var(--muted);
+}
+.message-author .message-time,
+.message-author .message-duration {
+  font-size: max(11px, 0.7143rem);
+  font-weight: 400;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  margin-left: auto;
+}
+.message-author .message-time + .message-duration {
+  margin-left: 0;
+}
+.message-meta {
+  margin-top: 6px;
+  font-size: max(11px, 0.7143rem);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 .markdown {
   font-size: max(11px, 1.0000rem);
@@ -1793,7 +1815,8 @@ dialog:has(.dialog-body.sheet) .dialog-body.sheet > header {
   .markdown {
     font-size: max(11px, 0.9286rem);
   }
-  .message-author span {
+  .message-author span,
+  .message-author .message-time {
     font-size: max(11px, 0.6429rem);
   }
   .approval-event,
