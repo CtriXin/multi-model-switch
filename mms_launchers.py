@@ -623,6 +623,21 @@ def _lookup_context_window(model_name, provider_id=None):
     if model_exact is not None:
         return model_exact
 
+    if has_1m_suffix:
+        suffixed_window = _ONE_M_SUFFIX_CONTEXT_WINDOWS.get(lower)
+        if suffixed_window is not None:
+            return suffixed_window
+
+    # User policy is the preferred surface for context size. It must win before
+    # the legacy k3/MiMo safe-base guards that otherwise cap plain model names.
+    policy_window = _capability_context_window(
+        clean,
+        provider_id=provider_id,
+        accepted_sources={"model_policy", "manual_override"},
+    )
+    if policy_window is not None:
+        return policy_window
+
     profile_safe_selector_window = None
     if not has_1m_suffix:
         profile_safe_selector_window = _plain_kimi_k3_profile_context_window(
@@ -631,21 +646,6 @@ def _lookup_context_window(model_name, provider_id=None):
         )
     if profile_safe_selector_window is not None:
         return profile_safe_selector_window
-
-    if has_1m_suffix:
-        suffixed_window = _ONE_M_SUFFIX_CONTEXT_WINDOWS.get(lower)
-        if suffixed_window is not None:
-            return suffixed_window
-
-    # User policy is the preferred surface for context size. It must win before
-    # the legacy MiMo safe-base guard that otherwise caps plain model names.
-    policy_window = _capability_context_window(
-        clean,
-        provider_id=provider_id,
-        accepted_sources={"model_policy", "manual_override"},
-    )
-    if policy_window is not None:
-        return policy_window
 
     if not has_1m_suffix:
         # Latest-approved capability facts are the WebUI/runtime truth after
