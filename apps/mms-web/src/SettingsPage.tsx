@@ -273,7 +273,7 @@ export function SettingsPage({
             <input type="checkbox" role="switch" aria-label="完成后自动收起过程" checked={autoCollapseProcess} onChange={e => setAutoCollapseProcess(e.target.checked)} />
           </label>
           <label className="preference-row">
-            <div><h2>显示命令行会话</h2><p>把用 <code>mmf</code> 在终端里开始的会话一起列出来。它们是只读的：可以查看，不能在这里继续。关掉后立即从列表消失。</p></div>
+            <div><h2>显示命令行会话</h2><p>把用 <code>mms</code> / <code>mmf</code> 在终端里开始的会话一起列出来。它们默认只读；要在这里继续，打开会话后选「接入并继续」。关掉后立即从列表消失。</p></div>
             <input type="checkbox" role="switch" aria-label="显示命令行会话" checked={showCliSessions} onChange={e => setShowCliSessions(e.target.checked)} />
           </label>
           <label className="preference-row">
