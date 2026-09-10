@@ -1596,7 +1596,21 @@ export function App() {
                 <section className="recent-section">
                   <div className="section-heading">
                     <h2>最近在做</h2>
-                    <span className="muted">{data.sessions.length} 个会话</span>
+                    {/* The count reads as "see all" next to a list of three,
+                        so it is the way to the flat list of every session,
+                        which is what the search surface already shows with an
+                        empty query. The sidebar only groups them by folder. */}
+                    <button
+                      className="section-heading-link"
+                      aria-label={`查看全部 ${data.sessions.length} 个会话`}
+                      onClick={() => {
+                        setQuery("");
+                        setSearch(true);
+                      }}
+                    >
+                      全部 {data.sessions.length} 个会话
+                      <ChevronRight size={14} />
+                    </button>
                   </div>
                   {data.sessions
                     .filter((s) => !s.archived)
