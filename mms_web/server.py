@@ -113,6 +113,9 @@ class WebApplication:
             return self._model_settings().read()
         if parts == ["skill-preferences"]:
             return self._sessions().skills.preferences()
+        if parts == ["ui-preferences"]:
+            from .ui_preferences import UiPreferences
+            return UiPreferences(self.state_root).read()
         if parts == ["sessions"]:
             return {"sessions": self._sessions().list_sessions()}
         if len(parts) == 2 and parts[0] == "attachments":
@@ -172,6 +175,9 @@ class WebApplication:
             return self._sessions().skills.snapshot(str(payload.get("workspaceId") or ""))
         if parts == ["skill-preferences"]:
             return self._sessions().skills.set_preferences(payload)
+        if parts == ["ui-preferences"]:
+            from .ui_preferences import UiPreferences
+            return UiPreferences(self.state_root).update(payload)
         if parts == ["project-materials"]:
             return self._sessions().materials.snapshot(str(payload.get("workspaceId") or ""))
         if parts == ["project-materials", "change"]:

@@ -118,7 +118,7 @@ export function GuidedTour({ step, move, close, help, example, modelReady, confi
       {step === "compose" && <button className="button tour-example" type="button" onClick={() => example(starterPrompt)}>帮我填入一条示例</button>}
       {step === "send" && !modelReady && <button className="text-button" type="button" onClick={() => move("connection")}>还没有可用模型，去连接服务</button>}
       <footer><button type="button" className="text-button" disabled={index === 0} onClick={() => move(steps[index - 1])}><ArrowLeft size={14} />上一步</button><button type="button" className="button primary" onClick={last || step === "send" ? close : next}>{last ? "知道了" : step === "send" ? "稍后再发" : step === "reply" ? "认识更多功能" : "下一步"}{!last && step !== "send" && <ArrowRight size={14} />}</button></footer>
-      <div className="tour-links"><button type="button" onClick={close}>先自己试试</button><button type="button" onClick={help}>查功能说明</button></div>
+      <div className="tour-links"><button type="button" onClick={close}>跳过引导</button><button type="button" onClick={help}>查功能说明</button></div>
     </section>
   </div>;
 }
