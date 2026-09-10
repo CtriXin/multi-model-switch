@@ -110,7 +110,7 @@ def test_pilot_lists_command_line_sessions_beside_its_own(tmp_path):
 
     app = WebApplication(state_root=tmp_path / "state", config_root=config_root)
     try:
-        rows = app.all_sessions()
+        rows = app.all_sessions(include_cli=True)
         assert [r["id"] for r in rows] == ["cli:aaaa-1"]
         row = rows[0]
         assert row["owner"] == "cli"
@@ -120,6 +120,8 @@ def test_pilot_lists_command_line_sessions_beside_its_own(tmp_path):
 
         detail = app.get(["sessions", "cli:aaaa-1"])
         assert [e["role"] for e in detail["events"]] == ["user"]
+        # Arrays the session view reads without checking must be present.
+        assert detail["artifacts"] == [] and detail["approvals"] == []
         assert detail["events"][0]["text"] == "终端里问的问题"
         # The transcript path is Pi's business, not the browser's.
         assert "path" not in detail["session"]
@@ -127,6 +129,25 @@ def test_pilot_lists_command_line_sessions_beside_its_own(tmp_path):
         app.close()
     # Read-only: the reader must not have touched Pi's directory.
     assert sorted(p.name for p in sessions.iterdir()) == ["one.jsonl"]
+
+
+def test_the_page_decides_whether_command_line_sessions_are_listed(tmp_path):
+    """The switch lives in the browser, so it takes effect on the next read."""
+    from mms_web.server import WebApplication
+
+    config_root = tmp_path / "mms-next"
+    sessions = config_root / "pi-gateway" / "sessions"
+    sessions.mkdir(parents=True)
+    write(sessions, "one", [session("bbbb-1"), message("user", "终端里的会话")])
+    app = WebApplication(state_root=tmp_path / "hidden", config_root=config_root)
+    try:
+        assert app.all_sessions() == []
+        assert app.get(["sessions"], {"cli": ["0"]})["sessions"] == []
+        assert [s["id"] for s in app.get(["sessions"], {"cli": ["1"]})["sessions"]] == ["cli:bbbb-1"]
+        # Readable by id either way, so a link to one keeps working.
+        assert app.get(["sessions", "cli:bbbb-1"])["session"]["title"] == "终端里的会话"
+    finally:
+        app.close()
 
 
 def test_a_missing_gateway_directory_does_not_break_the_list(tmp_path):

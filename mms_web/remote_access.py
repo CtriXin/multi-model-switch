@@ -67,7 +67,7 @@ class RemoteAccess:
             raise ValueError(f"unknown listen mode: {mode}")
         self.mode = mode
         self.hostnames = tuple(dict.fromkeys(h.strip().lower() for h in hostnames if h.strip()))
-        self.lan_address = _lan_address() if mode == "lan" else ""
+        self.lan_address = _lan_address() if mode != "loopback" else ""
         # Loopback-only keeps today's behaviour exactly, token included: there
         # is nothing to gate, and requiring one would break every existing
         # bookmark for no gain.
@@ -81,15 +81,17 @@ class RemoteAccess:
     def bind_address(self) -> str:
         """The address to listen on.
 
-        "lan" resolves to this machine's own address rather than the wildcard,
-        so choosing the LAN does not also expose every other interface. Only
-        an explicit "all" binds the wildcard.
+        Anything past loopback binds the wildcard on one socket, because
+        binding only this machine's LAN address would cut off 127.0.0.1 and
+        with it both the local browser and a tunnel connecting from here.
+
+        What separates "lan" from "all" is therefore the Host allowlist, not
+        the socket: "lan" answers only to loopback and this machine's own
+        address, "all" answers to any literal IP. The token is the gate in
+        both; the allowlist is what stops DNS rebinding and a hostname nobody
+        configured.
         """
-        if self.mode == "loopback":
-            return "127.0.0.1"
-        if self.mode == "all":
-            return "0.0.0.0"
-        return self.lan_address or "127.0.0.1"
+        return "127.0.0.1" if self.mode == "loopback" else "0.0.0.0"
 
     def allowed_hosts(self, port: int) -> set[str]:
         """Host header values this server answers to."""
@@ -100,9 +102,8 @@ class RemoteAccess:
                 # hostname as well as an explicit one.
                 hosts.add(name)
                 hosts.add(f"{name}:{port}")
-            address = self.lan_address or (_lan_address() if self.mode == "all" else "")
-            if address:
-                hosts.add(f"{address}:{port}")
+            if self.lan_address:
+                hosts.add(f"{self.lan_address}:{port}")
         return hosts
 
     def accepts(self, host: str | None, port: int) -> bool:
@@ -128,7 +129,8 @@ class RemoteAccess:
 
     def link(self, port: int) -> str:
         """The address to hand to a phone, token included."""
-        host = self.hostnames[0] if self.hostnames else (self.bind_address() or "127.0.0.1")
+        # A link is for a phone, so prefer a name it can actually reach.
+        host = self.hostnames[0] if self.hostnames else (self.lan_address or "127.0.0.1")
         scheme = "https" if self.hostnames else "http"
         base = host if self.hostnames else f"{host}:{port}"
         return f"{scheme}://{base}/" + (f"?{QUERY}={self.token}" if self.required else "")

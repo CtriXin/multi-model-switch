@@ -69,7 +69,7 @@ export interface Session {
     turnStartedAt?: string;
   } | null;
   updatedAt: string;
-  owner: "web" | "glint" | "external";
+  owner: "web" | "cli" | "glint" | "external";
   capabilities: { send: boolean; stop: boolean; approve: boolean };
   summary?: string;
   archived?: boolean;

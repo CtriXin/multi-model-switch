@@ -33,10 +33,16 @@ def serve(tmp_path):
         app.close()
 
 
-def fetch(port, path="/api/v1/sessions", host=None, token=None, cookie=None, redirect=True):
+def fetch(port, path="/api/v1/sessions", host=None, token=None, cookie=None,
+          redirect=True, remote=False):
+    """`remote=True` stands in for a phone: the test client is always on this
+    machine, and a request from this machine is deliberately exempt, so the
+    forwarding header a tunnel adds is what marks it as coming from outside."""
     request = urllib.request.Request(
         f"http://127.0.0.1:{port}{path}" + (f"?{QUERY}={token}" if token else ""))
     request.add_header("Host", host or f"127.0.0.1:{port}")
+    if remote:
+        request.add_header("X-Forwarded-For", "203.0.113.9")
     if cookie:
         request.add_header("Cookie", f"{COOKIE}={cookie}")
     opener = urllib.request.build_opener(
@@ -69,15 +75,16 @@ def test_reaching_beyond_loopback_requires_the_token(serve):
     # Readable only by its owner: it is the whole gate.
     assert token_file.stat().st_mode & 0o077 == 0
 
-    assert fetch(port)[0] == 401
-    assert fetch(port, cookie="wrong-token")[0] == 401
-    assert fetch(port, cookie=app.access.token)[0] == 200
+    assert fetch(port, remote=True)[0] == 401
+    assert fetch(port, cookie="wrong-token", remote=True)[0] == 401
+    assert fetch(port, cookie=app.access.token, remote=True)[0] == 200
 
 
 def test_a_token_in_the_query_becomes_a_cookie_and_leaves_the_url(serve):
     """So the token does not sit in history, the address bar or a Referer."""
     app, port = serve("all")
-    status, _, headers = fetch(port, "/api/v1/sessions", token=app.access.token, redirect=False)
+    status, _, headers = fetch(port, "/api/v1/sessions", token=app.access.token,
+                               redirect=False, remote=True)
     assert status == 302
     assert headers["Location"] == "/api/v1/sessions"
     cookie = headers["Set-Cookie"]
@@ -87,17 +94,21 @@ def test_a_token_in_the_query_becomes_a_cookie_and_leaves_the_url(serve):
 
 def test_a_rejected_request_says_nothing_about_the_service(serve):
     app, port = serve("all")
-    status, body, _ = fetch(port, "/", cookie="nope")
+    status, body, _ = fetch(port, "/", cookie="nope", remote=True)
     assert status == 401
     assert body == b"401"
 
 
-def test_the_lan_mode_binds_this_machine_only_not_the_wildcard(tmp_path):
+def test_lan_mode_keeps_loopback_working_and_narrows_by_host(tmp_path):
+    """Binding only the LAN address would cut off the local browser."""
     access = RemoteAccess(tmp_path, "lan")
-    address = access.bind_address()
-    assert address != "0.0.0.0"
-    # Either a real address on this machine, or loopback when it has none.
-    assert address == access.lan_address or address == "127.0.0.1"
+    assert access.bind_address() == "0.0.0.0"
+    assert access.accepts("127.0.0.1:8765", 8765)
+    if access.lan_address:
+        assert access.accepts(f"{access.lan_address}:8765", 8765)
+    # Unlike "all", an arbitrary address on the serving port is not answered.
+    assert not access.accepts("203.0.113.9:8765", 8765)
+    assert RemoteAccess(tmp_path, "all").accepts("203.0.113.9:8765", 8765)
 
 
 def test_a_configured_hostname_is_accepted_with_or_without_the_port(tmp_path):
@@ -128,3 +139,26 @@ def test_the_link_carries_the_token_and_prefers_the_public_hostname(tmp_path):
     assert RemoteAccess(tmp_path, "loopback").link(8765) == "http://127.0.0.1:8765/"
     access = RemoteAccess(tmp_path, "all", ("pilot.example.com",))
     assert access.link(8765) == f"https://pilot.example.com/?{QUERY}={access.token}"
+
+
+def test_a_browser_on_this_machine_needs_no_token(serve):
+    """Connecting from loopback already means being on the machine."""
+    app, port = serve("all")
+    assert app.access.required is True
+    assert fetch(port)[0] == 200
+
+
+def test_a_tunnel_also_arrives_from_loopback_and_is_not_exempt(serve):
+    """cloudflared connects from 127.0.0.1, so the peer address cannot decide it."""
+    app, port = serve("all")
+    for header in ("X-Forwarded-For", "X-Forwarded-Proto", "CF-Connecting-IP"):
+        request = urllib.request.Request(f"http://127.0.0.1:{port}/api/v1/sessions")
+        request.add_header("Host", f"127.0.0.1:{port}")
+        request.add_header(header, "203.0.113.9" if header != "X-Forwarded-Proto" else "https")
+        with pytest.raises(urllib.error.HTTPError) as caught:
+            urllib.request.urlopen(request, timeout=10)
+        assert caught.value.code == 401, header
+        # The same request with the token is served.
+        request.add_header("Cookie", f"{COOKIE}={app.access.token}")
+        with urllib.request.urlopen(request, timeout=10) as response:
+            assert response.status == 200

@@ -67,7 +67,7 @@ class WebApplication:
             self.model_settings = ModelSettings(self.catalog)
         return self.model_settings
 
-    def bootstrap(self) -> dict:
+    def bootstrap(self, include_cli: bool = False) -> dict:
         snapshot = self.catalog.snapshot() if self.catalog else {
             "models": [], "services": [], "presets": [], "workspaces": [],
             "diagnostics": [{"code": "CATALOG_UNAVAILABLE",
@@ -105,7 +105,7 @@ class WebApplication:
         return {
             **snapshot, "version": "1", "appVersion": VERSION, "mode": "live",
             "capabilities": capabilities, "csrfToken": self.csrf_token,
-            "sessions": self.all_sessions(),
+            "sessions": self.all_sessions(include_cli),
         }
 
     def _cli_sessions(self) -> list[dict]:
@@ -122,9 +122,15 @@ class WebApplication:
         except Exception:
             return []
 
-    def all_sessions(self) -> list[dict]:
-        """Pilot's own sessions and the command-line ones, newest first."""
+    def all_sessions(self, include_cli: bool = False) -> list[dict]:
+        """Pilot's own sessions, and the command-line ones when asked for.
+
+        The caller decides, so the page's own switch takes effect on its next
+        read with no restart and no server-side preference to keep in sync.
+        """
         own = self._sessions().list_sessions() if self.sessions else []
+        if not include_cli:
+            return own
         # A session resumed here owns its Pi session, so drop the read-only
         # row for it rather than showing the same conversation twice.
         claimed = {str(s.get("piSessionId") or "") for s in own}
@@ -150,10 +156,14 @@ class WebApplication:
                    "at": e["at"], "id": e["id"]}
                   for e in transcript(row["path"])]
         return {"session": {k: v for k, v in row.items() if k != "path"},
-                "events": events, "approvals": [], "runtime": {},
+                "events": events,
+                # Present and empty, not absent: the view reads these without
+                # checking, and an absent array is what blanked the page.
+                "artifacts": [], "artifactNotice": "", "approvals": [], "runtime": {},
                 "note": "这个会话是在命令行里开始的，这里只读。"}
 
-    def get(self, parts: list[str]) -> dict:
+    def get(self, parts: list[str], query: dict[str, list[str]] | None = None) -> dict:
+        include_cli = (query or {}).get("cli", ["0"])[0] == "1"
         if parts == ["update", "identity"]:
             from .update_handoff import path_identity, session_inventory
             return {"version": VERSION, "processId": os.getpid(), "instance": self.instance, "identity": path_identity(Path(__file__).resolve().parent.parent, self.state_root, self.config_root, Path.cwd()), "sessions": session_inventory(self.sessions)}
@@ -162,7 +172,7 @@ class WebApplication:
         if parts == ["model-settings"]:
             return self._model_settings().read()
         if parts == ["sessions"]:
-            return {"sessions": self.all_sessions()}
+            return {"sessions": self.all_sessions(include_cli)}
         if len(parts) == 2 and parts[0] == "attachments":
             return self._sessions().files.preview_attachment(parts[1])
         if len(parts) == 3 and parts[0] == "sessions":
@@ -173,7 +183,7 @@ class WebApplication:
             if parts[2] == "commands":
                 return self._sessions().command_catalog(parts[1])
         if parts == ["bootstrap"]:
-            return self.bootstrap()
+            return self.bootstrap(include_cli)
         if len(parts) == 2 and parts[0] == "sessions":
             if parts[1].startswith("cli:"):
                 return self.cli_session_detail(parts[1])
@@ -307,6 +317,21 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
             # Request paths/bodies can contain private task data. No access log.
             return
 
+        def _is_local_browser(self):
+            """A browser on this machine, which needs no token to get in.
+
+            Being able to connect from loopback already means being on the
+            machine, so a token adds nothing there. The peer address alone is
+            not enough to decide it: a tunnel also connects from loopback. It
+            announces itself with forwarding headers, and a browser on this
+            machine sends none, so both conditions are required.
+            """
+            peer = (self.client_address[0] if self.client_address else "")
+            if peer not in {"127.0.0.1", "::1"}:
+                return False
+            return not any(self.headers.get(name) for name in
+                           ("X-Forwarded-For", "X-Forwarded-Proto", "CF-Connecting-IP"))
+
         def _presented_token(self):
             """The token this request carries, from the cookie or the query."""
             from http.cookies import SimpleCookie
@@ -376,7 +401,7 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
             is redirected without it, so the token does not sit in history,
             in the address bar, or in a Referer header on the way out.
             """
-            if not app.access.required:
+            if not app.access.required or self._is_local_browser():
                 return True
             presented, from_query = self._presented_token()
             if not app.access.valid(presented):
@@ -413,7 +438,7 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
                             raise WebError("PREVIEW_UNAVAILABLE", "这个成果不是 HTML。", 400)
                         from .artifact_preview import offline_html
                         return self._send(200, offline_html(item["content"]), "text/html; charset=utf-8", preview=True)
-                    return self._json(200, app.get(parts))
+                    return self._json(200, app.get(parts, parse_qs(urlsplit(self.path).query)))
                 file = (root / (path.lstrip("/") or "index.html")).resolve()
                 if not file.is_relative_to(root) or not file.is_file():
                     raise WebError("NOT_FOUND", "页面资源不存在。请先构建 MMS Pilot。", 404)

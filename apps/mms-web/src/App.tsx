@@ -33,7 +33,7 @@ import {
   X,
 } from "lucide-react";
 import type { Bootstrap, Page, SessionDetail, FileSelection } from "./types";
-import { bootstrap, getSession, listSessions, isPreview, mutate, request } from "./api";
+import { bootstrap, getSession, includeCliSessions, listSessions, isPreview, mutate, request } from "./api";
 import {
   Composer,
   Dialog,
@@ -320,12 +320,22 @@ export function App() {
   const [selectToCopy, setSelectToCopy] = useState(() =>
     readSetting("mms-web-select-to-copy", false),
   );
+  const [showCliSessions, setShowCliSessions] = useState(() =>
+    readSetting("mms-web-cli-sessions", false),
+  );
   const [favorites, setFavorites] = useState<string[]>(() => {
     const value = readSetting<unknown>("mms-web-favorites", []);
     return Array.isArray(value)
       ? value.filter((v) => typeof v === "string")
       : [];
   });
+  // Told to the API layer before anything reads a list, and reloaded right
+  // after, so turning it off empties the list immediately.
+  useEffect(() => {
+    saveSetting("mms-web-cli-sessions", showCliSessions);
+    includeCliSessions(showCliSessions);
+    void load();
+  }, [showCliSessions]);
   useEffect(() => { saveSetting("mms-web-auto-collapse-process", autoCollapseProcess); }, [autoCollapseProcess]);
   useEffect(() => { saveSetting("mms-web-workspace-sort", workspaceSort); }, [workspaceSort]);
   useEffect(() => { saveSetting("mms-web-workspace-order", workspaceOrder); }, [workspaceOrder]);
@@ -1237,6 +1247,7 @@ export function App() {
                               }
                             </span>
                             <span>·</span>
+                            {s.owner === "cli" && <span>终端 ·</span>}
                             {s.modelName}
                           </small>
                         </span>
@@ -1634,7 +1645,8 @@ export function App() {
                           <strong>{s.title}</strong>
                           <small>
                             {s.summary ||
-                              harnessNames[s.harness] + " · " + s.modelName}
+                              (s.owner === "cli" ? "终端 · " : "") +
+                                harnessNames[s.harness] + " · " + s.modelName}
                           </small>
                         </span>
                         <Status
@@ -1666,6 +1678,8 @@ export function App() {
           <SettingsPage
             key={guideSettingsKey}
             openUpdates={() => setUpdateOpen(true)}
+            showCliSessions={showCliSessions}
+            setShowCliSessions={setShowCliSessions}
             updateAvailable={!!updateStatus?.available}
             connectionCompleted={connectionCompleted}
             tour={tour}
@@ -1756,6 +1770,15 @@ export function App() {
                   )}
                   {detail && (
                     <div className="conversation-content">
+                      {detail.session.owner === "cli" && (
+                        // Say it before the transcript, not after: someone
+                        // scrolling a long session should not have to reach
+                        // the composer to find out it cannot be used.
+                        <p className="session-readonly" role="status">
+                          这个会话是在终端里用 <code>mmf</code> 开始的，这里只读。
+                          要继续，请回到那个终端。
+                        </p>
+                      )}
                       <Transcript
                         key={detail.session.id}
                         forced={processForced}
@@ -2192,6 +2215,7 @@ export function App() {
                 <span>
                   <strong>{s.title}</strong>
                   <small>
+                    {s.owner === "cli" ? "终端 · " : ""}
                     {harnessNames[s.harness]} · {s.modelName}
                   </small>
                 </span>
