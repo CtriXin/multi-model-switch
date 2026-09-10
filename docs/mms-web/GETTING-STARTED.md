@@ -22,7 +22,19 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 
 macOS 也可以在 Finder 打开 `~/.mms/MMS Pilot.command`。如果从 Finder 启动时找不到通过 shell 管理器安装的 Node/Pi，先从能运行 `pi` 的终端启动上面的命令。系统文件选择器的交互与 macOS 本机权限有关。
 
-独立命令 `mms-web --open` 与 `mms web --open` 都可打开 Web。终端中按 Ctrl+C 停止服务；浏览器关闭只关闭页面。服务重启后，对话保留，继续发送时会恢复 Pi 会话。
+独立命令 `mms-web --open` 与 `mms web --open` 都可在前台打开 Web。终端中按 Ctrl+C 停止服务；浏览器关闭只关闭页面。服务重启后，对话保留，继续发送时会恢复 Pi 会话。
+
+安装脚本装完后会在后台起一个服务，它不是系统服务：机器重启或进程被结束后不会自己回来。用下面几个命令管理它，不用再翻进程列表：
+
+| 命令 | 作用 |
+|---|---|
+| `mms web status` | 列出本机所有在监听的 Pilot（地址、版本、pid、state-root、config-root、来源目录），● 标出属于当前 state-root 的那个 |
+| `mms web url` | 只打印当前实例的地址；没在跑就返回非零并提示 `mms web start` |
+| `mms web start [--open]` | 已在跑就直接返回地址；没跑就在后台启动，日志在 `<state-root>/logs/mms-web.log` |
+| `mms web stop [--all]` | 请当前实例退出（`--all` 是本机全部 Pilot），等待最多 20 秒，不会 `kill -9` |
+| `mms web restart` | 先停再起 |
+
+`mmf web status` 等同样可用。`--state-root` / `--port` 与前台启动时的含义一致；`--json` 给脚本用。
 
 ## 第一次配置
 

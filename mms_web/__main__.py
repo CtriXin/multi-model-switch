@@ -1,6 +1,7 @@
 import argparse
 import signal
 import os
+import sys
 import webbrowser
 from pathlib import Path
 
@@ -9,6 +10,15 @@ from .remote_access import QUERY
 
 
 def main(argv=None):
+    from .service import VERBS, run as run_service
+
+    raw = list(sys.argv[1:] if argv is None else argv)
+    # `mms web status|url|start|stop|restart` manage the detached service;
+    # the verb may follow options mms_core prepends (for example
+    # `--config-root <root> status`), so look for it anywhere.
+    for index, token in enumerate(raw):
+        if token in VERBS:
+            raise SystemExit(run_service(token, raw[:index] + raw[index + 1:]))
     parser = argparse.ArgumentParser(description="MMS Pilot — local conversations powered by MMS and Pi")
     from mms_version import VERSION
     parser.add_argument("--version", action="version", version=f"MMS Pilot {VERSION}")
