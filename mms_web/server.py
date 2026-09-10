@@ -38,6 +38,9 @@ class WebApplication:
         # Loopback-only is the default and needs no token, so nothing changes
         # for a browser on this machine.
         self.access = access.RemoteAccess(state_root, listen, hostnames)
+        # Set by create_server, which owns the handler class the extra sockets
+        # need. Absent in tests that drive the application without a server.
+        self.listeners = None
         if config_root is None:
             config_root = state_root / "config"
         self.config_root = config_root
@@ -173,6 +176,48 @@ class WebApplication:
                 "artifacts": [], "artifactNotice": "", "approvals": [], "runtime": {},
                 "note": "这个会话是在命令行里开始的，这里只读。"}
 
+    def remote_access_state(self) -> dict:
+        """The switch, the ways in, and which of them are actually listening."""
+        port = self.listeners._port if self.listeners else 0
+        self.access.refresh()
+        if self.listeners:
+            # Addresses change with the network, so bring the sockets in line
+            # with what the machine has now before reporting them.
+            self.listeners.sync(self.access.extra_binds())
+        state = self.access.state(port)
+        state["listening"] = self.listeners.active if self.listeners else []
+        state["unavailable"] = self.listeners.failed if self.listeners else {}
+        # Only reachable entries are offered; a bind that failed leads nowhere.
+        if state["mode"] == "lan":
+            reachable = set(state["listening"])
+            state["links"] = [entry for entry in state["links"]
+                              if entry["kind"] != "address" or entry["host"] in reachable]
+        return state
+
+    def set_remote_access(self, payload: dict) -> dict:
+        """Turn remote access on or off, or replace the token."""
+        payload = dict(payload or {})
+        if payload.get("regenerate") is True:
+            if self.access.mode == "loopback":
+                raise WebError("REMOTE_ACCESS_OFF", "先打开远程访问，再换 token。", 409)
+            self.access.regenerate()
+            return self.remote_access_state()
+        if "enabled" not in payload:
+            raise WebError("INVALID_REQUEST", "缺少 enabled。", 400)
+        # isinstance, not `in (True, False)`: 1 == True in Python, and a
+        # stray 1 must be refused rather than quietly read as "off".
+        if not isinstance(payload["enabled"], bool):
+            raise WebError("INVALID_PARAMETER", "enabled 必须是 true 或 false。", 400)
+        wanted = "lan" if payload["enabled"] else "loopback"
+        # "all" is a deliberate command-line choice; the switch never widens
+        # past the machine's own addresses on its own.
+        if self.access.mode == "all" and wanted == "lan":
+            return self.remote_access_state()
+        self.access.set_mode(wanted)
+        if self.listeners:
+            self.listeners.sync(self.access.extra_binds())
+        return self.remote_access_state()
+
     def get(self, parts: list[str], query: dict[str, list[str]] | None = None) -> dict:
         include_cli = (query or {}).get("cli", ["0"])[0] == "1"
         if parts == ["update", "identity"]:
@@ -180,6 +225,8 @@ class WebApplication:
             return {"version": VERSION, "processId": os.getpid(), "instance": self.instance, "identity": path_identity(Path(__file__).resolve().parent.parent, self.state_root, self.config_root, Path.cwd()), "sessions": session_inventory(self.sessions)}
         if parts == ["update"]:
             return self.updates.status()
+        if parts == ["remote-access"]:
+            return self.remote_access_state()
         if parts == ["model-settings"]:
             return self._model_settings().read()
         if parts == ["sessions"]:
@@ -226,6 +273,8 @@ class WebApplication:
             return coordinator.start(payload) if parts[1] == "start" else coordinator.cancel()
         if parts == ["update", "check"]:
             return self.updates.request_check()
+        if parts == ["remote-access"]:
+            return self.set_remote_access(payload)
         if parts == ["update", "preferences"]:
             return self.updates.preferences(payload)
         if len(parts) == 2 and parts[0] == "model-settings" and parts[1] in {"discover", "check", "refresh", "preview", "apply"}:
@@ -310,6 +359,8 @@ class WebApplication:
 
     def close(self):
         self.updates.close()
+        if self.listeners:
+            self.listeners.close()
         if self.sessions:
             self.sessions.close()
 
@@ -491,4 +542,60 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
 
     server = ThreadingHTTPServer((app.access.bind_address(), port), Handler)
     server.daemon_threads = True
+    app.listeners = RemoteListeners(Handler, server.server_address[1])
+    app.listeners.sync(app.access.extra_binds())
     return server
+
+
+class RemoteListeners:
+    """The sockets that exist only while remote access is switched on.
+
+    One per address rather than the wildcard, for two reasons. The always-on
+    loopback socket already holds this port, and a second wildcard bind on it
+    would collide. And closing these leaves nothing listening on the network,
+    which is what "off" has to mean: a port that accepts a connection is
+    visible whatever it answers.
+    """
+
+    def __init__(self, handler, port: int) -> None:
+        self._handler = handler
+        self._port = port
+        self._servers: dict[str, ThreadingHTTPServer] = {}
+        self.failed: dict[str, str] = {}
+
+    @property
+    def active(self) -> list[str]:
+        return sorted(self._servers)
+
+    def sync(self, addresses: list[str]) -> None:
+        """Listen on exactly these addresses, opening and closing as needed."""
+        wanted = list(dict.fromkeys(addresses))
+        for address in list(self._servers):
+            if address not in wanted:
+                self._close(address)
+        self.failed = {}
+        for address in wanted:
+            if address in self._servers:
+                continue
+            try:
+                extra = ThreadingHTTPServer((address, self._port), self._handler)
+            except OSError as error:
+                # A point-to-point tunnel endpoint may refuse a bind. Skip it
+                # and say so rather than failing the whole switch.
+                self.failed[address] = str(error)
+                continue
+            extra.daemon_threads = True
+            self._servers[address] = extra
+            threading.Thread(target=extra.serve_forever, name=f"mms-web-{address}",
+                             daemon=True).start()
+
+    def _close(self, address: str) -> None:
+        extra = self._servers.pop(address, None)
+        if extra is None:
+            return
+        extra.shutdown()
+        extra.server_close()
+
+    def close(self) -> None:
+        for address in list(self._servers):
+            self._close(address)

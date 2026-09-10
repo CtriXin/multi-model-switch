@@ -1,0 +1,139 @@
+/* Turning Pilot's own port outward is the one setting here with a blast
+   radius past this machine, so the row that does it reads differently from
+   the preferences around it: the warning is part of the label, the addresses
+   and the code sit below in their own block, and nothing is decorative. */
+.preference-caution {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--warning, #b26a00) 8%, transparent);
+  border-left: 2px solid color-mix(in srgb, var(--warning, #b26a00) 55%, transparent);
+  padding: 7px 11px;
+  border-radius: 0 7px 7px 0;
+  margin-top: 8px;
+}
+.remote-access {
+  padding: 0 0 16px;
+  border-bottom: 1px solid var(--line);
+}
+/* Which address to use depends on where the other device is, so they are
+   offered as a choice rather than guessed at. */
+.remote-ways {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.remote-way {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  text-align: left;
+  padding: 8px 13px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: transparent;
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    background var(--duration-fast) var(--ease-out);
+}
+.remote-way strong {
+  font-family: var(--font-mono);
+  font-size: max(11px, 0.8571rem);
+  font-weight: 500;
+}
+.remote-way small {
+  color: var(--muted);
+  font-size: max(11px, 0.7857rem);
+}
+.remote-way.selected {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  background: var(--selected);
+}
+.remote-share {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+}
+.remote-share .qr-code {
+  flex-shrink: 0;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  /* The quiet zone is drawn inside the SVG; this only keeps the frame off it. */
+  padding: 6px;
+  background: #fff;
+}
+.remote-share-copy {
+  min-width: 0;
+  flex: 1;
+}
+.remote-share-copy p {
+  color: var(--muted);
+  font-size: max(12px, 0.8571rem);
+  line-height: 1.6;
+  max-width: 52ch;
+}
+.remote-url {
+  display: block;
+  margin: 9px 0 12px;
+  padding: 8px 11px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--soft);
+  font-family: var(--font-mono);
+  font-size: max(11px, 0.7857rem);
+  /* A token has no spaces to break at and must stay selectable in full. */
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+.remote-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.remote-actions .button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+/* The way out of this network is a separate decision with its own support
+   boundary, so it collapses and stays quiet until someone opens it. */
+.geek-row {
+  align-items: flex-start;
+}
+.geek-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+}
+.geek-toggle svg {
+  transition: transform var(--duration-fast) var(--ease-out);
+  transform: rotate(-90deg);
+}
+.geek-toggle svg.open {
+  transform: rotate(0deg);
+}
+.geek-body {
+  margin-top: 10px;
+}
+.geek-body ol {
+  margin: 8px 0 8px 20px;
+  color: var(--muted);
+  font-size: max(12px, 0.8571rem);
+  line-height: 1.7;
+  max-width: 52ch;
+}
+.geek-body code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 640px) {
+  .remote-share {
+    flex-direction: column;
+  }
+}

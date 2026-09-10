@@ -1,6 +1,7 @@
 import { type ReactNode, useState } from "react";
 import { Sun, Moon, Monitor, Minus, Plus, SlidersHorizontal, Palette } from "lucide-react";
 import type { Bootstrap } from "./types";
+import { RemoteAccessSection } from "./RemoteAccess";
 import { Models } from "./Models";
 import { FONT_FAMILIES } from "./App";
 import { AppVersion, Dialog } from "./components";
@@ -116,6 +117,7 @@ export function SettingsPage({
             <div><h2>显示命令行会话</h2><p>把用 <code>mmf</code> 在终端里开始的会话一起列出来。它们是只读的：可以查看，不能在这里继续。关掉后立即从列表消失。</p></div>
             <input type="checkbox" role="switch" aria-label="显示命令行会话" checked={showCliSessions} onChange={e => setShowCliSessions(e.target.checked)} />
           </label>
+          <RemoteAccessSection />
           <div className="preference-row">
             <div>
               <h2>外观</h2>

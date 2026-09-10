@@ -99,16 +99,26 @@ def test_a_rejected_request_says_nothing_about_the_service(serve):
     assert body == b"401"
 
 
-def test_lan_mode_keeps_loopback_working_and_narrows_by_host(tmp_path):
-    """Binding only the LAN address would cut off the local browser."""
+def test_lan_mode_keeps_loopback_and_opens_one_socket_per_address(tmp_path):
+    """The local browser and any tunnel arrive on loopback and must not move.
+
+    Each of this machine's own addresses gets its own socket instead, so
+    switching off closes them and leaves nothing listening.
+    """
     access = RemoteAccess(tmp_path, "lan")
-    assert access.bind_address() == "0.0.0.0"
+    assert access.bind_address() == "127.0.0.1"
+    assert access.extra_binds() == access.addresses
     assert access.accepts("127.0.0.1:8765", 8765)
-    if access.lan_address:
-        assert access.accepts(f"{access.lan_address}:8765", 8765)
+    for address in access.addresses:
+        assert access.accepts(f"{address}:8765", 8765)
     # Unlike "all", an arbitrary address on the serving port is not answered.
     assert not access.accepts("203.0.113.9:8765", 8765)
-    assert RemoteAccess(tmp_path, "all").accepts("203.0.113.9:8765", 8765)
+    everything = RemoteAccess(tmp_path, "all")
+    assert everything.accepts("203.0.113.9:8765", 8765)
+    # "all" cannot enumerate what it serves, so it keeps the wildcard socket
+    # and needs no extras.
+    assert everything.bind_address() == "0.0.0.0"
+    assert everything.extra_binds() == []
 
 
 def test_a_configured_hostname_is_accepted_with_or_without_the_port(tmp_path):
