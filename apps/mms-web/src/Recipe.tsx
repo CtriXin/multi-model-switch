@@ -6,6 +6,8 @@ import { parseRecipe, prepareExport, renderRecipe, scrubSharedText, variableName
 import type { Recipe } from "./recipe-core";
 import { recipeExamples } from "./recipe-examples";
 import { localFilePaths } from "./local-file-paths";
+import { request } from "./api";
+import type { Attachment } from "./types";
 export type { Recipe } from "./recipe-core";
 export interface RecipeDraft { recipe: Recipe; draftPrompt: string; key: string; savedAt: number }
 const draftStorage = "mms-web-template-draft-v2";
@@ -41,8 +43,9 @@ function readFilling(): { recipe?: Recipe; values: Record<string, string> } {
     return {recipe, values};
   } catch { return {values:{}}; }
 }
-export function RecipeImport({ loaded }: { loaded: (draft: RecipeDraft) => void }) {
+export function RecipeImport({ loaded, workspaceId = "" }: { loaded: (draft: RecipeDraft) => void; workspaceId?: string }) {
   const picker = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState("");
   const generation = useRef(0);
   const [error, setError] = useState("");
   const [initial] = useState(readFilling);
@@ -58,6 +61,28 @@ export function RecipeImport({ loaded }: { loaded: (draft: RecipeDraft) => void 
   const [showPrompt, setShowPrompt] = useState(false);
   let prompt = "", variableError = "";
   if (recipe) try { prompt = renderRecipe(recipe, values); } catch (e) { variableError = (e as Error).message; }
+  async function importDropped(name: string, files: File[], merge: (paths: string[]) => void) {
+    if (!workspaceId) { setError("浏览器拿不到拖入文件的原路径。先选择工作文件夹后再拖入，文件会保存到项目里；或直接粘贴完整路径。"); return; }
+    setImporting(name);
+    setError("");
+    const paths: string[] = [], failures: string[] = [];
+    for (const file of files.slice(0, 8)) {
+      try {
+        if (file.size > 8 * 1024 * 1024) throw new Error("超过 8 MB，请粘贴原文件路径。");
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result));
+          reader.onerror = () => reject(new Error("无法读取文件"));
+          reader.readAsDataURL(file);
+        });
+        const item = await request<Attachment>("/files/import", { workspaceId, name: file.name, data: dataUrl.split(",")[1] });
+        if (item.localPath) paths.push(item.localPath);
+      } catch (e) { failures.push(`${file.name}：${(e as Error).message}`); }
+    }
+    setImporting("");
+    if (paths.length) merge(paths);
+    if (failures.length) setError(failures.join(" "));
+  }
   async function read(file?: File) {
     const current = ++generation.current;
     if (!file) return;
@@ -90,9 +115,20 @@ export function RecipeImport({ loaded }: { loaded: (draft: RecipeDraft) => void 
           const Field = isFile ? "textarea" : "input";
           return <label key={name}>{name}<Field aria-label={`变量 ${name}`} aria-describedby={isFile ? `recipe-file-help-${name}` : undefined} value={values[name] || ""} onChange={e => setValue(e.target.value)} maxLength={50000} rows={isFile ? 2 : undefined} placeholder={isFile ? "拖入一个或多个文件，或粘贴完整路径" : "填写本次使用的值"}
             onDragOver={isFile ? e => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } : undefined}
-            onDrop={isFile ? e => { e.preventDefault(); const raw = e.dataTransfer.getData("text/uri-list") || e.dataTransfer.getData("text/plain"); const paths = raw.split(/\r?\n/).flatMap(line => localFilePaths(line)); if (paths.length) setValue([...new Set(paths)].join("\n")); else setError("拖拽文件时浏览器没有提供原路径，请选择本地文件，或直接粘贴完整路径；文件不会被复制。"); } : undefined}
-            onPaste={isFile ? e => { const paths = e.clipboardData.getData("text/plain").split(/\r?\n/).flatMap(line => localFilePaths(line)); if (paths.length) { e.preventDefault(); setValue([...new Set(paths)].join("\n")); } } : undefined}
-          />{isFile && <small id={`recipe-file-help-${name}`} className="recipe-file-help">拖拽后自动填入文件路径；支持多个文件。浏览器不提供原路径时，请粘贴完整路径，文件不会被复制。</small>}</label>;
+            onDrop={isFile ? e => {
+              e.preventDefault();
+              const raw = e.dataTransfer.getData("text/uri-list") || e.dataTransfer.getData("text/plain");
+              const paths = raw.split(/\r?\n/).flatMap(line => localFilePaths(line));
+              const merge = (next: string[]) => setValue([...new Set([...(values[name] || "").split(/\r?\n/).map(l => l.trim()).filter(Boolean), ...next])].join("\n"));
+              if (paths.length) merge(paths);
+              else {
+                const files = Array.from(e.dataTransfer.files);
+                if (files.length) void importDropped(name, files, merge);
+                else setError("拖拽内容里没有文件路径，请直接粘贴完整路径。");
+              }
+            } : undefined}
+            onPaste={isFile ? e => { const paths = e.clipboardData.getData("text/plain").split(/\r?\n/).flatMap(line => localFilePaths(line)); if (paths.length) { e.preventDefault(); setValue([...new Set([...(values[name] || "").split(/\r?\n/).map(l => l.trim()).filter(Boolean), ...paths])].join("\n")); } } : undefined}
+          />{isFile && <small id={`recipe-file-help-${name}`} className="recipe-file-help">{importing === name ? "正在把拖入的文件保存到项目…" : "拖入一个或多个文件，或粘贴完整路径，每行一个。粘贴的路径直接引用原文件；拖入的文件会保存到项目的 .pilot/attachments，30 天内没有会话引用的副本会自动清理。"}</small>}</label>;
         })}</div>}
         {variableError && <p className="section-note">{variableError}</p>}
         <details open={showPrompt} onToggle={e => setShowPrompt(e.currentTarget.open)}><summary>查看将载入的任务说明</summary><pre className="recipe-preview">{prompt || recipe.prompt}</pre></details>

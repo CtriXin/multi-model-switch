@@ -9,6 +9,7 @@ import mimetypes
 import os
 import subprocess
 import sys
+import time
 import uuid
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from .errors import WebError
 from .runtime import private_json
 
 MAX_FILE = 8 * 1024 * 1024
+ATTACHMENT_KEEP_DAYS = 30  # imported copies unreferenced by any session are pruned after this
 TEXT_LIMIT = 1024 * 1024
 EXCLUDED = {"node_modules", "__pycache__", "vendor", "dist", "build"}
 PRIVATE = {"credentials.sh", "auth.json", "credentials.json", "id_rsa", "id_ed25519"}
@@ -42,9 +44,60 @@ class FileService:
         self.catalog = catalog
         self.root = state_root / "attachments"
 
+    def prune_workspace_attachments(self, root: Path, *, now: float | None = None) -> list[str]:
+        """Drop imported copies older than ATTACHMENT_KEEP_DAYS that no session still mentions.
+
+        Imports live under <workspace>/.pilot/attachments and would otherwise grow forever.
+        A file stays as long as any session record (event text, attachment entries or
+        skill context) contains its file name, so paths already handed to a model keep working.
+        """
+        folder = Path(root) / ".pilot" / "attachments"
+        if not folder.is_dir():
+            return []
+        now = time.time() if now is None else now
+        cutoff = now - ATTACHMENT_KEEP_DAYS * 86400
+        stale = []
+        try:
+            for entry in folder.iterdir():
+                try:
+                    if entry.is_file() and not entry.is_symlink() and entry.stat().st_mtime < cutoff:
+                        stale.append(entry)
+                except OSError:
+                    continue
+        except OSError:
+            return []
+        if not stale:
+            return []
+        referenced = set()
+        sessions_dir = self.root.parent / "sessions"
+        names = {entry.name for entry in stale}
+        try:
+            session_files = list(sessions_dir.glob("*.json")) if sessions_dir.is_dir() else []
+        except OSError:
+            session_files = []
+        for session_file in session_files:
+            try:
+                text = session_file.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            referenced.update(name for name in names if name in text)
+            if referenced == names:
+                break
+        removed = []
+        for entry in stale:
+            if entry.name in referenced:
+                continue
+            try:
+                entry.unlink()
+                removed.append(str(entry))
+            except OSError:
+                continue
+        return removed
+
     def import_to_workspace(self, payload: dict) -> dict:
         """Persist browser-provided bytes as a normal project file, then reference it."""
         root = self.workspace(str(payload.get("workspaceId") or ""))
+        self.prune_workspace_attachments(root)
         raw = str(payload.get("data") or "")
         try:
             if len(raw) > MAX_FILE * 1.4:

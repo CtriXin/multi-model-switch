@@ -13,8 +13,8 @@ dialog:has(.recipe-dialog) { width: min(760px, calc(100vw - 32px)); }
 .recipe-preview { margin: 0; padding: 12px; max-height: 300px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 1rem; line-height: 1.7; background: var(--soft); border: 1px solid var(--line); border-radius: 10px; }
 .recipe-requirements { display: flex; flex-direction: column; gap: 5px; font-size: 1rem; color: var(--muted); }
 .recipe-variables { display: grid; gap: 10px; }
-.recipe-file-help { color: var(--muted); line-height: 1.45; }
-.recipe-variables label:has(input:focus) input { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
+.recipe-import .recipe-file-help { color: var(--muted); line-height: 1.45; }
+.recipe-variables label:has(input:focus) input, .recipe-variables label:has(textarea:focus) textarea { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
 .recipe-loaded { text-align: left; padding: 12px 15px; border: 1px solid var(--line); border-radius: 9px; font-size: 1rem; line-height: 1.6; }
 .recipe-loaded p { margin: 5px 0; }
 .recipe-loaded button { margin: 4px 8px 0 0; }

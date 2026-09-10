@@ -1503,6 +1503,7 @@ export function App() {
               <div className="recipe-access">
                 {!isPreview && workspaceId && <ProjectMaterials key={workspaceId} workspaceId={workspaceId} />}
                 <RecipeImport
+                  workspaceId={workspaceId}
                   loaded={(item) => {
                     setRecipe(item); setRecipeConfirmed("");
                     setPlanMode(item.recipe.planning);
