@@ -18,6 +18,7 @@ import { messageAnchor } from "./ConversationOutline";
 import { MessageActions } from "./SessionTools";
 import { AttachmentView } from "./MessageMedia";
 import { ContextUsage } from "./ContextUsage";
+import { formatEventTime, formatEventTimeTitle, turnDuration } from "./time";
 import type {
   Preset,
   SessionDetail,
@@ -247,10 +248,12 @@ export function EventView({
   disconnected = false,
   continuation = false,
   intermediate = false,
+  turnStartedAt,
 }: {
   continuation?: boolean;
   intermediate?: boolean;
   disconnected?: boolean;
+  turnStartedAt?: string;
   event: SessionEvent;
   action?: (
     path: string,
@@ -287,6 +290,14 @@ export function EventView({
     !event.thinking?.trim()
   )
     return null;
+  // The reply spans the whole turn: from the message that started it to the
+  // last update of the answer.
+  const duration =
+    event.kind === "assistant"
+      ? turnDuration(turnStartedAt || event.createdAt, event.updatedAt)
+      : "";
+  const clock = formatEventTime(event.createdAt);
+  const clockTitle = formatEventTimeTitle(event.createdAt);
   return (
     <article
       id={messageAnchor(event.id)}
@@ -303,6 +314,12 @@ export function EventView({
           {event.kind === "assistant" && (
             <span>{event.modelName || detail.session.modelName}</span>
           )}
+          {event.kind === "assistant" && !!clock && (
+            <time className="message-time" dateTime={event.createdAt} title={clockTitle}>
+              {clock}
+            </time>
+          )}
+          {!!duration && <span className="message-duration">用时 {duration}</span>}
         </div>
         {event.thinking && (
           <details className="thinking-block">
@@ -339,6 +356,11 @@ export function EventView({
         </blockquote>)}
         <RichText text={event.text} repair={event.kind === "assistant"} />
         {event.kind === "user" && <ContextUsage event={event} />}
+        {event.kind === "user" && !!clock && (
+          <div className="message-meta">
+            <time dateTime={event.createdAt} title={clockTitle}>{clock}</time>
+          </div>
+        )}
         {event.text && (
           <MessageActions
             detail={detail}
