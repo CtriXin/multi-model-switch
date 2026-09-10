@@ -93,6 +93,7 @@ launch `{requestId,workspaceId,presetId,title,prompt}`；send `{requestId,text}`
 
 - WebApplication 未提供 config_root 时，使用 state_root/config 完成新用户设置。CatalogService 自身的 config_root=None 仍表示禁用目录，不偷偷发现 HOME。
 - POST /workspaces 接收 {path}，返回 Workspace；POST /workspaces/choose 在 macOS 打开本机文件夹选择器，返回 {path}，取消返回空 path。只由用户点击触发。
+- POST /workspaces/locate 接收 {name, children}，返回 {matches, sure}。用于浏览器只给出目录名的拖放：按已知工作目录、zoxide、系统索引和有界扫描查找同名目录，用 children 交集排序。sure 为 true 表示可直接引用，false 时由用户在“引用文件夹”中选择。只读取目录名，扫描有深度、数量和时间上限。
 - 自动模型组合 id 为 web:pi:<providerId>:<modelId>，由当前可用目录派生，不写回 MMS presets。
 - Event 增加 arguments、method、options、placeholder、prefill、answer。method 为 confirm/select/input/editor；select 回答必须是服务端收到的原始选项。任何问题都不自动代答。
 - send capability 包含可从私有原生 history 恢复的会话。恢复沿用该会话快照中的模型/通道，不自动换路由或使用全局 OAuth。

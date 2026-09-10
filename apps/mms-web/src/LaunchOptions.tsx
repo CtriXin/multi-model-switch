@@ -65,11 +65,13 @@ export function ModelPicker({
   );
 }
 
-export function WorkspaceDialog({ close, added, reference, initialQuery = "" }: {
+export function WorkspaceDialog({ close, added, reference, initialQuery = "", suggestions = [] }: {
   close: () => void;
   added?: (workspace: Workspace) => void;
   reference?: (path: string) => Promise<void>;
   initialQuery?: string;
+  /** Folders the service already matched to a drop; shown until the user types. */
+  suggestions?: Workspace[];
 }) {
   const [query, setQuery] = useState(initialQuery);
   const [results, setResults] = useState<Workspace[]>([]);
@@ -91,6 +93,9 @@ export function WorkspaceDialog({ close, added, reference, initialQuery = "" }: 
     }, 120);
     return () => { clearTimeout(timer); controller.abort(); };
   }, [query]);
+  // Located folders lead while the query is untouched; typing takes over.
+  const shown = (query === initialQuery ? [...suggestions, ...results] : results)
+    .filter((item, index, all) => all.findIndex(other => other.path === item.path) === index);
   async function select(workspace: Workspace) {
     if (busy) return;
     setBusy(true); setError("");
@@ -119,31 +124,31 @@ export function WorkspaceDialog({ close, added, reference, initialQuery = "" }: 
       <p className="dialog-intro">{reference
         ? `已识别文件夹${initialQuery ? `「${initialQuery}」` : ""}。选择对应的本地目录，把路径插入正文；不会复制内容或切换工作目录。`
         : "输入项目名，就能找到常用的工作文件夹。选好后会记住，下次可以直接开始。"}</p>
-      <form className="workspace-form" onSubmit={e => { e.preventDefault(); if (!loading && results[choice]) void select(results[choice]); }}>
+      <form className="workspace-form" onSubmit={e => { e.preventDefault(); if (shown[choice]) void select(shown[choice]); }}>
         <label className="workspace-search-input">
           <Search size={18} />
           <input autoFocus value={query} onChange={e => setQuery(e.target.value)}
             placeholder="输入项目名，如 runtimia 或 multi" autoComplete="off" aria-label="搜索项目文件夹"
             role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls="workspace-matches"
-            aria-activedescendant={results[choice] ? `workspace-match-${choice}` : undefined}
+            aria-activedescendant={shown[choice] ? `workspace-match-${choice}` : undefined}
             onKeyDown={e => {
               if (e.key === "Enter" && !e.nativeEvent.isComposing) {
                 e.preventDefault();
-                if (!loading && results[choice]) void select(results[choice]);
+                if (shown[choice]) void select(shown[choice]);
               }
-              if ((e.key === "ArrowDown" || e.key === "ArrowUp") && results.length) {
-                e.preventDefault(); setChoice(old => (old + (e.key === "ArrowDown" ? 1 : -1) + results.length) % results.length);
+              if ((e.key === "ArrowDown" || e.key === "ArrowUp") && shown.length) {
+                e.preventDefault(); setChoice(old => (old + (e.key === "ArrowDown" ? 1 : -1) + shown.length) % shown.length);
               }
             }} />
         </label>
-        <p className="muted" role="status">{loading ? "正在查找…" : query ? `找到 ${results.length} 个文件夹` : "最近和常用的文件夹"}</p>
+        <p className="muted" role="status">{loading && !shown.length ? "正在查找…" : query ? `找到 ${shown.length} 个文件夹` : "最近和常用的文件夹"}</p>
         <div id="workspace-matches" className="workspace-matches" role="listbox" aria-label="匹配的项目">
-          {results.map((item, index) => <button type="button" id={`workspace-match-${index}`} key={item.path}
-            role="option" aria-selected={choice === index} disabled={busy || loading}
+          {shown.map((item, index) => <button type="button" id={`workspace-match-${index}`} key={item.path}
+            role="option" aria-selected={choice === index} disabled={busy}
             onMouseEnter={() => setChoice(index)} onClick={() => void select(item)}>
             <FolderOpen size={18} /><span><strong>{item.name}</strong><small>{item.path}</small></span><ArrowUpRight size={15} />
           </button>)}
-          {!loading && !results.length && <p className="muted">还没找到，可以换个关键词、粘贴路径，或浏览文件夹。</p>}
+          {!loading && !shown.length && <p className="muted">还没找到，可以换个关键词、粘贴完整路径，或浏览文件夹。</p>}
         </div>
         {error && <p role="alert" className="inline-alert">{error}</p>}
         <button type="button" className="text-button" disabled={busy} onClick={() => void choose()}><FolderOpen size={16} />浏览其他文件夹…</button>

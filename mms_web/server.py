@@ -310,6 +310,11 @@ class WebApplication:
                 raise WebError("CAPABILITY_UNAVAILABLE", "本地服务尚未连接。", 409)
             from .workspace_search import search_workspaces
             return search_workspaces(self.catalog, payload)
+        if parts == ["workspaces", "locate"]:
+            if not self.catalog:
+                raise WebError("CAPABILITY_UNAVAILABLE", "本地服务尚未连接。", 409)
+            from .workspace_search import locate_folder
+            return locate_folder(self.catalog, payload)
         if parts == ["workspaces"]:
             if not self.catalog:
                 raise WebError("CAPABILITY_UNAVAILABLE", "本地服务尚未连接。", 409)
