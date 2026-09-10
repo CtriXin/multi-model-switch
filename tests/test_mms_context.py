@@ -275,7 +275,7 @@ def test_token_saver_run_shorthand_uses_run_subcommand(monkeypatch, tmp_path, ca
     assert capsys.readouterr().out == "short shorthand with option\n"
 
 
-def test_overlay_token_saver_session_entries_merges_existing_session_skills_and_commands(monkeypatch, tmp_path):
+def test_overlay_token_saver_session_entries_is_a_retired_no_op(monkeypatch, tmp_path):
     mms_launchers = _import_mms_launchers(monkeypatch, tmp_path)
 
     session_home = tmp_path / "session-home"
@@ -296,15 +296,14 @@ def test_overlay_token_saver_session_entries_merges_existing_session_skills_and_
 
     monkeypatch.setenv("MMS_TOKEN_SAVER_ROOT", str(token_saver_root))
 
-    mms_launchers._overlay_token_saver_session_entries(str(parent_dir), str(session_home))
+    # token-saver left the bundled product; an old session record or env must not recreate it.
+    assert mms_launchers._overlay_token_saver_session_entries(str(parent_dir), str(session_home)) is None
 
     assert os.path.islink(parent_dir / "skills")
-    assert os.path.islink(parent_dir / "skills" / "keep-skill")
-    assert os.path.islink(parent_dir / "skills" / "token-saver")
-    assert (parent_dir / "skills" / "token-saver" / "SKILL.md").read_text(encoding="utf-8") == "# token-saver\n"
-    assert os.path.islink(parent_dir / "commands")
-    assert os.path.islink(parent_dir / "commands" / "keep.toml")
-    assert os.path.islink(parent_dir / "commands" / "token-saver.toml")
+    assert (parent_dir / "skills" / "keep-skill").exists()
+    assert not (parent_dir / "skills" / "token-saver").exists()
+    assert not (parent_dir / "commands" / "token-saver.toml").exists()
+    assert not (session_home / ".mms-token-saver-overlay").exists()
 
 
 def test_overlay_auto_github_contributor_session_entries_merges_symlinked_skill_and_commands(monkeypatch, tmp_path):

@@ -59,10 +59,19 @@ export async function request<T>(
   return payload as T;
 }
 
+/** Whether the session list should include command-line sessions.
+ *  Set from the page's own preference, so turning it off empties the list on
+ *  the next read without a restart or a server-side setting. */
+let withCliSessions = false;
+export function includeCliSessions(on: boolean) {
+  withCliSessions = on;
+}
+const cliQuery = () => (withCliSessions ? "?cli=1" : "");
+
 export async function bootstrap(signal?: AbortSignal): Promise<Bootstrap> {
   const data = isPreview
     ? structuredClone(sampleBootstrap)
-    : await request<Bootstrap>("/bootstrap", undefined, signal);
+    : await request<Bootstrap>(`/bootstrap${cliQuery()}`, undefined, signal);
   if (
     !data ||
     data.version !== "1" ||
@@ -85,7 +94,7 @@ export async function bootstrap(signal?: AbortSignal): Promise<Bootstrap> {
 export async function listSessions(signal?: AbortSignal): Promise<Session[]> {
   if (isPreview) return structuredClone(sampleBootstrap.sessions);
   return (
-    await request<{ sessions: Session[] }>("/sessions", undefined, signal)
+    await request<{ sessions: Session[] }>(`/sessions${cliQuery()}`, undefined, signal)
   ).sessions;
 }
 export async function getSession(

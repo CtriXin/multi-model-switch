@@ -816,10 +816,14 @@ class CatalogService:
             "models": models,
             "services": services,
             "presets": presets,
-            "workspaces": [w for w in self._workspaces() if not w.get("hidden")],
+            "workspaces": self.workspaces(),
             "diagnostics": diagnostics,
             "revision": self._config_revision(),
         }
+
+    def workspaces(self) -> list[dict]:
+        """The registered folders, without the removed ones. Read-only."""
+        return [w for w in self._workspaces() if not w.get("hidden")]
 
     def _workspaces(self) -> list[dict]:
         workspaces: list[dict] = []

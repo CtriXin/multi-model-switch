@@ -1,7 +1,9 @@
 .quick-model-search { display: flex; align-items: center; gap: 9px; padding: 9px; border-bottom: 1px solid var(--line); }
 .quick-model-search > svg { flex-shrink: 0; color: var(--muted); }
 .quick-model-search input { width: 100%; min-width: 0; border: 0; background: transparent; color: var(--ink); font: inherit; padding: 3px 0; }
-.quick-model-list { max-height: min(290px, 40dvh); overflow-y: auto; padding: 5px 0; }
+/* Shrinks the list to the room the popover has, so search and advanced options stay in view. */
+.quick-model-menu { display: flex; flex-direction: column; max-height: calc(var(--popover-room, 480px) - 18px); }
+.quick-model-list { flex: 1 1 auto; min-height: 120px; max-height: 290px; overflow-y: auto; padding: 5px 0; }
 .quick-model-option { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 9px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); text-align: left; font: inherit; cursor: pointer; }
 .quick-model-option > span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
 .quick-model-option > svg, .quick-model-option > img { width: 18px; height: 18px; flex-shrink: 0; }
@@ -9,12 +11,20 @@
 .quick-model-option:hover:not(:disabled), .quick-model-option:focus-visible { background: var(--soft); outline: 1px solid var(--accent); outline-offset: -1px; }
 .quick-model-option:disabled { opacity: .55; cursor: default; }
 .quick-model-option small { font-size: max(11px, .7143rem); color: var(--muted); }
+/* The selected model, shown as one row while the options are open. It is the
+   way back to the list, so the two panels never stack into two scrollers. */
+.quick-model-current { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 11px 9px; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: var(--ink); text-align: left; font: inherit; cursor: pointer; }
+.quick-model-current > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.quick-model-current > img, .quick-model-current > svg { width: 18px; height: 18px; flex-shrink: 0; }
+.quick-model-current small { color: var(--muted); font-size: max(11px, .7143rem); white-space: nowrap; }
+.quick-model-current:hover, .quick-model-current:focus-visible { background: var(--soft); }
+.quick-model-current:hover small, .quick-model-current:focus-visible small { color: var(--accent); }
 .quick-model-advanced { border-top: 1px solid var(--line); }
-.quick-model-advanced > summary { display: flex; align-items: center; gap: 9px; padding: 12px 9px; cursor: pointer; list-style: none; color: var(--muted); }
-.quick-model-advanced > summary::-webkit-details-marker { display: none; }
-.quick-model-advanced > summary span { flex: 1; }
-.quick-model-advanced[open] > summary { color: var(--ink); }
-.quick-model-advanced[open] > summary > svg:last-child { transform: rotate(180deg); }
+.quick-model-advanced-toggle { display: flex; align-items: center; gap: 9px; width: 100%; padding: 12px 9px; border: 0; background: transparent; color: var(--muted); text-align: left; font: inherit; cursor: pointer; }
+.quick-model-advanced-toggle > span { flex: 1; }
+.quick-model-advanced-toggle > svg:last-child { flex-shrink: 0; }
+.quick-model-advanced-toggle:hover, .quick-model-advanced-toggle:focus-visible { color: var(--ink); background: var(--soft); }
+.quick-model-advanced.open > .quick-model-advanced-toggle { color: var(--ink); border-bottom: 1px solid var(--line); }
 .quick-model-advanced fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .quick-model-advanced .task-setting-row { gap: 10px; padding-inline: 9px; }
 .quick-model-advanced .task-setting-row select { min-width: 0; max-width: 65%; }

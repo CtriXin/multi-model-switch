@@ -111,3 +111,32 @@ def test_directory_and_missing_file_are_validated_before_metadata(tmp_path):
     with pytest.raises(WebError):
         files.reference_local({'paths': [str(tmp_path), str(tmp_path / 'missing')]})
     assert not files.root.exists()
+
+
+def test_imported_attachments_are_pruned_after_30_days_unless_a_session_mentions_them(tmp_path):
+    import os
+    import time
+    from mms_web.files import ATTACHMENT_KEEP_DAYS
+
+    state = tmp_path / 'state'
+    files = FileService(None, state)
+    workspace = tmp_path / 'project'
+    folder = workspace / '.pilot' / 'attachments'
+    folder.mkdir(parents=True)
+    old_unused = folder / 'aaaa-old.txt'
+    old_used = folder / 'bbbb-used.txt'
+    fresh = folder / 'cccc-fresh.txt'
+    for path in (old_unused, old_used, fresh):
+        path.write_text('x', encoding='utf-8')
+    stale = time.time() - (ATTACHMENT_KEEP_DAYS + 1) * 86400
+    os.utime(old_unused, (stale, stale))
+    os.utime(old_used, (stale, stale))
+    (state / 'sessions').mkdir(parents=True)
+    (state / 'sessions' / 's-1.json').write_text(json.dumps({'events': [{'kind': 'user', 'text': f'看看 {old_used}'}]}), encoding='utf-8')
+
+    removed = files.prune_workspace_attachments(workspace)
+
+    assert removed == [str(old_unused)]
+    assert old_used.exists() and fresh.exists()
+    # Without any attachments folder the call is a no-op.
+    assert files.prune_workspace_attachments(tmp_path / 'empty') == []
