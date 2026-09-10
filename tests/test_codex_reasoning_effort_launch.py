@@ -298,3 +298,11 @@ def test_launch_codex_bypass_mode_skips_hook_review_prompt(monkeypatch):
 
     assert "--dangerously-bypass-approvals-and-sandbox" in captured["cmd"]
     assert "--dangerously-bypass-hook-trust" in captured["cmd"]
+
+
+def test_gpt_explicit_model_effort_precedes_checkout_default(monkeypatch):
+    import mms_capability_resolver
+    import mms_core
+    monkeypatch.setattr(mms_capability_resolver, "load_default_model_policy", lambda: {"models": {"gpt-5": {"capabilities": {"reasoning_effort": "low"}}}})
+    assert mms_core._default_reasoning_effort_for_model_info({"model": "gpt-5"}) == "low"
+    assert mms_core._default_reasoning_effort_for_model_info({"model": "gpt-unconfigured"}) == mms_core._default_gpt_reasoning_effort()

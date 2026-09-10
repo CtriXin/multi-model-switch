@@ -536,7 +536,9 @@ def test_get_export_env_for_pi_writes_anthropic_models_config(monkeypatch, tmp_p
     assert provider["models"][0]["input"] == ["text", "image"]
     assert provider["models"][0]["reasoning"] is True
     assert provider["models"][0]["contextWindow"] == 1_000_000
-    assert provider["models"][0]["maxTokens"] == 64_000
+    # Sonnet 4.6 official model page lists 128K max output (verified 2026-09-09).
+    # https://platform.claude.com/docs/en/models/sonnet-4-6/overview
+    assert provider["models"][0]["maxTokens"] == 128_000
     assert provider["models"][0]["compat"] == {"forceAdaptiveThinking": True}
     assert provider["models"][1]["compat"] == {"forceAdaptiveThinking": True}
     settings_payload = json.loads(Path(exports["MMS_PI_SETTINGS_JSON"]).read_text(encoding="utf-8"))
@@ -1636,7 +1638,7 @@ def test_pi_tokyo_gemini_high_is_unblocked_after_live_smoke():
     assert "upstream 500" in mms_launchers._pi_model_block_reason(runtime, "gemini-3.1-pro-low")
 
 
-def test_pi_builtin_hints_cover_new_qwen_flash_and_max_models(monkeypatch, tmp_path):
+def test_pi_hints_and_profile_cover_new_qwen_flash_and_max_models(monkeypatch, tmp_path):
     import mms_launchers
 
     real_home = tmp_path / "real-home"
@@ -1679,7 +1681,8 @@ def test_pi_builtin_hints_cover_new_qwen_flash_and_max_models(monkeypatch, tmp_p
     assert model_by_id["qwen3.6-flash"]["maxTokens"] == 65_536
     assert model_by_id["qwen3.6-flash"]["input"] == ["text", "image"]
     assert model_by_id["qwen3.7-max"]["contextWindow"] == 1_000_000
-    assert model_by_id["qwen3.7-max"]["maxTokens"] == 65_536
+    # The checked-in Qwen 3.7 provider profile now overrides the older builtin hint.
+    assert model_by_id["qwen3.7-max"]["maxTokens"] == 131_072
     assert model_by_id["qwen3.7-max"]["input"] == ["text"]
 
 

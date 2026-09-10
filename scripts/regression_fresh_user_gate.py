@@ -54,6 +54,24 @@ _PY_COMPILE_TARGETS = [
 ]
 
 _PYTEST_TARGETS = [
+    "tests/test_mms_web_context_evidence.py",
+    "tests/test_mms_web_recipe_contract.py",
+    "tests/test_mms_web_updates.py",
+    "tests/test_mms_web_update_safety.py",
+    "tests/test_mms_web_update_coordinator.py",
+    "tests/test_mms_web_update_transaction.py",
+    "tests/test_mms_web_install_lock.py",
+    "tests/test_mms_web_starter_skills.py",
+    "tests/test_mms_web_local_files.py",
+    "tests/test_mms_web_workspace_search.py",
+    "tests/test_mms_web_model_settings.py",
+    "tests/test_mms_web_merge_regressions.py",
+    "tests/test_pi_vision_relay.py",
+    "tests/test_mms_web_project_materials.py",
+    "tests/test_mms_web_context_flow.py",
+    "tests/test_mms_web_artifact_history.py",
+    "tests/test_mms_web_artifact_flow.py",
+    "tests/test_mms_web_standalone_settings.py",
     "tests/test_claude_hardening_regressions.py",
     "tests/test_claude_isolation.py",
     "tests/test_codex_history_growth.py",
@@ -63,6 +81,7 @@ _PYTEST_TARGETS = [
     "tests/test_mms_resume_command.py",
     "tests/test_reset_mms_install.py",
     "tests/test_install_script_paths.py",
+    "tests/test_npx_installer_package.py",
     "tests/test_nsr_bundled_wrapper.py",
     "tests/test_hook_retirement.py",
     "tests/test_owned_superset_hook.py",
@@ -72,12 +91,14 @@ _PYTEST_TARGETS = [
 ]
 
 _QUICK_PYTEST_TARGETS = [
+    "tests/test_mms_web_starter_skills.py",
     "tests/test_claude_hardening_regressions.py::test_build_claude_session_settings_respects_session_nsr_toggle",
     "tests/test_claude_hardening_regressions.py::test_build_codex_session_hooks_respects_session_nsr_toggle",
     "tests/test_claude_hardening_regressions.py::test_claude_gateway_env_does_not_restore_project_scoped_resume_pointer_on_new_launch",
     "tests/test_claude_hardening_regressions.py::test_claude_gateway_env_does_not_restore_cross_model_resume_pointer_on_new_launch",
     "tests/test_mms_resume_command.py::test_handle_resume_command_passes_claude_resume_args_and_project",
     "tests/test_install_script_paths.py",
+    "tests/test_npx_installer_package.py",
     "tests/test_nsr_bundled_wrapper.py",
     "tests/test_hook_retirement.py",
     "tests/test_owned_superset_hook.py",
@@ -123,6 +144,26 @@ _SCENARIO_MATRIX = [
         "id": "resume-explicit-only",
         "state": "old Claude project pointers and explicit mms resume",
         "coverage": "new launch does not consume stale project resume, explicit resume still works",
+    },
+    {
+        "id": "retired-optional-pack-cleanup",
+        "state": "upgrade from a version that installed RTK/BrainKeeper/Map/CodeGraph/token-saver/TOON/ops-env-safe/ECC/OMC",
+        "coverage": "install unbinds every MMS-written leftover, preserves user-owned lookalikes, backs up Claude settings, and uninstalls no third-party binary",
+    },
+    {
+        "id": "retired-builtin-commands",
+        "state": "a machine where an older version wrote offduty/onduty/handover and /nsr into all five agent homes",
+        "coverage": "a new install writes none of them and takes back the 20 entries MMS wrote, while same-named user files and foreign symlinks survive",
+    },
+    {
+        "id": "npx-install-entry",
+        "state": "a machine with Node.js invokes the npm installer",
+        "coverage": "stable release resolution, parameter precedence, matching script/source refs, pinned downloads and temporary cleanup on success/failure",
+    },
+    {
+        "id": "one-question-install",
+        "state": "installer run with no arguments, with and without a terminal",
+        "coverage": "nothing that changes the install is asked; stable channel and shell PATH are the defaults; the only question offers to open MMS Web, which starts detached with a real config root, falls back off a taken port, reuses a running instance, and is skipped without a terminal",
     },
     {
         "id": "codex-hook-trust-and-history",

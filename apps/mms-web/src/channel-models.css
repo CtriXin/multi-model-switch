@@ -1,0 +1,482 @@
+.channel-models {
+  max-width: 960px;
+  padding: 8px 14px 32px 0;
+}
+.channel-models h2 {
+  margin: 26px 0 6px;
+  font-size: max(11px, 1.5714rem);
+  letter-spacing: -0.02em;
+}
+.channel-models-heading,
+.channel-toolbar,
+.channel-list-toolbar,
+.channel-save,
+.channel-manual,
+.channel-review footer,
+.channel-leave {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.channel-models input,
+.channel-models select,
+.channel-review input {
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 8px 10px;
+  font: inherit;
+}
+.channel-toolbar {
+  margin: 28px 0 22px;
+  align-items: flex-end;
+}
+.channel-toolbar label {
+  display: grid;
+  gap: 8px;
+  flex: 1;
+  max-width: 580px;
+  font-size: max(11px, 0.9286rem);
+  color: var(--muted);
+}
+.channel-toolbar select {
+  width: 100%;
+  color: var(--ink);
+}
+.channel-list-toolbar {
+  margin-bottom: 12px;
+  font-size: max(11px, 0.8571rem);
+  color: var(--muted);
+}
+.channel-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.channel-search input {
+  border: 0;
+  background: transparent;
+  width: min(300px, 45vw);
+}
+.channel-model-table {
+  border-block: 1px solid var(--line);
+}
+.channel-model-table-head,
+.channel-model-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 190px 155px;
+  align-items: center;
+  gap: 18px;
+}
+.channel-model-capability {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  font-size: max(11px, 0.8571rem);
+  color: var(--muted);
+}
+.channel-model-capability label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.channel-model-capability input[type="number"] {
+  width: 92px;
+  padding: 2px 6px;
+}
+/* Offered only when the row differs from what MMF already knows, so it reads
+   as "put it back" rather than one more thing to decide. */
+.capability-reset {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: max(11px, 0.7857rem);
+  padding: 2px 4px;
+  border-radius: 5px;
+  white-space: nowrap;
+}
+.capability-reset:hover {
+  background: var(--soft);
+}
+/* Batch capability check. One control above the table, because a refresh
+   changes many rows at once; the per-row reset stays inside its own row. */
+.channel-capability-refresh {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  font-size: max(11px, 0.857143rem);
+}
+/* The review sheet: one line per proposed change, so the source and the
+   overwrite warning are read before anything is filled in. */
+.capability-review {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.capability-review-rows {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  overflow: hidden;
+  max-height: 46vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.capability-review-selection,
+.capability-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.capability-review-selection {
+  justify-content: space-between;
+  font-size: max(11px, .857143rem);
+}
+.capability-selection-warning {
+  color: var(--warn-ink);
+}
+.capability-review-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1.4fr) minmax(8rem, 1.1fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-top: 1px solid var(--line);
+}
+.capability-review-row:first-child {
+  border-top: 0;
+}
+.capability-review-row:hover {
+  background: var(--soft);
+}
+.capability-review-model {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.capability-review-model strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.capability-review-model small {
+  color: var(--muted);
+}
+.capability-review-change {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font-size: max(11px, .857143rem);
+}
+.capability-review-change > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.capability-review-source {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.source-chip {
+  font-size: max(11px, .785714rem);
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--soft);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.source-chip.source-official {
+  background: color-mix(in oklab, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+/* The catalogue is a routing reference, not the vendor. Its rows are opt-in,
+   and the chip should not read as an endorsement. */
+.source-chip.source-catalog {
+  border: 1px dashed var(--line);
+}
+/* Overwriting the user's own setting is the one thing this sheet must never
+   do quietly, so the warning carries its own colour in both themes. */
+.source-chip.source-user {
+  background: color-mix(in oklab, var(--warn-ink) 16%, transparent);
+  color: var(--warn-ink);
+}
+:root {
+  --warn-ink: oklch(52% 0.14 62);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --warn-ink: oklch(80% 0.13 68);
+  }
+}
+:root[data-theme="dark"] {
+  --warn-ink: oklch(80% 0.13 68);
+}
+.capability-review-reports {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: max(11px, .857143rem);
+}
+.capability-review footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.channel-capability-refresh .capability-refresh {
+  min-height: 40px;
+  font-weight: 650;
+}
+.channel-capability-refresh .capability-refresh:disabled {
+  opacity: 0.55;
+}
+.channel-model-table-head {
+  padding: 10px 12px;
+  color: var(--muted);
+  background: var(--soft);
+  font-size: max(11px, 0.8571rem);
+}
+.channel-model-rows {
+  max-height: 46vh;
+  min-height: 100px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.channel-model-row {
+  padding: 10px 12px;
+  min-height: 65px;
+  border-top: 1px solid var(--line);
+}
+.channel-model-row:first-child {
+  border-top: 0;
+}
+.channel-model-row:hover {
+  background: var(--soft);
+}
+.channel-model-name {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+}
+.channel-model-name input {
+  width: 17px;
+  min-height: 17px;
+  height: 17px;
+  padding: 0;
+  accent-color: var(--accent);
+  flex-shrink: 0;
+}
+.channel-model-name span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+.channel-model-name strong {
+  font-size: max(11px, 1.0000rem);
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+.channel-model-name small {
+  font-size: max(11px, 0.8571rem);
+  color: var(--muted);
+}
+.channel-model-name small:empty {
+  display: none;
+}
+.channel-model-row select {
+  width: 100%;
+  font-size: max(11px, 0.9286rem);
+}
+.effort-unavailable {
+  font-size: max(11px, 0.8571rem);
+}
+.channel-manual {
+  margin-top: 16px;
+}
+.channel-manual input {
+  flex: 1;
+  min-width: 0;
+}
+.channel-scope-note {
+  color: var(--muted);
+  font-size: max(11px, 0.8571rem);
+  line-height: 1.7;
+  margin: 18px 0;
+}
+.channel-save {
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  font-size: max(11px, 0.9286rem);
+  color: var(--muted);
+}
+.channel-notice {
+  display: flex;
+  gap: 10px;
+  font-size: max(11px, 0.9286rem);
+  line-height: 1.6;
+  color: var(--ink);
+  padding: 12px;
+  background: var(--soft);
+  border-left: 2px solid var(--accent);
+}
+.channel-notice svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--accent);
+}
+.channel-review {
+  max-width: 620px;
+  font-size: max(11px, 1.0000rem);
+}
+.channel-review p {
+  line-height: 1.7;
+}
+.channel-config-path {
+  display: block;
+  color: var(--muted);
+  font-size: max(11px, 0.8571rem);
+  overflow-wrap: anywhere;
+}
+.channel-review ul {
+  padding: 0;
+  margin: 18px 0;
+  list-style: none;
+  max-height: 34vh;
+  overflow: auto;
+}
+.channel-review li {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 5px;
+  overflow-wrap: anywhere;
+}
+.channel-review li strong {
+  font-size: max(11px, 0.8571rem);
+  color: var(--muted);
+}
+.channel-review small {
+  color: var(--muted);
+}
+.channel-review label {
+  display: grid;
+  gap: 8px;
+  margin: 20px 0;
+}
+.channel-review footer,
+.channel-leave {
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+@media (max-width: 650px) {
+  .capability-review-row { grid-template-columns: 20px minmax(0, 1fr); gap: 8px 10px; }
+  .capability-review-row > input { grid-column: 1; grid-row: 1; align-self: start; }
+  .capability-review-model { grid-column: 2; grid-row: 1; }
+  .capability-review-model strong { white-space: normal; overflow-wrap: anywhere; }
+  .capability-review-change { grid-column: 2; grid-row: 2; flex-wrap: wrap; }
+  .capability-review-source { grid-column: 2; grid-row: 3; justify-content: flex-start; }
+  .channel-model-table-head,
+  .channel-model-row {
+    grid-template-columns: minmax(0, 1fr) 125px;
+    gap: 8px;
+    padding-inline: 4px;
+  }
+  /* Capability editing drops to its own line before the columns get too thin
+     to read; it is not a control worth cramping the model name for. */
+  .channel-model-table-head span:nth-child(2),
+  .channel-model-row .channel-model-capability {
+    grid-column: 1 / -1;
+  }
+  .channel-model-capability {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .channel-models-heading {
+    align-items: flex-start;
+  }
+  .channel-models-heading .button {
+    font-size: max(11px, 0.8571rem);
+    padding-inline: 8px;
+  }
+  .channel-toolbar {
+    flex-wrap: wrap;
+  }
+  .channel-toolbar label {
+    flex-basis: 100%;
+    max-width: none;
+  }
+  .channel-review {
+    max-width: 100%;
+  }
+}
+.model-library-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.channel-connection {
+  margin: 0 0 24px;
+  border-block: 1px solid var(--line);
+}
+.channel-connection-toggle {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 2px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+.channel-connection-toggle:hover {
+  color: var(--accent);
+}
+.channel-connection-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.channel-connection-fields {
+  display: grid;
+  gap: 16px;
+  padding: 4px 0 20px;
+}
+.channel-connection-fields label {
+  display: grid;
+  gap: 7px;
+  font-size: max(11px, 0.9286rem);
+}
+.channel-connection-fields input {
+  width: 100%;
+  min-width: 0;
+}
+.channel-connection-check {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  font-size: max(11px, 0.8571rem);
+}
+.channel-connection-fields p {
+  margin: 0;
+  font-size: max(11px, 0.8571rem);
+}
+.channel-review li span {
+  overflow-wrap: anywhere;
+}

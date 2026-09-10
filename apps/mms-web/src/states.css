@@ -1,0 +1,360 @@
+/* Shared selection, activity, result and focus language. */
+.session-link {
+  position: relative;
+  transition:
+    background 160ms ease-out,
+    outline-color 160ms ease-out;
+}
+.session-link:hover {
+  background: color-mix(in srgb, var(--ink) 5%, var(--sidebar));
+}
+.session-link.selected {
+  background: var(--selected);
+}
+.session-link.selected .session-link-copy strong {
+  color: var(--accent);
+  font-weight: 650;
+}
+.session-title-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+.session-title-row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.session-link-copy {
+  min-width: 0;
+  flex: 1;
+}
+.session-link-copy small {
+  font-size: max(11px, 0.7857rem);
+  gap: 6px;
+}
+.session-phase {
+  flex-shrink: 0;
+}
+.session-phase.thinking,
+.session-phase.responding,
+.session-phase.tool,
+.session-phase.running {
+  color: var(--accent);
+  font-weight: 650;
+}
+.session-phase.waiting,
+.session-phase.retrying {
+  color: var(--amber);
+  font-weight: 650;
+}
+.session-phase.error {
+  color: var(--danger);
+  font-weight: 650;
+}
+.session-phase.completed {
+  color: var(--success);
+}
+.new-reply-badge {
+  color: var(--inverse);
+  background: var(--accent);
+  border-radius: 5px;
+  padding: 2px 5px;
+  font-size: max(11px, 0.7143rem);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.session-link.has-unread {
+  background: color-mix(in srgb, var(--accent) 7%, var(--sidebar));
+}
+.session-link.has-unread .session-link-copy strong {
+  font-weight: 650;
+}
+.session-link.has-unread.selected {
+  background: var(--selected);
+}
+.session-link.just-completed::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  border: 1px solid var(--accent);
+  animation: result-flash 2.2s ease-out both;
+}
+@keyframes result-flash {
+  0% {
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+  }
+  100% {
+    opacity: 0;
+    box-shadow: 0 0 0 7px transparent;
+  }
+}
+.status-symbol {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.status.compact {
+  margin: 2px 1px 0 0;
+}
+.status.thinking,
+.status.responding,
+.status.running,
+.status.tool {
+  color: var(--accent);
+}
+.status.completed {
+  color: var(--success);
+}
+.status.stopped,
+.status.closed,
+.status.disconnected {
+  color: var(--muted);
+}
+.status.running .status-symbol svg,
+.status.compacting .status-symbol svg,
+.status.retrying .status-symbol svg {
+  animation: status-orbit 1.4s linear infinite;
+}
+.activity-bars {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 16px;
+}
+.activity-bars i {
+  width: 3px;
+  height: 12px;
+  border-radius: 2px;
+  background: currentColor;
+  transform-origin: center;
+  animation: activity-meter 1.15s ease-in-out infinite;
+}
+.activity-bars i:nth-child(2) {
+  height: 16px;
+  animation-delay: 150ms;
+}
+.activity-bars i:nth-child(3) {
+  height: 10px;
+  animation-delay: 300ms;
+}
+.responding .activity-bars i {
+  animation-duration: 0.75s;
+}
+@keyframes activity-meter {
+  0%,
+  100% {
+    transform: scaleY(0.4);
+    opacity: 0.6;
+  }
+  50% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+/* A pill while something is happening, and nothing at all once it is not:
+   a resting session should not carry a filled banner above the composer. */
+.current-activity {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+  padding: 3px 10px;
+  margin-bottom: 6px;
+  border-radius: 20px;
+  background: var(--soft);
+  border: 1px solid var(--line);
+  width: fit-content;
+  max-width: 100%;
+}
+.current-activity.thinking,
+.current-activity.responding,
+.current-activity.running,
+.current-activity.tool {
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--line));
+}
+.current-activity .status {
+  font-size: max(11px, 0.7857rem);
+  font-weight: 600;
+}
+/* Status has a full row; its label must never compete with file actions. */
+.session-composer > .current-activity {
+  display: flex;
+  width: auto;
+  flex-wrap: wrap;
+  padding: 4px 2px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  margin-bottom: 2px;
+}
+.session-composer > .current-activity .status {
+  max-width: 100%;
+  white-space: normal;
+}
+.session-composer > .current-activity .status-label {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+}
+.session-composer > .current-activity .activity-hint {
+  white-space: normal;
+  overflow: visible;
+}
+.current-activity .activity-hint {
+  font-size: max(11px, 0.7857rem);
+  color: var(--muted);
+}
+.current-activity.completed,
+.current-activity.idle,
+.current-activity.stopped,
+.current-activity.closed {
+  background: transparent;
+  border-color: transparent;
+  padding-left: 2px;
+}
+.accent-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.accent-options button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 11px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  font-size: max(11px, 0.8571rem);
+}
+.accent-options i {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #5856d6;
+}
+.accent-options [data-accent="indigo"] i {
+  background: #5e5ce6;
+}
+.accent-options [data-accent="cyan"] i {
+  background: #0a7ea4;
+}
+.accent-options [data-accent="pink"] i {
+  background: #c7365a;
+}
+.accent-options [data-accent="orange"] i {
+  background: #a95116;
+}
+.accent-options [data-accent="green"] i {
+  background: #17803d;
+}
+:root[data-theme="dark"] .accent-options [data-accent="indigo"] i {
+  background: #8c8cff;
+}
+:root[data-theme="dark"] .accent-options [data-accent="cyan"] i {
+  background: #64d2ff;
+}
+:root[data-theme="dark"] .accent-options [data-accent="pink"] i {
+  background: #ff6482;
+}
+:root[data-theme="dark"] .accent-options [data-accent="orange"] i {
+  background: #ff9f0a;
+}
+:root[data-theme="dark"] .accent-options [data-accent="green"] i {
+  background: #30d158;
+}
+.accent-options [aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--selected);
+  color: var(--accent);
+}
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+a:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+button[popovertarget][aria-expanded="true"] {
+  background: var(--selected);
+  color: var(--accent);
+}
+button:disabled {
+  cursor: not-allowed;
+}
+button[aria-busy="true"] {
+  cursor: progress;
+}
+select {
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background-color: var(--surface);
+  padding: 7px 10px;
+  min-height: 34px;
+}
+select:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.task-setting-row select {
+  background: var(--surface);
+  border-color: var(--line);
+}
+.home-content .composer,
+.session-composer .composer {
+  border-radius: 14px;
+}
+.button.primary:hover:not(:disabled),
+.send-button:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+.nav-skeleton,
+.message-skeleton {
+  color: var(--muted);
+}
+@media (max-width: 640px) {
+  .current-activity {
+    flex-wrap: wrap;
+    gap: 4px 10px;
+  }
+  .current-activity .status {
+    max-width: 100%;
+  }
+  .current-activity .activity-hint {
+    white-space: normal;
+  }
+  .accent-options {
+    margin-top: 10px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .activity-bars i,
+  .status-symbol svg {
+    animation: none !important;
+    transform: none;
+  }
+  .activity-bars i {
+    opacity: 1;
+  }
+  .session-link {
+    transition: none;
+  }
+  .session-link.just-completed::after {
+    animation: none;
+    opacity: 0.7;
+  }
+}

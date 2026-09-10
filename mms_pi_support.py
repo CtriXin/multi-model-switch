@@ -608,11 +608,43 @@ def _pi_exposed_model_names(runtime, selected_model=""):
     return names
 
 
-def _pi_model_input_types(model_name):
+# What the user set for this model, through the WebUI or model-policy. This
+# always wins, in every harness, which is the whole point of setting it.
+_USER_CAPABILITY_SOURCES = frozenset({"manual_override", "model_policy"})
+# Curated capability data. It outranks the name-matching tables further down,
+# but not the Pi-specific hints, which record what this runner actually did.
+_CURATED_CAPABILITY_SOURCES = frozenset({"provider_profile", "approved_facts"})
+
+
+def _pi_caps_vision_state(caps, allowed_sources):
+    """Return the resolver's vision verdict when one of ``allowed_sources`` set it.
+
+    A field still on ``conservative_fallback`` means nothing declared the
+    model, which is not the same answer as a source declaring "no vision".
+    """
+    if not isinstance(caps, dict):
+        return None
+    sources = caps.get("sources") if isinstance(caps.get("sources"), dict) else {}
+    if sources.get("supports_vision") not in allowed_sources:
+        return None
+    value = caps.get("supports_vision")
+    return bool(value) if isinstance(value, bool) else None
+
+
+def _pi_model_input_types(model_name, caps=None):
+    # Priority: the user's own setting, then Pi's own verified hints, then
+    # curated profile/registry facts, then name matching. Keeping the user at
+    # the top is what makes a WebUI vision change take effect here.
+    user_vision = _pi_caps_vision_state(caps, _USER_CAPABILITY_SOURCES)
+    if user_vision is not None:
+        return ["text", "image"] if user_vision else ["text"]
     normalized = _pi_normalize_model_key(model_name)
     hint = _PI_MODEL_INPUT_HINTS.get(normalized)
     if isinstance(hint, list) and hint:
         return list(hint)
+    curated_vision = _pi_caps_vision_state(caps, _CURATED_CAPABILITY_SOURCES)
+    if curated_vision is not None:
+        return ["text", "image"] if curated_vision else ["text"]
     if normalized.startswith(("claude-", "gpt-5", "gemini-")):
         return ["text", "image"]
     vision_state = _pi_reference_supports_vision(model_name)
@@ -623,6 +655,77 @@ def _pi_model_input_types(model_name):
     if _model_supports_vision(model_name):
         return ["text", "image"]
     return ["text"]
+
+
+def _pi_model_supports_vision(runtime, model_name):
+    """Resolved vision verdict for one model on this runtime."""
+    try:
+        caps = _pi_model_capabilities(runtime, model_name)
+    except Exception:
+        caps = {}
+    return "image" in _pi_model_input_types(model_name, caps=caps)
+
+
+def _pi_vision_relay_enabled():
+    """Whether the image relay may run at all.
+
+    The only switch is ``[vision_sidecar] enabled`` in config.toml. There is no
+    built-in model list: which models can see images comes from the capability
+    each model actually has.
+    """
+    try:
+        from mms_core import load_config
+
+        cfg = load_config()
+    except Exception:
+        return True
+    raw = cfg.get("vision_sidecar") if isinstance(cfg, dict) else {}
+    raw = raw if isinstance(raw, dict) else {}
+    return str(raw.get("enabled", "true")).strip().lower() not in {"false", "0", "no", "off"}
+
+
+def _pi_vision_plan(runtime, model_name):
+    """Decide whether Pi needs the image relay, and which models can serve it.
+
+    The pool is every model on this channel whose resolved capability says it
+    reads images, so it follows the user's own configuration and never a
+    hardcoded name list. Only models this runtime already exposes are eligible,
+    so the pool never adds an entry to the model list the user picked from.
+    The relay picks from the pool at random when an image actually arrives.
+    """
+    runtime = runtime if isinstance(runtime, dict) else {}
+    plan = {"main_model_vision": False, "pool": []}
+    try:
+        plan["main_model_vision"] = _pi_model_supports_vision(runtime, model_name)
+    except Exception:
+        plan["main_model_vision"] = False
+    if not _pi_vision_relay_enabled():
+        return plan
+
+    launchers = _launchers_module()
+    try:
+        exposed = launchers._pi_exposed_model_names(runtime, selected_model=model_name)
+    except Exception:
+        exposed = []
+    pool = []
+    for candidate in exposed:
+        name = str(candidate or "").strip()
+        if not name:
+            continue
+        try:
+            if not _pi_model_supports_vision(runtime, name):
+                continue
+            # The relay addresses models by their models.json id, which is the
+            # wire name, not always the selector the user sees.
+            wire_id = str(_pi_model_entry(runtime, name)["model"].get("id") or "").strip()
+        except Exception:
+            continue
+        if wire_id:
+            pool.append({"model": wire_id, "selector": name})
+    # Sorted only so the exported value is stable to read and test; the relay
+    # itself picks at random.
+    plan["pool"] = sorted(pool, key=lambda entry: entry["selector"].lower())
+    return plan
 
 
 def _pi_is_kimi_k3_selector(model_name):
@@ -1104,7 +1207,7 @@ def _pi_model_entry(runtime, model_name):
     entry = {
         "id": wire_model_name,
         "name": display_name or model_name,
-        "input": _pi_model_input_types(model_name),
+        "input": _pi_model_input_types(model_name, caps=caps),
         "contextWindow": int(caps.get("context_window_tokens") or 128000),
         "maxTokens": int(caps.get("max_output_tokens") or 16384),
     }
@@ -1390,6 +1493,14 @@ def _pi_gateway_env(runtime, model_info=None):
     env["MMS_PI_SETTINGS_JSON"] = settings_path
     env["MMS_PI_PROVIDER"] = provider_ref
     env["MMS_PI_SELECTED_MODEL"] = model
+    vision_plan = _pi_vision_plan(runtime, model)
+    # The relay extension cannot see the --model argument, so hand it the
+    # already-resolved verdict instead of letting it guess.
+    env["MMS_PI_MAIN_MODEL_VISION"] = "1" if vision_plan.get("main_model_vision") else "0"
+    env["MMS_PI_VISION_POOL"] = json.dumps(
+        [entry["model"] for entry in vision_plan.get("pool") or []],
+        ensure_ascii=True,
+    )
     env["MMS_PI_NPX_CACHE"] = _pi_npx_cache_dir()
     global_pi = _pi_global_executable()
     if global_pi:
@@ -1437,6 +1548,7 @@ def _pi_provider_export_env(runtime, model):
     models_path, selected_provider_ref = _write_pi_models_config(agent_dir, runtime, effective_model)
     settings_path = _write_pi_settings_config(agent_dir)
     os.makedirs(session_dir, exist_ok=True)
+    shell_vision_plan = _pi_vision_plan(runtime, effective_model)
     exports = {
         "PI_CODING_AGENT_DIR": agent_dir,
         "PI_CODING_AGENT_SESSION_DIR": session_dir,
@@ -1446,6 +1558,11 @@ def _pi_provider_export_env(runtime, model):
         "MMS_PI_PROVIDER": selected_provider_ref,
         "MMS_PI_SELECTED_MODEL": effective_model,
         "MMS_PI_NPX_CACHE": _pi_npx_cache_dir(),
+        "MMS_PI_MAIN_MODEL_VISION": "1" if shell_vision_plan.get("main_model_vision") else "0",
+        "MMS_PI_VISION_POOL": json.dumps(
+            [entry["model"] for entry in shell_vision_plan.get("pool") or []],
+            ensure_ascii=True,
+        ),
     }
     wrapper_path = launchers._pi_wrapper_path()
     if wrapper_path:
@@ -1468,6 +1585,23 @@ def launch_pi(model_info, runtime, once=False, extra_args=None):
     model = _pi_effective_selected_model(runtime, requested_model)
     env = _pi_gateway_env(runtime, model_info=model_info)
     provider_ref = str(env.get("MMS_PI_PROVIDER") or _pi_provider_ref(runtime)).strip()
+    if env.get("MMS_PI_MAIN_MODEL_VISION") == "0":
+        relay_models = []
+        try:
+            relay_models = json.loads(env.get("MMS_PI_VISION_POOL") or "[]")
+        except (TypeError, ValueError):
+            relay_models = []
+        if relay_models:
+            launchers.console.print(
+                f"[dim]vision pool: {', '.join(str(item) for item in relay_models)}[/dim]"
+            )
+        else:
+            # Fail loudly rather than dropping image support without a word.
+            launchers.console.print(
+                f"[yellow]{model} 不能直接读图，当前通道里也没有能读图的模型，"
+                "本次会话无法识别图片。在通道里启用一个支持图片的模型，"
+                "或在 Web 的通道模型页把该模型标记为可接收图片[/yellow]"
+            )
     cmd = ["pi", "--provider", provider_ref]
     if model:
         cmd += ["--model", model]

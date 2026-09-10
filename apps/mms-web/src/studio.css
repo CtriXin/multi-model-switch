@@ -1,0 +1,1324 @@
+/* MMF Studio: neutral surfaces and Glint-inspired accent/state vocabulary. */
+:root {
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --sidebar: #f3f4f8;
+  --ink: #262633;
+  --muted: #656a78;
+  --line: #dfe1e9;
+  --soft: #f4f5f9;
+  --accent: #5856d6;
+  --accent-hover: #4442b7;
+  --selected: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  --inverse: #fff;
+  --success: #247447;
+  --float-shadow: 0 10px 28px #22233418;
+}
+:root[data-theme="dark"] {
+  --bg: #24252d;
+  --surface: #292a34;
+  --sidebar: #1d1e24;
+  --ink: #eeeff5;
+  --muted: #b0b2c2;
+  --line: #454653;
+  --soft: #30313c;
+  --accent: #a7a3ff;
+  --accent-hover: #c1bfff;
+  --inverse: #1d1e24;
+  --success: #83d9a4;
+  --float-shadow: 0 10px 28px #0005;
+}
+:root[data-accent="indigo"] { --accent: #5e5ce6; --accent-hover: #4a48c4; }
+:root[data-accent="cyan"] { --accent: #0a7ea4; --accent-hover: #086684; }
+:root[data-accent="pink"] { --accent: #c7365a; --accent-hover: #a52c4a; }
+:root[data-accent="orange"] { --accent: #a95116; --accent-hover: #8b4110; }
+:root[data-accent="green"] { --accent: #17803d; --accent-hover: #126532; }
+:root[data-theme="dark"][data-accent="indigo"] { --accent: #8c8cff; --accent-hover: #a9a9ff; }
+:root[data-theme="dark"][data-accent="cyan"] { --accent: #64d2ff; --accent-hover: #92e0ff; }
+:root[data-theme="dark"][data-accent="pink"] { --accent: #ff6482; --accent-hover: #ff90a5; }
+:root[data-theme="dark"][data-accent="orange"] { --accent: #ff9f0a; --accent-hover: #ffbb52; }
+:root[data-theme="dark"][data-accent="green"] { --accent: #30d158; --accent-hover: #6ade8b; }
+.sidebar {
+  width: 264px;
+  border-right: 1px solid var(--line);
+  color: var(--ink);
+}
+.brand {
+  min-height: 56px;
+  padding: 14px 18px;
+  gap: 12px;
+  display: flex;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 10px;
+  transition: background 120ms ease;
+}
+.brand:hover {
+  background: color-mix(in srgb, var(--ink) 3%, transparent);
+}
+/* Shorter, thicker bars with fully round caps, spaced apart, each sheared on
+   its own. Shearing the whole group instead leans the gaps too, which is what
+   made the mark read as three blades. */
+.sidebar .brand .mms-mark {
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  width: auto;
+  flex-shrink: 0;
+  transition: transform 140ms var(--ease-out);
+}
+.sidebar .brand:hover .mms-mark {
+  transform: scale(1.04);
+}
+.sidebar .brand .mms-mark i {
+  display: block;
+  background: var(--accent);
+  height: 18px;
+  width: 4px;
+  /* Half the width, so the caps are half-circles rather than a chamfer. */
+  border-radius: 2px;
+  transform: skew(-13deg);
+  transition: background 140ms var(--ease-out);
+}
+.sidebar .brand .mms-mark i:nth-child(2) {
+  height: 12px;
+}
+.brand-wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+.brand-mms {
+  font-family: var(--font-sans);
+  font-size: max(11px, 1.4286rem);
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  color: var(--ink);
+  line-height: 1;
+}
+.brand-pilot {
+  font-family: var(--font-sans);
+  font-size: max(11px, 0.7857rem);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  padding: 2px 7px;
+  border-radius: 5px;
+  line-height: 1.2;
+}
+.sidebar-actions {
+  padding: 0 16px 12px;
+}
+.new-task {
+  height: 42px;
+  border: 1px solid transparent;
+  background: var(--accent);
+  color: var(--inverse);
+  font-size: max(11px, 0.9286rem);
+  border-radius: 9px;
+  gap: 11px;
+}
+.new-task:hover {
+  background: var(--accent-hover);
+  border-color: transparent;
+}
+.search-trigger {
+  height: 39px;
+  margin-top: 9px;
+}
+.search-trigger:hover {
+  background: var(--line);
+  color: var(--ink);
+}
+.session-nav {
+  padding: 5px 10px 20px;
+  scrollbar-color: var(--line) transparent;
+}
+.sidebar-section-label {
+  display: flex;
+  align-items: center;
+  margin: 5px 0 18px;
+  padding: 0 5px;
+}
+.session-filter {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  font-size: max(11px, 0.7857rem);
+  padding: 7px 8px;
+  border-radius: 5px;
+}
+.session-filter:hover {
+  background: var(--soft);
+}
+.sidebar .icon-button {
+  color: var(--muted);
+}
+.workspace-heading {
+  /* The right inset is permanently reserved for the hover actions, so the
+     folder name truncates in the same place whether or not they are shown.
+     Fading the name on hover instead left it running under the icons: the
+     fade landed inside the name's own box, which extends past where the
+     buttons begin. */
+  padding: 5px 62px 5px 8px;
+  font-size: max(11px, 0.8571rem);
+  gap: 7px;
+}
+.workspace-heading > span:nth-of-type(1) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workspace-heading > span:last-child {
+  font-size: max(11px, 0.7143rem);
+  opacity: 0.7;
+}
+.workspace-group + .workspace-group {
+  margin-top: 16px;
+}
+.workspace-group {
+  position: relative;
+}
+/* Folder actions sit over the heading row and only appear on hover, so the
+   resting sidebar stays a plain list of names. */
+.workspace-row-actions {
+  position: absolute;
+  top: 0;
+  right: 4px;
+  height: 27px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  pointer-events: none;
+  border-radius: 6px;
+  padding: 0 2px;
+  isolation: isolate;
+  transition: opacity var(--duration-base) var(--ease-out);
+}
+.workspace-row-actions > * {
+  position: relative;
+  z-index: 1;
+}
+.workspace-group:hover .workspace-row-actions,
+.workspace-row-actions:focus-within,
+.workspace-row-actions:has([aria-expanded="true"]) {
+  opacity: 1;
+  pointer-events: auto;
+}
+.workspace-row-actions .icon-button {
+  padding: 3px;
+}
+/* The count would sit under the action buttons; hide it while they show. */
+.workspace-group:hover .workspace-heading > span:last-child,
+.workspace-group:focus-within .workspace-heading > span:last-child {
+  opacity: 0;
+}
+.workspace-tools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+.workspace-tools .icon-button {
+  opacity: 0;
+  transition: opacity var(--duration-base) var(--ease-out);
+}
+.session-nav:hover .workspace-tools .icon-button,
+.workspace-tools:focus-within .icon-button,
+.workspace-tools .icon-button[aria-expanded="true"],
+.workspace-tools .add-workspace {
+  opacity: 1;
+}
+/* The row menu takes over the slot the status dot occupies, rather than
+   floating over the title, so the truncation point never moves on hover. */
+.session-row {
+  position: relative;
+}
+.session-row-menu {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  visibility: hidden;
+  border-radius: 6px;
+  padding: 3px;
+  transition: background var(--duration-fast) var(--ease-out);
+}
+.session-row:hover .session-row-menu,
+.session-row:focus-within .session-row-menu,
+.session-row-menu[aria-expanded="true"] {
+  visibility: visible;
+}
+/* The menu would cover the dot anyway; yielding the slot keeps it readable.
+   The row's own phase label still states that it is waiting. */
+.session-row:hover .attention-dot,
+.session-row:has(.session-row-menu[aria-expanded="true"]) .attention-dot,
+.session-row:hover .new-reply-badge,
+.session-row:has(.session-row-menu[aria-expanded="true"]) .new-reply-badge {
+  visibility: hidden;
+}
+/* Keep the row lit while the cursor is on its menu, which sits outside the
+   button, so the fade below always matches what is painted behind it. */
+.session-row:hover .session-link:not(.selected) {
+  background: var(--soft);
+}
+/* The row's right column is reserved for the menu, the way Kimi reserves the
+   slot its timestamp sits in. The title truncates before it, so nothing can
+   overlap in any state and no fade is needed. */
+.session-link .session-link-copy {
+  /* The menu is 24px wide inset 6px from the row edge; reserve both. */
+  padding-right: 30px;
+}
+.session-row-menu[aria-expanded="true"] {
+  background: var(--soft);
+  color: var(--ink);
+}
+.session-row-time {
+  margin: 4px 11px 2px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-size: max(11px, 0.7143rem);
+  color: var(--muted);
+}
+.load-more-sessions {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: max(11px, 0.7857rem);
+  text-align: left;
+  padding: 8px 10px 8px 17px;
+  border-radius: 8px;
+}
+.load-more-sessions:hover {
+  background: var(--soft);
+}
+.load-more-sessions,
+.session-row-menu,
+.workspace-heading {
+  transition: background var(--duration-fast) var(--ease-out);
+}
+.load-more-sessions:focus-visible,
+.workspace-heading:focus-visible,
+.session-row-menu:focus-visible,
+.workspace-row-actions .icon-button:focus-visible,
+.workspace-tools .icon-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.filter-option.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+/* Vendor marks sit inside the existing monogram badge; the inline tint comes
+   from the family so a long model list is scannable by colour. */
+.vendor-mark {
+  display: grid;
+  place-items: center;
+}
+.vendor-mark svg {
+  display: block;
+}
+.model-monogram-text {
+  font-size: max(11px, 0.7857rem);
+  font-weight: 650;
+  text-transform: capitalize;
+}
+.font-options {
+  display: grid;
+  gap: 10px;
+  min-width: 260px;
+}
+.font-options label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: max(11px, 0.8571rem);
+  color: var(--muted);
+}
+.font-options label > span:first-child {
+  flex: 1;
+}
+.font-options input[type="range"] {
+  width: 110px;
+}
+.font-options output {
+  min-width: 44px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.workspace-notice {
+  margin: 0 5px 10px;
+  padding: 6px 8px;
+  font-size: max(11px, 0.7857rem);
+  color: var(--muted);
+  background: var(--soft);
+  border-radius: 6px;
+}
+.filter-option.danger strong {
+  color: var(--danger);
+}
+.filter-option:disabled {
+  opacity: 0.45;
+}
+.filter-option,
+.content-option {
+  transition: background var(--duration-fast) var(--ease-out);
+}
+.filter-option:hover:disabled {
+  background: transparent;
+}
+.session-link {
+  padding: 8px 10px 8px 17px;
+  gap: 9px;
+  border-radius: 8px;
+}
+.session-link-copy strong {
+  font-size: max(11px, 0.9286rem);
+  font-weight: 450;
+  line-height: 1.6;
+}
+.session-link-copy small {
+  font-size: max(11px, 0.7143rem);
+  margin-top: 2px;
+  color: var(--muted);
+}
+.session-link.selected {
+  box-shadow: none;
+  background: var(--selected);
+  outline: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  outline-offset: -1px;
+}
+.sidebar-footer {
+  padding: 12px 19px;
+  min-height: 64px;
+  gap: 14px;
+  border-top-color: var(--line);
+}
+.settings-entry {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  text-align: left;
+  flex: 1;
+  padding: 9px 3px;
+  font-size: max(11px, 0.9286rem);
+}
+.settings-entry:hover {
+  color: var(--accent);
+}
+/* A waiting update badges the control people already use instead of adding a
+   second thing to the top bar. The mark sits on the icon, not in the row: the
+   connection state next to it is already a 6px accent dot, and two loose dots
+   in one footer would read as two status lights. */
+.settings-entry {
+  position: relative;
+}
+.settings-entry.has-update::after {
+  content: "";
+  position: absolute;
+  left: 14px;
+  top: 7px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--surface);
+}
+.attention-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--amber-bg);
+  border: 1px solid color-mix(in srgb, var(--amber) 25%, transparent);
+  color: var(--amber);
+  margin: 0 16px 10px;
+  padding: 10px;
+  border-radius: 8px;
+  font-size: max(11px, 0.7857rem);
+  text-align: left;
+}
+.attention-banner span {
+  flex: 1;
+}
+.topbar {
+  height: 56px;
+  padding: 0 27px;
+  border-bottom-color: color-mix(in srgb, var(--line) 65%, transparent);
+}
+[data-page="new"] .topbar,
+[data-page="models"] .topbar {
+  border-bottom: 0;
+}
+[data-page="new"] .breadcrumb,
+[data-page="models"] .breadcrumb {
+  visibility: hidden;
+}
+.home-content {
+  width: min(800px, calc(100% - 88px));
+  padding: clamp(40px, 10vh, 110px) 0 40px;
+}
+.home-intro {
+  border: 0;
+  padding: 0;
+  text-align: center;
+  margin-bottom: 28px;
+}
+.home-intro .workspace-picker {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 5px 11px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--muted);
+  margin-bottom: 25px;
+  background: var(--surface);
+}
+/* The chip is the control; its select is just the mechanism. A ring drawn
+   around the select at 3px offset lands outside the chip's 5px padding and
+   reads as a second box. Draw it on the chip instead, so it follows the shape
+   the user sees, and keep the select reachable by keyboard. */
+.home-intro .workspace-picker:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.home-intro .workspace-picker select:focus-visible,
+.home-intro .workspace-picker select:focus {
+  outline: none;
+}
+.home-intro .workspace-picker select {
+  max-width: 260px;
+  font-size: max(11px, 0.8571rem);
+  cursor: pointer;
+}
+.home-intro h1 {
+  font-size: max(11px, 2.4286rem);
+  letter-spacing: -0.05em;
+  line-height: 1.4;
+  font-weight: 600;
+}
+.home-intro p {
+  font-size: max(11px, 1.0000rem);
+  margin-top: 12px;
+}
+.recipe-access {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 5px 9px;
+}
+.recipe-access .text-button {
+  font-size: max(11px, 0.7857rem);
+  color: var(--muted);
+}
+.home-content .composer,
+.session-composer .composer {
+  padding: 20px 20px 14px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  box-shadow:
+    0 2px 6px #2626330c;
+}
+.composer:focus-within,
+.home-content .composer:focus-within,
+.session-composer .composer:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  box-shadow:
+    0 2px 6px #2626330c,
+    0 0 0 2px color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.home-content .composer textarea {
+  min-height: 84px;
+  font-size: max(11px, 1.0714rem);
+}
+.composer-editor textarea {
+  resize: none;
+}
+.home-content .composer-bottom,
+.composer-bottom {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  margin: 18px 0 0;
+  padding: 0;
+  gap: 10px;
+}
+.composer-tools {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  margin: 0;
+  flex-shrink: 0;
+}
+.composer-tools > button {
+  min-height: 34px;
+  font-size: max(11px, 0.8571rem);
+  gap: 6px;
+  padding: 7px;
+  border-radius: 7px;
+}
+.composer-tools .add-content {
+  padding: 7px;
+  width: 32px;
+}
+.composer-context {
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+  gap: 0;
+}
+.task-settings-trigger {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  font-size: max(11px, 0.7857rem);
+}
+.task-settings-trigger:hover {
+  background: var(--soft);
+}
+.task-model-name {
+  color: var(--ink);
+  font-size: max(11px, 0.8571rem);
+  font-weight: 550;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 185px;
+}
+.task-route-name {
+  color: var(--muted);
+  max-width: 115px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: max(11px, 0.7857rem);
+}
+.task-effort {
+  color: var(--accent);
+  font-size: max(11px, 0.7857rem);
+  flex-shrink: 0;
+}
+.task-plan {
+  color: var(--muted);
+  font-size: max(11px, 0.7143rem);
+  flex-shrink: 0;
+}
+.send-button {
+  width: 35px;
+  height: 35px;
+  border-radius: 50%;
+}
+.input-hint {
+  justify-content: flex-end;
+  font-size: max(11px, 0.7143rem);
+  margin-top: 11px;
+}
+.recent-section {
+  margin-top: 46px;
+}
+.recent-section .section-heading {
+  margin-bottom: 13px;
+}
+.recent-section h2 {
+  font-size: max(11px, 0.8571rem);
+  color: var(--muted);
+  font-weight: 500;
+}
+.recent-row {
+  padding: 17px 4px;
+  gap: 13px;
+  border-color: color-mix(in srgb, var(--line) 70%, transparent);
+}
+.recent-icon {
+  background: var(--soft);
+  width: 34px;
+  height: 39px;
+  border-radius: 7px;
+  color: var(--muted);
+}
+.recent-copy strong {
+  font-size: max(11px, 0.9286rem);
+  font-weight: 500;
+}
+.recent-copy small {
+  font-size: max(11px, 0.7857rem);
+  margin-top: 5px;
+}
+.empty-setup {
+  padding: 18px 0;
+}
+/* Native top-layer controls avoid clipping inside scrolling conversations. */
+.studio-popover {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  padding: 9px;
+  max-height: min(480px, calc(100dvh - 24px));
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  color: var(--ink);
+  box-shadow: var(--float-shadow);
+  font-size: max(11px, 0.8571rem);
+}
+.studio-popover::backdrop {
+  background: transparent;
+}
+.studio-popover > header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 11px 15px;
+  font-size: max(11px, 0.8571rem);
+}
+.task-setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  min-height: 55px;
+  padding: 9px 11px;
+  border-top: 1px solid var(--line);
+}
+.task-setting-row > span:first-child {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: max(11px, 0.7857rem);
+}
+.task-setting-row .model-picker-trigger {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 4px 0 4px 8px;
+  min-width: 0;
+  min-height: 34px;
+  border: 0;
+  background: transparent;
+  text-align: right;
+}
+.task-setting-row .model-picker-trigger strong {
+  overflow-wrap: anywhere;
+  font-size: max(11px, 0.8571rem);
+}
+.task-setting-row .model-picker-trigger small {
+  font-size: max(11px, 0.7143rem);
+}
+.task-setting-row select {
+  border: 0;
+  padding: 7px;
+  font-size: max(11px, 0.8571rem);
+  background: var(--soft);
+  border-radius: 6px;
+  max-width: 190px;
+}
+.task-setting-row .effort-field svg {
+  display: none;
+}
+.session-model-detail {
+  text-align: right;
+  overflow-wrap: anywhere;
+  font-size: max(11px, 0.8571rem);
+}
+.session-model-detail small {
+  display: block;
+  color: var(--muted);
+  margin-top: 4px;
+}
+.popover-note {
+  padding: 8px 11px 13px;
+  font-size: max(11px, 0.7143rem);
+  line-height: 1.6;
+  color: var(--muted);
+}
+.popover-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--line);
+  padding: 13px 11px 6px;
+  color: var(--muted);
+  font-size: max(11px, 0.7857rem);
+}
+.popover-footer:hover {
+  color: var(--accent);
+}
+.filter-option,
+.content-option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 0;
+  border-radius: 7px;
+  padding: 11px;
+  background: transparent;
+  text-align: left;
+  color: var(--ink);
+}
+.filter-option > span,
+.content-option > span {
+  flex: 1;
+}
+.filter-option strong {
+  font-size: max(11px, 0.8571rem);
+  font-weight: 500;
+}
+.filter-option small,
+.content-option small {
+  display: block;
+  font-size: max(11px, 0.7143rem);
+  color: var(--muted);
+  margin-top: 5px;
+  line-height: 1.5;
+}
+.filter-option:hover,
+.content-option:hover,
+.filter-option.selected {
+  background: var(--soft);
+}
+/* Settings have one navigation level and no service badge wall. */
+.settings-shell {
+  width: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.settings-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  max-width: 1050px;
+  margin: 0 auto;
+}
+.settings-heading h1 {
+  font-size: max(11px, 1.8571rem);
+}
+.settings-heading p {
+  color: var(--muted);
+  font-size: max(11px, 0.8571rem);
+  margin-top: 7px;
+}
+.settings-tabs {
+  display: flex;
+  gap: 18px;
+  border-bottom: 1px solid var(--line);
+  margin: 0;
+  max-width: none;
+  flex: none;
+}
+.settings-tabs button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: max(11px, 0.8571rem);
+  background: transparent;
+  border: 0;
+  padding: 9px 3px;
+  color: var(--muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.settings-tabs button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+.settings-tabs button.active {
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+}
+.settings-shell .settings-page {
+  padding: 16px 0 0;
+  max-width: none;
+  width: 100%;
+  margin: auto;
+  overflow: visible;
+}
+.settings-shell .page-heading {
+  margin-bottom: 10px;
+  gap: 15px;
+}
+.settings-shell .page-heading h2 {
+  font-size: max(11px, 1.2143rem);
+}
+.settings-shell .page-heading p {
+  font-size: max(11px, 0.8571rem);
+  margin-top: 8px;
+  line-height: 1.7;
+}
+.model-library-count {
+  margin: 0 0 20px;
+  color: var(--muted);
+  font-size: max(11px, 0.7857rem);
+}
+.model-library > .model-explorer {
+  box-shadow: none;
+  border-radius: 12px;
+}
+.model-library .model-groups,
+.model-library .model-detail {
+  max-height: 600px;
+  min-height: 370px;
+}
+.model-group strong,
+.channel-select strong {
+  font-size: max(11px, 0.9286rem);
+}
+.model-group small,
+.channel-select small {
+  font-size: max(11px, 0.7857rem);
+}
+.channel-choice.selected {
+  box-shadow: none;
+}
+.model-detail-heading h3 {
+  font-size: max(11px, 1.6429rem);
+}
+.model-facts {
+  font-size: max(11px, 0.7857rem);
+}
+.model-group.selected {
+  box-shadow: none;
+}
+/* The pane used to be centred inside a full page; inside the sheet it must
+   share the same edges as the tab row and the models pane. */
+.general-settings {
+  max-width: none;
+  margin: 0;
+}
+.preference-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--line);
+}
+.preference-row h2 {
+  font-size: max(11px, 0.9286rem);
+  font-weight: 550;
+}
+.preference-row p {
+  color: var(--muted);
+  font-size: max(12px, 0.8571rem);
+  line-height: 1.6;
+  margin-top: 3px;
+  max-width: 52ch;
+}
+/* Two shapes of content, two rules.
+   A single column, the channel table, scrolls with the pane: nesting a
+   scroller there left the rows that need the most room inside a strip.
+   Master-detail is the opposite. Sharing one scrollbar between a long model
+   list and a short detail means neither reaches its own end, so each column
+   fills the sheet and scrolls on its own. */
+.settings-shell .settings-page {
+  /* Must be a flex child of the sheet, or "fill the sheet" below resolves
+     against content height and both columns grow past the frame. */
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.settings-shell .channel-model-rows {
+  max-height: none;
+  min-height: 0;
+  overflow: visible;
+}
+.settings-shell .settings-page.model-library {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.settings-shell .model-library > .model-explorer {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  /* The search band sits inside this frame, so the columns must take what is
+     left rather than the frame's full height, or they overhang it by exactly
+     the band and get clipped mid-row. */
+  display: flex;
+  flex-direction: column;
+}
+.settings-shell .model-library .explorer-search {
+  flex: none;
+}
+/* The grid between the frame and the columns carries its own min-height and
+   was growing past the frame, which clipped both columns short of their end. */
+.settings-shell .model-library .explorer-columns {
+  flex: 1;
+  height: auto;
+  min-height: 0;
+}
+.settings-shell .model-library .model-groups,
+.settings-shell .model-library .model-detail {
+  max-height: none;
+  min-height: 0;
+  overflow-y: auto;
+  /* The last row otherwise stops flush against the frame and reads as cut
+     off rather than as the end of the list. */
+  padding-bottom: 22px;
+  scroll-padding-bottom: 22px;
+}
+/* One type scale across both panes. The models pane still carried the sizes
+   it had as a full page, so its headings ran four points larger than the
+   appearance pane sitting one tab away. */
+.settings-shell .settings-page h2 {
+  font-size: max(11px, 1.0714rem);
+  font-weight: 600;
+}
+.settings-shell .settings-page .page-heading p {
+  font-size: max(11px, 0.7857rem);
+  line-height: 1.5;
+}
+.settings-shell .model-detail-heading h3 {
+  font-size: max(11px, 1.2143rem);
+}
+.settings-shell .channel-list strong {
+  font-weight: 600;
+}
+/* Inside the sheet the search band is a filter, not a headline; its page
+   proportions were pushing the model list and its settings down. */
+.settings-shell .explorer-search {
+  padding: 10px 14px;
+}
+.settings-shell .explorer-search .picker-search {
+  padding: 6px 10px;
+}
+.settings-shell .model-library .page-heading {
+  margin-bottom: 8px;
+}
+.settings-shell .model-library-count {
+  margin: 0 0 10px;
+}
+.general-settings {
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+  padding-right: 4px;
+}
+/* A numeric stepper reads better than a slider for a value with nine steps. */
+.font-size-row .stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 2px;
+  flex: none;
+}
+.font-size-row .stepper button {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  transition: background var(--duration-fast) var(--ease-out);
+}
+.font-size-row .stepper button:hover:not(:disabled) {
+  background: var(--soft);
+  color: var(--ink);
+}
+.font-size-row .stepper button:disabled {
+  opacity: 0.35;
+}
+.font-size-row .stepper output {
+  min-width: 26px;
+  text-align: center;
+  font-size: max(11px, 0.8571rem);
+  font-variant-numeric: tabular-nums;
+}
+.general-settings select {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 5px 8px;
+  font-size: max(11px, 0.8571rem);
+  background: var(--surface);
+  min-width: 150px;
+  flex: none;
+}
+.appearance-options {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.appearance-options button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 6px 10px;
+  font-size: max(11px, 0.8571rem);
+  background: var(--surface);
+  font-size: max(11px, 0.8571rem);
+  white-space: nowrap;
+}
+.appearance-options button[aria-pressed="true"] {
+  background: var(--selected);
+  border-color: var(--accent);
+}
+/* Transcript is the focal point; supplementary panels open on demand. */
+.conversation-content {
+  max-width: 860px;
+  padding: 30px 36px 24px;
+}
+.session-composer {
+  max-width: 880px;
+  padding: 8px 30px 21px;
+}
+.session-composer .composer {
+  padding: 16px 17px 12px;
+  border-radius: 19px;
+}
+.session-composer textarea {
+  min-height: 54px;
+  height: 54px;
+  font-size: max(11px, 1.0000rem);
+}
+.session-composer .composer-bottom {
+  margin-top: 10px;
+}
+.session-workbar {
+  padding: 0 2px 8px;
+}
+.message {
+  margin-bottom: 30px;
+}
+.message-author {
+  font-size: max(11px, 0.7857rem);
+  color: var(--muted);
+  font-weight: 500;
+}
+.markdown {
+  font-size: max(11px, 1.0000rem);
+  line-height: 1.9;
+}
+.message.user .message-body {
+  background: var(--soft);
+  padding: 11px 16px 14px;
+  border-radius: 3px 14px 14px 14px;
+}
+.message.user .message-author {
+  margin-bottom: 4px;
+  min-height: 20px;
+}
+.message.user .message-avatar {
+  background: transparent;
+}
+.tool-event {
+  border-radius: 8px;
+}
+.current-activity {
+  padding: 8px 3px;
+  margin: 0 0 3px;
+  background: transparent;
+  border: 0;
+}
+@media (max-width: 1100px) {
+  .sidebar {
+    width: 230px;
+  }
+  .task-route-name {
+    max-width: 80px;
+  }
+  .task-model-name {
+    max-width: 150px;
+  }
+  .home-content {
+    width: calc(100% - 60px);
+  }
+}
+@media (max-width: 760px) {
+  .sidebar {
+    width: 260px;
+  }
+  .home-content {
+    width: calc(100% - 34px);
+    padding-top: 30px;
+  }
+  .home-intro h1 {
+    font-size: max(11px, 2.0000rem);
+  }
+  .home-intro .workspace-picker {
+    margin-bottom: 22px;
+  }
+  .home-intro p {
+    font-size: max(11px, 0.8571rem);
+  }
+  .home-content .composer {
+    padding: 16px 13px 12px;
+    border-radius: 17px;
+  }
+  .home-content .composer textarea {
+    min-height: 80px;
+    font-size: max(11px, 1.0000rem);
+  }
+  .composer-bottom,
+  .home-content .composer-bottom {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 7px;
+  }
+  .composer-tools {
+    grid-column: 1 / -1;
+  }
+  .composer-actions {
+    grid-column: 2;
+    grid-row: 2;
+  }
+  .composer-context {
+    grid-column: 1;
+    min-width: 0;
+    justify-content: flex-start;
+  }
+  .task-settings-trigger {
+    padding: 5px 2px;
+    gap: 5px;
+  }
+  .task-model-name {
+    max-width: 150px;
+    font-size: max(11px, 0.7857rem);
+  }
+  .task-route-name {
+    max-width: 85px;
+    font-size: max(11px, 0.6429rem);
+  }
+  .task-effort {
+    font-size: max(11px, 0.7143rem);
+  }
+  .task-plan {
+    display: none;
+  }
+  .input-hint {
+    font-size: max(11px, 0.6429rem);
+  }
+  .recent-section {
+    margin-top: 34px;
+  }
+  .recent-row > .status {
+    font-size: max(11px, 0.7143rem);
+  }
+  .topbar {
+    padding: 0 16px;
+  }
+  .session-composer {
+    padding: 8px 12px 13px;
+  }
+  .session-composer .composer {
+    padding: 14px 12px 10px;
+  }
+  .conversation-content {
+    padding: 22px 17px 20px;
+  }
+  .message {
+    gap: 9px;
+  }
+  .settings-shell {
+    padding: 0;
+  }
+  .settings-heading {
+    gap: 8px;
+  }
+  .settings-heading h1 {
+    font-size: max(11px, 1.6429rem);
+  }
+  .settings-tabs {
+    gap: 18px;
+  }
+  .settings-tabs button {
+    font-size: max(11px, 0.7857rem);
+  }
+  .settings-shell .page-heading {
+    align-items: flex-start;
+  }
+  .settings-shell .page-heading .button {
+    white-space: nowrap;
+    font-size: max(11px, 0.7857rem);
+    padding: 8px;
+  }
+  .settings-shell .page-heading p {
+    font-size: max(11px, 0.7857rem);
+  }
+  .preference-row {
+    flex-wrap: wrap;
+    gap: 15px;
+  }
+  .model-library .model-groups {
+    min-height: 0;
+    max-height: 215px;
+  }
+  .model-library .model-detail {
+    min-height: 0;
+    max-height: none;
+    padding: 20px 16px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .studio-popover,
+  .task-settings-trigger {
+    transition: none;
+  }
+}
+
+.app-version { color: var(--muted); font-size: max(11px, 0.8571rem); font-weight: 400; letter-spacing: 0; white-space: nowrap; }
+.brand > .app-version { margin-left: 2px; font-size: max(11px, 0.7857rem); }
+/* Settings is a sheet now; the version rides the tab row it replaced. */
+.settings-tabs > .app-version { margin-left: auto; align-self: center; }
+/* The version doubles as the entry to version and updates. */
+button.app-version { border: 0; background: transparent; padding: 4px 7px; border-radius: 6px; cursor: pointer; font: inherit; color: var(--muted); }
+button.app-version:hover { background: var(--soft); color: var(--ink); }
+button.app-version.has-update { color: var(--accent); }
+button.app-version.has-update::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--accent); vertical-align: middle; }
+
+/* Settings, help and the tour share one inset and font scale on small screens. */
+@media (max-width: 640px) {
+  dialog[data-guide-dialog="settings"] { width: calc(100vw - 16px); }
+  dialog[data-guide-dialog="settings"] > .dialog-body.sheet { padding: 18px 18px 16px; height: min(740px, calc(100dvh - 32px)); }
+  .settings-tabs { gap: 10px; flex-wrap: wrap; }
+  .settings-tabs > .app-version { font-size: 11px; }
+  .settings-tabs button { font-size: max(12px, .8571rem); }
+  .session-workbar { flex-wrap: wrap; row-gap: 6px; }
+}
+
+.appearance-options, .accent-options { flex-wrap: wrap; max-width: 100%; }
+.home-intro button.workspace-picker { font: inherit; font-size: max(11px, .8571rem); cursor: pointer; }
+.workspace-picker > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
+.workspace-form .workspace-search-input { display: flex; flex-direction: row; align-items: center; gap: 9px; }
+.workspace-form .workspace-search-input input { flex: 1; width: 100%; min-width: 0; }
+.workspace-matches { display: grid; gap: 4px; max-height: min(42vh, 350px); overflow: auto; }
+.workspace-matches button { display: flex; align-items: center; gap: 12px; padding: 11px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--ink); text-align: left; }
+.workspace-matches button[aria-selected="true"] { background: var(--soft); border-color: var(--line); }
+.workspace-matches button > span { display: grid; gap: 4px; flex: 1; min-width: 0; }
+.workspace-matches strong { font-weight: 600; }
+.workspace-matches small { color: var(--muted); font-size: max(11px, .8571rem); overflow-wrap: anywhere; }
+.preference-row > div { min-width: 0; }

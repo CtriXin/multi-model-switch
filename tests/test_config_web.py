@@ -4749,7 +4749,6 @@ def test_config_web_capability_truth_button_and_fields_are_present():
 
     assert "refreshCapabilityTruth" in html
     assert "refreshOpenRouterCatalog" in html
-    assert "refreshMmfOfficialOverrides" in html
     assert "/api/model-capabilities/refresh" in html
     assert "data-truth-field=\"context_window_tokens\"" in html
     assert "data-truth-field=\"vision\"" in html
@@ -4757,9 +4756,12 @@ def test_config_web_capability_truth_button_and_fields_are_present():
     assert "data-truth-field=\"reasoning_effort\"" in html
     assert "已知能力快照" in html
     assert "OpenRouter catalog" in html
-    assert "MMF 官方覆盖" in html
+    assert "MMF 官方数据" in html
     assert "不是厂商官方真值" in html
-    assert "openrouter_catalog:openrouter" in html
+    # The catalogue never outranks the vendor's own data.
+    assert "CAPABILITY_SOURCES" in html
+    assert "mergeCapabilitySnapshots" in html
+    assert "openrouter_catalog:key==='catalog'" in html
     assert "providerPayloadForCapabilityRefresh" in html
     assert "fieldsForCapabilityRefresh" in html
     assert "field!=='tool_use'" in html
@@ -4770,7 +4772,7 @@ def test_config_web_capability_truth_button_and_fields_are_present():
     assert "button.is-loading" in html
     assert "工具（手动项）" in html
     assert "capability_touched:true" in html
-    assert "有变化的草稿" in html
+    assert "个模型草稿" in html
 
 
 def test_config_web_max_output_tokens_are_saved_to_model_policy(tmp_path):

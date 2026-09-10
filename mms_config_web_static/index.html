@@ -78,7 +78,7 @@
                 <p class="muted model-fetch-note">模型拉取可以在本页自助完成，不需要 agent 代跑命令；拉取结果会先进入页面草稿，生成保存预览并发布后才会写入配置。</p>
                 <div class="truth-refresh-box">
                   <strong>已知能力快照</strong>
-                  <p class="muted">本地快照不联网；OpenRouter catalog 会联网读取结构化字段，但它是 provider catalog 参考，不是厂商官方真值。结果都只进草稿，保存预览后才生效。</p>
+                  <p class="muted">按可信度合并：MMF 官方数据优先于本地已知快照，两者都不联网。OpenRouter catalog 需要联网，它是 provider catalog 参考，不是厂商官方真值，只在前两者没覆盖该字段时才会被采用。结果都只进草稿，保存预览后才生效。</p>
                   <div class="checks truth-field-checks">
                     <label class="check"><input data-truth-field="context_window_tokens" type="checkbox" checked><span>上下文</span></label>
                     <label class="check"><input data-truth-field="max_output_tokens" type="checkbox" checked><span>输出上限</span></label>
@@ -91,9 +91,8 @@
                     <label class="check"><input data-truth-field="one_m_context" type="checkbox" checked><span>1M</span></label>
                   </div>
                   <div class="btns">
-                    <button id="refreshCapabilityTruth" class="secondary">用本地已知快照刷新</button>
-                    <button id="refreshOpenRouterCatalog" class="secondary">从 OpenRouter catalog 快速匹配</button>
-                    <button id="refreshMmfOfficialOverrides" class="secondary">应用 MMF 官方覆盖</button>
+                    <button id="refreshCapabilityTruth" class="secondary" title="按可信度合并 MMF 官方数据与本地已知快照，官方数据优先">检查最新能力</button>
+                    <button id="refreshOpenRouterCatalog" class="secondary" title="额外联网读取 OpenRouter。它报的是它选中的上游的限额，不是厂商口径，只在官方数据没有覆盖时才会被采用">也查 OpenRouter</button>
                   </div>
                 </div>
                 <div class="btns">
