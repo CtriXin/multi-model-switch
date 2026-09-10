@@ -97,3 +97,45 @@ def test_transcript_keeps_the_tail_and_drops_non_messages(tmp_path):
     # A long session is read from the end, which is what someone wants to see.
     assert [r["id"] for r in transcript(path, limit=2)] == ["m2", "m3"]
     assert transcript(tmp_path / "missing.jsonl") == []
+
+
+def test_pilot_lists_command_line_sessions_beside_its_own(tmp_path):
+    """One list holds both, newest first, and neither store is written to."""
+    from mms_web.server import WebApplication
+
+    config_root = tmp_path / "mms-next"
+    sessions = config_root / "pi-gateway" / "sessions"
+    sessions.mkdir(parents=True)
+    write(sessions, "one", [session("aaaa-1", cwd="/tmp/a"), message("user", "终端里问的问题")])
+
+    app = WebApplication(state_root=tmp_path / "state", config_root=config_root)
+    try:
+        rows = app.all_sessions()
+        assert [r["id"] for r in rows] == ["cli:aaaa-1"]
+        row = rows[0]
+        assert row["owner"] == "cli"
+        assert row["title"] == "终端里问的问题"
+        # Nothing about it is actionable until it is resumed.
+        assert row["capabilities"] == {"send": False, "stop": False, "fork": False, "archive": False}
+
+        detail = app.get(["sessions", "cli:aaaa-1"])
+        assert [e["role"] for e in detail["events"]] == ["user"]
+        assert detail["events"][0]["text"] == "终端里问的问题"
+        # The transcript path is Pi's business, not the browser's.
+        assert "path" not in detail["session"]
+    finally:
+        app.close()
+    # Read-only: the reader must not have touched Pi's directory.
+    assert sorted(p.name for p in sessions.iterdir()) == ["one.jsonl"]
+
+
+def test_a_missing_gateway_directory_does_not_break_the_list(tmp_path):
+    from mms_web.server import WebApplication
+
+    app = WebApplication(state_root=tmp_path / "state", config_root=tmp_path / "empty")
+    try:
+        assert app.all_sessions() == []
+        with pytest.raises(Exception):
+            app.get(["sessions", "cli:nope"])
+    finally:
+        app.close()

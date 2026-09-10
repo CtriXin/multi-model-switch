@@ -9,6 +9,7 @@ This reads that directory. It never writes to it: the files belong to Pi, and
 a session may be mid-write while we look at it.
 """
 from __future__ import annotations
+import datetime
 import json
 import os
 from pathlib import Path
@@ -18,6 +19,21 @@ from pathlib import Path
 _HEAD_LINES = 48
 _TITLE_LIMIT = 42
 _ROLES = {"user", "assistant", "toolResult"}
+
+
+def session_dir_for(config_root: str | os.PathLike) -> Path:
+    """Where MMS points every Pi launch, CLI or Pilot, to keep its sessions.
+
+    Mirrors ``mms_pi_support._pi_session_dir`` without importing it, because
+    that resolves the config root from the launch environment and Pilot
+    already knows which root it opened.
+    """
+    return Path(config_root) / "pi-gateway" / "sessions"
+
+
+def _iso(seconds: float) -> str:
+    return datetime.datetime.fromtimestamp(
+        seconds, datetime.timezone.utc).isoformat(timespec="milliseconds")
 
 
 def _text_of(message: dict) -> str:
@@ -86,11 +102,20 @@ def summarize(path: Path) -> dict | None:
         "harness": "pi",
         "modelName": model,
         "providerName": provider,
-        # These sessions were not started here, so nothing about them is
-        # editable from the browser until one is resumed.
+        # Shaped like a Pilot session so one list can hold both. These were
+        # not started here, so nothing about them is actionable in the browser
+        # yet; "owner" is what the page keys that difference off.
         "owner": "cli",
+        "channel": "",
+        "presetId": "",
+        "workspaceId": "",
+        "state": "stopped",
+        "activity": None,
+        "archived": False,
+        "forkedFrom": None,
+        "capabilities": {"send": False, "stop": False, "fork": False, "archive": False},
         "createdAt": str(header.get("timestamp") or ""),
-        "updatedAt": stat.st_mtime,
+        "updatedAt": _iso(stat.st_mtime),
         "path": str(path),
     }
 

@@ -100,8 +100,53 @@ class WebApplication:
         return {
             **snapshot, "version": "1", "appVersion": VERSION, "mode": "live",
             "capabilities": capabilities, "csrfToken": self.csrf_token,
-            "sessions": self.sessions.list_sessions() if self.sessions else [],
+            "sessions": self.all_sessions(),
         }
+
+    def _cli_sessions(self) -> list[dict]:
+        """Sessions started from the command line, read from Pi's own files.
+
+        Read-only and best-effort: a missing directory or an unreadable file
+        must never take the session list down with it.
+        """
+        if not self.config_root:
+            return []
+        try:
+            from .cli_sessions import index, session_dir_for
+            return index(session_dir_for(self.config_root))
+        except Exception:
+            return []
+
+    def all_sessions(self) -> list[dict]:
+        """Pilot's own sessions and the command-line ones, newest first."""
+        own = self._sessions().list_sessions() if self.sessions else []
+        # A session resumed here owns its Pi session, so drop the read-only
+        # row for it rather than showing the same conversation twice.
+        claimed = {str(s.get("piSessionId") or "") for s in own}
+        claimed.discard("")
+        merged = own + [s for s in self._cli_sessions()
+                        if s["piSessionId"] not in claimed]
+        merged.sort(key=lambda view: view.get("updatedAt") or "", reverse=True)
+        return merged
+
+    def cli_session_detail(self, session_id: str) -> dict:
+        """A read-only transcript for one command-line session."""
+        from .cli_sessions import index, session_dir_for, transcript
+        wanted = session_id[len("cli:"):]
+        if not self.config_root or not wanted:
+            raise WebError("NOT_FOUND", "找不到这个会话。", 404)
+        row = next((s for s in index(session_dir_for(self.config_root), limit=2000)
+                    if s["piSessionId"] == wanted), None)
+        if row is None:
+            raise WebError("NOT_FOUND", "找不到这个会话。", 404)
+        # Mapped onto the shape the transcript view already renders, so the
+        # page needs no second renderer for these.
+        events = [{"kind": "message", "role": e["role"], "text": e["text"],
+                   "at": e["at"], "id": e["id"]}
+                  for e in transcript(row["path"])]
+        return {"session": {k: v for k, v in row.items() if k != "path"},
+                "events": events, "approvals": [], "runtime": {},
+                "note": "这个会话是在命令行里开始的，这里只读。"}
 
     def get(self, parts: list[str]) -> dict:
         if parts == ["update", "identity"]:
@@ -112,7 +157,7 @@ class WebApplication:
         if parts == ["model-settings"]:
             return self._model_settings().read()
         if parts == ["sessions"]:
-            return {"sessions": self._sessions().list_sessions()}
+            return {"sessions": self.all_sessions()}
         if len(parts) == 2 and parts[0] == "attachments":
             return self._sessions().files.preview_attachment(parts[1])
         if len(parts) == 3 and parts[0] == "sessions":
@@ -125,6 +170,8 @@ class WebApplication:
         if parts == ["bootstrap"]:
             return self.bootstrap()
         if len(parts) == 2 and parts[0] == "sessions":
+            if parts[1].startswith("cli:"):
+                return self.cli_session_detail(parts[1])
             return self._sessions().get_session(parts[1])
         raise WebError("NOT_FOUND", "找不到这个接口。", 404)
 
