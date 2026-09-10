@@ -419,6 +419,7 @@ _PI_MODEL_INPUT_HINTS = {
     "qwen3.6-flash": ["text", "image"],
     "qwen3.7-max": ["text"],
     "deepseek-v4.1-flash-expires-on-0910": ["text", "image"],
+    "deepseek-v4-flash": ["text", "image"],
 }
 
 _PI_MODEL_UNSUPPORTED_HINTS = {

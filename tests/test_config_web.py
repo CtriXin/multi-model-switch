@@ -4931,7 +4931,7 @@ def test_config_web_mmf_official_overrides_use_provider_profiles(monkeypatch, tm
     glm = result["model_capabilities"]["glm-5.2"]
     assert glm["context_window_tokens"] == 1_000_000
     assert glm["max_output_tokens"] == 131_072
-    assert glm["reasoning_effort"] == "max"
+    assert glm["reasoning_effort"] == "high"
 
     gpt = result["model_capabilities"]["gpt-5.5"]
     assert gpt["context_window_tokens"] == 1_000_000
@@ -4945,8 +4945,8 @@ def test_config_web_mmf_official_overrides_use_provider_profiles(monkeypatch, tm
     assert gemini["official_reasoning_effort"] == "high"
 
     deepseek = result["model_capabilities"]["deepseek-v4-pro"]
-    assert deepseek["context_window_tokens"] == 1_000_000
-    assert deepseek["max_output_tokens"] == 384_000
+    assert deepseek["context_window_tokens"] == 1_048_576
+    assert deepseek["max_output_tokens"] == 393_216
 
     k3 = result["model_capabilities"]["k3"]
     assert k3["context_window_tokens"] == 262_144

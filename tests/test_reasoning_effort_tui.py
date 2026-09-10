@@ -92,7 +92,7 @@ def test_confirm_profile_capabilities_apply_model_defaults(monkeypatch, tmp_path
     assert qwen_caps["profile"] == "dashscope-openai"
     assert qwen_caps["default_enabled"] is False
     assert deepseek_caps["effort_supported"] is True
-    assert _confirm_effort_values(deepseek_caps, deepseek_caps["tokens"]) == ["high", "xhigh"]
+    assert _confirm_effort_values(deepseek_caps, deepseek_caps["tokens"]) == ["low", "medium", "high", "xhigh", "max"]
 
 
 def test_confirm_profile_capabilities_expose_max_only_for_gpt56(monkeypatch, tmp_path):
