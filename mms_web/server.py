@@ -111,6 +111,8 @@ class WebApplication:
             return self.updates.status()
         if parts == ["model-settings"]:
             return self._model_settings().read()
+        if parts == ["skill-preferences"]:
+            return self._sessions().skills.preferences()
         if parts == ["sessions"]:
             return {"sessions": self._sessions().list_sessions()}
         if len(parts) == 2 and parts[0] == "attachments":
@@ -168,6 +170,8 @@ class WebApplication:
                     shutil.rmtree(root)
         if parts == ["skills"]:
             return self._sessions().skills.snapshot(str(payload.get("workspaceId") or ""))
+        if parts == ["skill-preferences"]:
+            return self._sessions().skills.set_preferences(payload)
         if parts == ["project-materials"]:
             return self._sessions().materials.snapshot(str(payload.get("workspaceId") or ""))
         if parts == ["project-materials", "change"]:

@@ -1852,3 +1852,28 @@ def test_pi_policy_copy_fails_explicitly_and_cannot_target_global(isolated_polic
     monkeypatch.setattr(Path, 'read_text', deny_policy)
     with pytest.raises(RuntimeError, match='Cannot load Pi agent policy'):
         pi._pi_gateway_env({'model': 'synthetic-model'})
+
+
+def test_pi_skill_overlay_links_bundled_skills_below_every_user_root(monkeypatch, tmp_path):
+    import mms_pi_support
+
+    real_home = tmp_path / "real-home"
+    user_weber = real_home / ".agents" / "skills" / "weber"
+    bundled_weber = tmp_path / "bundle" / "weber"
+    bundled_grill = tmp_path / "bundle" / "grill-me"
+    for skill_dir in (user_weber, bundled_weber, bundled_grill):
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("---\nname: test\ndescription: test\n---\n", encoding="utf-8")
+    (tmp_path / "project" / ".git").mkdir(parents=True)
+    monkeypatch.setattr(mms_pi_support, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+    monkeypatch.setattr(mms_pi_support, "_resolve_weber_root", lambda: str(bundled_weber))
+    monkeypatch.setattr(mms_pi_support, "_resolve_grill_me_root", lambda: str(bundled_grill))
+    monkeypatch.setattr(mms_pi_support, "_resolve_toon_root", lambda: "")
+
+    overlay = Path(mms_pi_support._pi_materialize_skill_overlay(tmp_path / "session", tmp_path / "project"))
+
+    # A user's own copy replaces the bundled one; a bundled-only skill still lands in the session.
+    assert (overlay / "weber").resolve() == user_weber
+    assert (overlay / "grill-me").resolve() == bundled_grill
+    assert not (overlay / "toon").exists()
+    assert list(real_home.rglob("grill-me")) == []

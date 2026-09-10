@@ -11,11 +11,20 @@ from .runtime import real_home
 from .starter_skills import starter_skills
 
 
-def effective_paths(cwd, home):
-    return [item["path"] for item in effective_entries(cwd, home)]
+def effective_paths(cwd, home, include_external=False):
+    return [item["path"] for item in effective_entries(cwd, home, include_external=include_external)]
 
 
-def effective_entries(cwd, home):
+def bundled_skill_roots():
+    """Skills MMS ships and injects into Pi sessions (weber, grill-me, toon)."""
+    try:
+        import mms_pi_support
+        return list(mms_pi_support._pi_bundled_skill_roots())
+    except Exception:
+        return []
+
+
+def effective_entries(cwd, home, *, include_external=False):
     # Matches mms_pi_support._pi_materialize_skill_overlay: top-level names
     # override global -> repository root -> cwd, with .agents after .pi.
     directories = []
@@ -25,10 +34,20 @@ def effective_entries(cwd, home):
         if (current / ".git").exists() or current.parent == current:
             break
         current = current.parent
-    sources = [(Path(home) / ".agents/skills", False, "共享")]
+    sources = []
+    if include_external:
+        sources.extend([
+            (Path(home) / ".claude/skills", False, "Claude 全局"),
+            (Path(home) / ".codex/skills", False, "Codex 全局"),
+            (Path(home) / ".config/opencode/skills", False, "OpenCode 全局"),
+        ])
+    sources.append((Path(home) / ".agents/skills", False, "共享"))
     for directory in reversed(directories):
         sources.extend([(directory / ".pi/skills", True, "项目"), (directory / ".agents/skills", False, "项目")])
     entries = {}
+    # Lowest precedence, mirroring mms_pi_support._pi_materialize_skill_overlay.
+    for name, root in bundled_skill_roots():
+        entries[name] = {"path": root, "source": "Pilot 内置", "sourceRoot": str(Path(root).parent), "overrides": []}
     for root, markdown, scope in sources:
         if not root.is_dir():
             continue
@@ -46,6 +65,23 @@ class SkillCatalog:
     def __init__(self, catalog, state_root):
         self.catalog, self.root = catalog, Path(state_root) / "skill-reader"
 
+    @property
+    def preferences_path(self):
+        return self.root / "preferences.json"
+
+    def preferences(self):
+        try:
+            value = json.loads(self.preferences_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            value = {}
+        return {"mergeExternal": value.get("mergeExternal") is True}
+
+    def set_preferences(self, payload):
+        from .runtime import private_json
+        value = {"mergeExternal": payload.get("mergeExternal") is True} if isinstance(payload, dict) else {"mergeExternal": False}
+        private_json(self.preferences_path, value)
+        return value
+
     def snapshot(self, workspace_id):
         workspace = next((w for w in self.catalog._workspaces() if w["id"] == workspace_id), None)
         if not workspace or not Path(workspace["path"]).is_dir():
@@ -58,7 +94,7 @@ class SkillCatalog:
         if not module.is_file():
             raise WebError("SKILLS_UNAVAILABLE", "当前 Pi 版本未提供 skills 读取接口。", 409)
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        origins = effective_entries(workspace["path"], real_home())
+        origins = effective_entries(workspace["path"], real_home(), include_external=self.preferences()["mergeExternal"])
         with tempfile.TemporaryDirectory(dir=self.root, prefix="overlay-") as temporary:
             overlay = Path(temporary)
             for origin in origins:

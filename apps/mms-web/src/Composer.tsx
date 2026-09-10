@@ -19,6 +19,7 @@ import { Popover } from "./Popover";
 import { SkillPicker } from "./SkillPicker";
 import type { Skill } from "./SkillPicker";
 import { request } from "./api";
+import { SKILL_PREFERENCES_EVENT } from "./SkillSources";
 import type { Attachment, FileSelection } from "./types";
 import { FilesPanel } from "./FilesPanel";
 import { localFilePaths } from "./local-file-paths";
@@ -114,6 +115,12 @@ export function Composer({
         : [...old, id].slice(0, 20),
     );
   }
+  const [skillsRevision, setSkillsRevision] = useState(0);
+  useEffect(() => {
+    const bump = () => setSkillsRevision(n => n + 1);
+    window.addEventListener(SKILL_PREFERENCES_EVENT, bump);
+    return () => window.removeEventListener(SKILL_PREFERENCES_EVENT, bump);
+  }, []);
   useEffect(() => {
     let cancelled = false;
     setSkills([]);
@@ -137,7 +144,7 @@ export function Composer({
     return () => {
       cancelled = true;
     };
-  }, [workspaceId, requiredSkillKey]);
+  }, [workspaceId, requiredSkillKey, skillsRevision]);
   const requirementIssues = requiredSkillNames.length ? (skillsReady ? requiredSkillMatches(requiredSkillNames, skills, selectedSkills).issues : [skillError || "正在核对模板所需的 Skills。"]) : [];
   const [text, setText] = useState(() => {
     const original = draft?.text ?? initialText;
@@ -386,7 +393,7 @@ export function Composer({
       }
       setAttachments((old) => [...old.filter(a => referencedInText(a)), ...imported]);
       insertPaths(imported.flatMap(item => item.localPath ? [item.localPath] : []));
-      if (imported.length) setFilePathHint("文件已保存到项目的 .pilot/attachments，路径已插入正文，可在其他会话继续引用。");
+      if (imported.length) setFilePathHint("文件已保存到项目的 .pilot/attachments，路径已插入正文，可在其他会话继续引用。30 天内没有任何会话引用的副本会自动清理。");
     } catch (e) {
       failures.push((e as Error).message);
     } finally {

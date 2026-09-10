@@ -61,6 +61,7 @@ export function SkillPicker({ skills, selected, toggle, close, error, example, l
         <summary>还想添加自己的 skill？</summary>
         <p>内置能力已随 Pilot 提供。已有的共享和项目 skills 在“全部能力”里，搜索也会一起查找。</p>
         <p>外部 skill 通常是一个包含 SKILL.md 的文件夹。先检查来源和内容，再放到工作文件夹的 .agents/skills 下，刷新页面即可读取。它只对这个项目生效；带有脚本的 skill 可能需要额外工具。</p>
+        <p>已经装在本机 Claude、Codex 或 OpenCode 里的 skills，可以在设置的通用设置里打开「合并本机 Skills」，Pilot 会在隔离读取层一并查看，不会改动原目录。</p>
       </details>
       <div className="skill-footer">
         <small>选择后随这条消息提交，实际加载见运行详情 · 最多 20 个</small>
