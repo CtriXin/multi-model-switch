@@ -72,6 +72,7 @@ _PYTEST_TARGETS = [
     "tests/test_mms_web_artifact_history.py",
     "tests/test_mms_web_artifact_flow.py",
     "tests/test_mms_web_standalone_settings.py",
+    "tests/test_web_config_root_adoption.py",
     "tests/test_claude_hardening_regressions.py",
     "tests/test_claude_isolation.py",
     "tests/test_codex_history_growth.py",
@@ -122,8 +123,9 @@ _SCENARIO_MATRIX = [
     },
     {
         "id": "shared-config-root-default",
-        "state": "empty HOME with no MMS env; a channel pinned to the legacy root; a Pilot state root with and without its own config",
-        "coverage": "mms defaults to the same ~/.config/mms-next root as mmf, a pinned channel stays on the legacy root in stable mode, and Pilot shares the default root unless it already owns configuration",
+        "state": "empty HOME with no MMS env; a channel pinned to the legacy root; a fresh Pilot state root",
+        "coverage": "mms defaults to the same ~/.config/mms-next root as mmf, a pinned channel stays on the legacy root in stable mode, and Pilot shares the default root "
+                    "(adoption of an existing Web-owned config is covered by tests/test_web_config_root_adoption.py)",
     },
     {
         "id": "legacy-dirty-install-cleanup",
@@ -275,23 +277,17 @@ def _smoke_shared_config_root_default() -> None:
             "import json,sys;"
             "from pathlib import Path;"
             "from mms_web.runtime import default_config_root;"
-            "print(json.dumps({'fresh': str(default_config_root(Path(sys.argv[1]))),"
-            " 'owned': str(default_config_root(Path(sys.argv[2])))}))"
+            "print(json.dumps({'fresh': str(default_config_root(Path(sys.argv[1])))}))"
         )
         fresh_state = home / ".local" / "share" / "mms-web"
-        owned_state = home / ".local" / "share" / "mms-web-owned"
-        (owned_state / "config").mkdir(parents=True)
-        (owned_state / "config" / "config.toml").write_text("", encoding="utf-8")
         completed = _run(
             "pilot default config root",
-            [sys.executable, "-c", probe, str(fresh_state), str(owned_state)],
+            [sys.executable, "-c", probe, str(fresh_state)],
             env=_env_for_home(home),
         )
         roots = json.loads(completed.stdout)
         if roots.get("fresh") != str(shared_root):
             raise SystemExit(f"pilot fresh root mismatch: {roots.get('fresh')} != {shared_root}")
-        if roots.get("owned") != str(owned_state / "config"):
-            raise SystemExit(f"pilot owned root mismatch: {roots!r}")
 
 
 def _safe_symlink(target: Path | str, link: Path) -> None:
