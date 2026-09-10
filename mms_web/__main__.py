@@ -18,6 +18,13 @@ def main(argv=None):
                         default=Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local/share"))) / "mms-web",
                         help="Directory for Web-owned config, sessions and runtime snapshots")
     parser.add_argument("--open", action="store_true", help="Open the local Web client in your browser")
+    parser.add_argument("--listen", choices=("loopback", "lan", "all"), default="loopback",
+                        help="loopback (default, this machine only), lan (this machine's own "
+                             "network address), or all (every interface). Anything but loopback "
+                             "requires the access token printed at startup.")
+    parser.add_argument("--hostname", action="append", default=[], metavar="HOST",
+                        help="A public hostname this server answers to, for example one "
+                             "fronted by a tunnel. Repeatable.")
     source = Path(__file__).resolve().parent.parent
     bundled = source / "mms_web_static"
     parser.add_argument("--static-root", type=Path, default=bundled if bundled.is_dir() else source / "apps/mms-web/dist")
@@ -33,10 +40,21 @@ def main(argv=None):
     if not (args.static_root / "index.html").is_file():
         parser.error("Web assets are missing. Reinstall MMS v4, or run npm run build --workspace @mms/web in the source checkout.")
     lease = acquire_state_lock(root)
-    app = WebApplication(state_root=root, config_root=args.config_root)
+    app = WebApplication(state_root=root, config_root=args.config_root,
+                         listen=args.listen, hostnames=tuple(args.hostname))
     server = create_server(app, args.static_root, args.port)
-    address = f"http://127.0.0.1:{server.server_address[1]}"
+    port = server.server_address[1]
+    address = f"http://127.0.0.1:{port}"
     print(f"MMS Pilot: {address}", flush=True)
+    if app.access.required:
+        # Say plainly what is reachable and print the one link that opens it.
+        # A phone gets in by following this and nothing else.
+        where = {"lan": "本机局域网地址", "all": "所有网络接口"}[app.access.mode]
+        print(f"  已开放：{where}。带 token 的链接才能访问，token 存在 "
+              f"{root / 'remote-access-token'}", flush=True)
+        print(f"  手机打开：{app.access.link(port)}", flush=True)
+    else:
+        print("  仅本机可访问，未监听任何对外地址。", flush=True)
     from .update_coordinator import UpdateCoordinator
     app.updates.coordinator = UpdateCoordinator(app, server, source, args.static_root)
     app.updates.start_scheduler()

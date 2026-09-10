@@ -10,10 +10,11 @@ import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlsplit
+from urllib.parse import unquote, urlsplit, parse_qs
 
 from mms_version import VERSION
 
+from . import remote_access as access
 from .errors import WebError
 
 MAX_BODY = 12 * 1024 * 1024
@@ -30,9 +31,13 @@ def _adapter(module: str, name: str, **kwargs):
 
 
 class WebApplication:
-    def __init__(self, *, state_root: Path, config_root: Path | None = None):
+    def __init__(self, *, state_root: Path, config_root: Path | None = None,
+                 listen: str = "loopback", hostnames: tuple[str, ...] = ()):
         from .runtime import require_private_root
         state_root = require_private_root(state_root)
+        # Loopback-only is the default and needs no token, so nothing changes
+        # for a browser on this machine.
+        self.access = access.RemoteAccess(state_root, listen, hostnames)
         if config_root is None:
             config_root = state_root / "config"
         self.config_root = config_root
@@ -302,13 +307,25 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
             # Request paths/bodies can contain private task data. No access log.
             return
 
+        def _presented_token(self):
+            """The token this request carries, from the cookie or the query."""
+            from http.cookies import SimpleCookie
+            query = parse_qs(urlsplit(self.path).query)
+            if query.get(access.QUERY):
+                return query[access.QUERY][0], True
+            jar = SimpleCookie(self.headers.get("Cookie", ""))
+            morsel = jar.get(access.COOKIE)
+            return (morsel.value if morsel else ""), False
+
         def _check_origin(self, *, mutation=False):
             expected_port = self.server.server_address[1]
-            hosts = {f"127.0.0.1:{expected_port}", f"localhost:{expected_port}"}
-            if self.headers.get("Host") not in hosts:
+            hosts = app.access.allowed_hosts(expected_port)
+            if not app.access.accepts(self.headers.get("Host"), expected_port):
                 raise WebError("INVALID_HOST", "只允许访问本机服务地址。", 403)
             origin = self.headers.get("Origin")
-            if origin is not None and origin not in {f"http://{host}" for host in hosts}:
+            if origin is not None and origin not in {
+                f"{scheme}://{host}" for host in hosts for scheme in ("http", "https")
+            }:
                 raise WebError("INVALID_ORIGIN", "请在 MMS 本地页面中执行此操作。", 403)
             if self.headers.get("Sec-Fetch-Site") == "cross-site":
                 raise WebError("INVALID_ORIGIN", "不允许跨站访问本地服务。", 403)
@@ -352,9 +369,39 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
                 raise WebError("NOT_FOUND", "找不到这个接口。", 404)
             return path.removeprefix("/api/v1/").split("/")
 
+        def _gate(self):
+            """Return True when the request may proceed.
+
+            A valid token in the query is exchanged for a cookie and the URL
+            is redirected without it, so the token does not sit in history,
+            in the address bar, or in a Referer header on the way out.
+            """
+            if not app.access.required:
+                return True
+            presented, from_query = self._presented_token()
+            if not app.access.valid(presented):
+                self._send(401, b"401", "text/plain; charset=utf-8")
+                return False
+            if from_query and self.command == "GET":
+                split = urlsplit(self.path)
+                query = "&".join(part for part in split.query.split("&")
+                                 if not part.startswith(f"{access.QUERY}="))
+                secure = self.headers.get("X-Forwarded-Proto", "").lower() == "https"
+                self.send_response(302)
+                self.send_header("Location", split.path + (f"?{query}" if query else ""))
+                self.send_header("Set-Cookie",
+                                 f"{access.COOKIE}={presented}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000"
+                                 + ("; Secure" if secure else ""))
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return False
+            return True
+
         def do_GET(self):
             try:
                 self._check_origin()
+                if not self._gate():
+                    return
                 path = unquote(urlsplit(self.path).path)
                 if path.startswith("/api/"):
                     parts = self._parts()
@@ -383,6 +430,8 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
         def do_POST(self):
             try:
                 self._check_origin(mutation=True)
+                if not self._gate():
+                    return
                 if self.headers.get_content_type() != "application/json":
                     raise WebError("INVALID_BODY", "请求必须使用 JSON。", 415)
                 try:
@@ -404,6 +453,6 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
             except Exception as exc:
                 self._error(exc)
 
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    server = ThreadingHTTPServer((app.access.bind_address(), port), Handler)
     server.daemon_threads = True
     return server
