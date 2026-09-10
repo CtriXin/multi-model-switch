@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import type { Bootstrap, ConfigPreview } from "./types";
 import { Dialog } from "./components";
+import { ConnectionGuide } from "./ConnectionGuide";
 import { mutate, request } from "./api";
 import {
   EffortSelect,
@@ -46,6 +47,7 @@ export function ConnectionDialog({
   onboarding?: boolean;
   complete?: () => void;
 }) {
+  const [guide, setGuide] = useState(onboarding || !data.presets.some(p => p.available));
   const [step, setStep] = useState<Step>("connection");
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
@@ -202,7 +204,8 @@ export function ConnectionDialog({
       close={() => void dismiss()}
       dismissible={!busy || busy === "discover"}
     >
-      <div className="connection-flow" aria-busy={!!busy}>
+      <div className={"connection-flow" + (guide ? " has-connection-guide" : "")} aria-busy={!!busy}>
+        <button type="button" className="connection-guide-toggle text-button" aria-pressed={guide} onClick={() => setGuide(v => !v)}>？{guide ? "收起连接引导" : "一步步带我连接"}</button>
         <ol className="connection-steps" aria-label="连接进度">
           {["服务地址", "连接密钥", "选择模型", "确认保存"].map((label, i) => {
             const current =
@@ -261,7 +264,7 @@ export function ConnectionDialog({
             <fieldset disabled={!!busy} className="connection-fields">
               {step === "connection" ? <>
                 <p className="connection-note">Pilot 通过模型服务回答问题。把服务商提供的 API 地址粘贴到下面。</p>
-                <label className="field">
+                <label className="field" data-setup="address">
                   API 地址
                   <input required type="url" value={url}
                     onChange={e => { setUrl(e.target.value.trim()); setListed(false); setModels([]); setChosen([]); }}
@@ -276,18 +279,18 @@ export function ConnectionDialog({
                   </select><small>按服务商的说明选择；没有特别要求时保留默认值。</small></label>
                   {protocol === "dual" && <p className="connection-note">适用于两种接口共用同一个地址和 Key 的网关。地址不同时，请在通道设置中分别填写。</p>}
                 </details>
-                <button className="button primary full" type="submit">下一步，填写密钥 <ArrowRight size={15} /></button>
+                <button className="button primary full" data-setup-next type="submit">下一步，填写密钥 <ArrowRight size={15} /></button>
                 <button className="connection-text-button full" type="button" onClick={() => void dismiss()}>还没有服务信息，稍后配置</button>
               </> : <>
                 <p className="connection-route"><span>{url}</span></p>
-                <label className="field">API Key
+                <label className="field" data-setup="key">API Key
                   <input required type="password" value={key} onChange={e => { setKey(e.target.value.trim()); setListed(false); setModels([]); setChosen([]); }} placeholder="粘贴服务提供的密钥" autoComplete="new-password" spellCheck={false} />
                   <small>通常可以在服务商网站的「API Key」或「密钥管理」中找到。密钥不会保存到浏览器。</small>
                 </label>
                 <p className="connection-note">{protocol === "anthropic" || !discovered ? "下一步填写服务商提供的模型名称。" : "下一步检查连接并读取模型列表，不发送付费对话。"}</p>
                 <div className="connection-footer">
                   <button className="button" type="button" onClick={() => void goBack()}><ArrowLeft size={14} />修改地址</button>
-                  <button className="button primary" type="submit">{busy === "discover" ? <><LoaderCircle size={15} className="connection-spinner" />正在读取模型…</> : <>{protocol === "anthropic" || !discovered ? "下一步，填写模型" : "连接并读取模型"}<ArrowRight size={15} /></>}</button>
+                  <button className="button primary" data-setup-next type="submit">{busy === "discover" ? <><LoaderCircle size={15} className="connection-spinner" />正在读取模型…</> : <>{protocol === "anthropic" || !discovered ? "下一步，填写模型" : "连接并读取模型"}<ArrowRight size={15} /></>}</button>
                 </div>
                 {protocol !== "anthropic" && discovered && <button className="connection-text-button full" type="button" onClick={e => { if (e.currentTarget.form?.reportValidity()) startManual(); }}>服务不提供模型列表？手动填写</button>}
               </>}
@@ -341,7 +344,7 @@ export function ConnectionDialog({
                         </button>
                       </div>
                     </div>
-                    <div className="connection-models" aria-label="可选模型">
+                    <div className="connection-models" data-setup="models" aria-label="可选模型">
                       {shown.map((m) => (
                         <label key={m}>
                           <input
@@ -366,7 +369,7 @@ export function ConnectionDialog({
                     </div>
                   </>
                 )}
-                <div className="connection-methods">
+                <div className="connection-methods" data-setup={!models.length && !manual ? "models" : undefined}>
                   <button
                     type="button"
                     className="connection-text-button"
@@ -390,7 +393,7 @@ export function ConnectionDialog({
             )}
             {manual && (
               <>
-                <label className="field">
+                <label className="field" data-setup="models">
                   模型名称
                   <textarea
                     autoFocus
@@ -430,6 +433,7 @@ export function ConnectionDialog({
               </button>
               <button
                 className="button primary"
+                data-setup-next
                 disabled={!!busy || !selectedModels.length}
                 onClick={() => void prepare()}
               >
@@ -444,7 +448,7 @@ export function ConnectionDialog({
         {step === "preview" && preview && (
           <>
             <p className="connection-note">保存后自动载入 MMS 随版本提供的模型预设，包括思考强度、上下文与识图能力。首次使用先保留预设即可，之后随时能调整。</p>
-            <div className="config-changes">
+            <div className="config-changes" data-setup="review">
               <div>
                 <strong>接口类型</strong>
                 <p>
@@ -503,6 +507,7 @@ export function ConnectionDialog({
               </button>
               <button
                 className="button primary"
+                data-setup-next
                 disabled={!!busy}
                 onClick={() => void apply()}
               >
@@ -532,6 +537,7 @@ export function ConnectionDialog({
             onboarding={onboarding}
           />
         )}
+        {guide && <ConnectionGuide step={step} close={() => setGuide(false)} back={() => void goBack()} busy={!!busy} manual={protocol === "anthropic" || !discovered} />}
       </div>
     </Dialog>
   );
@@ -566,7 +572,7 @@ function ConnectionReady({
       </p>
       {selected ? (
         <>
-          <label className="field">
+          <label className="field" data-setup="ready">
             首次对话使用的模型
             <select
               value={selected}
@@ -605,6 +611,7 @@ function ConnectionReady({
       )}
       <button
         className="button primary full"
+        data-setup-next
         disabled={!!selected && !facts}
         onClick={() => done(facts ? selected : undefined)}
       >

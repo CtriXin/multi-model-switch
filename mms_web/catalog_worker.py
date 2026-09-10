@@ -215,7 +215,12 @@ def _cmd_apply_config(stream, payload):
 
     # Gate every actual write target BEFORE importing any MMS module: the
     # config root itself and the lock/credential paths all live inside it.
-    if _overlaps_protected(config_root, protected):
+    # The Registry publish path is the one exemption: it writes through the
+    # same reviewed plan MMS itself applies, never by hand-editing config.toml
+    # or credentials.sh, so a shared v2 root stays consistent for both
+    # entrances. Legacy hand-writes into a real root remain refused.
+    registry_publish = payload.get("standalone") is True
+    if _overlaps_protected(config_root, protected) and not registry_publish:
         _fail(stream, "CONFIG_ROOT_PROTECTED", "真实 MMS 配置区仅限人工写入，Web 应用已拒绝")
         return
 

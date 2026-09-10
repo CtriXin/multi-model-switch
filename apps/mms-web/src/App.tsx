@@ -12,6 +12,7 @@ import {
   ChevronsUpDown,
   Copy,
   Download,
+  Eye,
   GitBranch,
   CircleAlert,
   Command,
@@ -33,8 +34,8 @@ import {
   ChevronDown,
   X,
 } from "lucide-react";
-import type { Bootstrap, Page, SessionDetail, FileSelection } from "./types";
-import { bootstrap, getSession, listSessions, isPreview, mutate } from "./api";
+import type { Bootstrap, Page, Session, SessionDetail, FileSelection, Workspace } from "./types";
+import { bootstrap, getSession, includeCliSessions, listSessions, isPreview, mutate, request } from "./api";
 import {
   Composer,
   Dialog,
@@ -58,14 +59,17 @@ import { CurrentActivity, sessionStatus } from "./SessionStatus";
 import { useSessionAttention } from "./SessionAttention";
 import { FilesPanel } from "./FilesPanel";
 import { RuntimePanel, SessionMenu, exportConversation } from "./SessionTools";
-import { RecipeImport } from "./Recipe";
+import { RecipeImport, readRecipeDraft, saveRecipeDraft } from "./Recipe";
+import { modelRequirementIssues, requiredSkillMatches } from "./recipe-core";
+import type { Skill } from "./SkillPicker";
+import type { LaunchFacts } from "./ModelExplorer";
 import { VendorMark, vendorTint } from "./VendorMark";
-import type { Recipe } from "./Recipe";
+import type { RecipeDraft } from "./Recipe";
 import { SettingsPage } from "./SettingsPage";
 import { TaskSettings, SessionSettings } from "./TaskSettings";
 import { Popover } from "./Popover";
 import { useLaunchFacts, readRoutePreferences } from "./ModelExplorer";
-import { WorkspaceDialog } from "./LaunchOptions";
+import { ModelPicker, WorkspaceDialog } from "./LaunchOptions";
 
 const empty: Bootstrap = {
   version: "1",
@@ -224,9 +228,18 @@ export function App() {
   const [workspaceId, setWorkspaceId] = useState(() =>
     readSetting("mms-web-workspace", ""),
   );
-  const [recipe, setRecipe] = useState<(Recipe & { key: number }) | null>(null);
-  const [planMode, setPlanMode] = useState(false);
+  const [recipe, setRecipe] = useState<RecipeDraft | null>(readRecipeDraft);
+  const [recipeConfirmed, setRecipeConfirmed] = useState("");
+  const recipeContext = useRef({ key: "", revision: 0 });
+  useEffect(() => { saveRecipeDraft(recipe); }, [recipe]);
+  const [planMode, setPlanMode] = useState(!!recipe?.recipe.planning);
   const [addFolder, setAddFolder] = useState(false);
+  const [adopt, setAdopt] = useState<{
+    session: Session;
+    presetId: string;
+    busy: boolean;
+    error: string;
+  } | null>(null);
   const [presetId, setPresetId] = useState(() =>
     readSetting("mms-web-preset", ""),
   );
@@ -321,6 +334,9 @@ export function App() {
   const [selectToCopy, setSelectToCopy] = useState(() =>
     readSetting("mms-web-select-to-copy", false),
   );
+  const [showCliSessions, setShowCliSessions] = useState(() =>
+    readSetting("mms-web-cli-sessions", false),
+  );
   const [favorites, setFavorites] = useState<string[]>(() => {
     const value = readSetting<unknown>("mms-web-favorites", []);
     return Array.isArray(value)
@@ -367,6 +383,13 @@ export function App() {
       setHomeSplit(false);
     };
   }, [homeNode, data.sessions.length]);
+  // Told to the API layer before anything reads a list, and reloaded right
+  // after, so turning it off empties the list immediately.
+  useEffect(() => {
+    saveSetting("mms-web-cli-sessions", showCliSessions);
+    includeCliSessions(showCliSessions);
+    void load();
+  }, [showCliSessions]);
   useEffect(() => { saveSetting("mms-web-auto-collapse-process", autoCollapseProcess); }, [autoCollapseProcess]);
   useEffect(() => { saveSetting("mms-web-workspace-sort", workspaceSort); }, [workspaceSort]);
   useEffect(() => { saveSetting("mms-web-workspace-order", workspaceOrder); }, [workspaceOrder]);
@@ -760,6 +783,11 @@ export function App() {
   const workspace = data.workspaces.find((w) => w.id === workspaceId);
   const preset = data.presets.find((p) => p.id === presetId);
   const launchFacts = useLaunchFacts(presetId, workspaceId);
+  const recipeKey = recipe ? [recipe.key, workspaceId, presetId, JSON.stringify(launchFacts.facts?.model)].join("|") : "";
+  if (recipeContext.current.key !== recipeKey) recipeContext.current = { key: recipeKey, revision: recipeContext.current.revision + 1 };
+  const recipeToken = `${recipeKey}|${recipeContext.current.revision}`;
+  const recipeIssues = recipe ? modelRequirementIssues(recipe.recipe, launchFacts.facts?.model) : [];
+  const recipeReady = !recipe || (!recipeIssues.length && recipeConfirmed === recipeToken);
   const [effortChoice, setEffortChoice] = useState<{
     id: string;
     level: string;
@@ -785,20 +813,34 @@ export function App() {
           s.state === attention ||
           (attention === "error" && s.activity?.phase === "error")),
   );
+  const registered = new Set(data.workspaces.map((w) => w.id));
+  // A terminal session was never assigned a folder here, so when the directory
+  // it ran in is not a registered one it gets its own group. Otherwise every
+  // project's terminal work piles into a single bucket.
+  const groupOf = (s: Session) =>
+    !registered.has(s.workspaceId) && s.owner === "cli" && s.cwd
+      ? "cwd:" + s.cwd
+      : s.workspaceId;
   const navWorkspaces = [...data.workspaces];
   for (const session of data.sessions) {
-    if (!navWorkspaces.some((w) => w.id === session.workspaceId))
-      navWorkspaces.push({
-        id: session.workspaceId,
-        name: "其他工作空间",
-        path: "",
-      });
+    const id = groupOf(session);
+    if (navWorkspaces.some((w) => w.id === id)) continue;
+    navWorkspaces.push(
+      id.startsWith("cwd:")
+        ? {
+            id,
+            name: session.cwd!.replace(/\/+$/, "").split("/").pop() || session.cwd!,
+            path: session.cwd!,
+            unregistered: true,
+          }
+        : { id, name: "其他工作空间", path: "" },
+    );
   }
   const lastEdited = new Map<string, string>();
   for (const session of data.sessions) {
-    const seen = lastEdited.get(session.workspaceId) || "";
-    if (session.updatedAt > seen)
-      lastEdited.set(session.workspaceId, session.updatedAt);
+    const id = groupOf(session);
+    const seen = lastEdited.get(id) || "";
+    if (session.updatedAt > seen) lastEdited.set(id, session.updatedAt);
   }
   navWorkspaces.sort((a, b) => {
     if (workspaceSort === "manual") {
@@ -850,7 +892,9 @@ export function App() {
   }
   async function copySessionId(id: string) {
     try {
-      await navigator.clipboard.writeText(id);
+      // A terminal session's id is prefixed here to keep it apart from
+      // Pilot's own. Copy the bare id, which is what `pi --session` takes.
+      await navigator.clipboard.writeText(id.replace(/^cli:/, ""));
       setWorkspaceNotice("已复制 Session ID");
     } catch {
       setWorkspaceNotice("浏览器拒绝了复制，请手动选择 ID");
@@ -890,6 +934,60 @@ export function App() {
       await load();
     } catch (error) {
       setWorkspaceNotice(error instanceof Error ? error.message : "重命名失败");
+    }
+  }
+  /** Register a folder the sidebar only knows from the sessions that ran in
+   *  it, which is what makes it usable for starting new work. */
+  async function registerWorkspace(path: string) {
+    try {
+      const added = await mutate<Workspace>("/workspaces", { path });
+      setData((old) => ({
+        ...old,
+        workspaces: [...old.workspaces.filter((w) => w.id !== added.id), added],
+      }));
+      await load();
+    } catch (error) {
+      setWorkspaceNotice(error instanceof Error ? error.message : "添加失败");
+    }
+  }
+  /** The model the terminal was using, when this Pilot has it available.
+   *  Continuing with a different model is allowed, but it should be a choice,
+   *  not what happens by default. */
+  function presetForModel(modelName: string) {
+    const wanted = modelName.trim().toLowerCase();
+    if (!wanted) return presetId;
+    const match = data.presets.find(
+      (p) =>
+        p.available &&
+        p.harness === "pi" &&
+        (p.name.toLowerCase() === wanted ||
+          p.modelId.toLowerCase().endsWith(":" + wanted) ||
+          p.modelId.toLowerCase() === wanted),
+    );
+    return match?.id || presetId;
+  }
+  /** Continue a terminal-started session here, from its own history.
+   *  The terminal's transcript is copied, not shared: two processes appending
+   *  to one file would corrupt it, so that session stays exactly as it is. */
+  async function submitAdopt() {
+    if (!adopt || adopt.busy) return;
+    setAdopt({ ...adopt, busy: true, error: "" });
+    try {
+      const result = await mutate<SessionDetail>(
+        "/sessions/" + encodeURIComponent(adopt.session.id) + "/adopt",
+        { presetId: adopt.presetId },
+      );
+      setAdopt(null);
+      openSession(result.session.id);
+      void load();
+    } catch (error) {
+      setAdopt((old) =>
+        old && {
+          ...old,
+          busy: false,
+          error: error instanceof Error ? error.message : "接入失败",
+        },
+      );
     }
   }
   async function submitWorkspaceRemove() {
@@ -1094,7 +1192,7 @@ export function App() {
             </div>
           ) : (
             navWorkspaces.map((w) => {
-              const sessions = filtered.filter((s) => s.workspaceId === w.id);
+              const sessions = filtered.filter((s) => groupOf(s) === w.id);
               return (
                 <section className="workspace-group" key={w.id}>
                   <button
@@ -1145,6 +1243,22 @@ export function App() {
                               <small>{w.path || "这些会话的目录已不在记录里"}</small>
                             </span>
                           </button>
+                          {w.unregistered && (
+                            <button
+                              type="button"
+                              className="filter-option"
+                              onClick={() => {
+                                void registerWorkspace(w.path);
+                                close();
+                              }}
+                            >
+                              <Plus size={14} />
+                              <span>
+                                <strong>添加为工作文件夹</strong>
+                                <small>加进侧栏后，就能在这里新建会话</small>
+                              </span>
+                            </button>
+                          )}
                           {workspaceSort === "manual" && (
                             <>
                               <button
@@ -1178,7 +1292,7 @@ export function App() {
                           <button
                             type="button"
                             className="filter-option"
-                            disabled={w.id === "default" || !w.path}
+                            disabled={w.id === "default" || !w.path || !!w.unregistered}
                             onClick={() => {
                               setRenameWorkspace({ id: w.id, name: w.name });
                               close();
@@ -1193,7 +1307,7 @@ export function App() {
                           <button
                             type="button"
                             className="filter-option danger"
-                            disabled={w.id === "default" || !w.path}
+                            disabled={w.id === "default" || !w.path || !!w.unregistered}
                             onClick={() => {
                               setRemoveWorkspace({
                                 id: w.id,
@@ -1209,7 +1323,9 @@ export function App() {
                               <small>
                                 {w.id === "default"
                                   ? "启动目录不能移除"
-                                  : "只从侧栏移除，文件和会话都保留"}
+                                  : w.unregistered
+                                    ? "这个目录还不在侧栏记录里"
+                                    : "只从侧栏移除，文件和会话都保留"}
                               </small>
                             </span>
                           </button>
@@ -1220,8 +1336,8 @@ export function App() {
                       type="button"
                       className="icon-button"
                       aria-label={`在 ${w.name} 新建会话`}
-                      title="在这个目录新建会话"
-                      disabled={!w.path}
+                      title={w.unregistered ? "先把这个目录添加为工作文件夹" : "在这个目录新建会话"}
+                      disabled={!w.path || !!w.unregistered}
                       onClick={() => {
                         setWorkspaceId(w.id);
                         navigate("new");
@@ -1273,6 +1389,14 @@ export function App() {
                               }
                             </span>
                             <span>·</span>
+                            {s.owner === "cli" && (
+                              // Its own separator, not a space inside the
+                              // label: the row's flex gap draws the rest.
+                              <>
+                                <span>终端</span>
+                                <span>·</span>
+                              </>
+                            )}
                             {s.modelName}
                           </small>
                         </span>
@@ -1303,6 +1427,8 @@ export function App() {
                                 <strong>复制 Session ID</strong>
                               </span>
                             </button>
+                            {s.owner !== "cli" && (
+                              <>
                             <button
                               type="button"
                               className="filter-option"
@@ -1342,6 +1468,8 @@ export function App() {
                                 </small>
                               </span>
                             </button>
+                              </>
+                            )}
                             <button
                               type="button"
                               className="filter-option"
@@ -1355,6 +1483,7 @@ export function App() {
                                 <strong>导出会话</strong>
                               </span>
                             </button>
+                            {s.owner !== "cli" && (
                             <button
                               type="button"
                               className="filter-option danger"
@@ -1384,6 +1513,7 @@ export function App() {
                                 </small>
                               </span>
                             </button>
+                            )}
                             <p className="session-row-time">
                               {new Date(s.updatedAt).toLocaleString()}
                             </p>
@@ -1432,19 +1562,14 @@ export function App() {
           </button>
           <span
             className={
-              "connection-dot " + (connected && !statusesStale ? "online" : "")
+              "connection-status " + (connected && !statusesStale ? "online" : "offline")
             }
-            title={
-              connected && !statusesStale
-                ? "本地服务已连接"
-                : "等待连接本地服务"
-            }
-            aria-label={
-              connected && !statusesStale
-                ? "本地服务已连接"
-                : "等待连接本地服务"
-            }
-          />
+            title={connected && !statusesStale ? "本地 Pilot Web 服务已连接" : "本地 Pilot Web 服务等待连接"}
+            aria-label={connected && !statusesStale ? "服务在线" : "服务断开，等待连接"}
+          >
+            <span aria-hidden="true">{connected && !statusesStale ? "●" : "!"}</span>
+            {connected && !statusesStale ? "服务在线" : "需要连接"}
+          </span>
         </div>
       </aside>
       <main className="main-area">
@@ -1463,7 +1588,12 @@ export function App() {
                 : detail
                   ? data.workspaces.find(
                       (w) => w.id === detail.session.workspaceId,
-                    )?.name || "工作空间"
+                    )?.name ||
+                    // A terminal session may have run in a folder the sidebar
+                    // does not have registered; name it after that folder
+                    // rather than falling back to a generic word.
+                    detail.session.cwd?.replace(/\/+$/, "").split("/").pop() ||
+                    "工作空间"
                   : workspace?.name || "工作空间"}
             </span>
             <ChevronRight size={14} />
@@ -1477,7 +1607,7 @@ export function App() {
           </div>
           <div className="topbar-actions">
             <UpdateCenter ready={!loading && connected} open={updateOpen} setOpen={setUpdateOpen} onStatus={setUpdateStatus} />
-            <HelpGuide ready={!loading && connected && modelReady && !setupOpen && !settingsOpen} modelReady={modelReady} open={guideOpen} setOpen={(open) => { if (open) setGuideStep(null); setGuideOpen(open); }} hasSession={page === "session" && !!detail} navigate={guideNavigate} startTour={startIntroduction} />
+            <HelpGuide ready={!loading && connected && modelReady && !setupOpen && !settingsOpen} modelReady={modelReady} open={guideOpen} setOpen={(open) => { if (open) setGuideStep(null); setGuideOpen(open); }} hasSession={page === "session" && !!detail} navigate={guideNavigate} startTour={startIntroduction} startConnection={data.capabilities.configure ? () => requestNavigation(() => { setGuideOpen(false); setGuideStep(null); setSettingsOpen(false); setSetupOpen(true); }) : undefined} />
             {detail && (
               <Status
                 session={detail.session}
@@ -1547,31 +1677,32 @@ export function App() {
               <div className="recipe-access">
                 {!isPreview && workspaceId && <ProjectMaterials key={workspaceId} workspaceId={workspaceId} />}
                 <RecipeImport
+                  workspaceId={workspaceId}
                   loaded={(item) => {
-                    setRecipe({ ...item, key: Date.now() });
-                    setPlanMode(item.planning);
-                    const match = data.presets.find(
-                      (p) => p.available && p.name === item.preferredModel,
-                    );
-                    setPresetId(match?.id || "");
+                    setRecipe(item); setRecipeConfirmed("");
+                    setPlanMode(item.recipe.planning);
                   }}
                 />
               </div>
-              {recipe && (
-                <p className="recipe-loaded" role="status">
-                  已载入「{recipe.title}
-                  」。任务说明已填入草稿，检查内容、工作文件夹和模型后发送。模板不会自动附带附件或连接凭据。
-                </p>
-              )}
+              {recipe && <section className="recipe-loaded">
+                <strong>已载入「{recipe.recipe.title}」</strong>
+                <p>模板模型偏好：{recipe.recipe.preferredModel || "未指定"}。当前使用 {preset?.name || "尚未选择"} · {preset?.channel || ""}；确认后再发送。</p>
+                <p>必需 Skills：{recipe.recipe.requiredSkills.join("、") || "无"}。文件与变量由本次草稿提供。</p>
+                {recipeIssues.map(issue => <p role="status" key={issue}>{issue}</p>)}
+                {recipeReady ? <p role="status">已确认当前模型与工作文件夹。</p> : <button type="button" disabled={!!recipeIssues.length || !preset?.available || !connected} onClick={() => setRecipeConfirmed(recipeToken)}>确认使用当前模型</button>}
+                <button type="button" onClick={() => { setRecipe(null); setRecipeConfirmed(""); }}>退出模板草稿</button>
+              </section>}
               <Composer
                 key={`new:${workspaceId}:${recipe?.key || ""}`}
                 draftKey={`new:${workspaceId}:${recipe?.key || ""}`}
-                initialText={recipe?.prompt}
+                initialText={recipe?.draftPrompt}
+                requiredSkillNames={recipe?.recipe.requiredSkills}
                 guideRequest={guideRequest}
                 guideHandled={() => setGuideRequest(undefined)}
                 workspaceId={workspaceId}
                 disabled={
                   !connected ||
+                  !recipeReady ||
                   !data.capabilities.launch ||
                   !launchFacts.facts ||
                   !presetId ||
@@ -1580,28 +1711,30 @@ export function App() {
                 reason={
                   !connected
                     ? "连接 MMS 本地服务后即可开始。"
-                    : "请选择可用模型和工作文件夹后开始。"
+                    : !recipeReady ? "请先核对模板需求并确认当前模型。" : "请选择可用模型和工作文件夹后开始。"
                 }
                 busy={busy}
                 placeholder="想做什么？"
-                send={(text, extras) =>
-                  runAction(
-                    "/sessions",
-                    {
-                      workspaceId,
-                      presetId,
-                      // Mark the cut, or a clipped prompt reads as the whole
-                      // title ending mid-sentence.
-                      title:
-                        text.length > 42 ? text.slice(0, 42) + "…" : text,
-                      prompt: text,
-                      planMode,
-                      thinkingLevel: effort || undefined,
-                      ...extras,
-                    },
-                    true,
-                  )
-                }
+                send={async (text, extras) => {
+                  if (!recipeReady) return false;
+                  const revision = recipeContext.current.revision;
+                  if (recipe) {
+                    const [facts, found] = await Promise.all([
+                      request<LaunchFacts>("/launch-options", { presetId, workspaceId }),
+                      request<{ skills: Skill[] }>("/skills", { workspaceId }),
+                    ]);
+                    if (recipeContext.current.revision !== revision) throw new Error("工作文件夹或模型已经变化，请重新检查后发送。");
+                    const issues = [...modelRequirementIssues(recipe.recipe, facts.model), ...requiredSkillMatches(recipe.recipe.requiredSkills, found.skills, extras.skills).issues];
+                    if (issues.length) throw new Error(issues.join(" "));
+                  }
+                  const ok = await runAction("/sessions", {
+                    workspaceId, presetId, title: text.length > 42 ? text.slice(0, 42) + "…" : text, prompt: text,
+                    planMode, thinkingLevel: effort || undefined, ...extras,
+                    ...(recipe ? { recipeRequirements: { ...recipe.recipe.modelRequirements, skills: recipe.recipe.requiredSkills } } : {}),
+                  }, true);
+                  if (ok && recipe) { setRecipe(null); setRecipeConfirmed(""); }
+                  return ok;
+                }}
               >
                 <TaskSettings
                   presets={data.presets}
@@ -1685,7 +1818,8 @@ export function App() {
                           <strong>{s.title}</strong>
                           <small>
                             {s.summary ||
-                              harnessNames[s.harness] + " · " + s.modelName}
+                              (s.owner === "cli" ? "终端 · " : "") +
+                                harnessNames[s.harness] + " · " + s.modelName}
                           </small>
                         </span>
                         <Status
@@ -1717,6 +1851,8 @@ export function App() {
           <SettingsPage
             key={guideSettingsKey}
             openUpdates={() => setUpdateOpen(true)}
+            showCliSessions={showCliSessions}
+            setShowCliSessions={setShowCliSessions}
             updateAvailable={!!updateStatus?.available}
             connectionCompleted={connectionCompleted}
             tour={tour}
@@ -1807,6 +1943,16 @@ export function App() {
                   )}
                   {detail && (
                     <div className="conversation-content">
+                      {detail.session.owner === "cli" && (
+                        // Say it before the transcript, not after: someone
+                        // scrolling a long session should not have to reach
+                        // the composer to find out it cannot be used.
+                        <p className="session-readonly" role="status">
+                          这个会话是在终端里用 <code>mmf</code> 开始的，这里只读。
+                          回到那个终端可以照常继续；也可以用下面的「接入 Pilot」
+                          把这段对话复制过来，之后在这里做。
+                        </p>
+                      )}
                       <Transcript
                         key={detail.session.id}
                         forced={processForced}
@@ -1920,6 +2066,29 @@ export function App() {
                       busy={busy}
                     />
                   </div>
+                  {detail.session.owner === "cli" ? (
+                    // Nothing in the composer can be used until this session is
+                    // adopted, so none of it is shown; the one action that does
+                    // work takes its place.
+                    <div className="composer-locked" role="status">
+                      <Eye size={15} />
+                      <span>这条会话在终端里进行，Pilot 只能查看。</span>
+                      <button
+                        type="button"
+                        className="button primary"
+                        onClick={() =>
+                          setAdopt({
+                            session: detail.session,
+                            presetId: presetForModel(detail.session.modelName),
+                            busy: false,
+                            error: "",
+                          })
+                        }
+                      >
+                        接入 Pilot 继续
+                      </button>
+                    </div>
+                  ) : (
                   <Composer
                     key={detail.session.id}
                     selectionRequest={selectionRequest?.sessionId === detail.session.id ? selectionRequest : undefined}
@@ -2017,6 +2186,7 @@ export function App() {
                       }}
                     />
                   </Composer>
+                  )}
                 </div>
               )}
             </div>
@@ -2205,6 +2375,67 @@ export function App() {
           </div>
         </Dialog>
       )}
+      {adopt && (
+        <Dialog
+          title="接入这条终端会话"
+          close={() => {
+            if (!adopt.busy) setAdopt(null);
+          }}
+        >
+          <p className="dialog-intro">
+            会把上面的对话复制一份到 Pilot，用你选的模型接着往下做。终端里那条记录不动，
+            回到那个终端仍能继续；两边从此各走各的，这个列表只留 Pilot 这条。
+          </p>
+          <label className="adopt-field">
+            <span>接着用哪个模型</span>
+            <ModelPicker
+              presets={data.presets}
+              models={data.models}
+              // Reading a channel's options needs a folder that exists, and a
+              // terminal session's own folder is not registered until it is
+              // adopted. This only picks where those options are read from;
+              // the adopted session still starts in its own directory.
+              workspaceId={adopt.session.workspaceId || workspaceId || "default"}
+              value={adopt.presetId}
+              change={(id) => setAdopt((old) => old && { ...old, presetId: id })}
+              favorites={favorites}
+              toggleFavorite={favorite}
+            />
+          </label>
+          <p className="adopt-field">
+            <span>工作文件夹</span>
+            <span className="adopt-path">
+              {adopt.session.cwd || "未记录"}
+              {!registered.has(adopt.session.workspaceId) && adopt.session.cwd
+                ? "，会一并加进侧栏"
+                : ""}
+            </span>
+          </p>
+          {adopt.error && (
+            <p className="form-error" role="alert">
+              {adopt.error}
+            </p>
+          )}
+          <div className="workspace-form">
+            <button
+              type="button"
+              className="button primary"
+              disabled={adopt.busy || !adopt.presetId}
+              onClick={() => void submitAdopt()}
+            >
+              {adopt.busy ? "正在接入…" : "接入并继续"}
+            </button>
+            <button
+              type="button"
+              className="button"
+              disabled={adopt.busy}
+              onClick={() => setAdopt(null)}
+            >
+              取消
+            </button>
+          </div>
+        </Dialog>
+      )}
       {addFolder && (
         <WorkspaceDialog
           close={() => setAddFolder(false)}
@@ -2243,6 +2474,7 @@ export function App() {
                 <span>
                   <strong>{s.title}</strong>
                   <small>
+                    {s.owner === "cli" ? "终端 · " : ""}
                     {harnessNames[s.harness]} · {s.modelName}
                   </small>
                 </span>

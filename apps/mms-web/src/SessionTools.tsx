@@ -10,7 +10,8 @@ import {
   Settings2,
 } from "lucide-react";
 import { request } from "./api";
-import { shareRecipe } from "./Recipe";
+import { RecipeExport } from "./Recipe";
+import { ContextEvidence } from "./ContextEvidence";
 import type { SessionDetail } from "./types";
 
 type Action = (
@@ -49,12 +50,18 @@ export function SessionMenu({
 }) {
   const menuRef = useRef<HTMLDetailsElement>(null);
   const [rename, setRename] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const [name, setName] = useState("");
   const path = "/sessions/" + detail.session.id;
   const active = ["running", "waiting"].includes(detail.session.state);
+  // A session started in a terminal is listed here for reading only. Renaming,
+  // forking and archiving all write to Pilot's own store, which does not own
+  // this session, so the menu offers only what works: the export.
+  const readOnly = detail.session.owner === "cli";
   const lastUser = [...detail.events].reverse().find((e) => e.kind === "user");
   return (
     <div className="session-menu-wrap">
+      {sharing && <RecipeExport detail={detail} close={() => setSharing(false)} />}
       {rename && (
         <form
           className="rename-form"
@@ -89,22 +96,26 @@ export function SessionMenu({
           <MoreHorizontal size={18} />
         </summary>
         <div>
-          <button
-            onClick={() => {
-              setName(detail.session.title);
-              setRename(true);
-            }}
-          >
-            <Pencil size={14} />
-            重命名
-          </button>
-          <button
-            disabled={active || busy}
-            onClick={() => void action(path + "/fork", {}, true)}
-          >
-            <GitBranch size={14} />
-            创建会话分支
-          </button>
+          {!readOnly && (
+            <>
+              <button
+                onClick={() => {
+                  setName(detail.session.title);
+                  setRename(true);
+                }}
+              >
+                <Pencil size={14} />
+                重命名
+              </button>
+              <button
+                disabled={active || busy}
+                onClick={() => void action(path + "/fork", {}, true)}
+              >
+                <GitBranch size={14} />
+                创建会话分支
+              </button>
+            </>
+          )}
           {detail.session.state === "error" && lastUser && (
             <button
               disabled={busy || !detail.session.capabilities.send}
@@ -120,28 +131,32 @@ export function SessionMenu({
               重试最后一条消息
             </button>
           )}
-          <button
-            onClick={() => shareRecipe(detail)}
-            title="保存首条任务文字、模型偏好和模式。不会自动附带连接凭据、附件或后续对话；任务文字按原样保存。"
-          >
-            <Copy size={14} />
-            保存为任务模板
-          </button>
+          {!readOnly && (
+            <button
+              onClick={() => setSharing(true)}
+              title="编辑目标、示例和需求，检查导出内容后下载模板。"
+            >
+              <Copy size={14} />
+              保存为任务模板
+            </button>
+          )}
           <button onClick={() => exportConversation(detail)}>
             <Download size={14} />
             导出对话
           </button>
-          <button
-            disabled={active || busy}
-            onClick={() =>
-              void action(path + "/manage", {
-                archived: !detail.session.archived,
-              })
-            }
-          >
-            <Archive size={14} />
-            {detail.session.archived ? "恢复到列表" : "归档会话"}
-          </button>
+          {!readOnly && (
+            <button
+              disabled={active || busy}
+              onClick={() =>
+                void action(path + "/manage", {
+                  archived: !detail.session.archived,
+                })
+              }
+            >
+              <Archive size={14} />
+              {detail.session.archived ? "恢复到列表" : "归档会话"}
+            </button>
+          )}
         </div>
       </details>
     </div>
@@ -234,6 +249,7 @@ export function RuntimePanel({
           </div>
         ))}
       </dl>
+      <ContextEvidence key={detail.session.id} detail={detail} />
       <h3>运行参数</h3>
       <p className="section-note">
         只改变当前会话，由 Pi 验证参数。MMS 的路由和账号配置保持原值。
@@ -379,8 +395,25 @@ export function RuntimePanel({
           进程与诊断信息
         </summary>
         <pre>{diagnostic || "正在读取…"}</pre>
+        {!!diagnostic && !diagnostic.startsWith("无法") && (
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() => {
+              const url = URL.createObjectURL(new Blob([diagnostic], { type: "application/json;charset=utf-8" }));
+              const link = document.createElement("a");
+              link.href = url;
+              link.download = `pilot-diagnostics-${detail.session.id}.json`;
+              link.click();
+              setTimeout(() => URL.revokeObjectURL(url), 1000);
+            }}
+          >
+            <Download size={14} />
+            导出脱敏诊断包
+          </button>
+        )}
         <p className="section-note">
-          仅展示当前会话的状态和脱敏日志，不显示 API Key 或完整环境变量。
+          仅展示当前会话的状态和脱敏日志，不显示 API Key、请求正文、thinking、文件内容或完整环境变量。
         </p>
       </details>
     </div>

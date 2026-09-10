@@ -54,6 +54,8 @@ _PY_COMPILE_TARGETS = [
 ]
 
 _PYTEST_TARGETS = [
+    "tests/test_mms_web_context_evidence.py",
+    "tests/test_mms_web_recipe_contract.py",
     "tests/test_mms_web_updates.py",
     "tests/test_mms_web_update_safety.py",
     "tests/test_mms_web_update_coordinator.py",
@@ -70,6 +72,7 @@ _PYTEST_TARGETS = [
     "tests/test_mms_web_artifact_history.py",
     "tests/test_mms_web_artifact_flow.py",
     "tests/test_mms_web_standalone_settings.py",
+    "tests/test_web_config_root_adoption.py",
     "tests/test_claude_hardening_regressions.py",
     "tests/test_claude_isolation.py",
     "tests/test_codex_history_growth.py",
@@ -119,6 +122,12 @@ _SCENARIO_MATRIX = [
         "coverage": "mmf uses ~/.config/mms-next under the fresh user home",
     },
     {
+        "id": "shared-config-root-default",
+        "state": "empty HOME with no MMS env; a channel pinned to the legacy root; a fresh Pilot state root",
+        "coverage": "mms defaults to the same ~/.config/mms-next root as mmf, a pinned channel stays on the legacy root in stable mode, and Pilot shares the default root "
+                    "(adoption of an existing Web-owned config is covered by tests/test_web_config_root_adoption.py)",
+    },
+    {
         "id": "legacy-dirty-install-cleanup",
         "state": "gateway session contains leaked .mms/.nvm/.local/bin and stale ccs",
         "coverage": "cleanup removes only MMS-owned leaked artifacts and preserves unrelated user CLI links",
@@ -157,6 +166,11 @@ _SCENARIO_MATRIX = [
         "id": "npx-install-entry",
         "state": "a machine with Node.js invokes the npm installer",
         "coverage": "stable release resolution, parameter precedence, matching script/source refs, pinned downloads and temporary cleanup on success/failure",
+    },
+    {
+        "id": "install-entry-parity",
+        "state": "the same install reached by curl and by the npm wrapper, which pins --ref to the release it resolved",
+        "coverage": "both print the same one-line headline; a genuinely pinned older ref or a dev/canary channel still prints the full version overview",
     },
     {
         "id": "one-question-install",
@@ -229,6 +243,56 @@ def _smoke_fresh_mmf_config_root() -> None:
             raise SystemExit(f"fresh mmf mode mismatch: {payload!r}")
         if payload.get("config_root") != expected_root:
             raise SystemExit(f"fresh mmf root mismatch: {payload.get('config_root')} != {expected_root}")
+
+
+def _smoke_shared_config_root_default() -> None:
+    """One root serves both entrances, and a pinned channel still opts out."""
+    with tempfile.TemporaryDirectory(prefix="mms-shared-root-") as tmp:
+        home = Path(tmp).resolve() / "home"
+        home.mkdir()
+        shared_root = home / ".config" / "mms-next"
+        legacy_root = home / ".config" / "mms"
+
+        completed = _run(
+            "fresh mms config root",
+            [sys.executable, str(ROOT_DIR / "mms"), "config", "root", "--json"],
+            env=_env_for_home(home),
+        )
+        payload = json.loads(completed.stdout)
+        if payload.get("config_root") != str(shared_root):
+            raise SystemExit(f"fresh mms root mismatch: {payload.get('config_root')} != {shared_root}")
+        if payload.get("mode") != "preview":
+            raise SystemExit(f"fresh mms mode mismatch: {payload!r}")
+
+        pinned_env = _env_for_home(home)
+        pinned_env["MMS_CONFIG_ROOT"] = str(legacy_root)
+        pinned_env["MMS_CONFIG_ROOT_MODE"] = "stable"
+        completed = _run(
+            "pinned legacy channel config root",
+            [sys.executable, str(ROOT_DIR / "mms"), "config", "root", "--json"],
+            env=pinned_env,
+        )
+        payload = json.loads(completed.stdout)
+        if payload.get("config_root") != str(legacy_root):
+            raise SystemExit(f"pinned root mismatch: {payload.get('config_root')} != {legacy_root}")
+        if payload.get("mode") != "stable":
+            raise SystemExit(f"pinned mode mismatch: {payload!r}")
+
+        probe = (
+            "import json,sys;"
+            "from pathlib import Path;"
+            "from mms_web.runtime import default_config_root;"
+            "print(json.dumps({'fresh': str(default_config_root(Path(sys.argv[1])))}))"
+        )
+        fresh_state = home / ".local" / "share" / "mms-web"
+        completed = _run(
+            "pilot default config root",
+            [sys.executable, "-c", probe, str(fresh_state)],
+            env=_env_for_home(home),
+        )
+        roots = json.loads(completed.stdout)
+        if roots.get("fresh") != str(shared_root):
+            raise SystemExit(f"pilot fresh root mismatch: {roots.get('fresh')} != {shared_root}")
 
 
 def _safe_symlink(target: Path | str, link: Path) -> None:
@@ -387,6 +451,7 @@ def main() -> int:
     _print_scenarios()
     _run("py_compile", [sys.executable, "-m", "py_compile", *_PY_COMPILE_TARGETS])
     _smoke_fresh_mmf_config_root()
+    _smoke_shared_config_root_default()
     _smoke_legacy_install_state_matrix()
     _smoke_repeatable_install_dry_run()
     _smoke_nsr_low_noise_hook_matrix()

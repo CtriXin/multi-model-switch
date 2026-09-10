@@ -420,7 +420,7 @@ def test_launch_pi_writes_openai_models_config_and_uses_wrapper(monkeypatch, tmp
     assert settings_payload["retry"] == {"enabled": True, "maxRetries": 8, "baseDelayMs": 1000}
     assert settings_payload["quietStartup"] is True
     assert settings_payload["extensions"][0].endswith("scripts/pi-retry-extension.mjs")
-    assert not (real_home / ".config" / "mms" / "pi-gateway").exists()
+    assert not (real_home / ".config" / "mms-next" / "pi-gateway").exists()
 
 
 def test_launch_pi_rewrites_deprecated_antigravity_gemini_alias_to_live_replacement(monkeypatch, tmp_path):
@@ -526,7 +526,7 @@ def test_get_export_env_for_pi_writes_anthropic_models_config(monkeypatch, tmp_p
     assert exports["MMS_PI_BIN"] == "/tmp/pi-wrapper"
     assert exports["MMS_PI_NPX_CACHE"].endswith(".ai/cache/pi-npx")
     assert exports["MMS_PI_SETTINGS_JSON"].endswith("settings.json")
-    models_path = real_home / ".config" / "mms" / "pi-gateway" / "exports" / "relay-b-claude-sonnet-4-6" / "agent" / "models.json"
+    models_path = real_home / ".config" / "mms-next" / "pi-gateway" / "exports" / "relay-b-claude-sonnet-4-6" / "agent" / "models.json"
     payload = json.loads(models_path.read_text(encoding="utf-8"))
     provider = payload["providers"]["mms-relay-b"]
     assert provider["api"] == "anthropic-messages"
@@ -806,6 +806,7 @@ def test_pi_openai_provider_compat_uses_profile_specific_flags(monkeypatch, tmp_
         "medium": None,
         "high": "high",
         "xhigh": "max",
+        "max": "max",
     }
 
 
@@ -1851,3 +1852,28 @@ def test_pi_policy_copy_fails_explicitly_and_cannot_target_global(isolated_polic
     monkeypatch.setattr(Path, 'read_text', deny_policy)
     with pytest.raises(RuntimeError, match='Cannot load Pi agent policy'):
         pi._pi_gateway_env({'model': 'synthetic-model'})
+
+
+def test_pi_skill_overlay_links_bundled_skills_below_every_user_root(monkeypatch, tmp_path):
+    import mms_pi_support
+
+    real_home = tmp_path / "real-home"
+    user_weber = real_home / ".agents" / "skills" / "weber"
+    bundled_weber = tmp_path / "bundle" / "weber"
+    bundled_grill = tmp_path / "bundle" / "grill-me"
+    for skill_dir in (user_weber, bundled_weber, bundled_grill):
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("---\nname: test\ndescription: test\n---\n", encoding="utf-8")
+    (tmp_path / "project" / ".git").mkdir(parents=True)
+    monkeypatch.setattr(mms_pi_support, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+    monkeypatch.setattr(mms_pi_support, "_resolve_weber_root", lambda: str(bundled_weber))
+    monkeypatch.setattr(mms_pi_support, "_resolve_grill_me_root", lambda: str(bundled_grill))
+    monkeypatch.setattr(mms_pi_support, "_resolve_toon_root", lambda: "")
+
+    overlay = Path(mms_pi_support._pi_materialize_skill_overlay(tmp_path / "session", tmp_path / "project"))
+
+    # A user's own copy replaces the bundled one; a bundled-only skill still lands in the session.
+    assert (overlay / "weber").resolve() == user_weber
+    assert (overlay / "grill-me").resolve() == bundled_grill
+    assert not (overlay / "toon").exists()
+    assert list(real_home.rglob("grill-me")) == []

@@ -13,7 +13,7 @@ import tempfile
 import tomllib
 
 from .errors import WebError
-from .runtime import require_private_root
+from .runtime import require_publishable_root
 
 
 def unpublished_options(runtime: dict, model: str) -> dict:
@@ -78,7 +78,14 @@ def apply_connection(root: Path, request: dict) -> dict:
     import mms_config_web as web
     from .model_settings_worker import load
 
-    require_private_root(root)
+    require_publishable_root(root)
+    if not (root / "root-manifest.json").is_file():
+        # A shared v2 root may not exist yet on a fresh machine. Create the
+        # layout with the same initializer the CLI uses; never import or touch
+        # any other root.
+        from mms_registry_cli import init_config_root
+
+        init_config_root(config_dir=root, create_db=True, command_name="mms web registry")
     cfg, rows, revision = load(root, standalone=True)
     rows = copy.deepcopy(rows)
     for row in rows:

@@ -117,6 +117,31 @@ def _resolve_toon_root():
     return _launchers_module()._resolve_toon_root()
 
 
+def _resolve_grill_me_root():
+    return _launchers_module()._resolve_grill_me_root()
+
+
+# User-facing skills MMS ships with. They sit below every user root so a
+# same-name global or project skill keeps winning, exactly like the CLI overlays.
+_PI_BUNDLED_SESSION_SKILLS = (
+    ("weber", "_resolve_weber_root"),
+    ("grill-me", "_resolve_grill_me_root"),
+    ("toon", "_resolve_toon_root"),
+)
+
+
+def _pi_bundled_skill_roots():
+    roots = []
+    for name, resolver in _PI_BUNDLED_SESSION_SKILLS:
+        try:
+            root = str(globals()[resolver]() or "").strip()
+        except Exception:
+            root = ""
+        if root and os.path.isfile(os.path.join(root, "SKILL.md")):
+            roots.append((name, root))
+    return roots
+
+
 def _resolve_token_saver_root():
     return _launchers_module()._resolve_token_saver_root()
 
@@ -222,6 +247,18 @@ def _pi_materialize_skill_overlay(session_home, project_dir):
         )
 
     linked = 0
+    # Bundled skills go first so every user root below can replace them by name.
+    for name, root in _pi_bundled_skill_roots():
+        destination = overlay_dir / name
+        try:
+            if destination.is_symlink() or destination.is_file():
+                destination.unlink()
+            elif destination.exists():
+                continue
+            destination.symlink_to(root)
+            linked += 1
+        except OSError:
+            continue
     for source_dir, include_markdown in sources:
         if not source_dir.is_dir():
             continue
@@ -381,6 +418,7 @@ _PI_MODEL_INPUT_HINTS = {
     "minimax-m2.7": ["text"],
     "qwen3.6-flash": ["text", "image"],
     "qwen3.7-max": ["text"],
+    "deepseek-v4.1-flash-expires-on-0910": ["text", "image"],
 }
 
 _PI_MODEL_UNSUPPORTED_HINTS = {
@@ -1097,14 +1135,9 @@ def _pi_model_thinking_level_map(runtime, profile_id, protocol, model_name, caps
     if protocol_name not in {"responses", "openai_chat_completions"}:
         return {}
 
-    if profile_id == "deepseek":
-        return {
-            "minimal": None,
-            "low": None,
-            "medium": None,
-            "high": "high",
-            "xhigh": "max",
-        }
+    # 2026-09-09: deepseek 档位改由 provider-profiles.json 驱动（v4.1 实测 7 档
+    # none/minimal/low/medium/high/xhigh/max；v4-pro/flash 由 model_overrides 钉住旧保守表）。
+    # 见 config/provider-profiles.json deepseek.effort + model_overrides。
 
     profile_caps = profile_thinking_capabilities(
         model_name,

@@ -501,7 +501,7 @@ def test_install_script_describes_built_in_tools_in_plain_language():
 
     assert "xmem" not in text.lower()
     assert "Built-in tools" in text
-    assert "web access, browser automation, token-saving tools" in text
+    assert "weber routing, grill-me, TOON and NSR come with MMS" in text
     assert "only apply inside sessions MMS starts" in text
     # the jargon inventory is gone from the install screen
     assert "weber router + web-access logged-in Chrome + agent-browser headless" not in text
@@ -526,27 +526,22 @@ def test_install_check_reports_all_bundled_session_assets(tmp_path):
     session_assets = mms_home / "assets" / "session-assets"
     hooks = mms_home / "hooks"
     for path in (
-        session_assets / "packs" / "caveman" / "skills" / "caveman",
-        session_assets / "packs" / "caveman" / "hooks",
-        session_assets / "skills" / "token-saver",
         session_assets / "skills" / "toon",
-        session_assets / "skills" / "web-access",
         session_assets / "skills" / "weber",
-        session_assets / "skills" / "agent-browser",
+        session_assets / "skills" / "weber" / "backends-web-access",
+        session_assets / "skills" / "weber" / "backends-agent-browser",
+        session_assets / "skills" / "grill-me",
         hooks,
     ):
         path.mkdir(parents=True, exist_ok=True)
     for path in (
-        session_assets / "packs" / "caveman" / "skills" / "caveman" / "SKILL.md",
-        session_assets / "skills" / "token-saver" / "SKILL.md",
         session_assets / "skills" / "toon" / "SKILL.md",
-        session_assets / "skills" / "web-access" / "SKILL.md",
         session_assets / "skills" / "weber" / "SKILL.md",
-        session_assets / "skills" / "agent-browser" / "SKILL.md",
+        session_assets / "skills" / "weber" / "backends-web-access" / "SKILL.md",
+        session_assets / "skills" / "weber" / "backends-agent-browser" / "SKILL.md",
+        session_assets / "skills" / "grill-me" / "SKILL.md",
     ):
         path.write_text("# asset\n", encoding="utf-8")
-    (session_assets / "packs" / "caveman" / "hooks" / "caveman-activate.js").write_text("// activate\n", encoding="utf-8")
-    (session_assets / "packs" / "caveman" / "hooks" / "caveman-mode-tracker.js").write_text("// tracker\n", encoding="utf-8")
     for name in (
         "nsr-builtin-hook.py",
         "nsr-loop-hook.py",
@@ -561,7 +556,7 @@ def test_install_check_reports_all_bundled_session_assets(tmp_path):
     output = _run_install_check(home=home)
 
     assert ("Bundled session assets" in output) or ("内建 session assets" in output)
-    for label in ("Caveman", "token-saver", "TOON", "web-access", "weber", "agent-browser", "NSR"):
+    for label in ("TOON", "weber", "grill-me", "NSR"):
         assert f"✓ {label}:" in output
 
 
@@ -719,9 +714,9 @@ def test_install_script_removes_global_token_saver_and_toon_packs():
     assert "write_mms_script_wrapper" not in text
     assert "INSTALL_TOKEN_SAVER" not in text
     assert "INSTALL_TOON" not in text
-    # still shipped as bundled session assets
-    assert "$assets_root/skills/token-saver/SKILL.md" in text
+    # TOON remains a bundled session asset; token-saver is retired.
     assert "$assets_root/skills/toon/SKILL.md" in text
+    assert "$assets_root/skills/token-saver" not in text
 
 def test_install_script_removes_optional_xmem_pack():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
@@ -1410,3 +1405,53 @@ def test_retired_skill_cleanup_preserves_custom_target_inside_install_root(tmp_p
     _run_retired_cleanup(home)
     assert (skills / "handover").resolve() == custom
     assert (skills / "offduty").read_text() == "user instructions"
+
+
+def _piped_dry_run(tmp_path, *args, stable_ref="v9.9.9"):
+    """Run the installer the way curl and npx do: piped, outside the repo."""
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+    env.update(_version_env_overrides(stable_ref=stable_ref, latest_tag_ref=stable_ref))
+    for name in ("REAL_HOME", "MMS_REAL_HOME", "ORIGINAL_HOME", "MMS_CONFIG_ROOT"):
+        env.pop(name, None)
+    return subprocess.run(
+        ["bash", "-s", "--", "--lang", "en", *args, "--dry-run"],
+        cwd=tmp_path,
+        env=env,
+        input=INSTALL_SCRIPT.read_text(encoding="utf-8"),
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+
+
+def test_headline_is_one_line_for_the_bare_command(tmp_path):
+    out = _piped_dry_run(tmp_path)
+
+    assert "Installing the latest version: v9.9.9" in out
+    assert "Version overview" not in out
+
+
+def test_headline_is_one_line_when_the_wrapper_pins_the_latest_release(tmp_path):
+    """The npm wrapper resolves the release itself and pins --ref so the script
+    and the sources cannot drift. That pin must read like the bare command."""
+    out = _piped_dry_run(tmp_path, "--ref", "v9.9.9")
+
+    assert "Installing the latest version: v9.9.9" in out
+    assert "Version overview" not in out
+
+
+def test_overview_is_shown_when_an_older_version_is_pinned(tmp_path):
+    out = _piped_dry_run(tmp_path, "--ref", "v4.2.0")
+
+    assert "Version overview" in out
+    assert "Planned install ref: v4.2.0" in out
+
+
+def test_overview_is_shown_for_the_dev_and_canary_channels(tmp_path):
+    for channel in ("dev", "canary"):
+        out = _piped_dry_run(tmp_path, "--channel", channel)
+        assert "Version overview" in out, channel
+        assert f"Install channel: {channel}" in out, channel

@@ -8,6 +8,7 @@ import "./transcript.css";
 import "./connections.css";
 import "./artifacts.css";
 import "./materials.css";
+import "./recipes.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

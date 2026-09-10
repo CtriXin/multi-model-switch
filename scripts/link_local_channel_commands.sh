@@ -43,6 +43,7 @@ CANARY_ROOT="${MMS_CANARY_ROOT:-$CANARY_ROOT_DEFAULT}"
 STABLE_ROOT="${MMS_STABLE_ROOT:-$STABLE_ROOT_DEFAULT}"
 MANAGED_PYTHON="${MMS_MANAGED_PYTHON:-$REAL_HOME_VALUE/.mms/.venv/bin/python}"
 PREVIEW_CONFIG_ROOT="$REAL_HOME_VALUE/.config/mms-next"
+LEGACY_CONFIG_ROOT="$REAL_HOME_VALUE/.config/mms"
 UPDATE_SCRIPT="${MMS_LOCAL_CHANNEL_UPDATE_SCRIPT:-$REPO_ROOT/scripts/local_channel_update.py}"
 
 mkdir -p "$BIN_DIR"
@@ -81,10 +82,14 @@ EOF_WRAPPER
     cat >> "$target" <<EOF_WRAPPER
 export MMS_CONFIG_ROOT="$PREVIEW_CONFIG_ROOT"
 export MMS_PREVIEW_MODE="mmf"
+unset MMS_CONFIG_ROOT_MODE || true
 EOF_WRAPPER
   else
-    cat >> "$target" <<'EOF_WRAPPER'
-unset MMS_CONFIG_ROOT || true
+    # The default root is now mms-next, so a legacy-root channel has to pin
+    # both the path and the truth mode; unsetting would follow the new default.
+    cat >> "$target" <<EOF_WRAPPER
+export MMS_CONFIG_ROOT="$LEGACY_CONFIG_ROOT"
+export MMS_CONFIG_ROOT_MODE="stable"
 unset MMS_CONFIG_DIR || true
 unset MMS_PREVIEW_MODE || true
 EOF_WRAPPER
@@ -126,6 +131,7 @@ UPDATER="$UPDATE_SCRIPT"
 export MMS_COMMAND_NAME="mms"
 unset MMS_CONFIG_ROOT || true
 unset MMS_CONFIG_DIR || true
+unset MMS_CONFIG_ROOT_MODE || true
 unset MMS_PREVIEW_MODE || true
 if [ -f "\$UPDATER" ]; then
   UPDATE_PYTHON="\$PYTHON"
@@ -151,9 +157,9 @@ write_python_wrapper "mmm" "$MAIN_ROOT" "mms" "stable" "main" "daily"
 
 cat <<EOF_SUMMARY
 linked local MMS command matrix in $BIN_DIR:
-  mms -> public installed copy: $PUBLIC_ENTRY
-  mmd -> stable worktree:      $STABLE_ROOT/mms
+  mms -> public installed copy: $PUBLIC_ENTRY  (default root $PREVIEW_CONFIG_ROOT)
+  mmd -> stable worktree:      $STABLE_ROOT/mms  (pinned MMS_CONFIG_ROOT=$LEGACY_CONFIG_ROOT)
   mmf -> root dev checkout:    $DEV_ROOT/mmf  (MMS_CONFIG_ROOT=$PREVIEW_CONFIG_ROOT)
   mmg -> canary worktree:      $CANARY_ROOT/mms  (MMS_CONFIG_ROOT=$PREVIEW_CONFIG_ROOT)
-  mmm -> main worktree:        $MAIN_ROOT/mms
+  mmm -> main worktree:        $MAIN_ROOT/mms  (pinned MMS_CONFIG_ROOT=$LEGACY_CONFIG_ROOT)
 EOF_SUMMARY

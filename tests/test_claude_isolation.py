@@ -201,10 +201,12 @@ def test_mms_config_paths_resolve_real_home_under_gateway_shell(monkeypatch, tmp
     reloaded_core = importlib.reload(mms_core)
     reloaded_router = importlib.reload(mms_router)
     try:
-        assert reloaded_core.CONFIG_PATH == str(real_home / ".config" / "mms" / "config.toml")
-        assert reloaded_core.CREDENTIALS_PATH == str(real_home / ".config" / "mms" / "credentials.sh")
-        assert reloaded_core._config_write_target_path() == str(real_home / ".config" / "mms" / "config.toml")
-        assert reloaded_router.MODEL_ROUTES_PATH == str(real_home / ".config" / "mms" / "model-routes.json")
+        # The default root is mms-next; the point here is that it resolves
+        # under the real home rather than under the gateway session home.
+        assert reloaded_core.CONFIG_PATH == str(real_home / ".config" / "mms-next" / "config.toml")
+        assert reloaded_core.CREDENTIALS_PATH == str(real_home / ".config" / "mms-next" / "credentials.sh")
+        assert reloaded_core._config_write_target_path() == str(real_home / ".config" / "mms-next" / "config.toml")
+        assert reloaded_router.MODEL_ROUTES_PATH == str(real_home / ".config" / "mms-next" / "model-routes.json")
     finally:
         monkeypatch.delenv("HOME", raising=False)
         monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
@@ -307,7 +309,10 @@ def test_stable_usage_write_keeps_legacy_routes_export(monkeypatch, tmp_path):
     monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
     monkeypatch.setenv("REAL_HOME", str(real_home))
     monkeypatch.setenv("ORIGINAL_HOME", str(real_home))
-    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    # The default root is mms-next, which reads the published bundle, so the
+    # legacy export only runs when a channel is pinned to the stable root.
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(stable_root))
+    monkeypatch.setenv("MMS_CONFIG_ROOT_MODE", "stable")
     monkeypatch.delenv("MMS_COMMAND_NAME", raising=False)
     monkeypatch.delenv("MMS_PREVIEW_MODE", raising=False)
 
@@ -327,7 +332,23 @@ def test_stable_usage_write_keeps_legacy_routes_export(monkeypatch, tmp_path):
         reloaded._trigger_routes_export_after_usage_write()
 
         assert calls == [{"force": True, "quiet": True}]
+
+        # The default root publishes a verified bundle instead, so it must not
+        # keep rewriting the legacy export.
+        monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+        monkeypatch.delenv("MMS_CONFIG_ROOT_MODE", raising=False)
+        preview_reloaded = importlib.reload(mms_core)
+        preview_calls = []
+        monkeypatch.setattr(
+            preview_reloaded, "_refresh_routes_export_for_hive", lambda *args, **kwargs: preview_calls.append(kwargs)
+        )
+        monkeypatch.setattr(preview_reloaded.threading, "Thread", ImmediateThread)
+        preview_reloaded._trigger_routes_export_after_usage_write()
+
+        assert preview_calls == []
     finally:
+        monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+        monkeypatch.delenv("MMS_CONFIG_ROOT_MODE", raising=False)
         monkeypatch.delenv("MMS_REAL_HOME", raising=False)
         monkeypatch.delenv("REAL_HOME", raising=False)
         monkeypatch.delenv("ORIGINAL_HOME", raising=False)
@@ -815,12 +836,14 @@ def test_model_context_overrides_follow_selected_config_root(monkeypatch, tmp_pa
     monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
 
-    assert mms_launchers._lookup_context_window("root-selected-model") == 111_000
-
-    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
-
+    # No explicit root: the default is mms-next.
     assert mms_launchers._lookup_context_window("root-selected-model") == 222_000
     assert mms_launchers._MODEL_CONTEXT_OVERRIDES_CACHE["path"] == str(preview_root / "model-context-overrides.json")
+
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(stable_root))
+
+    assert mms_launchers._lookup_context_window("root-selected-model") == 111_000
+    assert mms_launchers._MODEL_CONTEXT_OVERRIDES_CACHE["path"] == str(stable_root / "model-context-overrides.json")
 
 
 def test_mmf_wrapper_selects_mms_next_without_stable_fallback(tmp_path):
@@ -1935,7 +1958,7 @@ def test_validate_home_context_accepts_isolated_oauth_session(tmp_path):
 
     assert result["real_home"] == str(real_home)
     assert result["session_home"] == str(session_home)
-    assert result["config_root"] == str(real_home / ".config" / "mms")
+    assert result["config_root"] == str(real_home / ".config" / "mms-next")
     assert result["net_mode"] == "proxy"
     assert result["dns_mode"] == "proxy-likely"
     assert result["locale"] == "en_US.UTF-8"
@@ -2088,7 +2111,7 @@ def test_sanitize_account_claude_settings_payload_strips_session_env():
             },
             "hooks": {"preToolUse": [{"matcher": "*"}]},
             "statusLine": {"type": "command", "command": "/tmp/status.sh"},
-            "permissions": {"allow": ["Read"], "deny": ["Bash(rm -rf /)*"]},
+            "permissions": {"allow": ["Read"], "deny": ["Bash(rm -rf /*)"]},
         }
     )
 
