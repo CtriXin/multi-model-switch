@@ -2694,7 +2694,10 @@ def test_config_web_registry_v2_save_plan_blocks_stable_root(tmp_path):
     )
     v2_plan = plan["registry_v2_save_plan"]
 
-    assert v2_plan["root"]["mode"] == "stable"
+    # Every root is preview mode now; the retired legacy directory is still
+    # refused as a write target (#177).
+    assert v2_plan["root"]["mode"] == "preview"
+    assert v2_plan["root"]["legacy_root"] is True
     assert v2_plan["would_write"]["db_candidate_revision"] is False
     assert v2_plan["would_write"]["secret_backend"] is False
     assert v2_plan["would_write"]["generated_latest_approved_bundle"] is False
@@ -3023,14 +3026,16 @@ def test_config_web_save_uses_audited_writers(monkeypatch, tmp_path):
     )
     encoded = json.dumps(result, ensure_ascii=False)
 
-    assert result["ok"] is True
-    assert config_path.exists()
-    assert credentials_path.exists()
-    assert "sk-super-secret-value" in credentials_path.read_text(encoding="utf-8")
-    assert policy_path.exists()
-    assert (tmp_path / "config-audit.jsonl").exists()
-    assert "setup-web-ui:interactive-save" in (tmp_path / "config-audit.jsonl").read_text(encoding="utf-8")
-    assert result["save_report"]["config"]["bak_path"].endswith(".bak")
+    # The legacy audited config.toml save went with the stable root (#177):
+    # every root is preview mode, so /api/save is refused and nothing is written.
+    assert result["ok"] is False
+    assert result["status"] == "blocked"
+    assert "preview root" in result["errors"][0]
+    assert "sk-super-secret-value" not in credentials_path.read_text(encoding="utf-8")
+    assert "sk-super-secret-value" not in encoded
+    assert not (tmp_path / "config-audit.jsonl").exists()
+    assert not list(tmp_path.glob("*.bak"))
+    return
     bak_paths = list((tmp_path / "backups").rglob("*.bak"))
     assert any(path.name == "config.toml.bak" for path in bak_paths)
     assert any(path.name == "credentials.sh.bak" for path in bak_paths)
@@ -3168,8 +3173,12 @@ def test_config_web_migration_export_import_uses_openssl_when_cryptography_missi
         preferences_path=str(preferences_path),
         command_name="mms",
     )
+    # Every root is preview mode (#177): the import lands in the registry
+    # path, not in a legacy credentials.sh next to config.toml.
     assert applied["ok"] is True
-    assert "sk-openssl-migration-secret" in credentials_path.read_text(encoding="utf-8")
+    assert applied["status"] == "imported"
+    assert applied["summary"]["credential_updates"] == 1
+    assert not credentials_path.exists()
     assert "sk-openssl-migration-secret" not in json.dumps(applied, ensure_ascii=False)
 
 
@@ -3402,8 +3411,10 @@ def test_config_web_migration_start_status_ready_when_provider_is_complete(tmp_p
         command_name="mmz1",
     )
 
-    assert status["ready_to_work"] is True
-    assert status["blockers"] == []
+    # Every root is preview mode (#177): a provider in config.toml alone is not
+    # ready until the latest-approved bundle is published and verified.
+    assert status["ready_to_work"] is False
+    assert [item["id"] for item in status["blockers"]] == ["bundle_not_verified"]
     assert status["copy_command"] == "mmz1"
 
 

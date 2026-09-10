@@ -309,8 +309,9 @@ def test_stable_usage_write_keeps_legacy_routes_export(monkeypatch, tmp_path):
     monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
     monkeypatch.setenv("REAL_HOME", str(real_home))
     monkeypatch.setenv("ORIGINAL_HOME", str(real_home))
-    # The default root is mms-next, which reads the published bundle, so the
-    # legacy export only runs when a channel is pinned to the stable root.
+    # The legacy stable root is retired: even a process pinned to it with the
+    # old wrapper env stays in preview mode and never rewrites the legacy
+    # model-routes.json export.
     monkeypatch.setenv("MMS_CONFIG_ROOT", str(stable_root))
     monkeypatch.setenv("MMS_CONFIG_ROOT_MODE", "stable")
     monkeypatch.delenv("MMS_COMMAND_NAME", raising=False)
@@ -331,7 +332,7 @@ def test_stable_usage_write_keeps_legacy_routes_export(monkeypatch, tmp_path):
         monkeypatch.setattr(reloaded.threading, "Thread", ImmediateThread)
         reloaded._trigger_routes_export_after_usage_write()
 
-        assert calls == [{"force": True, "quiet": True}]
+        assert calls == []
 
         # The default root publishes a verified bundle instead, so it must not
         # keep rewriting the legacy export.
@@ -785,12 +786,14 @@ def test_home_context_reports_selected_config_root(monkeypatch, tmp_path):
     assert context["config_root"] != str(stable_root)
 
 
-def test_home_context_defaults_to_stable_root_without_explicit_root(monkeypatch, tmp_path):
+def test_home_context_under_a_legacy_gateway_home_uses_the_single_root(monkeypatch, tmp_path):
+    """Gateway session homes still sit under ~/.config/mms, but the config a
+    session reads is the one shared root; the legacy root is retired (#177)."""
     import mms_launchers
 
     real_home = tmp_path / "real-home"
-    stable_root = real_home / ".config" / "mms"
-    gateway_home = stable_root / "codex-gateway" / "s" / "4174"
+    stable_root = real_home / ".config" / "mms-next"
+    gateway_home = real_home / ".config" / "mms" / "codex-gateway" / "s" / "4174"
     gateway_home.mkdir(parents=True)
     monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
     monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
@@ -840,10 +843,12 @@ def test_model_context_overrides_follow_selected_config_root(monkeypatch, tmp_pa
     assert mms_launchers._lookup_context_window("root-selected-model") == 222_000
     assert mms_launchers._MODEL_CONTEXT_OVERRIDES_CACHE["path"] == str(preview_root / "model-context-overrides.json")
 
+    # An explicit pin at the retired legacy root is redirected to the shared
+    # root (#177): a stale shell export must not resurrect the old config.
     monkeypatch.setenv("MMS_CONFIG_ROOT", str(stable_root))
 
-    assert mms_launchers._lookup_context_window("root-selected-model") == 111_000
-    assert mms_launchers._MODEL_CONTEXT_OVERRIDES_CACHE["path"] == str(stable_root / "model-context-overrides.json")
+    assert mms_launchers._lookup_context_window("root-selected-model") == 222_000
+    assert mms_launchers._MODEL_CONTEXT_OVERRIDES_CACHE["path"] == str(preview_root / "model-context-overrides.json")
 
 
 def test_mmf_wrapper_selects_mms_next_without_stable_fallback(tmp_path):

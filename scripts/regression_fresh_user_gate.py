@@ -264,19 +264,22 @@ def _smoke_shared_config_root_default() -> None:
         if payload.get("mode") != "preview":
             raise SystemExit(f"fresh mms mode mismatch: {payload!r}")
 
+        # A stale shell export or the retired mmd/mmm wrapper env pointing at
+        # the legacy root must not drag a process back there: the pin is
+        # redirected to the shared root and the mode stays preview.
         pinned_env = _env_for_home(home)
         pinned_env["MMS_CONFIG_ROOT"] = str(legacy_root)
         pinned_env["MMS_CONFIG_ROOT_MODE"] = "stable"
         completed = _run(
-            "pinned legacy channel config root",
+            "retired legacy stable pin",
             [sys.executable, str(ROOT_DIR / "mms"), "config", "root", "--json"],
             env=pinned_env,
         )
         payload = json.loads(completed.stdout)
-        if payload.get("config_root") != str(legacy_root):
-            raise SystemExit(f"pinned root mismatch: {payload.get('config_root')} != {legacy_root}")
-        if payload.get("mode") != "stable":
-            raise SystemExit(f"pinned mode mismatch: {payload!r}")
+        if payload.get("config_root") != str(shared_root):
+            raise SystemExit(f"legacy pin not redirected: {payload.get('config_root')} != {shared_root}")
+        if payload.get("mode") != "preview":
+            raise SystemExit(f"legacy stable pin still honoured: {payload!r}")
 
         probe = (
             "import json,sys;"

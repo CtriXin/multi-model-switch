@@ -914,9 +914,11 @@ def test_install_completion_points_at_the_web_app_and_v2_preview_gate():
     assert "在 MMS Web 里添加 provider 和 API Key" in text
     assert "bash install.sh --check" in text
 
-    # preview path is unchanged
-    assert "下一步（首次 preview/mmf 只做这两行）" in text
-    assert "$NEXT_MMF_CMD preview prepare" in text
+    # preview path: the legacy root is never read, so the only next step is
+    # configuring providers in the WebUI
+    assert "下一步（先配通道）" in text
+    assert "$NEXT_MMF_CMD preview prepare" not in text
+    assert "legacy_config_has_route_candidates" not in text
     assert "$NEXT_MMF_CMD config web" in text
     assert "$NEXT_MMF_CMD config doctor" in text
 
@@ -1169,7 +1171,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_HEAD(self):
         self.send_response(200)
         home = Path(sys.argv[0]).parent.parent.parent
-        identity = hashlib.sha256(f"{home / '.mms'}|{home / '.local/share/mms-web/config'}|".encode()).hexdigest()
+        # The server hashes source|config_root|version; the installer must use
+        # the shared config root, not Pilot's old private directory.
+        identity = hashlib.sha256(f"{home / '.mms'}|{home / '.config/mms-next'}|".encode()).hexdigest()
         self.send_header("X-MMS-Web-Identity", identity)
         self.end_headers()
 

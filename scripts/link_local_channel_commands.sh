@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Link the maintainer's local command matrix without touching ~/.config/mms.
-# mms = public installed copy, mmd = stable worktree, mmf = root dev checkout,
-# mmg = canary worktree, mmm = main/stable observation worktree.
+# Link the maintainer's local command matrix. Every command uses the single
+# config root ~/.config/mms-next; the legacy ~/.config/mms root is retired.
+# mms = public installed copy, mmf = root dev checkout, mmg = canary worktree.
+# mmd / mmm (pinned to the legacy root) are retired and removed when found.
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
@@ -12,17 +13,9 @@ case "$REPO_ROOT" in
   */.worktrees/*) BASE_ROOT="${REPO_ROOT%%/.worktrees/*}" ;;
 esac
 DEV_ROOT_DEFAULT="$BASE_ROOT"
-MAIN_ROOT_DEFAULT="$BASE_ROOT/.worktrees/main"
-if [ ! -f "$MAIN_ROOT_DEFAULT/mms" ]; then
-  MAIN_ROOT_DEFAULT="$BASE_ROOT"
-fi
 CANARY_ROOT_DEFAULT="$BASE_ROOT/.worktrees/canary"
-STABLE_ROOT_DEFAULT="$BASE_ROOT/.worktrees/stable-v3.3-no-db"
 if [ "$(basename "$REPO_ROOT")" = "canary" ] && [ "$(basename "$(dirname "$REPO_ROOT")")" = ".worktrees" ]; then
   CANARY_ROOT_DEFAULT="$REPO_ROOT"
-fi
-if [ "$(basename "$REPO_ROOT")" = "stable-v3.3-no-db" ] && [ "$(basename "$(dirname "$REPO_ROOT")")" = ".worktrees" ]; then
-  STABLE_ROOT_DEFAULT="$REPO_ROOT"
 fi
 
 resolve_real_home() {
@@ -37,13 +30,10 @@ resolve_real_home() {
 REAL_HOME_VALUE="$(resolve_real_home)"
 BIN_DIR="${MMS_LOCAL_BIN:-$REAL_HOME_VALUE/.local/bin}"
 PUBLIC_ENTRY="${MMS_PUBLIC_ENTRY:-$REAL_HOME_VALUE/.mms/mms}"
-MAIN_ROOT="${MMS_MAIN_ROOT:-$MAIN_ROOT_DEFAULT}"
 DEV_ROOT="${MMS_DEV_ROOT:-$DEV_ROOT_DEFAULT}"
 CANARY_ROOT="${MMS_CANARY_ROOT:-$CANARY_ROOT_DEFAULT}"
-STABLE_ROOT="${MMS_STABLE_ROOT:-$STABLE_ROOT_DEFAULT}"
 MANAGED_PYTHON="${MMS_MANAGED_PYTHON:-$REAL_HOME_VALUE/.mms/.venv/bin/python}"
 PREVIEW_CONFIG_ROOT="$REAL_HOME_VALUE/.config/mms-next"
-LEGACY_CONFIG_ROOT="$REAL_HOME_VALUE/.config/mms"
 UPDATE_SCRIPT="${MMS_LOCAL_CHANNEL_UPDATE_SCRIPT:-$REPO_ROOT/scripts/local_channel_update.py}"
 
 mkdir -p "$BIN_DIR"
@@ -78,22 +68,12 @@ UPDATE_BRANCH="$branch"
 UPDATE_CADENCE="$cadence"
 export MMS_COMMAND_NAME="$name"
 EOF_WRAPPER
-  if [ "$config_mode" = "preview" ]; then
-    cat >> "$target" <<EOF_WRAPPER
+  # Every channel shares the one config root; there is no legacy pin anymore.
+  cat >> "$target" <<EOF_WRAPPER
 export MMS_CONFIG_ROOT="$PREVIEW_CONFIG_ROOT"
 export MMS_PREVIEW_MODE="mmf"
 unset MMS_CONFIG_ROOT_MODE || true
 EOF_WRAPPER
-  else
-    # The default root is now mms-next, so a legacy-root channel has to pin
-    # both the path and the truth mode; unsetting would follow the new default.
-    cat >> "$target" <<EOF_WRAPPER
-export MMS_CONFIG_ROOT="$LEGACY_CONFIG_ROOT"
-export MMS_CONFIG_ROOT_MODE="stable"
-unset MMS_CONFIG_DIR || true
-unset MMS_PREVIEW_MODE || true
-EOF_WRAPPER
-  fi
   cat >> "$target" <<'EOF_WRAPPER'
 run_update_hook() {
   [ -f "$UPDATER" ] || return 0
@@ -149,17 +129,26 @@ EOF_WRAPPER
   chmod 755 "$target"
 }
 
+remove_retired_wrapper() {
+  # Only wrappers this script wrote are removed: they carry the legacy pin.
+  local target="$BIN_DIR/$1"
+  [ -f "$target" ] || return 0
+  if grep -q 'MMS_CONFIG_ROOT_MODE="stable"' "$target" 2>/dev/null; then
+    rm -f "$target"
+    echo "removed retired wrapper: $target"
+  fi
+}
+
 write_public_mms_wrapper
-write_python_wrapper "mmd" "$STABLE_ROOT" "mms" "stable" "release/stable-v3.3-no-db" "weekly"
 write_python_wrapper "mmf" "$DEV_ROOT" "mmf" "preview" "dev" "daily"
 write_python_wrapper "mmg" "$CANARY_ROOT" "mms" "preview" "canary" "always"
-write_python_wrapper "mmm" "$MAIN_ROOT" "mms" "stable" "main" "daily"
+remove_retired_wrapper "mmd"
+remove_retired_wrapper "mmm"
 
 cat <<EOF_SUMMARY
 linked local MMS command matrix in $BIN_DIR:
   mms -> public installed copy: $PUBLIC_ENTRY  (default root $PREVIEW_CONFIG_ROOT)
-  mmd -> stable worktree:      $STABLE_ROOT/mms  (pinned MMS_CONFIG_ROOT=$LEGACY_CONFIG_ROOT)
   mmf -> root dev checkout:    $DEV_ROOT/mmf  (MMS_CONFIG_ROOT=$PREVIEW_CONFIG_ROOT)
   mmg -> canary worktree:      $CANARY_ROOT/mms  (MMS_CONFIG_ROOT=$PREVIEW_CONFIG_ROOT)
-  mmm -> main worktree:        $MAIN_ROOT/mms  (pinned MMS_CONFIG_ROOT=$LEGACY_CONFIG_ROOT)
+  mmd / mmm are retired: every entrance reads only $PREVIEW_CONFIG_ROOT
 EOF_SUMMARY

@@ -288,7 +288,7 @@ $(t "说明:" "Notes:")
   - $(t "--lang 可设置默认 UI 语言（zh / en）" "--lang sets the default UI language (zh / en)")
   - $(t "安装过程零交互：不询问可选包，也不询问 UI 语言；唯一的提问是装完之后要不要打开 MMS Web" "The install is non-interactive: no optional-pack questions and no UI language prompt; the only question comes after everything is installed and just offers to open MMS Web")
   - $(t "--launch-web 跳过提问直接打开，--no-launch-web 完全不打开；没有终端时不提问，只打印命令" "--launch-web opens it without asking, --no-launch-web never opens it; with no terminal available nothing is asked and the command is printed instead")
-  - $(t "检测到 Pilot 正在使用该安装目录时，默认请它退出后继续安装；--keep-running-pilot 改为暂停安装" "When Pilot is using the installation, it is asked to exit and the install continues; --keep-running-pilot stops the install instead")
+  - $(t "检测到 Pilot 正在使用该安装目录或占用默认端口时，默认请它退出后继续安装；--keep-running-pilot 改为暂停安装" "When a Pilot is using the installation or holding the default port, it is asked to exit and the install continues; --keep-running-pilot stops the install instead")
   - $(t "MMS Web 在后台运行，安装进程随即退出；PATH 默认写入 shell 配置，--no-shell-rc 可关闭" "MMS Web runs in the background and the installer exits right after; PATH is written to your shell config by default and --no-shell-rc turns that off")
   - $(t "pi 是必装项，pilot web 端依赖它；缺失的 claude/codex/opencode 会自动补装，已安装的不会被改动" "pi is mandatory because the pilot web app depends on it; missing claude/codex/opencode are installed automatically while existing ones are left untouched")
   - $(t "内建能力（weber 网页路由、grill-me、TOON、NSR）随 MMS 一起安装，只在 MMS 启动的会话里生效" "Built-in tools (weber web routing, grill-me, TOON, NSR) ship with MMS and only apply inside sessions MMS starts")
@@ -1820,35 +1820,6 @@ print_version_overview() {
     echo "  $(t "安装通道" "Install channel"): $(install_channel_label)"
 }
 
-legacy_config_has_route_candidates() {
-    "$(_python_bin)" - "$LEGACY_CONFIG_ROOT" <<'PY' >/dev/null 2>&1
-import sys
-import tomllib
-from pathlib import Path
-
-root = Path(sys.argv[1]).expanduser()
-config_path = root / "config.toml"
-if not config_path.exists():
-    raise SystemExit(1)
-try:
-    config = tomllib.loads(config_path.read_text(encoding="utf-8"))
-except Exception:
-    raise SystemExit(1)
-
-providers = config.get("providers")
-if not isinstance(providers, list):
-    raise SystemExit(1)
-
-for provider in providers:
-    if not isinstance(provider, dict) or provider.get("enabled") is False:
-        continue
-    for key in ("fallback_models", "extra_models"):
-        models = provider.get(key)
-        if isinstance(models, list) and any(str(item).strip() for item in models):
-            raise SystemExit(0)
-raise SystemExit(1)
-PY
-}
 
 run_install_check() {
     local node_label=""
@@ -2027,11 +1998,12 @@ PY
 # <pid> <command>" line per process that merely uses this installation.
 # Exit 0 when the installation is free, 3 when it is in use.
 inspect_live_pilot() {
-    "$(_python_bin)" - "$MMS_HOME" <<'PY'
+    "$(_python_bin)" - "$MMS_HOME" "${MMS_WEB_DEFAULT_PORT:-${MMS_WEB_PORT_BASE:-8765}}" <<'PY'
 import fcntl, os, shlex, subprocess, sys
 from pathlib import Path
 
 root = Path(sys.argv[1]).resolve()
+port = int(sys.argv[2] or 0)
 lease_held = False
 try:
     fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -2078,6 +2050,21 @@ def is_server(command):
     return False
 
 
+def listening_on_port():
+    """PIDs bound to the Pilot port. A Pilot from another install, or one that
+    updated itself from the page, serves here with a different source path;
+    leaving it alive would make the fresh install start a second Pilot."""
+    if port <= 0:
+        return set()
+    try:
+        out = subprocess.run(['lsof', '-nP', '-iTCP:%d' % port, '-sTCP:LISTEN', '-Fp'],
+                             capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    return {line[1:] for line in out.splitlines() if line.startswith('p')}
+
+
+port_holders = listening_on_port()
 servers = []
 others = []
 for row in rows:
@@ -2088,6 +2075,9 @@ for row in rows:
     if pid == str(os.getpid()):
         continue
     if not any(word in command for word in ('-m mms_web', '/mms-web', '/mms web')):
+        continue
+    if pid in port_holders:
+        servers.append((pid, command))
         continue
     if not uses_installation(pid, command):
         continue
@@ -2135,7 +2125,7 @@ confirm_open_web() {
 
 # Report the port of an MMS Web instance that is already serving, if any.
 running_mms_web_port() {
-    "$(_python_bin)" - "$MMS_WEB_DEFAULT_PORT" "$MMS_WEB_PORT_SEARCH_LIMIT" "$MMS_HOME" "${XDG_DATA_HOME:-$REAL_HOME/.local/share}/mms-web/config" <<'PY'
+    "$(_python_bin)" - "$MMS_WEB_DEFAULT_PORT" "$MMS_WEB_PORT_SEARCH_LIMIT" "$MMS_HOME" "$CONFIG_ROOT" <<'PY'
 import hashlib
 import re
 from pathlib import Path
@@ -2828,17 +2818,10 @@ if [ -x "$BIN_DIR/mms" ]; then
 
     if [ "$PREVIEW_CHANNEL_INSTALL" -eq 1 ]; then
         echo ""
-        if legacy_config_has_route_candidates; then
-            echo "  $(t "下一步（首次 preview/mmf 只做这两行）:" "Next step (first preview/mmf run: only do these two lines):")"
-            echo "    $NEXT_MMF_CMD preview prepare"
-            echo "    $NEXT_MMF_CMD"
-            echo "  $(t "说明：prepare 只读取 ~/.config/mms，并写入 ~/.config/mms-next；不会改 stable 配置。" "Note: prepare only reads ~/.config/mms and writes ~/.config/mms-next; stable config is not modified.")"
-        else
-            echo "  $(t "下一步（全新机器先配通道）:" "Next step (fresh machine: configure providers first):")"
-            echo "    $NEXT_MMF_CMD config web"
-            echo "    $NEXT_MMF_CMD"
-            echo "  $(t "说明：没有检测到可迁移的旧模型路由，先在 WebUI 添加 provider/API Key 并保存。" "Note: no migratable legacy model routes were detected; add providers/API keys in the WebUI first.")"
-        fi
+        echo "  $(t "下一步（先配通道）:" "Next step (configure providers first):")"
+        echo "    $NEXT_MMF_CMD config web"
+        echo "    $NEXT_MMF_CMD"
+        echo "  $(t "说明：所有入口只读 ~/.config/mms-next；旧的 ~/.config/mms 不再被读取，请在 WebUI 添加 provider/API Key 并保存。" "Note: every entrance reads only ~/.config/mms-next; the old ~/.config/mms is no longer read, so add providers/API keys in the WebUI and save.")"
         echo ""
         echo "  $(t "以后需要排查时再运行:" "Only run this later when debugging:") $NEXT_MMF_CMD config doctor"
     fi
