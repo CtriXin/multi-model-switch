@@ -52,6 +52,8 @@ INSTALL_CLI_EXPLICIT=0
 CHECK_ONLY=0
 CLEANUP_ONLY=0
 LAUNCH_WEB_MODE="ask"
+KEEP_RUNNING_PILOT=0
+STOPPED_PILOT=0
 PRINT_ONLY_VERSION=0
 DRY_RUN=0
 
@@ -275,7 +277,7 @@ download_url_to_file() {
 usage() {
     cat <<EOF
 $(t "用法:" "Usage:")
-  bash install.sh [--channel stable|dev|canary] [--dry-run] [--no-shell-rc] [--no-launch-web] [--launch-web] [--run-setup] [--ensure-node22] [--lang zh|en] [--install-cli name[,name2]]
+  bash install.sh [--channel stable|dev|canary] [--dry-run] [--no-shell-rc] [--no-launch-web] [--launch-web] [--keep-running-pilot] [--run-setup] [--ensure-node22] [--lang zh|en] [--install-cli name[,name2]]
   bash install.sh --ref <tag-or-branch>
   bash install.sh --stable
   bash install.sh --dev
@@ -298,6 +300,7 @@ $(t "说明:" "Notes:")
   - $(t "--lang 可设置默认 UI 语言（zh / en）" "--lang sets the default UI language (zh / en)")
   - $(t "安装过程零交互：不询问可选包，也不询问 UI 语言；唯一的提问是装完之后要不要打开 MMS Web" "The install is non-interactive: no optional-pack questions and no UI language prompt; the only question comes after everything is installed and just offers to open MMS Web")
   - $(t "--launch-web 跳过提问直接打开，--no-launch-web 完全不打开；没有终端时不提问，只打印命令" "--launch-web opens it without asking, --no-launch-web never opens it; with no terminal available nothing is asked and the command is printed instead")
+  - $(t "检测到 Pilot 正在使用该安装目录时，默认请它退出后继续安装；--keep-running-pilot 改为暂停安装" "When Pilot is using the installation, it is asked to exit and the install continues; --keep-running-pilot stops the install instead")
   - $(t "MMS Web 在后台运行，安装进程随即退出；PATH 默认写入 shell 配置，--no-shell-rc 可关闭" "MMS Web runs in the background and the installer exits right after; PATH is written to your shell config by default and --no-shell-rc turns that off")
   - $(t "pi 是必装项，pilot web 端依赖它；缺失的 claude/codex/opencode 会自动补装，已安装的不会被改动" "pi is mandatory because the pilot web app depends on it; missing claude/codex/opencode are installed automatically while existing ones are left untouched")
   - $(t "内建能力（网页访问、浏览器自动化、省 token 工具、Caveman、NSR）随 MMS 一起安装，只在 MMS 启动的会话里生效" "Built-in tools (web access, browser automation, token savers, Caveman, NSR) ship with MMS and only apply inside sessions MMS starts")
@@ -1968,46 +1971,130 @@ print(path)
 PY
 )" || return 1
     exec 9>"$lock_path"
-    if ! "$(_python_bin)" - "$MMS_HOME" <<'PY'
-import fcntl, os, subprocess, sys
+
+    local report="" status=0 servers=""
+    set +e
+    report="$(inspect_live_pilot)"
+    status=$?
+    set -e
+    if [ "$status" -eq 0 ]; then
+        return 0
+    fi
+    if [ "$status" -ne 3 ]; then
+        echo "$report" >&2
+        return 1
+    fi
+
+    # Only Pilot servers are stoppable. Agent sessions Pilot spawned mention
+    # the same paths but stopping them would kill the user's conversation.
+    servers="$(printf '%s\n' "$report" | sed -n 's/^server //p')"
+    if [ "$KEEP_RUNNING_PILOT" -eq 1 ] || [ -z "$servers" ]; then
+        echo "⚠ $(t "Pilot 正在使用此安装目录，已暂停安装；没有关闭进程或清理会话。请在页面的‘更新’入口完成安全更新，或自行退出服务后再运行本命令。" "Pilot is using this installation. Nothing was stopped or removed. Use Update in Pilot, or exit the service yourself before rerunning this command.")"
+        printf '%s\n' "$report" | sed -n 's/^other /  /p'
+        return 1
+    fi
+
+    echo "• $(t "Pilot 正在使用此安装目录，先请它退出再继续安装" "Pilot is using this installation; asking it to exit before continuing"): $(printf '%s' "$servers" | tr '\n' ' ')"
+    local pid=""
+    for pid in $servers; do
+        kill -TERM "$pid" 2>/dev/null || true
+    done
+    local waited=0
+    while [ "$waited" -lt 20 ]; do
+        set +e
+        report="$(inspect_live_pilot)"
+        status=$?
+        set -e
+        if [ "$status" -eq 0 ]; then
+            STOPPED_PILOT=1
+            echo "✓ $(t "Pilot 已退出，继续安装；会话数据保留在原处" "Pilot exited; continuing. Session data is left where it was")"
+            return 0
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+
+    echo "⚠ $(t "Pilot 未能在 20 秒内退出，已暂停安装；没有强制结束任何进程。" "Pilot did not exit within 20s. Installation stopped; nothing was force-killed.")"
+    printf '%s\n' "$report" | sed -n 's/^server /  /p'
+    return 1
+}
+
+# Prints one "server <pid>" line per stoppable Pilot server and one "other
+# <pid> <command>" line per process that merely uses this installation.
+# Exit 0 when the installation is free, 3 when it is in use.
+inspect_live_pilot() {
+    "$(_python_bin)" - "$MMS_HOME" <<'PY'
+import fcntl, os, shlex, subprocess, sys
 from pathlib import Path
+
+root = Path(sys.argv[1]).resolve()
+lease_held = False
 try:
     fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)
 except OSError:
-    raise SystemExit(1)
-# Older Pilot releases have no lease. Detect their actual process cwd as well
-# as explicit source paths, without touching any process or conversation.
-root = Path(sys.argv[1]).resolve()
+    lease_held = True
+
 try:
     rows = subprocess.check_output(['ps', '-ax', '-o', 'pid=', '-o', 'command='], text=True, timeout=5).splitlines()
 except (OSError, subprocess.SubprocessError):
-    raise SystemExit('Cannot verify running Pilot processes; installation stopped')
+    print('Cannot verify running Pilot processes; installation stopped')
+    raise SystemExit(2)
+
+
+def uses_installation(pid, command):
+    if str(root) + '/' in command:
+        return True
+    try:
+        proc_cwd = Path('/proc') / pid / 'cwd'
+        if proc_cwd.exists():
+            return proc_cwd.resolve() == root
+        result = subprocess.run(['lsof', '-a', '-p', pid, '-d', 'cwd', '-Fn'], capture_output=True, text=True, timeout=3)
+        names = [line[1:] for line in result.stdout.splitlines() if line.startswith('n')]
+        return bool(names) and Path(names[0]).resolve() == root
+    except (OSError, subprocess.SubprocessError):
+        print('Cannot verify a running Pilot process; installation stopped')
+        raise SystemExit(2)
+
+
+def is_server(command):
+    """A Pilot server, not a session it spawned."""
+    try:
+        argv = shlex.split(command)
+    except ValueError:
+        argv = command.split()
+    for index, token in enumerate(argv):
+        if token == '-m' and index + 1 < len(argv) and argv[index + 1] == 'mms_web':
+            return True
+        if Path(token).name in ('mms-web', 'MMS Pilot.command'):
+            return True
+    return False
+
+
+servers = []
+others = []
 for row in rows:
     parts = row.strip().split(None, 1)
     if len(parts) != 2:
         continue
     pid, command = parts
+    if pid == str(os.getpid()):
+        continue
     if not any(word in command for word in ('-m mms_web', '/mms-web', '/mms web')):
         continue
-    if str(root) + '/' in command:
-        raise SystemExit(1)
-    try:
-        proc_cwd = Path('/proc') / pid / 'cwd'
-        if proc_cwd.exists():
-            cwd = proc_cwd.resolve()
-        else:
-            result = subprocess.run(['lsof', '-a', '-p', pid, '-d', 'cwd', '-Fn'], capture_output=True, text=True, timeout=3)
-            names = [line[1:] for line in result.stdout.splitlines() if line.startswith('n')]
-            cwd = Path(names[0]).resolve() if names else None
-        if cwd == root:
-            raise SystemExit(1)
-    except (OSError, subprocess.SubprocessError):
-        raise SystemExit('Cannot verify a running Pilot process; installation stopped')
+    if not uses_installation(pid, command):
+        continue
+    (servers if is_server(command) else others).append((pid, command))
+
+if not servers and not others and not lease_held:
+    raise SystemExit(0)
+for pid, _command in servers:
+    print(f'server {pid}')
+for pid, command in others:
+    print(f'other {pid} {command[:120]}')
+if lease_held and not servers and not others:
+    print('other - a Pilot holds the installation lease')
+raise SystemExit(3)
 PY
-    then
-        echo "⚠ $(t "Pilot 正在使用此安装目录，已暂停安装；没有关闭进程或清理会话。请在页面的‘更新’入口完成安全更新，或自行退出服务后再运行本命令。" "Pilot is using this installation. Nothing was stopped or removed. Use Update in Pilot, or exit the service yourself before rerunning this command.")"
-        return 1
-    fi
 }
 
 # The installer ends by offering to open MMS Web. The server is started
@@ -2411,6 +2498,10 @@ while [[ $# -gt 0 ]]; do
         --launch-web)
             LAUNCH_WEB_MODE="always"
             ;;
+        --keep-running-pilot)
+            KEEP_RUNNING_PILOT=1
+            shift
+            ;;
         --no-launch-web)
             LAUNCH_WEB_MODE="never"
             ;;
@@ -2752,6 +2843,13 @@ if [ -x "$BIN_DIR/mms" ]; then
         echo "$(t "检测到首次使用，启动配置向导..." "First-time setup detected, launching setup wizard...")"
         echo ""
         "$BIN_DIR/mms" || true
+        DID_LAUNCH=1
+    fi
+
+    # Pilot was running before this install, so put it back without asking.
+    if [ "$STOPPED_PILOT" -eq 1 ] && [ "$DID_LAUNCH" -eq 0 ] && [ "$LAUNCH_WEB_MODE" != "never" ]; then
+        echo "• $(t "安装前请 Pilot 退出过，现在重新打开" "Pilot was asked to exit before installing; reopening it now")"
+        start_mms_web_detached || true
         DID_LAUNCH=1
     fi
 
