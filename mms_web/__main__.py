@@ -10,7 +10,7 @@ from .remote_access import QUERY
 
 
 def main(argv=None):
-    from .service import VERBS, run as run_service
+    from .service import VERBS, help_text, run as run_service, wants_help
 
     raw = list(sys.argv[1:] if argv is None else argv)
     # `mms web status|url|start|stop|restart` manage the detached service;
@@ -19,6 +19,11 @@ def main(argv=None):
     for index, token in enumerate(raw):
         if token in VERBS:
             raise SystemExit(run_service(token, raw[:index] + raw[index + 1:]))
+    # Typed with nothing to do: say what can be appended instead of quietly
+    # occupying the terminal with a server the caller may not have wanted.
+    if wants_help(raw):
+        print(help_text())
+        raise SystemExit(0)
     parser = argparse.ArgumentParser(description="MMS Pilot — local conversations powered by MMS and Pi")
     from mms_version import VERSION
     parser.add_argument("--version", action="version", version=f"MMS Pilot {VERSION}")

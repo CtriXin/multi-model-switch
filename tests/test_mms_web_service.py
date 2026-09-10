@@ -17,11 +17,13 @@ def _free_port_base() -> int:
         return probe.getsockname()[1]
 
 
-def _run(args, *, home: Path, timeout=90):
+def _run(args, *, home: Path, timeout=90, extra_env=None):
     env = {k: v for k, v in os.environ.items()
            if k not in ("MMS_CONFIG_ROOT", "MMS_CONFIG_DIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME",
-                        "MMS_REAL_HOME", "REAL_HOME", "ORIGINAL_HOME", "MMS_WEB_PORT_BASE")}
+                        "MMS_REAL_HOME", "REAL_HOME", "ORIGINAL_HOME", "MMS_WEB_PORT_BASE",
+                        "MMS_COMMAND_NAME")}
     env.update({"HOME": str(home), "MMS_REAL_HOME": str(home), "PYTHONPATH": str(ROOT)})
+    env.update(extra_env or {})
     return subprocess.run([sys.executable, "-P", "-m", "mms_web", *args], cwd=ROOT, env=env,
                           capture_output=True, text=True, timeout=timeout)
 
@@ -119,3 +121,50 @@ def test_the_verb_may_follow_options_that_mms_core_prepends(home):
     # An unknown positional is still an argparse error from the server parser.
     bogus = _run(["frobnicate"], home=home)
     assert bogus.returncode == 2 and "unrecognized arguments" in bogus.stderr
+
+
+def test_bare_web_prints_help_instead_of_occupying_the_terminal(home):
+    """`mms web` with nothing to do says what can be appended (issue #191)."""
+    bare = _run([], home=home)
+    assert bare.returncode == 0, bare.stderr
+    assert bare.stdout.startswith("MMS Pilot ")
+    for verb in ("start", "status", "url", "stop", "restart"):
+        assert f"\n  {verb}" in bare.stdout, verb
+    # mms_core prepends the selected root, so that is still a bare call.
+    prepended = _run(["--config-root", str(home / "config")], home=home)
+    assert prepended.stdout == bare.stdout
+    for flag in ("help", "-h", "--help"):
+        assert _run([flag], home=home).stdout == bare.stdout, flag
+
+
+def test_help_examples_are_spelled_like_the_entry_point_that_printed_them(home):
+    env_named = _run([], home=home, extra_env={"MMS_COMMAND_NAME": "mmf"})
+    assert "mmf web start --open" in env_named.stdout
+    assert "mms web start --open" not in env_named.stdout
+    default = _run([], home=home)
+    assert "mms web start --open" in default.stdout
+
+
+def test_options_that_ask_for_a_server_are_not_a_help_request():
+    from mms_web.service import wants_help
+
+    assert wants_help([]) is True
+    assert wants_help(["--config-root", "/tmp/root"]) is True
+    assert wants_help(["--config-root=/tmp/root"]) is True
+    assert wants_help(["--help"]) is True
+    # Anything that asks for a server keeps serving, including the launcher
+    # invocations: `MMS Pilot.command` passes --open, the installer passes
+    # --state-root/--port/--open.
+    for argv in (["--open"], ["--port", "8080"], ["--listen", "lan"], ["--version"],
+                 ["--state-root", "/tmp/state", "--port", "8080", "--open"],
+                 ["--config-root", "/tmp/root", "--open"]):
+        assert wants_help(argv) is False, argv
+
+
+def test_the_help_lists_every_verb_that_can_be_dispatched():
+    from mms_web.service import VERBS, help_text
+
+    text = help_text("mms web")
+    for verb in VERBS:
+        assert f"\n  {verb}" in text, verb
+    assert "logs/mms-web.log" in text
