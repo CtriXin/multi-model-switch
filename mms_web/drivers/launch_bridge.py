@@ -63,8 +63,20 @@ def _npx_caches() -> list[Path]:
     return [cache for cache in caches if cache.is_dir()]
 
 
+def installed_pi() -> str:
+    """The same Pi the launcher resolves, including one off this PATH."""
+    try:
+        from mms_pi_support import _pi_global_executable
+    except Exception:
+        return shutil.which("pi") or ""
+    try:
+        return _pi_global_executable() or ""
+    except Exception:
+        return shutil.which("pi") or ""
+
+
 def pi_runtime() -> tuple[str, str]:
-    executable = shutil.which("pi") or cached_pi()
+    executable = installed_pi() or cached_pi()
     if not executable:
         return "", ""
     # npm/fnm installations have a matching Node beside their global bin.

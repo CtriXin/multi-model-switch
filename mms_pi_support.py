@@ -6,6 +6,7 @@ import copy
 import json
 import os
 import shutil
+import subprocess
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -214,11 +215,36 @@ def _pi_npx_cache_dir():
     return str(Path(__file__).resolve().parent / ".ai" / "cache" / "pi-npx")
 
 
+_PI_NPM_PREFIX_CACHE = None
+
+
+def _npm_global_prefix():
+    """npm's global prefix, asked once. Empty when npm is unavailable."""
+    global _PI_NPM_PREFIX_CACHE
+    if _PI_NPM_PREFIX_CACHE is None:
+        try:
+            result = subprocess.run(["npm", "prefix", "-g"], capture_output=True, text=True, timeout=10)
+            _PI_NPM_PREFIX_CACHE = result.stdout.strip() if result.returncode == 0 else ""
+        except (OSError, subprocess.SubprocessError):
+            _PI_NPM_PREFIX_CACHE = ""
+    return _PI_NPM_PREFIX_CACHE
+
+
 def _pi_global_executable():
-    """Use an active global Pi install when available; the wrapper owns fallback."""
+    """An installed global Pi, whether or not its bin directory is on PATH.
+
+    A session started from Finder or by the installer does not inherit the
+    shell PATH that nvm/fnm/npm-global rely on, so `which` alone reported no
+    Pi on machines that run it fine from a terminal.
+    """
     candidate = shutil.which("pi")
     if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
         return candidate
+    prefix = _npm_global_prefix()
+    if prefix:
+        candidate = os.path.join(prefix, "bin", "pi")
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
     return ""
 
 
