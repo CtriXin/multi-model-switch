@@ -116,7 +116,11 @@ export function readQueue(
   };
 }
 
-/** Where an item lands after one step, or null when it cannot move that way. */
+/** Where an item lands after one step, or null when it cannot move that way.
+ *
+ *  Every steer is delivered before every follow-up whatever the order says, so
+ *  a message only moves among its own kind; at the boundary there is nowhere
+ *  left to go. */
 export function moveTarget(
   items: PendingMessage[],
   id: string,
@@ -124,9 +128,9 @@ export function moveTarget(
 ): { id: string; toIndex: number } | null {
   const from = items.findIndex((item) => item.id === id);
   if (from < 0) return null;
-  const toIndex = from + direction;
-  if (toIndex < 0 || toIndex >= items.length) return null;
-  return { id, toIndex };
+  for (let toIndex = from + direction; toIndex >= 0 && toIndex < items.length; toIndex += direction)
+    if (items[toIndex].mode === items[from].mode) return { id, toIndex };
+  return null;
 }
 
 /** What happened to a message the user already sent. */
@@ -180,21 +184,17 @@ export function steerLinks(events: SessionEvent[]): SteerLink[] {
       continue;
     const sentAt = Date.parse(steer.createdAt);
     if (Number.isNaN(sentAt)) continue;
-    // The answer that was already being written when the steer was queued: Pi
-    // delivers it into that same run, before the next model request.
-    const inFlight = [...answers]
-      .reverse()
-      .find((answer) => {
-        const started = Date.parse(answer.createdAt);
-        if (Number.isNaN(started) || started > sentAt) return false;
-        const ended = Date.parse(answer.updatedAt || "");
-        return answer.status === "running" || Number.isNaN(ended) || ended > sentAt;
-      });
-    if (!inFlight) continue;
-    const existing = links.get(inFlight.id);
+    // Pi delivers a steer before the next model request, so it shapes the next
+    // answer, not the text already on screen when it was sent.
+    const next = answers.find((answer) => {
+      const started = Date.parse(answer.createdAt);
+      return !Number.isNaN(started) && started > sentAt;
+    });
+    if (!next) continue;
+    const existing = links.get(next.id);
     if (existing?.confirmed) continue;
-    links.set(inFlight.id, {
-      assistantId: inFlight.id,
+    links.set(next.id, {
+      assistantId: next.id,
       steerIds: [...(existing?.steerIds || []), steer.id],
       confirmed: false,
     });

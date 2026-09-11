@@ -81,12 +81,25 @@ test('malformed queue entries are dropped rather than rendered as blanks', () =>
 });
 
 test('a queued message moves one step and stops at the ends', () => {
- const items = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+ const items = ['a', 'b', 'c'].map(id => ({ id, mode: 'followUp' }));
  assert.deepEqual(moveTarget(items, 'b', -1), { id: 'b', toIndex: 0 });
  assert.deepEqual(moveTarget(items, 'b', 1), { id: 'b', toIndex: 2 });
  assert.equal(moveTarget(items, 'a', -1), null);
  assert.equal(moveTarget(items, 'c', 1), null);
  assert.equal(moveTarget(items, 'missing', 1), null);
+});
+
+test('a message only moves among its own kind, because lanes fix the rest', () => {
+ const items = [
+  { id: 's1', mode: 'steer' },
+  { id: 'f1', mode: 'followUp' },
+  { id: 'f2', mode: 'followUp' },
+ ];
+ // The only follow-up above f1 is a steer, which is delivered first no matter
+ // what the order says, so there is nowhere for f1 to go.
+ assert.equal(moveTarget(items, 'f1', -1), null);
+ assert.deepEqual(moveTarget(items, 'f1', 1), { id: 'f1', toIndex: 2 });
+ assert.equal(moveTarget(items, 's1', 1), null);
 });
 
 test('a queued message says when it will be delivered, by the mode it was sent with', () => {
@@ -114,27 +127,28 @@ test('the service is believed about which answer a steer changed', () => {
  assert.match(steerBadge(links[0]), /按你的引导调整过/);
 });
 
-test('without the service saying so, the page claims only what the timeline proves', () => {
+test('without the service saying so, the page credits the answer that came next', () => {
  const links = steerLinks([
   { id: 'a1', kind: 'assistant', createdAt: '2026-09-11T10:00:00Z', status: 'running' },
   { id: 'u1', kind: 'user', mode: 'steer', createdAt: '2026-09-11T10:00:30Z', status: 'queued' },
+  { id: 'a2', kind: 'assistant', createdAt: '2026-09-11T10:01:00Z' },
  ]);
- assert.deepEqual(links, [{ assistantId: 'a1', steerIds: ['u1'], confirmed: false }]);
+ assert.deepEqual(links, [{ assistantId: 'a2', steerIds: ['u1'], confirmed: false }]);
  assert.match(steerBadge(links[0]), /生成过程中收到你的引导/);
  assert.doesNotMatch(steerBadge(links[0]), /调整过/);
 });
 
-test('an answer that was already finished is not blamed on a later steer', () => {
+test('the answer already on screen when the steer was sent is not the one it changed', () => {
  assert.deepEqual(steerLinks([
-  { id: 'a1', kind: 'assistant', createdAt: '2026-09-11T10:00:00Z', updatedAt: '2026-09-11T10:00:10Z', status: 'done' },
+  { id: 'a1', kind: 'assistant', createdAt: '2026-09-11T10:00:00Z', status: 'running' },
   { id: 'u1', kind: 'user', mode: 'steer', createdAt: '2026-09-11T10:00:30Z' },
  ]), []);
 });
 
 test('a steer that never reached the session marks nothing', () => {
  const events = mode => [
-  { id: 'a1', kind: 'assistant', createdAt: '2026-09-11T10:00:00Z', status: 'running' },
   { id: 'u1', kind: 'user', mode: 'steer', createdAt: '2026-09-11T10:00:30Z', status: mode },
+  { id: 'a1', kind: 'assistant', createdAt: '2026-09-11T10:01:00Z' },
  ];
  for (const status of ['cancelled', 'error', 'failed', 'interrupted'])
   assert.deepEqual(steerLinks(events(status)), [], status);
@@ -142,28 +156,29 @@ test('a steer that never reached the session marks nothing', () => {
 
 test('an ordinary follow-up never marks an answer', () => {
  assert.deepEqual(steerLinks([
-  { id: 'a1', kind: 'assistant', createdAt: '2026-09-11T10:00:00Z', status: 'running' },
   { id: 'u1', kind: 'user', mode: 'followUp', createdAt: '2026-09-11T10:00:30Z', status: 'queued' },
   { id: 'u2', kind: 'user', createdAt: '2026-09-11T10:00:40Z', status: 'queued' },
+  { id: 'a1', kind: 'assistant', createdAt: '2026-09-11T10:01:00Z' },
  ]), []);
 });
 
 test('two steers into the same answer are counted, not stacked as separate notes', () => {
  const links = steerLinks([
-  { id: 'a1', kind: 'assistant', createdAt: '2026-09-11T10:00:00Z', status: 'running' },
   { id: 'u1', kind: 'user', mode: 'steer', createdAt: '2026-09-11T10:00:30Z' },
   { id: 'u2', kind: 'user', mode: 'steer', createdAt: '2026-09-11T10:00:40Z' },
+  { id: 'a1', kind: 'assistant', createdAt: '2026-09-11T10:01:00Z' },
  ]);
  assert.equal(links.length, 1);
  assert.deepEqual(links[0].steerIds, ['u1', 'u2']);
  assert.match(steerBadge(links[0]), /2 条/);
 });
 
-test('a steer lands in the answer that was open, not the one before it', () => {
+test('a steer credits the first answer after it, not every later one', () => {
  const links = steerLinks([
-  { id: 'a1', kind: 'assistant', createdAt: '2026-09-11T10:00:00Z', updatedAt: '2026-09-11T10:00:10Z', status: 'done' },
-  { id: 'a2', kind: 'assistant', createdAt: '2026-09-11T10:00:20Z', status: 'running' },
+  { id: 'a1', kind: 'assistant', createdAt: '2026-09-11T10:00:00Z', status: 'done' },
   { id: 'u1', kind: 'user', mode: 'steer', createdAt: '2026-09-11T10:00:30Z' },
+  { id: 'a2', kind: 'assistant', createdAt: '2026-09-11T10:00:40Z' },
+  { id: 'a3', kind: 'assistant', createdAt: '2026-09-11T10:00:50Z' },
  ]);
  assert.deepEqual(links.map(l => l.assistantId), ['a2']);
 });
