@@ -1,10 +1,13 @@
 # MMS Web UI Quickstart
 
-Web UI 是 MMS 当前最适合做教程的配置入口。它比 TUI 更适合截图、录屏和逐步解释，也更适合用 Playwright 做回归截图。
+> **这个页面已降级。** 日常配置请用 `mms web`（Pilot）：加通道、拉模型列表、改能力开关都在那里，
+> 和终端写同一个配置根。本文保留给 Pilot 尚未覆盖的部分，以及需要看旧配置页的场景。
+
+Web UI 比 TUI 更适合截图、录屏和逐步解释，也更适合用 Playwright 做回归截图。
 
 ## 启动
 
-Preview root 推荐用 `mmf`。如果保存页显示的是 `保存配置`，说明你打开的是 `mms config web` stable root；要写 `预览 DB + latest-approved bundle` 必须用 `mmf`：
+只有一个配置根 `~/.config/mms-next`，`mms` 和 `mmf` 都落在它上面，保存一律走 `写入预览 DB + 发布`：
 
 ```bash
 mmf config web

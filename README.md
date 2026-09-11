@@ -18,7 +18,7 @@
 - **一个入口启动多个 CLI**：`mms` 进入 TUI，或直接 `mms claude` / `mms codex` / `mms opencode`。
 - **一个地方管理模型来源**：provider、account、route、fallback、thinking、vision、cache-sensitive transport 都在启动前可见。
 - **隔离但可恢复**：Claude/Codex session 使用 MMS 管理的 HOME / config seed，减少污染真实全局配置，同时保留 resume。
-- **Web UI 配配置**：不想手写 TOML 时，用 `mmf config web` 添加通道、拉模型、隐藏噪音模型、预览保存计划。
+- **Web UI 配置**：加通道、拉模型、改能力开关都在 `mms web`（Pilot）里做，和终端写同一个配置根。`mmf config web` 已降级为维护入口。
 - **按 session 注入能力包**：CodeGraph、TOON、grill-me、Web automation bundle 等能力默认是 session-local，不改你的全局 hook；已移除 Caveman 与 token-saver 的内建安装。
 - **诊断优先**：在怀疑模型之前，先看 route、协议、cache、API Key、请求路径和 runtime exposure。
 
@@ -32,8 +32,11 @@ Pilot 和 `mmf config web` 是两个不同的页面，不要混：
 
 | | 打开方式 | 用来做什么 |
 |---|---|---|
-| MMS Pilot | `mms web --open` | 日常干活：开会话、选模型和通道、管工作文件夹、看执行过程和产出 |
-| 配置 Web UI | `mmf config web` | 配置：加通道、拉模型列表、隐藏噪音模型、生成保存预览并发布 |
+| MMS Pilot | `mms web --open` | 日常干活，以及全部日常配置：开会话、加通道、拉模型列表、改能力开关、管工作文件夹 |
+| 配置 Web UI（已降级） | `mmf config web` | 只剩 Pilot 尚未覆盖的部分：账号、偏好、Skill / MCP、迁移与人工确认动作 |
+
+Pilot 保存通道和模型后，终端读到的是同一份配置，不需要再去配置 Web UI 确认一遍。
+配置 Web UI 启动时会打印这条降级提示；它仍然可用，但不再是配置 MMS 的推荐方式。
 
 Pilot 当前的 harness 是 Pi。Claude、Codex、OpenCode、agy 仍从 MMS CLI 启动，尚未接入 Pilot 的统一会话。
 

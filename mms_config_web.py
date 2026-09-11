@@ -5568,7 +5568,7 @@ def _preferences_target_path(*, config_path: str = "", preferences_path: str = "
     paths = getattr(mms_core, "PREFERENCES_PATHS", None)
     if isinstance(paths, list) and paths:
         return os.path.abspath(os.path.expanduser(str(paths[0])))
-    return os.path.abspath(os.path.expanduser("~/.config/mms/preferences.toml"))
+    return os.path.abspath(os.path.expanduser("~/.config/mms-next/preferences.toml"))
 
 
 def _preferences_lock_path(*, config_path: str = "", preferences_path: str = "") -> str:
