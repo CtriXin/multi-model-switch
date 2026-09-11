@@ -30,6 +30,12 @@ model_short=$(echo "$model" | sed 's/ (.*//')
 # installs that predate the move left gateway homes under ~/.config/mms, so a
 # session HOME has to be matched against both names before it can be walked
 # back out to its own root.
+# `stat -f %m` is BSD only. On Linux every timestamp read as 0, so every
+# freshness check below failed and the route/health display never appeared.
+file_mtime() {
+    stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0
+}
+
 MMS_ROOT_NAMES="mms-next mms"
 
 # Echo "<config root>" when $1 sits inside a gateway session home.
@@ -93,32 +99,32 @@ pick_route_status_file() {
     if [ "$is_gateway_session" -eq 1 ]; then
         if [ "$explicit_config_root" -eq 1 ] && [ -f "$primary_user" ]; then
             local mt age
-            mt=$(stat -f %m "$primary_user" 2>/dev/null || echo 0)
+            mt=$(file_mtime "$primary_user")
             age=$(( now - mt ))
             [ "$age" -lt 600 ] && { echo "$primary_user"; return; }
         fi
         if [ -f "$primary_home" ]; then
             local mt age
-            mt=$(stat -f %m "$primary_home" 2>/dev/null || echo 0)
+            mt=$(file_mtime "$primary_home")
             age=$(( now - mt ))
             [ "$age" -lt 600 ] && { echo "$primary_home"; return; }
         fi
         if [ "$explicit_config_root" -ne 1 ] && [ -f "$primary_user" ]; then
             local mt age
-            mt=$(stat -f %m "$primary_user" 2>/dev/null || echo 0)
+            mt=$(file_mtime "$primary_user")
             age=$(( now - mt ))
             [ "$age" -lt 600 ] && { echo "$primary_user"; return; }
         fi
     else
         if [ -f "$primary_user" ]; then
             local mt age
-            mt=$(stat -f %m "$primary_user" 2>/dev/null || echo 0)
+            mt=$(file_mtime "$primary_user")
             age=$(( now - mt ))
             [ "$age" -lt 600 ] && { echo "$primary_user"; return; }
         fi
         if [ -f "$primary_home" ]; then
             local mt age
-            mt=$(stat -f %m "$primary_home" 2>/dev/null || echo 0)
+            mt=$(file_mtime "$primary_home")
             age=$(( now - mt ))
             [ "$age" -lt 600 ] && { echo "$primary_home"; return; }
         fi
@@ -130,7 +136,7 @@ pick_route_status_file() {
     for p in "$primary_user" "$primary_home"; do
         if [ -f "$p" ]; then
             local mt
-            mt=$(stat -f %m "$p" 2>/dev/null || echo 0)
+            mt=$(file_mtime "$p")
             if [ "$mt" -gt "$best_mtime" ]; then
                 best_mtime="$mt"
                 best_path="$p"
@@ -141,7 +147,7 @@ pick_route_status_file() {
     if [ -d "$gateway_sessions" ]; then
         while IFS= read -r p; do
             local mt
-            mt=$(stat -f %m "$p" 2>/dev/null || echo 0)
+            mt=$(file_mtime "$p")
             if [ "$mt" -gt "$best_mtime" ]; then
                 best_mtime="$mt"
                 best_path="$p"
@@ -156,7 +162,7 @@ pick_route_status_file() {
 _ROUTE_STATUS="${MMS_ROUTE_STATUS_PATH:-$(pick_route_status_file)}"
 route_tag=""
 if mms_root_from_gateway_path "$HOME" >/dev/null && [ -n "$_ROUTE_STATUS" ] && [ -f "$_ROUTE_STATUS" ]; then
-    route_age=$(( $(date +%s) - $(stat -f %m "$_ROUTE_STATUS" 2>/dev/null || echo 0) ))
+    route_age=$(( $(date +%s) - $(file_mtime "$_ROUTE_STATUS") ))
     if [ "$route_age" -lt 600 ]; then
         r_model=$(jq -r '.model // empty' "$_ROUTE_STATUS" 2>/dev/null)
         r_ctx=$(jq -r '.context_window_tokens // .context_window_size // empty' "$_ROUTE_STATUS" 2>/dev/null)
@@ -174,7 +180,7 @@ fi
 health_icon=""
 _HEALTH_CACHE="$(mms_config_root)/health-cache.json"
 if [ -f "$_HEALTH_CACHE" ]; then
-    h_age=$(( $(date +%s) - $(stat -f %m "$_HEALTH_CACHE" 2>/dev/null || echo 0) ))
+    h_age=$(( $(date +%s) - $(file_mtime "$_HEALTH_CACHE") ))
     if [ "$h_age" -lt 120 ]; then
         _h_model="${r_model:-$model_short}"
         _h_status=$(jq -r --arg m "$_h_model" '.records[$m].status // empty' "$_HEALTH_CACHE" 2>/dev/null)
@@ -213,7 +219,7 @@ GIT_DIFF_CACHE="${TMPDIR}claude-statusline-gitdiff"
 git_diff_info=""
 if [ -n "$cwd" ] && [ -d "$cwd" ]; then
     now_s=$(date +%s)
-    cache_mt=$(stat -f %m "$GIT_DIFF_CACHE" 2>/dev/null || echo 0)
+    cache_mt=$(file_mtime "$GIT_DIFF_CACHE")
     if [ $(( now_s - cache_mt )) -gt 5 ]; then
         stat_line=$(git -C "$cwd" diff --stat 2>/dev/null | tail -1)
         echo "$stat_line" > "$GIT_DIFF_CACHE"
@@ -298,7 +304,7 @@ USAGE_LOCK="${TMPDIR}claude-usage-cache.lock"
 
 _refresh_usage_bg() {
     if [ -f "$USAGE_LOCK" ]; then
-        lock_age=$(( $(date +%s) - $(stat -f %m "$USAGE_LOCK" 2>/dev/null || echo 0) ))
+        lock_age=$(( $(date +%s) - $(file_mtime "$USAGE_LOCK") ))
         [ "$lock_age" -lt 30 ] && return
         rm -f "$USAGE_LOCK"
     fi
@@ -338,7 +344,7 @@ fmt_resets() {
 
 usage_info=""
 if [ -f "$USAGE_CACHE" ]; then
-    cache_age=$(( $(date +%s) - $(stat -f %m "$USAGE_CACHE" 2>/dev/null || echo 0) ))
+    cache_age=$(( $(date +%s) - $(file_mtime "$USAGE_CACHE") ))
     if [ "$cache_age" -lt 600 ]; then
         u_raw=$(jq -r '.five_hour.utilization // empty' "$USAGE_CACHE" 2>/dev/null)
         u_reset=$(jq -r '.five_hour.resets_at // empty' "$USAGE_CACHE" 2>/dev/null)
