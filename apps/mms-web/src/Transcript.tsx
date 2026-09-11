@@ -76,7 +76,7 @@ export function Transcript({forced, report, ...props}: Props & {
   const events = props.detail.events.filter(e => e.id !== "n-web-mode" &&
     !(e.kind === "notice" && e.text === "会话已通过 MMS 启动路径创建") &&
     !(e.kind === "assistant" && !e.text.trim() && !e.thinking?.trim()));
-  const pending = events.filter(e => e.kind === "user" && ["queued", "cancelled", "error"].includes(e.status || ""));
+  const pending = events.filter(e => e.kind === "user" && ["queued", "cancelled", "error", "failed", "interrupted"].includes(e.status || ""));
   const turns: SessionEvent[][] = [];
   for (const event of events.filter(e => !pending.includes(e))) {
     if (!turns.length || event.kind === "user") turns.push([]);

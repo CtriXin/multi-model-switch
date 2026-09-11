@@ -114,7 +114,20 @@ export interface SessionEvent {
   kind: "user" | "assistant" | "tool" | "approval" | "notice";
   text: string;
   title?: string;
-  status?: "running" | "done" | "error" | "queued" | "cancelled";
+  status?:
+    | "running"
+    | "done"
+    | "queued"
+    /** Pi consumed the queued message. */
+    | "delivered"
+    /** The send was rejected; the message never ran. */
+    | "failed"
+    /** Stop removed it from the queue mid-turn. */
+    | "interrupted"
+    /** The user cleared the queue, or a resume invalidated it. */
+    | "cancelled"
+    /** What a failed send was called before the states were split apart. */
+    | "error";
   approvalId?: string;
   decision?: "allow" | "deny";
   method?: "confirm" | "select" | "input" | "editor";
@@ -187,6 +200,9 @@ export interface Runtime {
   pendingMessageCount?: number;
   /** Queue text only, in delivery order, with no ids: readable, not editable. */
   queue?: string[];
+  /** The same queue split by lane. Steering is delivered first. */
+  queueSteering?: string[];
+  queueFollowUp?: string[];
   /** The same queue with stable ids and per-message mode, when the service
    *  reports it. Preferred over `queue` whenever present. */
   pending?: PendingMessage[];

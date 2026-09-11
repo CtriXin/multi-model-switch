@@ -1,35 +1,36 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
- availableSendModes,
  deliveryLabel,
  moveTarget,
  readQueue,
- resolveSendMode,
  steerBadge,
  steerLinks,
+ wireMode,
 } from '../src/message-control.ts';
 
-const modes = (running, caps) => availableSendModes(running, caps).map(o => o.mode);
-
-test('an idle session sends directly and offers nothing else', () => {
- assert.deepEqual(modes(false, { steer: true }), ['direct']);
- assert.deepEqual(modes(false), ['direct']);
+test('the page-only "direct" never reaches the service, which rejects it', () => {
+ assert.equal(wireMode('direct'), undefined);
+ assert.equal(wireMode('followUp'), 'followUp');
+ assert.equal(wireMode('steer'), 'steer');
 });
 
-test('a running session queues, and only offers steering when the service takes it', () => {
- assert.deepEqual(modes(true), ['followUp']);
- assert.deepEqual(modes(true, {}), ['followUp']);
- assert.deepEqual(modes(true, { steer: false }), ['followUp']);
- assert.deepEqual(modes(true, { steer: true }), ['followUp', 'steer']);
+test('the queue is read lane by lane, steering first, because that is the delivery order', () => {
+ const view = readQueue({
+  pendingMessageCount: 3,
+  queue: ['改用另一个文件', '先补一段说明', '最后总结'],
+  queueSteering: ['改用另一个文件'],
+  queueFollowUp: ['先补一段说明', '最后总结'],
+ });
+ assert.deepEqual(view.items.map(i => i.mode), ['steer', 'followUp', 'followUp']);
+ assert.deepEqual(view.items.map(i => i.text), ['改用另一个文件', '先补一段说明', '最后总结']);
+ assert.equal(view.manageable, false);
+ assert.equal(view.unlisted, 0);
 });
 
-test('a steer the service cannot deliver falls back to the queue instead of being sent anyway', () => {
- assert.equal(resolveSendMode('steer', true, { steer: true }), 'steer');
- assert.equal(resolveSendMode('steer', true, {}), 'followUp');
- assert.equal(resolveSendMode('steer', false, { steer: true }), 'direct');
- assert.equal(resolveSendMode(undefined, true, { steer: true }), 'followUp');
- assert.equal(resolveSendMode(undefined, false), 'direct');
+test('one empty lane does not hide the other', () => {
+ assert.deepEqual(readQueue({ queueSteering: [], queueFollowUp: ['一'] }).items.map(i => i.mode), ['followUp']);
+ assert.deepEqual(readQueue({ queueSteering: ['一'], queueFollowUp: [] }).items.map(i => i.mode), ['steer']);
 });
 
 test('queued messages with ids can be managed only when the service serves /queue', () => {
@@ -52,7 +53,7 @@ test('queued messages with ids can be managed only when the service serves /queu
  assert.match(unmanaged.note, /只能整队清空/);
 });
 
-test('a service that reports only queue text is read, not edited', () => {
+test('a service that reports only one flat queue is read, not edited', () => {
  const view = readQueue({ pendingMessageCount: 2, queue: ['一', '二'] }, { queueControl: true });
  assert.deepEqual(view.items.map(i => i.text), ['一', '二']);
  assert.deepEqual(view.items.map(i => i.mode), ['followUp', 'followUp']);
@@ -94,10 +95,13 @@ test('a queued message says when it will be delivered, by the mode it was sent w
  assert.equal(deliveryLabel({ status: 'queued' }), '排队中，尚未执行');
 });
 
-test('a message that never ran says so, and an unconfirmed send is not called delivered', () => {
+test('a message that never ran says so, and each way of not running reads differently', () => {
  assert.equal(deliveryLabel({ status: 'cancelled', mode: 'steer' }), '已取消，未执行');
+ assert.equal(deliveryLabel({ status: 'interrupted', mode: 'steer' }), '已被停止打断，未执行');
+ assert.equal(deliveryLabel({ status: 'failed', mode: 'steer' }), '发送失败，未执行');
  assert.equal(deliveryLabel({ status: 'error', mode: 'steer' }), '发送失败，未执行');
  assert.equal(deliveryLabel({ status: 'queued', mode: 'steer', contextUsage: { state: 'uncertain' } }), '发送结果待确认');
+ assert.equal(deliveryLabel({ status: 'delivered', mode: 'followUp' }), '');
  assert.equal(deliveryLabel({ status: 'done', mode: 'followUp' }), '');
 });
 
@@ -132,8 +136,8 @@ test('a steer that never reached the session marks nothing', () => {
   { id: 'a1', kind: 'assistant', createdAt: '2026-09-11T10:00:00Z', status: 'running' },
   { id: 'u1', kind: 'user', mode: 'steer', createdAt: '2026-09-11T10:00:30Z', status: mode },
  ];
- assert.deepEqual(steerLinks(events('cancelled')), []);
- assert.deepEqual(steerLinks(events('error')), []);
+ for (const status of ['cancelled', 'error', 'failed', 'interrupted'])
+  assert.deepEqual(steerLinks(events(status)), [], status);
 });
 
 test('an ordinary follow-up never marks an answer', () => {

@@ -23,9 +23,10 @@ export function loadLabel(item: { loadState?: string; invoked?: boolean; partial
 export function ContextUsage({ event }: { event: SessionEvent }) {
   const usage = event.contextUsage;
   if (!usage) return null;
-  const label = usage.state === "uncertain" ? "发送结果待确认" : event.status === "cancelled" ? "已取消" : event.status === "queued" ? deliveryLabel(event) :
+  const undelivered = ["queued", "cancelled", "failed", "interrupted", "error"];
+  const label = usage.state === "uncertain" ? "发送结果待确认" : undelivered.includes(event.status || "") ? deliveryLabel(event) :
     ({ prepared: "已准备", submitted: "已提交", failed: "发送失败", uncertain: "发送结果待确认" })[usage.state];
-  const submitted = usage.state === "submitted" && event.status !== "queued" && event.status !== "cancelled";
+  const submitted = usage.state === "submitted" && !undelivered.includes(event.status || "");
   if (!usage.items.length) {
     return submitted ? null : <p className="context-delivery-status" role="status">{label}</p>;
   }

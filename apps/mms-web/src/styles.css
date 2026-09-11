@@ -2834,9 +2834,42 @@ dialog:has(.dialog-body.sheet) .dialog-body.sheet > header {
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 9px 12px 10px;
-  margin-bottom: 8px;
   background: var(--surface);
 }
+/* Rides on top of the input, inside the same frame, so acting on a queued
+   message is one glance from where it was typed. */
+.message-queue-dock {
+  background: var(--soft);
+  border-color: transparent;
+  margin: -4px 0 12px;
+}
+.composer.collapsed .message-queue-dock {
+  display: none;
+}
+/* One line each: this is an index of what is waiting, not a second copy of the
+   messages the transcript already shows in full. */
+.message-queue-dock .message-queue-items p {
+  -webkit-line-clamp: 1;
+}
+.queue-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  background: none;
+  padding: 3px 6px;
+  border-radius: 6px;
+  color: var(--muted);
+  font: inherit;
+  font-size: max(11px, 0.7857rem);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.queue-action:hover:not(:disabled) {
+  background: var(--surface);
+  color: var(--ink);
+}
+
 /* Inside the runtime panel it is one section among many, so it drops the frame
    and uses the same rule the other sections use. */
 .message-queue-panel {
@@ -2864,11 +2897,7 @@ dialog:has(.dialog-body.sheet) .dialog-body.sheet > header {
   color: var(--muted);
   font-size: max(11px, 0.7857rem);
 }
-/* Above the input this is an index of what is waiting, not a second copy of
-   the messages the transcript already shows in full. */
-.message-queue-controls .message-queue-items p {
-  -webkit-line-clamp: 1;
-}
+
 .message-queue-clear {
   border: 0;
   background: none;
@@ -2930,60 +2959,6 @@ dialog:has(.dialog-body.sheet) .dialog-body.sheet > header {
 /* Never block the text it sits beside once it has nothing left to offer. */
 .queue-item-actions .icon-button:disabled {
   opacity: 0.35;
-}
-
-/* Chosen delivery for the next message, next to the send button. */
-.send-mode-trigger {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  border: 1px solid var(--line);
-  background: var(--surface);
-  color: var(--muted);
-  border-radius: 8px;
-  padding: 5px 7px 5px 9px;
-  font: inherit;
-  font-size: max(11px, 0.7857rem);
-  cursor: pointer;
-  flex-shrink: 0;
-}
-.send-mode-trigger:hover {
-  color: var(--ink);
-}
-.send-mode-menu {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.send-mode {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  text-align: start;
-  border: 0;
-  background: none;
-  border-radius: 7px;
-  padding: 8px 9px;
-  font: inherit;
-  cursor: pointer;
-}
-.send-mode:hover {
-  background: var(--soft);
-}
-.send-mode.active {
-  background: var(--selected);
-}
-.send-mode strong {
-  font-size: max(12px, 0.9286rem);
-  font-weight: 600;
-}
-.send-mode span {
-  color: var(--muted);
-  font-size: max(11px, 0.7857rem);
-  line-height: 1.6;
-}
-.send-mode.danger strong {
-  color: var(--danger);
 }
 
 /* Says a steering message reached this turn. It never claims the answer

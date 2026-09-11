@@ -12,70 +12,46 @@
  *
  *  So the page can only offer what the local service exposes:
  *
- *    POST /sessions/{id}/messages   { ...,  mode: "direct" | "followUp" | "steer" }
- *        `mode` is always sent. A service that ignores it still behaves the way
- *        the page describes, because "steer" is offered only under the
- *        capability below.
- *    POST /sessions/{id}/queue      { action: "remove", id }
- *                                   { action: "move",   id, toIndex }
- *        Returns the session detail, like every other mutation.
+ *    POST /sessions/{id}/messages   { ...,  mode: "followUp" | "steer" }
+ *        `direct` is the page's word for "the session is idle, so this starts
+ *        a turn". It is not a wire value and is left out of the request: the
+ *        service rejects anything that is not one of the two above.
  *
- *    session.capabilities.steer         the service accepts mode: "steer"
+ *    session.capabilities.steer   the service accepts mode: "steer"
+ *    runtime.queueSteering / runtime.queueFollowUp
+ *        the pending queue split by lane, in delivery order — steering goes
+ *        first. Text only: Pi reports no ids for queued messages.
+ *    event.status   queued | delivered | failed | interrupted | cancelled
+ *
+ *  That is what the service serves today. These are not served, and the page
+ *  stays quiet without them rather than guessing:
+ *
+ *    POST /sessions/{id}/queue          { action: "remove", id }
+ *                                       { action: "steer",  id }
+ *                                       { action: "move",   id, toIndex }
+ *        "steer" promotes a waiting follow-up into the steering lane. It is
+ *        the only way the page offers to redirect work in flight, so without
+ *        this route steering is unreachable from the page.
  *    session.capabilities.queueControl  the service serves /queue
- *    runtime.pending                    queued messages with stable ids and mode
+ *    runtime.pending                    queued messages with stable ids
+ *    event.mode                         how this user message was sent
+ *    event.steeredBy                    which steers reached this answer
  *
- *  Every one of those is optional and absent means "not supported". Until the
- *  service grows them the page keeps the honest subset — queue reading, whole
- *  queue clearing, delivery state — and never shows a control that would
- *  silently do something else. Fake buttons are the documented anti-pattern in
+ *  Pi has no per-item delete or reorder, so /queue has to be "clear the queue,
+ *  then re-enqueue what is kept, in order" on the service side. Until it
+ *  exists the page offers whole-queue clearing only. Every field above is
+ *  optional and absent means "not supported": no control appears that would
+ *  silently do something else, which is the anti-pattern named in
  *  `docs/AGENT_GUARDRAILS.md`.
  */
 import type { PendingMessage, Runtime, SendMode, SessionEvent } from "./types";
 
-export interface SendModeOption {
-  mode: SendMode;
-  label: string;
-  /** What the user is promising the session, in delivery terms. */
-  description: string;
-}
-
-const DIRECT: SendModeOption = {
-  mode: "direct",
-  label: "发送",
-  description: "会话空闲，这条消息直接开始新一轮。",
-};
-const FOLLOW_UP: SendModeOption = {
-  mode: "followUp",
-  label: "排队补充",
-  description: "等当前这一轮完全结束后再送达，不改变正在进行的工作。",
-};
-const STEER: SendModeOption = {
-  mode: "steer",
-  label: "立即引导",
-  description:
-    "当前这批工具调用跑完、下一次模型请求之前送达。它不会中途截断已经生成的内容；要真正结束这一轮请用停止。",
-};
-
-/** The delivery choices this session can actually honour right now. */
-export function availableSendModes(
-  running: boolean,
-  capabilities?: { steer?: boolean },
-): SendModeOption[] {
-  if (!running) return [DIRECT];
-  return capabilities?.steer ? [FOLLOW_UP, STEER] : [FOLLOW_UP];
-}
-
-/** Keeps a remembered choice legal: a session that stopped running sends
- *  directly, and a steer the service cannot deliver falls back to the queue. */
-export function resolveSendMode(
-  chosen: SendMode | undefined,
-  running: boolean,
-  capabilities?: { steer?: boolean },
-): SendMode {
-  const options = availableSendModes(running, capabilities);
-  return options.some((option) => option.mode === chosen)
-    ? (chosen as SendMode)
-    : options[0].mode;
+/** What actually goes on the request. The page's `direct` has no wire form:
+ *  an idle session starts a turn, which is what the service does with no mode
+ *  at all, and it rejects "direct" outright. A busy session always queues; a
+ *  message becomes a steer afterwards, through the queue, not on the way out. */
+export function wireMode(mode: SendMode): "followUp" | "steer" | undefined {
+  return mode === "direct" ? undefined : mode;
 }
 
 export interface QueueView {
@@ -89,7 +65,7 @@ export interface QueueView {
   note: string;
 }
 
-const LEGACY_NOTE = "当前本地服务只报告了队列文字，没有逐条编号，只能整队清空。";
+const LEGACY_NOTE = "本地服务只报告了队列文字，没有逐条编号，因此只能整队清空。";
 const UNMANAGEABLE_NOTE = "当前本地服务不支持逐条删除或调整顺序，只能整队清空。";
 
 /** Reads the queue out of whatever shape the service reports. */
@@ -120,16 +96,23 @@ export function readQueue(
       note: manageable || !items.length ? "" : UNMANAGEABLE_NOTE,
     };
   }
-  const texts = Array.isArray(runtime?.queue) ? runtime.queue : [];
-  return {
-    items: texts.map((text, index) => ({
-      id: `legacy:${index}`,
+  const lane = (texts: unknown, mode: "followUp" | "steer") =>
+    (Array.isArray(texts) ? texts : []).map((text, index) => ({
+      id: `${mode}:${index}`,
       text: String(text),
-      mode: "followUp" as const,
-    })),
+      mode,
+    }));
+  // Steering is delivered before follow-ups, so it is listed first.
+  const lanes = [
+    ...lane(runtime?.queueSteering, "steer"),
+    ...lane(runtime?.queueFollowUp, "followUp"),
+  ];
+  const items = lanes.length ? lanes : lane(runtime?.queue, "followUp");
+  return {
+    items,
     manageable: false,
-    unlisted: Math.max(0, counted - texts.length),
-    note: texts.length ? LEGACY_NOTE : "",
+    unlisted: Math.max(0, counted - items.length),
+    note: items.length ? LEGACY_NOTE : "",
   };
 }
 
@@ -149,7 +132,11 @@ export function moveTarget(
 /** What happened to a message the user already sent. */
 export function deliveryLabel(event: SessionEvent): string {
   if (event.status === "cancelled") return "已取消，未执行";
-  if (event.status === "error") return "发送失败，未执行";
+  if (event.status === "interrupted") return "已被停止打断，未执行";
+  // "error" is what the service called a failed send before it split the
+  // delivery states apart; both still mean the message never ran.
+  if (event.status === "failed" || event.status === "error")
+    return "发送失败，未执行";
   if (event.contextUsage?.state === "uncertain") return "发送结果待确认";
   if (event.status !== "queued") return "";
   if (event.mode === "steer")
@@ -189,7 +176,8 @@ export function steerLinks(events: SessionEvent[]): SteerLink[] {
   const answers = events.filter((event) => event.kind === "assistant");
   for (const steer of events) {
     if (steer.kind !== "user" || steer.mode !== "steer") continue;
-    if (steer.status === "cancelled" || steer.status === "error") continue;
+    if (["cancelled", "error", "failed", "interrupted"].includes(steer.status || ""))
+      continue;
     const sentAt = Date.parse(steer.createdAt);
     if (Number.isNaN(sentAt)) continue;
     // The answer that was already being written when the steer was queued: Pi

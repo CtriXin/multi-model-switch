@@ -5,14 +5,12 @@ import type { FormEvent, ReactNode, RefObject } from "react";
 import {
   CircleAlert,
   ArrowUp,
-  ChevronDown,
   BookOpen,
   AtSign,
   ImagePlus,
   LoaderCircle,
   Paperclip,
   Plus,
-  Send,
   Square,
   Terminal,
   X,
@@ -23,7 +21,6 @@ import type { Skill } from "./SkillPicker";
 import { request } from "./api";
 import { SKILL_PREFERENCES_EVENT } from "./SkillSources";
 import type { Attachment, FileSelection, Workspace, SendMode } from "./types";
-import { availableSendModes, resolveSendMode } from "./message-control";
 import { FilesPanel } from "./FilesPanel";
 import { localFilePaths } from "./local-file-paths";
 import { requiredSkillMatches } from "./recipe-core";
@@ -83,7 +80,7 @@ export function Composer({
   draftKey: providedDraftKey,
   placeholder = "继续补充你的想法…",
   scroll,
-  steerAvailable = false,
+  queue,
   enterToSend = true,
 }: {
   initialText?: string;
@@ -116,6 +113,8 @@ export function Composer({
   };
   /** Whether the service accepts a steering message on this session. */
   steerAvailable?: boolean;
+  /** Messages waiting to be delivered, docked on top of the input. */
+  queue?: ReactNode;
   enterToSend?: boolean;
 }) {
   const draftKey =
@@ -178,15 +177,9 @@ export function Composer({
   });
   const [fileSelections, setFileSelections] = useState<FileSelection[]>(draft?.fileSelections || []);
   const [submitting, setSubmitting] = useState(false);
-  // Remembered only until it is used: steering is a deliberate act, so the next
-  // message goes back to the safe default rather than inheriting the choice.
-  const [chosenMode, setChosenMode] = useState<SendMode>();
-  const sendModes = availableSendModes(!!running, { steer: steerAvailable });
-  const sendMode = resolveSendMode(chosenMode, !!running, {
-    steer: steerAvailable,
-  });
-  const activeMode =
-    sendModes.find((option) => option.mode === sendMode) || sendModes[0];
+  // A busy session queues; an idle one starts a turn. Redirecting the work is
+  // done on the queued message afterwards, not chosen here beforehand.
+  const sendMode: SendMode = running ? "followUp" : "direct";
   const [attachments, setAttachments] = useState<Attachment[]>(
     draft?.attachments || [],
   );
@@ -654,7 +647,6 @@ export function Composer({
         });
         if (ok) {
           discardDraft(draftKey);
-          setChosenMode(undefined);
           setText("");
           setSelectedSkills([]);
           setAttachments([]);
@@ -750,6 +742,7 @@ export function Composer({
             引用文件或文件夹
           </div>
         )}
+        {queue}
         {(attachments.filter(a => referencedInText(a)).length > 0 || references.length > 0) && (
           <div className="attachment-list">
             {attachments.filter(a => referencedInText(a)).map((a) => (
@@ -1070,61 +1063,6 @@ export function Composer({
           </div>
           <div className="composer-context">{children}</div>
           <div className="composer-actions">
-            {running && (sendModes.length > 1 || !!stop) && (
-              <Popover
-                className="send-mode-trigger"
-                title="发送方式"
-                label={
-                  <>
-                    <span>{activeMode.label}</span>
-                    <ChevronDown size={13} />
-                  </>
-                }
-              >
-                {(close) => (
-                  <div className="send-mode-menu">
-                    {sendModes.map((option) => (
-                      <button
-                        key={option.mode}
-                        type="button"
-                        className={
-                          option.mode === sendMode ? "send-mode active" : "send-mode"
-                        }
-                        aria-pressed={option.mode === sendMode}
-                        onClick={() => {
-                          setChosenMode(option.mode);
-                          close();
-                        }}
-                      >
-                        <strong>{option.label}</strong>
-                        <span>{option.description}</span>
-                      </button>
-                    ))}
-                    {!steerAvailable && (
-                      <p className="section-note">
-                        本地服务尚未提供立即引导，现在只能排队补充或停止。
-                      </p>
-                    )}
-                    {!!stop && (
-                      <button
-                        type="button"
-                        className="send-mode danger"
-                        disabled={busy}
-                        onClick={() => {
-                          close();
-                          stop();
-                        }}
-                      >
-                        <strong>停止当前执行</strong>
-                        <span>
-                          结束这一轮，已排队的消息仍会按顺序继续送达。
-                        </span>
-                      </button>
-                    )}
-                  </div>
-                )}
-              </Popover>
-            )}
             {running && stop && (
               <button
                 type="button"
@@ -1152,17 +1090,15 @@ export function Composer({
                 btwMode
                   ? "发送旁问，不打断当前任务"
                   : running
-                    ? activeMode.description
+                    ? "加入待发送队列，可在队列里改为立即引导"
                     : "发送任务"
               }
               aria-label={
-                btwMode ? "发送旁问" : running ? activeMode.label : "发送任务"
+                btwMode ? "发送旁问" : running ? "加入待发送队列" : "发送任务"
               }
             >
               {busy || submitting ? (
                 <LoaderCircle size={18} className="spin" />
-              ) : sendMode === "steer" ? (
-                <Send size={17} />
               ) : (
                 <ArrowUp size={20} />
               )}

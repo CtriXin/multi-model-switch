@@ -59,6 +59,7 @@ import { ProjectMaterials } from "./ProjectMaterials";
 import { Transcript } from "./Transcript";
 import { MessageQueue } from "./MessageQueue";
 import { SideQuestions, useSideQuestions } from "./SideQuestions";
+import { wireMode } from "./message-control";
 import { ConversationOutline } from "./ConversationOutline";
 import { CurrentActivity, sessionStatus } from "./SessionStatus";
 import { useSessionAttention } from "./SessionAttention";
@@ -2112,33 +2113,40 @@ export function App() {
                       </button>
                     </div>
                   ) : (
-                  <>
-                  <MessageQueue
-                    variant="controls"
-                    runtime={detail.runtime}
-                    capabilities={detail.session.capabilities}
-                    busy={busy}
-                    remove={(id) =>
-                      void runAction(
-                        `/sessions/${encodeURIComponent(detail.session.id)}/queue`,
-                        { action: "remove", id },
-                      )
-                    }
-                    move={(id, toIndex) =>
-                      void runAction(
-                        `/sessions/${encodeURIComponent(detail.session.id)}/queue`,
-                        { action: "move", id, toIndex },
-                      )
-                    }
-                    clear={() =>
-                      void runAction(
-                        `/sessions/${encodeURIComponent(detail.session.id)}/control`,
-                        { action: "clearQueue" },
-                      )
-                    }
-                  />
                   <Composer
                     enterToSend={enterToSend}
+                    queue={
+                      <MessageQueue
+                        variant="dock"
+                        runtime={detail.runtime}
+                        capabilities={detail.session.capabilities}
+                        busy={busy}
+                        remove={(id) =>
+                          void runAction(
+                            `/sessions/${encodeURIComponent(detail.session.id)}/queue`,
+                            { action: "remove", id },
+                          )
+                        }
+                        move={(id, toIndex) =>
+                          void runAction(
+                            `/sessions/${encodeURIComponent(detail.session.id)}/queue`,
+                            { action: "move", id, toIndex },
+                          )
+                        }
+                        steer={(id) =>
+                          void runAction(
+                            `/sessions/${encodeURIComponent(detail.session.id)}/queue`,
+                            { action: "steer", id },
+                          )
+                        }
+                        clear={() =>
+                          void runAction(
+                            `/sessions/${encodeURIComponent(detail.session.id)}/control`,
+                            { action: "clearQueue" },
+                          )
+                        }
+                      />
+                    }
                     key={detail.session.id}
                     selectionRequest={selectionRequest?.sessionId === detail.session.id ? selectionRequest : undefined}
                     selectionHandled={() => setSelectionRequest(undefined)}
@@ -2211,13 +2219,12 @@ export function App() {
                     }
                     busy={busy}
                     running={detail.session.state === "running"}
-                    steerAvailable={!!detail.session.capabilities.steer}
-                    send={(text, extras) =>
+                    send={(text, { mode, ...extras }) =>
                       runAction(
                         "/sessions/" +
                           encodeURIComponent(detail.session.id) +
                           "/messages",
-                        { text, ...extras },
+                        { text, ...extras, ...(wireMode(mode) ? { mode: wireMode(mode) } : {}) },
                       )
                     }
                     stop={
@@ -2244,7 +2251,6 @@ export function App() {
                       }}
                     />
                   </Composer>
-                  </>
                   )}
                 </div>
               )}
