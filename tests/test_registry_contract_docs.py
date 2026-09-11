@@ -225,23 +225,15 @@ def test_mmf_v2_docs_record_current_preview_boundaries() -> None:
 def test_public_readmes_explain_config_v2_preview_gate() -> None:
     text = _readme_text()
 
+    # #177 retired the preview -> stable promotion this list used to describe.
+    # What the READMEs owe a reader now is the single root and where runtime
+    # truth comes from.
     required_terms = [
-        "Config V2 Preview Root",
-        "mms -> ~/.config/mms",
-        "mmf -> ~/.config/mms-next",
-        "mmf preview doctor --json",
-        "mmf preview prepare --from ~/.config/mms --include-secrets --json",
-        "mmf config bundle --json",
+        "~/.config/mms-next",
+        "legacy `~/.config/mms`",
+        "不再被任何入口读取",
+        "预览 DB",
         "generated/model-registry.latest-approved.json",
-        "mms migrate config-v2 --json",
-        "mms config release-readiness --json",
-        "apply_enabled=false",
-        "READY_FOR_4_0_HUMAN_GATE",
-        "release_complete=false",
-        "stable_root_human_only",
-        "promotion_apply_not_implemented",
-        "silent fallback",
-        "Claude config",
     ]
 
     missing = [term for term in required_terms if term not in text]
@@ -307,12 +299,9 @@ def test_architecture_images_show_latest_approved_bundle_not_legacy_route_truth(
 def test_readmes_describe_registry_v2_profile_boundary() -> None:
     text = _readme_text()
 
+    # The English half of this list went away when the READMEs became Chinese.
+    # The boundary it guards did not.
     required_terms = [
-        "Registry v2 is the preferred path for local changes",
-        "TUI / `mms config` / WebUI",
-        "creates DB candidates",
-        "`generated/model-registry.latest-approved.json` bundle",
-        "generated Profile it references is the runtime boundary",
         "本地修改优先走 Registry v2",
         "TUI / `mms config` / WebUI 先创建 DB candidate",
         "它引用的 generated Profile 就是 runtime boundary",

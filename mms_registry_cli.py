@@ -1383,24 +1383,20 @@ def config_v2_release_readiness(
             "public_readme_preview_docs",
             ROOT / "README.md",
             [
-                "Config V2 Preview Root",
-                "mms -> ~/.config/mms",
-                "mmf -> ~/.config/mms-next",
-                "mms migrate config-v2 --json",
-                "apply_enabled=false",
-                "Claude config",
+                "~/.config/mms-next",
+                "legacy `~/.config/mms`",
+                "不再被任何入口读取",
+                "预览 DB",
             ],
         ),
         _docs_terms_requirement(
             "public_readme_zh_preview_docs",
             ROOT / "README.zh-CN.md",
             [
-                "Config V2 Preview Root",
-                "mms -> ~/.config/mms",
-                "mmf -> ~/.config/mms-next",
-                "mms migrate config-v2 --json",
-                "apply_enabled=false",
-                "Claude config",
+                "~/.config/mms-next",
+                "legacy `~/.config/mms`",
+                "不再被任何入口读取",
+                "预览 DB",
             ],
         ),
         _docs_terms_requirement(
@@ -1444,7 +1440,7 @@ def config_v2_release_readiness(
         ),
         "notes": [
             "This audit proves readiness only up to the stable human gate.",
-            "It does not write stable ~/.config/mms/**, preview roots, DB, generated bundles, secret backends, or Claude config.",
+            "It does not write the retired ~/.config/mms tree, config roots, DB, generated bundles, secret backends, or Claude config.",
             "Do not mark the 4.0 migration complete until the human-gated stable promotion and post-promotion smoke are performed.",
         ],
     }
