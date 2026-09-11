@@ -5,6 +5,7 @@ import "./styles.css";
 import "./studio.css";
 import "./states.css";
 import "./transcript.css";
+import "./side-questions.css";
 import "./connections.css";
 import "./artifacts.css";
 import "./materials.css";

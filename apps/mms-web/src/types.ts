@@ -1,3 +1,5 @@
+import type { SideQuestion } from "./side-questions";
+
 export type Harness = "pi" | "codex" | "claude" | "opencode" | "gemini" | "agy";
 export type SessionState =
   | "running"
@@ -134,6 +136,8 @@ export interface SessionDetail {
   artifacts: Artifact[];
   artifactNotice?: string;
   runtime?: Runtime;
+  /** `/btw` records. They live beside the transcript, never inside `events`. */
+  sideQuestions?: SideQuestion[];
 }
 export interface Attachment {
   id: string;
@@ -193,6 +197,11 @@ export interface Bootstrap {
     modelSettings?: boolean;
     launch: boolean;
     discoverModels?: boolean;
+    /** `/btw` is answerable at all. State answers need no model. */
+    sideQuestions?: boolean;
+    /** A read-only sidecar model is available, so questions that need
+     *  judgement can be answered too. Without it those fail closed. */
+    sidecarCompletion?: boolean;
   };
   workspaces: Workspace[];
   models: Model[];

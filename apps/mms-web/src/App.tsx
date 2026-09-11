@@ -57,6 +57,7 @@ import type { GuideAction } from "./guide-content";
 import { ArtifactView } from "./ArtifactView";
 import { ProjectMaterials } from "./ProjectMaterials";
 import { Transcript } from "./Transcript";
+import { SideQuestions, useSideQuestions } from "./SideQuestions";
 import { ConversationOutline } from "./ConversationOutline";
 import { CurrentActivity, sessionStatus } from "./SessionStatus";
 import { useSessionAttention } from "./SessionAttention";
@@ -1008,6 +1009,9 @@ export function App() {
       setWorkspaceNotice(error instanceof Error ? error.message : "移除失败");
     }
   }
+  // `/btw` is session-owned and independent of the main task's write lock, so
+  // it keeps its own state rather than travelling through `runAction`.
+  const sideQuestions = useSideQuestions(detail?.session.id, detail?.sideQuestions);
   const signals = useSessionAttention(
     data.sessions,
     detail,
@@ -1999,6 +2003,10 @@ export function App() {
                           会话已建立。发送第一条消息开始工作。
                         </p>
                       )}
+                      <SideQuestions
+                        state={sideQuestions}
+                        sidecarAvailable={data.capabilities.sidecarCompletion}
+                      />
                     </div>
                   )}
                 </div>
@@ -2115,6 +2123,13 @@ export function App() {
                     sessionId={detail.session.id}
                     sessionAlive={!!detail.runtime?.alive}
                     scroll={scroll}
+                    sideQuestion={{
+                      ask: sideQuestions.ask,
+                      limitation:
+                        data.capabilities.sidecarCompletion === false
+                          ? "这台机器没有配置只读旁问模型。进度、耗时、最近工具、审批和队列这类状态问题可以回答；需要判断的问题会明确记为未回答。"
+                          : undefined,
+                    }}
                     onCommand={async (command, args) => {
                       if (command === "export") {
                         exportConversation(detail);
