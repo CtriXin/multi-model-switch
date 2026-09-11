@@ -29,6 +29,12 @@ INSTALL_CHANNEL="stable"
 REQUESTED_INSTALL_CHANNEL=""
 LATEST_TAG_CACHE=""
 LATEST_RELEASE_TAG_CACHE=""
+# The public default installs this exact version, not "whatever is newest".
+# Releases are cut from dev several times a day; pointing the one-liner at the
+# latest of them hands every new user code nobody has used yet. Raise this
+# after a version has been verified. MMS_INSTALL_STABLE_REF overrides it, and
+# --channel dev / --ref still reach anything else.
+STABLE_CHANNEL_REF="${MMS_INSTALL_STABLE_REF:-v4.4.0}"
 DEV_CHANNEL_REF="${MMS_INSTALL_DEV_REF:-dev}"
 CANARY_CHANNEL_REF="${MMS_INSTALL_CANARY_REF:-canary}"
 DEFAULT_INSTALL_FALLBACK_TAG="${MMS_INSTALL_FALLBACK_TAG:-v3.3.1}"
@@ -603,12 +609,17 @@ prepare_source_dir() {
 
 resolve_requested_ref() {
     local ref="$INSTALL_REF"
-    if [ -z "$ref" ] && { [ "$INSTALL_CHANNEL" = "stable" ] || [ "$INSTALL_CHANNEL" = "latest-release" ]; }; then
+    if [ -z "$ref" ] && [ "$INSTALL_CHANNEL" = "stable" ]; then
+        ref="$STABLE_CHANNEL_REF"
+        echo "✓ stable: $ref"
+        echo "  $(t "这是已验证的稳定版本。要装最新的开发版本：--channel dev；要装指定版本：--ref vX.Y.Z" "This is the verified stable version. For the newest development build use --channel dev, or --ref vX.Y.Z for a specific one.")"
+    fi
+    if [ -z "$ref" ] && [ "$INSTALL_CHANNEL" = "latest-release" ]; then
         ref="$(resolve_latest_release_tag || true)"
         if [ -n "$ref" ]; then
-            echo "✓ stable release: $ref"
+            echo "✓ latest release: $ref"
         else
-            echo "⚠ $(t "获取 stable/latest release 失败，回退到最新 tag" "Failed to fetch stable/latest release, falling back to latest tag")"
+            echo "⚠ $(t "获取 latest release 失败，回退到最新 tag" "Failed to fetch the latest release, falling back to the latest tag")"
             INSTALL_CHANNEL="latest-tag"
         fi
     fi
