@@ -192,6 +192,7 @@ class _LiveSession:
             "send": bool(alive or self.can_resume()),
             "stop": bool(alive),
             "approve": bool(alive and self.approvals),
+            "steer": bool(alive),
         }
 
     def session_view(self) -> dict:
@@ -241,11 +242,21 @@ class _LiveSession:
                 event["text"] += "\n本轮已结束，未收到此工具的完成回报。"
 
     def cancel_pending(self):
+        """Queue cleared explicitly or invalidated by resume/restart: cancelled."""
         with self.lock:
             for event_id in list(self.pending_prompts):
                 event = self.event_index.get(event_id)
                 if event and event.get("status") == "queued":
                     event["status"] = "cancelled"
+            self.pending_prompts.clear()
+
+    def interrupt_pending(self):
+        """abort/stop removed these from the Pi queue mid-turn: interrupted."""
+        with self.lock:
+            for event_id in list(self.pending_prompts):
+                event = self.event_index.get(event_id)
+                if event and event.get("status") == "queued":
+                    event["status"] = "interrupted"
             self.pending_prompts.clear()
 
     def activity_view(self) -> dict | None:
@@ -606,11 +617,23 @@ class SessionService(SessionActions, SessionSideQuestions):
         text = payload.get("text") or ("请查看附件。" if payload.get("attachments") else "")
         if not isinstance(text, str) or not text.strip():
             raise WebError("INVALID_REQUEST", "请输入消息内容。", 400)
-        op_payload = {"op": "send", "sessionId": session.meta["id"], "text": text, "skills": payload.get("skills", []), "attachments": payload.get("attachments", []), "references": payload.get("references", []), "fileSelections": payload.get("fileSelections", [])}
+        # Delivery mode: followUp (default) queues behind the current work;
+        # steer is delivered once the in-flight tool calls finish. Only
+        # stop/interrupt ends the current turn.
+        mode = str(payload.get("mode") or "followUp")
+        if mode not in {"followUp", "steer"}:
+            raise WebError("INVALID_PARAMETER", "mode 必须是 followUp 或 steer。", 400)
+        op_payload = {"op": "send", "sessionId": session.meta["id"], "text": text, "mode": mode, "skills": payload.get("skills", []), "attachments": payload.get("attachments", []), "references": payload.get("references", []), "fileSelections": payload.get("fileSelections", [])}
         with session.mutation_lock, self._request_scope(request_id, op_payload, session) as replay:
             if replay is not None:
                 with replay.lock:
                     return replay.detail_view()
+            with session.lock:
+                # A pending approval is part of the in-flight turn; steering
+                # must never jump ahead of it. Default follow-up stays queued
+                # behind the approval and is delivered after the turn settles.
+                if mode == "steer" and (session.approvals or session.state == "waiting"):
+                    raise WebError("APPROVAL_PENDING", "当前有等待你确认的问题，请先处理，再引导当前任务。", 409)
             selections = payload.get("fileSelections", [])
             if not isinstance(selections, list) or len(selections) > 4:
                 raise WebError("INVALID_SELECTION", "每条消息最多引用 4 个成果选段。", 400)
@@ -643,13 +666,16 @@ class SessionService(SessionActions, SessionSideQuestions):
                     event["status"] = "queued"
                     session.pending_prompts[event["id"]] = text + suffix
             try:
-                self._send_prompt(session, text + suffix, images=images)
+                if mode == "steer" and previous_state == "running":
+                    self._send_prompt(session, text + suffix, images=images, command="steer")
+                else:
+                    self._send_prompt(session, text + suffix, images=images)
                 context["state"] = "submitted" if session.driver else "prepared"
             except WebError as exc:
                 with session.lock:
                     context["state"] = "uncertain" if exc.code in {"RPC_TIMEOUT", "RPC_UNCONFIRMED"} else "failed"
                     session.pending_prompts.pop(event["id"], None)
-                    event["status"] = "error"
+                    event["status"] = "failed"
                     if session.last_sequence == event.get("sequence") and session.state == "running":
                         session.state = previous_state
                     session.persist(self._state_dir)
@@ -693,6 +719,15 @@ class SessionService(SessionActions, SessionSideQuestions):
             for event in session.events:
                 if event.get("kind") == "approval" and not event.get("decision"):
                     event["decision"] = "deny"
+            # A fresh process has an empty queue; anything still marked queued
+            # was invalidated by the restart of the runtime.
+            session.cancel_pending()
+            for event in session.events:
+                if event.get("kind") == "user" and event.get("status") == "queued":
+                    event["status"] = "cancelled"
+            session.meta["queue"] = []
+            session.meta["queueSteering"] = []
+            session.meta["queueFollowUp"] = []
             session.append_event({"kind": "notice", "text": "已恢复上次的上下文，可以继续工作。"}, self._now)
 
     def stop(self, session_id: str, payload: dict) -> dict:
@@ -713,7 +748,13 @@ class SessionService(SessionActions, SessionSideQuestions):
             session.stop_requested = True
             try:
                 driver.abort()
-                session.cancel_pending()
+                # abort clears the Pi queue mid-turn: those queued messages
+                # were interrupted, not merely cancelled by the user.
+                session.interrupt_pending()
+                with session.lock:
+                    session.meta["queue"] = []
+                    session.meta["queueSteering"] = []
+                    session.meta["queueFollowUp"] = []
             except DriverClosedError:
                 pass
             except RpcTimeoutError:
@@ -963,7 +1004,7 @@ class SessionService(SessionActions, SessionSideQuestions):
                 context["state"] = "submitted" if live.driver else "prepared"
             except WebError as exc:
                 context["state"] = "uncertain" if exc.code in {"RPC_TIMEOUT", "RPC_UNCONFIRMED"} else "failed"
-                event["status"] = "error"
+                event["status"] = "failed"
                 live.append_event({"kind": "notice", "text": exc.message, "status": "error"}, self._now)
         with live.lock:
             live.persist(self._state_dir)
@@ -979,12 +1020,20 @@ class SessionService(SessionActions, SessionSideQuestions):
         if images and "image" not in (session.driver.get_state().get("model") or {}).get("input", []):
             raise WebError("IMAGE_UNSUPPORTED", "当前模型不支持图片。请切换到支持图片的模型，或移除图片后重试。", 409)
 
-    def _send_prompt(self, session: _LiveSession, text: str, *, images=None) -> None:
+    def _send_prompt(self, session: _LiveSession, text: str, *, images=None, command: str = "prompt") -> None:
         driver = session.driver
         if driver is None:
             return
+        if command == "steer" and not callable(getattr(driver, "steer", None)):
+            raise WebError("CAPABILITY_UNAVAILABLE", "当前执行工具不支持立即引导。", status=409)
         try:
-            response = driver.send_prompt(text, images=images) if images else driver.send_prompt(text)
+            if command == "steer":
+                # Pi native steer: delivered after the in-flight tool calls
+                # finish. Never degrade a failed steer into a follow-up; the
+                # user asked to redirect the current work, not to queue behind it.
+                response = driver.steer(text, images=images) if images else driver.steer(text)
+            else:
+                response = driver.send_prompt(text, images=images) if images else driver.send_prompt(text)
         except DriverWriteUnconfirmedError as exc:
             raise WebError("RPC_UNCONFIRMED", "Pi 连接在写入过程中断开，发送结果待确认。请先查看会话记录。", status=502) from exc
         except DriverClosedError as exc:
@@ -994,6 +1043,8 @@ class SessionService(SessionActions, SessionSideQuestions):
         if response.get("deliveryUnconfirmed") is True:
             raise WebError("RPC_UNCONFIRMED", "Pi 在确认前断开，发送结果待确认。请先查看会话记录。", status=502)
         if response.get("success") is False:
+            if command == "steer":
+                raise WebError("STEER_FAILED", "Pi 未接受该引导消息，请查看会话状态后重试；未自动改为排队发送。", status=502)
             raise WebError("SEND_FAILED", "Pi 未接受该消息，请检查所选服务连接后重试。", status=502)
 
     # -- internals: driver callbacks -------------------------------------
@@ -1012,7 +1063,8 @@ class SessionService(SessionActions, SessionSideQuestions):
                 if event_id in session.pending_prompts:
                     session.pending_prompts.pop(event_id, None)
                     event = session.event_index[event_id]
-                    event.pop("status", None)
+                    # Pi actually consumed the queued message: delivered.
+                    event["status"] = "delivered"
                     session.events.remove(event)
                     session.last_sequence += 1
                     event["sequence"] = session.last_sequence
@@ -1054,6 +1106,10 @@ class SessionService(SessionActions, SessionSideQuestions):
                         fields["text"] = fields.get("text", "") + "\n图片超过预览限制或格式不支持。"
             if isinstance(fields.get("queue"), list):
                 session.meta["queue"] = fields["queue"]
+            if isinstance(fields.get("queueSteering"), list):
+                session.meta["queueSteering"] = fields["queueSteering"]
+            if isinstance(fields.get("queueFollowUp"), list):
+                session.meta["queueFollowUp"] = fields["queueFollowUp"]
             event = session.upsert_event(fields, self._now)
             observe_read(session, event)
             if session.artifact_history:
@@ -1122,6 +1178,18 @@ class SessionService(SessionActions, SessionSideQuestions):
             else:
                 final_state = "error"
             session.state = final_state
+            # The queue died with the process: messages still waiting there
+            # will never be delivered. Distinguish user-requested interrupts
+            # from unexpected exits.
+            stranded = "interrupted" if session.stop_requested else "failed"
+            for event_id in list(session.pending_prompts):
+                event = session.event_index.get(event_id)
+                if event and event.get("status") == "queued":
+                    event["status"] = stranded
+            session.pending_prompts.clear()
+            session.meta["queue"] = []
+            session.meta["queueSteering"] = []
+            session.meta["queueFollowUp"] = []
             session.finish_pending_tools()
             session.activity = None
             session.turn_started_at = None
@@ -1213,6 +1281,15 @@ class SessionService(SessionActions, SessionSideQuestions):
             if not isinstance(meta, dict) or not meta.get("id"):
                 continue
             live = _LiveSession(dict(meta), self._state_root)
+            # The Pi queue does not survive a service restart; never advertise
+            # stale pending messages as still queued for delivery.
+            live.meta["queue"] = []
+            live.meta["queueSteering"] = []
+            live.meta["queueFollowUp"] = []
+            runtime_view = live.meta.get("runtimeView")
+            if isinstance(runtime_view, dict):
+                for key in ("queue", "queueSteering", "queueFollowUp", "pendingMessageCount"):
+                    runtime_view.pop(key, None)
             live.events = [e for e in (payload.get("events") or []) if isinstance(e, dict)]
             for event in live.events:
                 if event.get("kind") == "user" and event.get("status") == "queued":

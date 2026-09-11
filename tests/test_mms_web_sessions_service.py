@@ -177,7 +177,7 @@ def test_launch_success_shape(tmp_path, seeded_seam):
     assert session["modelName"] == "fake-sonnet"
     assert session["providerName"] == "Fake Provider"
     assert session["state"] == "running"
-    assert session["capabilities"] == {"send": True, "stop": True, "approve": False}
+    assert session["capabilities"] == {"send": True, "stop": True, "approve": False, "steer": True}
     assert session["title"] == "帮我看一下这个问题"
     kinds = [event["kind"] for event in detail["events"]]
     assert kinds.count("user") == 1
@@ -381,7 +381,7 @@ def test_persistence_and_restart_snapshot(tmp_path, seeded_seam):
     listed = service2.list_sessions()
     assert len(listed) == 1
     assert listed[0]["state"] == "stopped", "restart must not pretend the child runs"
-    assert listed[0]["capabilities"] == {"send": False, "stop": False, "approve": False}
+    assert listed[0]["capabilities"] == {"send": False, "stop": False, "approve": False, "steer": False}
     detail2 = service2.get_session(session_id)
     texts = [e["text"] for e in detail2["events"] if e["kind"] == "user"]
     assert texts == ["第一轮", "第二轮"]

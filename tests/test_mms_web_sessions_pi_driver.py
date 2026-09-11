@@ -275,6 +275,47 @@ def test_get_state_roundtrip(make_driver):
     assert state.get("isStreaming") is False
 
 
+def test_steer_delivers_after_inflight_tool_call(make_driver):
+    driver, sink = make_driver()
+    assert driver.send_prompt("steer-tool-flow")["success"] is True
+    sink.wait_for(lambda: sink.events.get("t-call_steer_tool_1", {}).get("status") == "running")
+    response = driver.steer("redirect now")
+    assert response["success"] is True
+    assert response["command"] == "steer"
+    sink.wait_for(lambda: "idle" in sink.proto_states)
+    consumed = [e for e in sink.events.values() if e.get("consumedPrompt") == "redirect now"]
+    assert len(consumed) == 1, "steering message must be delivered exactly once"
+    # The in-flight tool call finished before the steering message arrived.
+    tool = sink.events["t-call_steer_tool_1"]
+    assert tool["status"] == "done"
+    consumed_id = next(i for i, e in sink.events.items() if e.get("consumedPrompt") == "redirect now")
+    assert sink.order.index("t-call_steer_tool_1") < sink.order.index(consumed_id)
+    assert sink.events.get("n-queue", {}).get("queue") == []
+    assistant = [i for i in sink.order if i.startswith("m-")]
+    assert sink.text_of(assistant[-1]) == "steered reply: redirect now"
+    # Steering never ends the turn; no abort was involved.
+    assert "stopped" not in [a["phase"] for a in sink.activities]
+
+
+def test_steer_rejection_is_reported_not_degraded(make_driver):
+    driver, sink = make_driver()
+    response = driver.steer("steer-fail")
+    assert response["success"] is False
+    assert "simulated steer rejection" in response["error"]
+    sink.wait_for(lambda: any(e.get("title") == "命令错误" for e in sink.events.values()))
+
+
+def test_queue_update_splits_steering_and_follow_up(make_driver):
+    driver, sink = make_driver()
+    driver._handle_event({"type": "queue_update", "steering": ["s1"], "followUp": ["f1", "f2"]})
+    event = sink.events["n-queue"]
+    assert event["queueSteering"] == ["s1"]
+    assert event["queueFollowUp"] == ["f1", "f2"]
+    assert event["queue"] == ["s1", "f1", "f2"]
+    driver._handle_event({"type": "queue_update", "steering": [], "followUp": []})
+    assert sink.events["n-queue"]["queue"] == []
+
+
 def test_response_timeout_raises(make_driver):
     driver, sink = make_driver()
     with pytest.raises(RpcTimeoutError):

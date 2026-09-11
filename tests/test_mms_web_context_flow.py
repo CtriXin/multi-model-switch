@@ -121,7 +121,7 @@ def test_source_record_does_not_claim_submission_after_rpc_failure(tmp_path, see
         with pytest.raises(WebError):
             service.send(detail["session"]["id"], {"requestId": "failed-context-send", "text": "Not confirmed"})
         event = [e for e in service.get_session(detail["session"]["id"])["events"] if e["kind"] == "user"][-1]
-        assert event["contextUsage"]["state"] == expected and event["status"] == "error"
+        assert event["contextUsage"]["state"] == expected and event["status"] == "failed"
     finally:
         service.close()
 

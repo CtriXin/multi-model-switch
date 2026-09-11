@@ -55,7 +55,7 @@ def consume_prompt(session, prompt):
     event = next((e for e in session.events if e.get("kind") == "user"
                   and e.get("contextUsage", {}).get("promptSha256") == source_digest
                   and not e["contextUsage"].get("consumed")
-                  and e.get("status") != "cancelled" and e["contextUsage"].get("state") != "failed"), None)
+                  and e.get("status") not in {"cancelled", "interrupted"} and e["contextUsage"].get("state") != "failed"), None)
     session.meta.pop("activeContextEvent", None)
     if not event:
         return None
