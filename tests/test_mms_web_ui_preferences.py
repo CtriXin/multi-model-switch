@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
+from mms_version import VERSION
 from mms_web.server import WebApplication
 from mms_web.ui_preferences import UiPreferences
 
@@ -34,13 +35,34 @@ def test_the_release_notes_marker_is_a_version_not_a_flag(tmp_path):
     assert prefs.update({"whatsNewSeenVersion": None})["whatsNewSeenVersion"] == ""
 
 
+def test_a_never_used_install_is_stamped_before_the_browser_sees_it(tmp_path):
+    """A first-ever read decides "this install is new", not the browser.
+
+    The guided tour writes this same file on first run, so a browser-side rule
+    would race it and sometimes greet a first-time user with a changelog.
+    """
+    prefs = UiPreferences(tmp_path / "state")
+    assert prefs.read(seed_version="4.17.0") == {"tourSeen": False, "whatsNewSeenVersion": "4.17.0"}
+    # Written, not just returned: the next read agrees without seeding again.
+    assert prefs.read() == {"tourSeen": False, "whatsNewSeenVersion": "4.17.0"}
+
+    # An install that already exists is an upgrade, and keeps its empty value
+    # so the notes get shown.
+    used = UiPreferences(tmp_path / "used")
+    used.update({"tourSeen": True})
+    assert used.read(seed_version="4.17.0") == {"tourSeen": True, "whatsNewSeenVersion": ""}
+
+
 def test_ui_preferences_routes(tmp_path):
     with patch("mms_web.server._adapter", return_value=None):
         app = WebApplication(state_root=tmp_path / "state")
     try:
-        assert app.get(["ui-preferences"]) == EMPTY
-        assert app.post(["ui-preferences"], {"tourSeen": True}) == {**EMPTY, "tourSeen": True}
-        assert app.get(["ui-preferences"]) == {**EMPTY, "tourSeen": True}
+        # The very first read stamps the running version on a new state root.
+        first = app.get(["ui-preferences"])
+        assert first["tourSeen"] is False
+        assert first["whatsNewSeenVersion"] == VERSION
+        assert app.post(["ui-preferences"], {"tourSeen": True})["tourSeen"] is True
+        assert app.get(["ui-preferences"])["tourSeen"] is True
         assert app.post(["ui-preferences"], {"whatsNewSeenVersion": "4.16.0"}) == {
             "tourSeen": True,
             "whatsNewSeenVersion": "4.16.0",

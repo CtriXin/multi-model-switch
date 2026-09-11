@@ -3,6 +3,7 @@ import { ChevronDown, ChevronUp, X } from "lucide-react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { isPreview, request } from "./api";
+import { decideWhatsNew } from "./whats-new";
 
 type Notes = { version?: string; notes?: string; upgradeNotice?: string };
 
@@ -27,15 +28,14 @@ export function WhatsNew({ ready }: { ready: boolean }) {
           request<{ whatsNew?: Notes }>("/update"),
           request<{ whatsNewSeenVersion?: string }>("/ui-preferences"),
         ]);
+        if (cancelled) return;
         const current = status.whatsNew?.version;
-        if (cancelled || !current || !status.whatsNew?.notes) return;
-        const seen = prefs.whatsNewSeenVersion || "";
-        if (seen === current) return;
-        if (!seen) {
-          // First run of a build that records this at all: nothing to catch up on.
-          void request("/ui-preferences", { whatsNewSeenVersion: current }).catch(() => {});
-          return;
-        }
+        const action = decideWhatsNew({
+          version: current,
+          notes: status.whatsNew?.notes,
+          seenVersion: prefs.whatsNewSeenVersion,
+        });
+        if (action !== "show") return;
         setNotes(status.whatsNew);
       } catch {
         // A changelog is never worth an error in front of the user.

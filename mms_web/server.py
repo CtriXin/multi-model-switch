@@ -285,7 +285,7 @@ class WebApplication:
             return self._sessions().skills.preferences()
         if parts == ["ui-preferences"]:
             from .ui_preferences import UiPreferences
-            return UiPreferences(self.state_root).read()
+            return UiPreferences(self.state_root).read(seed_version=VERSION)
         if parts == ["sessions"]:
             return {"sessions": self.all_sessions(include_cli)}
         if len(parts) == 2 and parts[0] == "attachments":

@@ -20,11 +20,21 @@ class UiPreferences:
     def __init__(self, state_root: Path):
         self.path = Path(state_root) / "ui-preferences.json"
 
-    def read(self) -> dict:
+    def read(self, *, seed_version: str = "") -> dict:
+        """Read the flags, seeding a state root that has never been used.
+
+        ``seed_version`` stamps the running version on an install with no
+        preferences file at all, so its first visit is not greeted by a
+        changelog it did not miss. Deciding this in the browser instead would
+        race the guided tour, which writes this same file on first run.
+        """
+        exists = self.path.exists()
         try:
             value = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             value = {}
+        if not exists and str(seed_version or "").strip():
+            return self.update({"whatsNewSeenVersion": str(seed_version).strip()})
         if not isinstance(value, dict):
             value = {}
         result = {key: value.get(key) is True for key in _BOOL_KEYS}
