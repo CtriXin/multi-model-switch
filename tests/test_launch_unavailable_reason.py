@@ -14,7 +14,8 @@ def test_a_missing_pi_names_pi(monkeypatch):
     monkeypatch.setattr("mms_web.drivers.launch_bridge.pi_runtime", lambda: ("", ""))
     seam = probe_mms_pi_seam()
     assert seam["available"] is False
-    assert "pi" in seam["reason"] and "安装脚本" in seam["reason"]
+    # Says both places it looked, so "but my terminal runs pi" has an answer.
+    assert "Pi" in seam["reason"] and "缓存" in seam["reason"] and "安装脚本" in seam["reason"]
 
 
 def test_an_old_node_names_the_version_it_needs(monkeypatch):
@@ -64,3 +65,53 @@ def test_the_snapshot_repeats_the_blocker_instead_of_a_generic_line():
     assert 'blocker = str(capabilities.get("launchReason")' in source
     assert '"reason": model.get("reason") or blocker' in source
     assert '"reason": preset.get("reason") or blocker' in source
+
+
+def _warm_cache(root: Path, *, executable=True, manifest=True) -> Path:
+    """The shape `scripts/pi-cli-wrapper.sh` looks for in the npx cache."""
+    binary = root / "_npx" / "a1b2c3" / "node_modules" / ".bin" / "pi"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("#!/usr/bin/env node\n")
+    if executable:
+        binary.chmod(0o755)
+    if manifest:
+        package = binary.parent.parent / "@earendil-works" / "pi-coding-agent"
+        package.mkdir(parents=True)
+        (package / "package.json").write_text("{}")
+    return binary
+
+
+def test_the_warmed_npx_cache_counts_as_an_installed_pi(tmp_path, monkeypatch):
+    """The wrapper a launch goes through accepts it, so the gate must too.
+
+    A colleague's machine ran Pi fine from the terminal while every model in
+    Pilot showed 不可用, because only PATH was consulted here.
+    """
+    import mms_web.drivers.launch_bridge as bridge
+
+    binary = _warm_cache(tmp_path / "pi-npx")
+    monkeypatch.setattr(bridge.shutil, "which", lambda name: None if name == "pi" else "/usr/bin/node")
+    monkeypatch.setitem(__import__("sys").modules, "mms_pi_support",
+                        type("M", (), {"_pi_npx_cache_dir": staticmethod(lambda: str(tmp_path / "pi-npx"))}))
+    assert bridge.cached_pi() == str(binary)
+
+
+def test_an_incomplete_cache_is_not_mistaken_for_an_install(tmp_path, monkeypatch):
+    import mms_web.drivers.launch_bridge as bridge
+
+    _warm_cache(tmp_path / "no-manifest", manifest=False)
+    _warm_cache(tmp_path / "not-executable", executable=False)
+    for name in ("no-manifest", "not-executable", "empty"):
+        monkeypatch.setitem(__import__("sys").modules, "mms_pi_support",
+                            type("M", (), {"_pi_npx_cache_dir": staticmethod(lambda n=name: str(tmp_path / n))}))
+        assert bridge.cached_pi() == "", name
+
+
+def test_a_global_pi_still_wins(tmp_path, monkeypatch):
+    import mms_web.drivers.launch_bridge as bridge
+
+    _warm_cache(tmp_path / "pi-npx")
+    monkeypatch.setattr(bridge.shutil, "which", lambda name: "/usr/local/bin/" + name)
+    monkeypatch.setattr(bridge, "cached_pi", lambda: pytest.fail("PATH pi must be preferred"))
+    executable, _node = bridge.pi_runtime()
+    assert executable == "/usr/local/bin/pi"

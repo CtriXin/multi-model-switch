@@ -23,8 +23,31 @@ class LaunchPlan:
     notes: list[str] = field(default_factory=list)
 
 
+def cached_pi() -> str:
+    """The Pi the launcher would use when no global one is installed.
+
+    `scripts/pi-cli-wrapper.sh` resolves a global pi, then this warmed npx
+    cache, then warms it. A session launch goes through that wrapper, so the
+    gate in front of it has to accept the same installs; looking only at PATH
+    reported "cannot run sessions" on machines whose terminal runs Pi fine.
+    """
+    try:
+        from mms_pi_support import _pi_npx_cache_dir
+    except Exception:
+        return ""
+    try:
+        cache = Path(_pi_npx_cache_dir())
+    except Exception:
+        return ""
+    for candidate in sorted(cache.glob("_npx/*/node_modules/.bin/pi")):
+        manifest = candidate.parent.parent / "@earendil-works" / "pi-coding-agent" / "package.json"
+        if os.access(candidate, os.X_OK) and manifest.is_file():
+            return str(candidate)
+    return ""
+
+
 def pi_runtime() -> tuple[str, str]:
-    executable = shutil.which("pi")
+    executable = shutil.which("pi") or cached_pi()
     if not executable:
         return "", ""
     # npm/fnm installations have a matching Node beside their global bin.
@@ -58,7 +81,7 @@ def probe_mms_pi_seam() -> dict:
     """
     executable, node = pi_runtime()
     if not executable:
-        reason = "找不到 pi 命令。重新运行安装脚本，或在能运行 pi 的终端里启动 Pilot。"
+        reason = "找不到 Pi：PATH 上没有，安装目录的缓存里也没有。重新运行安装脚本即可补上。"
     elif not node:
         # pi_runtime accepts a Node only when node:zlib has zstd, which
         # arrived in 22.15. An older Node is the usual cause on a machine
