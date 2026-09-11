@@ -215,6 +215,13 @@ class SessionActions:
             meta.update(id="s-" + uuid.uuid4().hex[:12], title=session.meta["title"] + " · 分支", runtimeRoot=str(new_root), archived=False, updatedAt=self._now(), forkedFrom=session_id)
             branch = type(session)(meta)
             branch.state = "stopped"
+            # Settled side questions belong to the visible history and travel
+            # with the branch; in-flight ones and idempotency keys do not.
+            from .side_questions import BTW_FINAL_STATES
+            branch.side_questions = copy.deepcopy({
+                key: row for key, row in session.side_questions.items()
+                if row.get("status") in BTW_FINAL_STATES
+            })
             end_index = session.events.index(selected) + 1 if selected else len(session.events)
             branch.events = copy.deepcopy(session.events[:end_index])
             branch.event_index = {e["id"]: e for e in branch.events}

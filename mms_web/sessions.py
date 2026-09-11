@@ -29,6 +29,7 @@ from .drivers.base import DriverClosedError, DriverWriteUnconfirmedError, Launch
 from .errors import WebError
 from .context_evidence import consume_prompt, observe_read, prompt_hash
 from .session_actions import SessionActions, backfill_history, redact
+from .side_questions import BTW_FINAL_STATES, SessionSideQuestions, public_side_question
 
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _MAX_EVENTS = 4000
@@ -119,6 +120,9 @@ class _LiveSession:
         self.stop_requested = False
         self.request_log: dict[str, str] = {}
         self.finalized = False
+        # /btw side questions live beside the transcript, never in events.
+        self.side_questions: dict[str, dict] = {}
+        self.btw_idem: dict[str, str] = {}
         self.updated_at = meta.get("updatedAt") or _now_iso()
         from .artifact_history import ArtifactHistory
         self.artifact_history = ArtifactHistory(state_root, meta, self.secrets) if state_root else None
@@ -222,6 +226,9 @@ class _LiveSession:
         return {
             "session": self.session_view(),
             "events": [copy.deepcopy(event) for event in self.events],
+            "sideQuestions": [public_side_question(row) for row in sorted(
+                self.side_questions.values(), key=lambda row: row.get("createdAt") or ""
+            )],
             "artifacts": self.artifact_history.list(self.events) if self.artifact_history else collect_artifacts(self.meta, self.events),
             "artifactNotice": self.artifact_history.note if self.artifact_history else "",
             "runtime": self.meta.get("runtimeView", {}),
@@ -257,6 +264,8 @@ class _LiveSession:
             "events": self.events,
             "approvals": self.approvals,
             "requestLog": self.request_log,
+            "sideQuestions": list(self.side_questions.values()),
+            "btwIdem": self.btw_idem,
             "lastSequence": self.last_sequence,
             "stopRequested": self.stop_requested,
             "updatedAt": self.updated_at,
@@ -266,7 +275,7 @@ class _LiveSession:
 
 
 
-class SessionService(SessionActions):
+class SessionService(SessionActions, SessionSideQuestions):
     """API v1 session adapter. See docs/mms-web/API.md for the contract."""
 
     def __init__(
@@ -280,6 +289,8 @@ class SessionService(SessionActions):
         process_launcher: Any = None,
         real_launch: bool = False,
         now: Callable[[], str] | None = None,
+        sidecar_runner: Callable | None = None,
+        btw_timeout: float = 30.0,
     ) -> None:
         self._config_root = Path(config_root) if config_root is not None else None
         self._state_root = Path(state_root)
@@ -297,6 +308,12 @@ class SessionService(SessionActions):
         self._lock = threading.RLock()
         self._sessions: dict[str, _LiveSession] = {}
         self._requests: dict[str, dict] = {}
+        # Read-only /btw sidecar seam. Absent means completion questions fail
+        # closed with a visible error; it is never simulated.
+        self._sidecar_runner = sidecar_runner
+        self._btw_timeout = float(btw_timeout)
+        self._btw_timers: dict[str, threading.Timer] = {}
+        self._btw_cancel: dict[str, threading.Event] = {}
         self._closed = False
         self._state_dir = self._state_root / "sessions"
         from .skills import SkillCatalog
@@ -315,7 +332,13 @@ class SessionService(SessionActions):
             and self._seam.get("available")
             and callable(getattr(self._catalog, "resolve_launch", None))
         )
-        return {"launch": launch, "launchReason": "" if launch else self._launch_blocker()}
+        return {
+            "launch": launch,
+            "launchReason": "" if launch else self._launch_blocker(),
+            # /btw is session-owned and read-only: state answers always work.
+            "sideQuestions": True,
+            "sidecarCompletion": callable(self._sidecar_runner),
+        }
 
     def _launch_blocker(self) -> str:
         """What to do about it, in the order the reader can act on."""
@@ -712,6 +735,7 @@ class SessionService(SessionActions):
             with session.lock:
                 session.stop_requested = True
                 driver = session.driver
+            self._close_side_questions(session)
             if driver is not None:
                 try:
                     driver.close()
@@ -1165,6 +1189,18 @@ class SessionService(SessionActions):
             live.stop_requested = bool(payload.get("stopRequested"))
             live.request_log = {
                 k: v for k, v in dict(payload.get("requestLog") or {}).items() if isinstance(v, str)
+            }
+            for row in payload.get("sideQuestions") or []:
+                if isinstance(row, dict) and row.get("btwId"):
+                    if row.get("status") in {"prepared", "accepted", "running"}:
+                        # The worker thread died with the process; never fake done.
+                        row["status"] = "cancelled"
+                        row["error"] = "服务重启时旁问尚未完成，已标记取消。"
+                        row["completedAt"] = row.get("completedAt") or live.updated_at
+                    live.side_questions[str(row["btwId"])] = row
+            live.btw_idem = {
+                k: v for k, v in dict(payload.get("btwIdem") or {}).items()
+                if isinstance(v, str) and v in live.side_questions
             }
             live.updated_at = str(payload.get("updatedAt") or _now_iso())
             state = str(payload.get("state") or "")

@@ -115,6 +115,16 @@ launch `{requestId,workspaceId,presetId,title,prompt}`；send `{requestId,text}`
 - 图片能力拒绝在记录新消息前完成。CSRF 明确拒绝后前端只刷新 token 并重试一次，不对未知网络失败盲目重发。上传内容不打印到日志。
 - 工作配方是前端导出/导入的 `mms-work-recipe-v1` 文件，只白名单读取 title/prompt/preferredModel/planning，不自动提交、启动或写入配置。
 
+## 2026-09-12 `/btw` 旁问（side-questions）
+
+- `POST /sessions/:id/side-questions {question, idempotencyKey?, sourceHint?}`：创建会话拥有的旁问。`sourceHint` 仅接受 `state|completion`；缺省按问题是否询问状态来路由。相同 `idempotencyKey` 返回原旁问，不重复创建。
+- `GET /sessions/:id/side-questions`、`GET /sessions/:id/side-questions/:btwId`：列表与单条；`POST /sessions/:id/side-questions/:btwId/cancel`：取消未完成的旁问，已完成行幂等返回原状。
+- 旁问行包含 `btwId/mainSessionId/owner=sidecar/status/answer/source/contextRevision/routeSnapshot/usage/redactionSummary/error/createdAt/acceptedAt/startedAt/completedAt`；状态机 `prepared → accepted → running → completed|failed|cancelled|uncertain`。
+- 隔离不变量：旁问不进入主 transcript 事件流、不进入 follow-up 队列、不调用 driver、不改变模型/通道/effort；主 session 的 `last_sequence` 不因旁问改变。`SessionDetail.sideQuestions` 只读返回旁问记录。
+- `state` 来源是确定性的会话快照回答（阶段、耗时、最近工具、队列、审批、错误）；`completion` 来源是宿主注入的只读 sidecar seam（`sidecar_runner`），只接收预算化且脱敏的上下文快照与 cancel event。无 runner 时 fail closed：记录 `failed` 且原因可见，主任务不受影响；bootstrap `capabilities.sidecarCompletion=false`。
+- 脱敏：question/answer/error/context 均按会话 secrets 掩码，`redactionSummary.secretsMasked` 记录次数。
+- 生命周期边界：主任务 stop 不取消进行中的旁问；服务 `close()` 把进行中旁问标为 `uncertain`；进程重启后加载时把进行中行标为 `cancelled`，已完成行保留。fork 只携带已完结的旁问。
+
 ## Prelaunch selection (2026-09-08)
 
 - `POST /launch-options {presetId, workspaceId}`: read-only resolution through the original MMS provider/preferences/model-policy path using a disposable private configuration snapshot. Public fields: `model` (id/name/input/contextWindow/maxTokens/reasoning), `protocol`, `configuredThinkingLevel`, `defaultThinkingLevel`, `supportedThinkingLevels`, `thinkingLevelMap`. No credentials or endpoint URLs.
