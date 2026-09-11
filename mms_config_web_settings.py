@@ -771,8 +771,8 @@ def _settings_gate_catalog(command_name: str = "mms") -> dict[str, dict[str, Any
     webui = f"{command} config web"
     interactive = command
     account_writes = [
-        "~/.config/mms/config.toml accounts/account.defaults",
-        "~/.config/mms/accounts/** OAuth/account state",
+        "<MMS_CONFIG_ROOT>/config.toml accounts/account.defaults",
+        "<MMS_CONFIG_ROOT>/accounts/** OAuth/account state",
         "可能涉及外部浏览器或 CLI login side effects",
     ]
     registry_writes = [
@@ -826,7 +826,7 @@ def _settings_gate_catalog(command_name: str = "mms") -> dict[str, dict[str, Any
                 "确认 backup、目标 root、secret 处理和 human-only config 边界。",
                 "只有人工确认后才运行实际迁移命令。",
             ],
-            "writes": ["~/.config/mms/** stable config tree", "<MMS_CONFIG_ROOT>/registry/** preview DB/root artifacts", "config backups / audit logs"],
+            "writes": ["<MMS_CONFIG_ROOT>/registry/** preview DB/root artifacts", "config backups / audit logs"],
             "safe_alternative": "在 WebUI 保存页生成 preview plan，不直接迁移 stable。",
         },
         "family_autosort_gate": {
@@ -862,7 +862,7 @@ def _settings_gate_catalog(command_name: str = "mms") -> dict[str, dict[str, Any
                 "Claude account/remove 必须停在 human-only gate。",
                 "手动 remove 后回 WebUI accounts report 和保存预览核对。",
             ],
-            "writes": ["~/.config/mms/config.toml accounts/account.defaults", "~/.config/mms/accounts/<account-id>/**"],
+            "writes": ["<MMS_CONFIG_ROOT>/config.toml accounts/account.defaults", "<MMS_CONFIG_ROOT>/accounts/<account-id>/**"],
             "safe_alternative": "先在 WebUI 将非 Claude account disabled/default 草稿调整并 review。",
         },
         "account_rename_gate": {
@@ -874,7 +874,7 @@ def _settings_gate_catalog(command_name: str = "mms") -> dict[str, dict[str, Any
                 "该动作可能移动 account home 目录并重写 usage/defaults；必须人工确认备份和目标目录不存在。",
                 "完成后回 WebUI accounts report，核对 id/default/usage 是否一致。",
             ],
-            "writes": ["~/.config/mms/config.toml accounts/account.defaults", "~/.config/mms/accounts/<old-id>/** -> <new-id>/**", "~/.config/mms/usage.json account usage keys"],
+            "writes": ["<MMS_CONFIG_ROOT>/config.toml accounts/account.defaults", "<MMS_CONFIG_ROOT>/accounts/<old-id>/** -> <new-id>/**", "<MMS_CONFIG_ROOT>/usage.json account usage keys"],
             "safe_alternative": "WebUI 已支持非 Claude account 显示名、启用状态、priority、family、timezone、note 的草稿/保存预览。",
         },
         "account_network_gate": {
@@ -886,7 +886,7 @@ def _settings_gate_catalog(command_name: str = "mms") -> dict[str, dict[str, Any
                 "Claude account config 是 human-only；任何 Claude proxy/home_dir/no_proxy 变化都必须停止并人工确认。",
                 "非 Claude 账号如需改 proxy/no_proxy，请在终端人工运行 account.edit 并随后回 WebUI 做只读核对。",
             ],
-            "writes": ["~/.config/mms/config.toml accounts[*].proxy/no_proxy/home_dir/timezone", "~/.config/mms/accounts/** account state can be affected by launch/login"],
+            "writes": ["<MMS_CONFIG_ROOT>/config.toml accounts[*].proxy/no_proxy/home_dir/timezone", "<MMS_CONFIG_ROOT>/accounts/** account state can be affected by launch/login"],
             "safe_alternative": "WebUI 只显示 proxy/no_proxy 是否已配置；非敏感 timezone/note 可在账号表中走保存预览。",
         },
         "provider_network_gate": {
@@ -898,7 +898,7 @@ def _settings_gate_catalog(command_name: str = "mms") -> dict[str, dict[str, Any
                 "修改前先确认目标 provider、expected proxy、no_proxy 不会命中 Claude/OpenAI 域名造成直连泄漏。",
                 "人工执行 provider.edit 后回到 WebUI 生成保存预览或 provider_usage_summary 核对非敏感字段。",
             ],
-            "writes": ["~/.config/mms/config.toml providers[*].proxy/no_proxy", "provider network policy for future launches"],
+            "writes": ["<MMS_CONFIG_ROOT>/config.toml providers[*].proxy/no_proxy", "provider network policy for future launches"],
             "safe_alternative": "WebUI 支持通道 URL/API Key/protocol/CLI/timezone/note/Claude 1M 的草稿/保存预览；只把 proxy/no_proxy 留给人工确认。",
         },
         "refresh_due_sources_gate": {
@@ -994,7 +994,7 @@ def _settings_gate_catalog(command_name: str = "mms") -> dict[str, dict[str, Any
                 "确认写入 repo-local .mms/rescue demo artifacts。",
                 "完成后在 WebUI 点击 rescue_events 查看 artifact path。",
             ],
-            "writes": ["<repo>/.mms/rescue/**", "~/.config/mms/rescue/index.jsonl metadata"],
+            "writes": ["<repo>/.mms/rescue/**", "<MMS_CONFIG_ROOT>/rescue/index.jsonl metadata"],
             "safe_alternative": "WebUI 只读 rescue_events；不生成 demo artifact。",
         },
         "rescue_handover_gate": {
@@ -1018,7 +1018,7 @@ def _settings_gate_catalog(command_name: str = "mms") -> dict[str, dict[str, Any
                 "该动作可能访问 GitHub/npm 并更新本地 version cache。",
                 "WebUI about report 默认只读 cached 状态，不自动联网刷新。",
             ],
-            "writes": ["~/.config/mms/version.json update cache"],
+            "writes": ["<MMS_CONFIG_ROOT>/version.json update cache"],
             "safe_alternative": "WebUI 点击关于状态读取缓存版本状态。",
         },
         "about_upgrade_gate": {
@@ -1041,7 +1041,7 @@ def _settings_gate_catalog(command_name: str = "mms") -> dict[str, dict[str, Any
                 "WebUI 当前已提供 typed confirm 草稿删除；优先使用 WebUI 保存预览。",
                 "CLI remove 属于 legacy mutating path，执行前先确认 provider 不再被默认/route/fallback 使用。",
             ],
-            "writes": ["~/.config/mms/config.toml providers/provider.default", "credentials/model-policy related entries"],
+            "writes": ["<MMS_CONFIG_ROOT>/config.toml providers/provider.default", "credentials/model-policy related entries"],
             "safe_alternative": "WebUI typed confirm -> 生成保存预览 -> confirm save。",
         },
     }

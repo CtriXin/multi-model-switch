@@ -5218,3 +5218,45 @@ def test_config_web_shutdown_survives_repeat_sigint(monkeypatch):
         signal.signal(signal.SIGINT, original_handler)
 
     assert url.startswith("http://127.0.0.1:")
+
+
+def test_config_web_announces_that_pilot_replaced_it(capsys):
+    """The page still runs, but it must stop presenting itself as the way in.
+
+    Pilot writes the same config root, so channels and models edited there are
+    already what the terminal launches with. Users kept configuring here and
+    then wondering which of the two pages was real.
+    """
+    rc = mms_config_web.run_config_web(
+        {"providers": []},
+        ["--print-summary"],
+        command_name="mmf",
+        config_path="/tmp/config.toml",
+        preferences_path="/tmp/preferences.toml",
+    )
+
+    assert rc == 0
+    captured = capsys.readouterr()
+    # The notice goes to stderr so a piped --print-summary stays valid JSON.
+    assert json.loads(captured.out)["schema"] == "mms.setup_web.snapshot.v2"
+    assert "mmf config web 已降级" in captured.err
+    assert "mmf web" in captured.err
+
+
+def test_config_web_gate_cards_do_not_name_the_retired_config_root():
+    """A gate card tells the user which files an action writes.
+
+    Config moved to ~/.config/mms-next; these cards still named ~/.config/mms,
+    so the human gate was disclosing a path nothing writes any more.
+    """
+    import mms_config_web_settings
+
+    catalog = mms_config_web_settings._settings_gate_catalog("mms")
+    offenders = [
+        f"{gate_id}: {target}"
+        for gate_id, gate in catalog.items()
+        for target in gate.get("writes", [])
+        if "~/.config/mms/" in target
+    ]
+
+    assert not offenders, "gate cards name the retired config root: " + "; ".join(offenders)
