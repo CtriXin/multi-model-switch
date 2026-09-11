@@ -10947,6 +10947,40 @@ def _codex_gateway_root():
     return os.path.join(_selected_mms_config_root({}), "codex-gateway")
 
 
+_CODEX_CONTEXT_WINDOW_FLOOR = 1_000_000
+
+
+def _codex_gateway_context_window(runtime, model_info):
+    """Return a context window worth telling Codex about, or None.
+
+    Codex ships a catalog for the models it knows and falls back to its own
+    default for anything routed through a custom provider, so a 1M model
+    behaves like a small one and compacts far too early. ``model_context_window``
+    in the gateway config.toml is how Codex takes our number instead.
+
+    Only widen, and only for models Codex cannot already know. Its catalog
+    carries OpenAI's own models with an effective window below their maximum,
+    so overriding those would push requests past a limit Codex was respecting
+    on purpose. A window we overstate becomes a rejected request, not an early
+    compaction.
+    """
+    model = str((model_info or {}).get("model") or "").strip()
+    if not model:
+        return None
+    normalized = model.lower()
+    if normalized.startswith(("gpt-", "o1", "o3", "o4")) or "codex" in normalized:
+        return None
+    try:
+        window = _coerce_context_window(
+            _lookup_context_window(model, provider_id=(runtime or {}).get("id"))
+        )
+    except Exception:
+        return None
+    if window is None or window < _CODEX_CONTEXT_WINDOW_FLOOR:
+        return None
+    return window
+
+
 def _codex_gateway_env(runtime, base_url, model_info=None):
     """为 gateway api_key 模式创建隔离 session，并复用稳定 CODEX_HOME。"""
     import json as _json
@@ -11051,6 +11085,15 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
             if preamble and not preamble.endswith("\n"):
                 preamble += "\n"
             preamble += f"{replacement}\n"
+        return preamble + rest
+
+    def _remove_top_level_scalar(text, key):
+        import re
+        section_match = re.search(r'^\[', text, flags=re.MULTILINE)
+        preamble_end = section_match.start() if section_match else len(text)
+        preamble = text[:preamble_end]
+        rest = text[preamble_end:]
+        preamble = re.sub(rf'^{re.escape(key)}\s*=\s*.+$\n?', '', preamble, flags=re.MULTILINE)
         return preamble + rest
 
     def _set_project_base_url(text, project_path, value):
@@ -11177,6 +11220,7 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
     # may contain stale custom sections from previous buggy generations.
     source_config = real_config if os.path.exists(real_config) else gateway_config_template
     gateway_config = os.path.join(codex_dir, "config.toml")
+    codex_context_window = _codex_gateway_context_window(runtime, model_info)
     if os.path.exists(source_config):
         try:
             with open(source_config, "r", encoding="utf-8") as f:
@@ -11184,6 +11228,12 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
             config_text = _set_top_level_scalar(config_text, "forced_login_method", "api")
             config_text = _set_top_level_scalar(config_text, "disable_response_storage", True)
             config_text = _set_top_level_scalar(config_text, "base_url", base_url)
+            if codex_context_window:
+                config_text = _set_top_level_scalar(config_text, "model_context_window", codex_context_window)
+            else:
+                # A previous session may have written a window for a different
+                # model; this config is reused, so stale must mean removed.
+                config_text = _remove_top_level_scalar(config_text, "model_context_window")
             config_text = _set_project_base_url(config_text, _safe_getcwd(), base_url)
             config_text = _set_project_scalar(config_text, _safe_getcwd(), "trust_level", "trusted")
             config_text = _rewrite_table_block(
@@ -11217,6 +11267,8 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
             f.write('forced_login_method = "api"\n')
             f.write('disable_response_storage = true\n')
             f.write(f'base_url = "{base_url}"\n')
+            if codex_context_window:
+                f.write(f'model_context_window = {codex_context_window}\n')
             f.write('\n[model_providers.custom]\n')
             f.write('name = "custom"\n')
             f.write('wire_api = "responses"\n')

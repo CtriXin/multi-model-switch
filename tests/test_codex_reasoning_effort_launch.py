@@ -322,3 +322,73 @@ def test_gpt_explicit_model_effort_precedes_checkout_default(monkeypatch):
     monkeypatch.setattr(mms_capability_resolver, "load_default_model_policy", lambda: {"models": {"gpt-5": {"capabilities": {"reasoning_effort": "low"}}}})
     assert mms_core._default_reasoning_effort_for_model_info({"model": "gpt-5"}) == "low"
     assert mms_core._default_reasoning_effort_for_model_info({"model": "gpt-unconfigured"}) == mms_core._default_gpt_reasoning_effort()
+
+
+def _isolated_codex_gateway(monkeypatch, tmp_path):
+    """Run the Codex gateway writer against a throwaway config root."""
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    config_root = real_home / ".config" / "mms-next"
+    config_root.mkdir(parents=True)
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(config_root))
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+    for name in (
+        "_cleanup_stale_sessions",
+        "_link_shared_dotfiles",
+        "_sync_codex_session_claude_json",
+        "_install_session_command_wrappers",
+        "_install_session_packet_env",
+    ):
+        monkeypatch.setattr(mms_launchers, name, lambda *a, **k: None)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=False: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_locale_profile", lambda env, runtime: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, runtime: env)
+    monkeypatch.setattr(mms_launchers, "_install_host_context_env", lambda *a, **k: {})
+    monkeypatch.setattr(mms_launchers, "_build_codex_session_hooks", lambda *a, **k: {"hooks": {}})
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.chdir(repo)
+    return mms_launchers
+
+
+def test_codex_gateway_context_window_only_widens_unknown_models():
+    import mms_launchers
+
+    kimi = {"id": "kimi"}
+    for alias in ("k3", "k3[1m]", "kimi-k3"):
+        assert mms_launchers._codex_gateway_context_window(kimi, {"model": alias}) == 1_048_576, alias
+
+    # Codex knows its own catalog, including an effective window below the
+    # model's maximum. Overriding those would push past a deliberate limit.
+    for openai_model in ("gpt-5.5", "gpt-5.3-codex", "GPT-5.4"):
+        assert mms_launchers._codex_gateway_context_window(kimi, {"model": openai_model}) is None, openai_model
+
+    # Below 1M Codex's own default stands; we only ever widen.
+    assert mms_launchers._codex_gateway_context_window(kimi, {"model": "kimi-for-coding"}) is None
+    assert mms_launchers._codex_gateway_context_window(kimi, {"model": ""}) is None
+    assert mms_launchers._codex_gateway_context_window(kimi, None) is None
+
+
+def test_codex_gateway_config_carries_the_one_million_window(monkeypatch, tmp_path):
+    """K3 is a 1M model, and Codex has no way to know that on its own.
+
+    Every other harness is told: Claude Code through its context env, Pi
+    through models.json. Codex was the one that received nothing, so it fell
+    back to its default for an unknown routed model and compacted early.
+    """
+    from pathlib import Path
+
+    mms_launchers = _isolated_codex_gateway(monkeypatch, tmp_path)
+    runtime = {"id": "kimi", "api_key": "sk-test", "nsr_mode": "disable"}
+
+    env = mms_launchers._codex_gateway_env(runtime, "https://relay.example.com", model_info={"model": "k3"})
+    config = Path(env["CODEX_HOME"], "config.toml").read_text(encoding="utf-8")
+    assert "model_context_window = 1048576" in config
+
+    # The gateway config is reused across sessions, so switching models must
+    # take the window back out rather than leave K3's 1M on a GPT session.
+    env = mms_launchers._codex_gateway_env(runtime, "https://relay.example.com", model_info={"model": "gpt-5.4"})
+    config = Path(env["CODEX_HOME"], "config.toml").read_text(encoding="utf-8")
+    assert "model_context_window" not in config
+    assert 'base_url = "https://relay.example.com"' in config
