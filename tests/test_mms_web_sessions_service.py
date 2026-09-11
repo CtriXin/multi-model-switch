@@ -154,7 +154,10 @@ def test_capabilities_require_real_launch_and_seam(tmp_path, seeded_seam):
 
 def test_launch_disabled_without_real_launch(tmp_path, seeded_seam):
     service, _ = make_service(tmp_path, real_launch=False)
-    assert service.capabilities() == {"launch": False}
+    # The blocker travels with the flag now: a page full of unavailable models
+    # has to be able to say what is missing.
+    assert service.capabilities() == {"launch": False,
+                                      "launchReason": "没有选定 MMS 配置根，无法启动会话。"}
     with pytest.raises(WebError) as err:
         launch_ok(service)
     assert err.value.status == 409

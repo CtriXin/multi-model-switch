@@ -51,10 +51,25 @@ def pi_runtime() -> tuple[str, str]:
 
 
 def probe_mms_pi_seam() -> dict:
+    """Whether this machine can run a Pi session, and what is missing if not.
+
+    The reason reaches the page, so it has to name the thing to install rather
+    than restate that something is wrong.
+    """
     executable, node = pi_runtime()
-    return {"available": bool(executable and node and _WORKER.is_file()),
-            "driver": "pi-rpc", "launcher": "mms_launchers.launch_cli",
-            "reason": "" if executable and node else "需要安装 Pi 和兼容的 Node.js 运行环境。"}
+    if not executable:
+        reason = "找不到 pi 命令。重新运行安装脚本，或在能运行 pi 的终端里启动 Pilot。"
+    elif not node:
+        # pi_runtime accepts a Node only when node:zlib has zstd, which
+        # arrived in 22.15. An older Node is the usual cause on a machine
+        # where pi itself installed fine.
+        reason = "没有找到符合要求的 Node.js：需要 22.15 以上的版本。升级 Node 后重启 Pilot。"
+    elif not _WORKER.is_file():
+        reason = "这份安装缺少会话执行组件，请重新运行安装脚本。"
+    else:
+        reason = ""
+    return {"available": not reason, "driver": "pi-rpc",
+            "launcher": "mms_launchers.launch_cli", "reason": reason}
 
 
 def build_pi_launch_plan(model_info, runtime, cwd, *, config_root=None, extra_args=None):

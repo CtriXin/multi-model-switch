@@ -84,13 +84,18 @@ class WebApplication:
         if self.sessions:
             capabilities.update(self.sessions.capabilities())
         if not capabilities["launch"]:
+            # The probe knows what is missing — an absent pi, a Node too old to
+            # run it. Repeating "not ready" instead leaves the reader with
+            # nothing to act on, which is what a whole machine of greyed-out
+            # models looked like.
+            blocker = str(capabilities.get("launchReason") or "").strip() or "Web 会话接入尚未就绪。"
             snapshot = {
                 **snapshot,
                 "models": [{**model, "available": False,
-                            "reason": model.get("reason") or "Web 会话接入尚未就绪。"}
+                            "reason": model.get("reason") or blocker}
                            for model in snapshot.get("models", [])],
                 "presets": [{**preset, "available": False,
-                             "reason": preset.get("reason") or "Web 会话接入尚未就绪。"}
+                             "reason": preset.get("reason") or blocker}
                             for preset in snapshot.get("presets", [])],
             }
         if capabilities["launch"]:

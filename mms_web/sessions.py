@@ -310,13 +310,20 @@ class SessionService(SessionActions):
     # -- capabilities --------------------------------------------------
 
     def capabilities(self) -> dict:
-        return {
-            "launch": bool(
-                self._real_launch
-                and self._seam.get("available")
-                and callable(getattr(self._catalog, "resolve_launch", None))
-            )
-        }
+        launch = bool(
+            self._real_launch
+            and self._seam.get("available")
+            and callable(getattr(self._catalog, "resolve_launch", None))
+        )
+        return {"launch": launch, "launchReason": "" if launch else self._launch_blocker()}
+
+    def _launch_blocker(self) -> str:
+        """What to do about it, in the order the reader can act on."""
+        if not self._real_launch:
+            return "没有选定 MMS 配置根，无法启动会话。"
+        if not self._seam.get("available"):
+            return str(self._seam.get("reason") or "")
+        return "模型目录暂时不可用，无法解析启动参数。"
 
     def seam_report(self) -> dict:
         """Diagnostics for the lead; not part of the HTTP contract."""
