@@ -114,14 +114,32 @@ def test_an_incomplete_cache_is_not_mistaken_for_an_install(tmp_path, monkeypatc
         assert bridge.cached_pi() == "", name
 
 
-def test_a_global_pi_still_wins(tmp_path, monkeypatch):
+def test_an_installed_pi_still_wins_over_the_cache(tmp_path, monkeypatch):
+    """Resolution order mirrors the wrapper: installed first, cache second."""
     import mms_web.drivers.launch_bridge as bridge
 
     _warm_cache(tmp_path / "pi-npx")
+    monkeypatch.setattr(bridge, "installed_pi", lambda: "/usr/local/bin/pi")
+    monkeypatch.setattr(bridge, "cached_pi", lambda: pytest.fail("an installed pi must be preferred"))
     monkeypatch.setattr(bridge.shutil, "which", lambda name: "/usr/local/bin/" + name)
-    monkeypatch.setattr(bridge, "cached_pi", lambda: pytest.fail("PATH pi must be preferred"))
     executable, _node = bridge.pi_runtime()
     assert executable == "/usr/local/bin/pi"
+
+
+def test_installed_pi_follows_the_launchers_own_resolver(monkeypatch):
+    """One truth: the gate must see whatever `mms` would run, PATH or not."""
+    import sys
+
+    import mms_web.drivers.launch_bridge as bridge
+
+    monkeypatch.setitem(sys.modules, "mms_pi_support",
+                        type("M", (), {"_pi_global_executable": staticmethod(lambda: "/opt/npm/bin/pi")}))
+    assert bridge.installed_pi() == "/opt/npm/bin/pi"
+    # A launcher that cannot answer must not take the gate down with it.
+    monkeypatch.setitem(sys.modules, "mms_pi_support",
+                        type("M", (), {"_pi_global_executable": staticmethod(lambda: (_ for _ in ()).throw(RuntimeError()))}))
+    monkeypatch.setattr(bridge.shutil, "which", lambda name: "/usr/bin/" + name)
+    assert bridge.installed_pi() == "/usr/bin/pi"
 
 
 def test_a_pi_dist_cli_in_npms_own_cache_is_found_too(tmp_path, monkeypatch):

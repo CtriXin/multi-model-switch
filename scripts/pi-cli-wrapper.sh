@@ -8,6 +8,45 @@ if [ -n "${MMS_PI_EXECUTABLE:-}" ]; then
 fi
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+SELF_PATH="$SCRIPT_DIR/$(basename "$0")"
+
+absolute_path() {
+  [ -n "${1:-}" ] || return 1
+  dir=$(CDPATH= cd -- "$(dirname "$1")" 2>/dev/null && pwd) || return 1
+  printf '%s/%s\n' "$dir" "$(basename "$1")"
+}
+
+# An installed Pi, whether or not its bin directory is on this PATH. MMS
+# normally passes MMS_PI_EXECUTABLE, but the installer calls this script
+# directly, and npm's global bin is often outside a non-interactive PATH.
+# Without this the cache below is the only option, and npx refuses to fill it
+# while a global copy exists — which left "warmup did not produce an
+# executable" on machines whose terminal ran pi perfectly well.
+installed_pi_path() {
+  candidate=$(command -v pi 2>/dev/null) || candidate=""
+  if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+    resolved=$(absolute_path "$candidate" || printf '%s' "$candidate")
+    # Never exec ourselves: `pi` on PATH can be this very wrapper.
+    if [ "$resolved" != "$SELF_PATH" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  fi
+  prefix=$(npm prefix -g 2>/dev/null) || prefix=""
+  if [ -n "$prefix" ] && [ -x "$prefix/bin/pi" ]; then
+    resolved=$(absolute_path "$prefix/bin/pi" || printf '%s' "$prefix/bin/pi")
+    if [ "$resolved" != "$SELF_PATH" ]; then
+      printf '%s\n' "$prefix/bin/pi"
+      return 0
+    fi
+  fi
+  return 1
+}
+
+if INSTALLED_PI=$(installed_pi_path); then
+  exec "$INSTALLED_PI" "$@"
+fi
+
 ROOT_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 CACHE_DIR=${MMS_PI_NPX_CACHE:-"$ROOT_DIR/.ai/cache/pi-npx"}
 LOCK_DIR="$CACHE_DIR/.mms-pi-npx-install.lock"
@@ -72,10 +111,17 @@ fi
 acquire_lock
 if ! CACHED_PI=$(cached_pi_path); then
   npx -y --cache "$CACHE_DIR" @earendil-works/pi-coding-agent --version >/dev/null
-  CACHED_PI=$(cached_pi_path) || {
-    echo "MMS Pi cache warmup did not produce an executable" >&2
+  if ! CACHED_PI=$(cached_pi_path); then
+    # npx exits 0 without filling the cache when the package is already
+    # installed globally, so look once more for that copy before giving up.
+    if INSTALLED_PI=$(installed_pi_path); then
+      release_lock
+      trap - EXIT INT TERM HUP
+      exec "$INSTALLED_PI" "$@"
+    fi
+    echo "MMS Pi cache warmup did not produce an executable, and no installed pi was found on PATH or under npm's global prefix" >&2
     exit 1
-  }
+  fi
 fi
 release_lock
 trap - EXIT INT TERM HUP

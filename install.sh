@@ -1142,7 +1142,11 @@ warm_pi_runtime_cache() {
         fi
     fi
 
-    echo "✗ $(t "pi 运行时预热失败；Pilot 无法安全启动，本次安装已停止" "pi runtime warmup failed; Pilot cannot start safely, installation stopped")"
+    # The wrapper resolves an installed pi on PATH or under npm's global
+    # prefix before it ever needs the cache, so reaching here means no pi is
+    # runnable at all — not merely that npx declined to fill the cache.
+    echo "✗ $(t "pi 运行时未就绪：PATH 上没有可运行的 pi，npm 全局目录下也没有，缓存预热同样没产出" "The pi runtime is not ready: no runnable pi on PATH, none under npm's global prefix, and the cache warmup produced nothing")"
+    echo "  $(t "先确认 pi 可用再重装：npm install -g" "Make pi runnable, then reinstall: npm install -g") $PI_CLI_PACKAGE_SPEC"
     return 1
 }
 
