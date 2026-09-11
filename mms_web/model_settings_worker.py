@@ -306,8 +306,9 @@ def draft_for(rows, request, revision):
     if changed_routes:
         # Unchanged hidden routes remain published. Only explicitly deselected
         # visible models are removed; adding one model must not prune history.
-        retained = set(target.get("approved_route_models") or []) - (original - set(selected))
-        target["models"] = [{"id": m, "visible": True} for m in sorted(retained | set(selected))]
+        # The selected list is authoritative for the current channel. Hidden
+        # history is retained in policy, but never re-enters this route.
+        target["models"] = [{"id": m, "visible": True} for m in selected]
         target["hidden_models"] = sorted((set(target.get("hidden_models", [])) | (original - set(selected))) - set(selected))
         target["extra_models"] = []
         target["fallback_models"] = []

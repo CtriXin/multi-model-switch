@@ -19,8 +19,12 @@ export NPM_CONFIG_CACHE="$CACHE_DIR"
 export npm_config_cache="$CACHE_DIR"
 
 cached_pi_path() {
-  for cached_pi in "$CACHE_DIR"/_npx/*/node_modules/.bin/pi; do
-    cached_manifest="${cached_pi%/.bin/pi}/@earendil-works/pi-coding-agent/package.json"
+  for cached_pi in "$CACHE_DIR"/_npx/*/node_modules/.bin/pi "$CACHE_DIR"/_npx/*/node_modules/@earendil-works/pi-coding-agent/dist/cli.js; do
+    case "$cached_pi" in
+      */node_modules/.bin/pi) cached_manifest="${cached_pi%/.bin/pi}/@earendil-works/pi-coding-agent/package.json" ;;
+      */@earendil-works/pi-coding-agent/dist/cli.js) cached_manifest="${cached_pi%/dist/cli.js}/package.json" ;;
+      *) continue ;;
+    esac
     if [ -x "$cached_pi" ] && [ -f "$cached_manifest" ]; then
       printf '%s\n' "$cached_pi"
       return 0

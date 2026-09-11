@@ -98,7 +98,6 @@ _KNOWN_VISION_MODELS = {
     "gpt-5.4",
     "gpt-5.5",
     "k3",
-    "k3[1m]",
     "kimi-k3",
     "k2.6",
     "k2.6-code-preview",

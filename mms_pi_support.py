@@ -377,7 +377,7 @@ _PI_MODEL_MAX_TOKENS_HINTS = {
     "deepseek-v4-pro": 393216,
     "gpt-5.3-codex": 128000,
     "gpt-5.3-codex-spark": 32000,
-    "k3": 131072,
+    "k3": 1048576,
     "k3[1m]": 1048576,
     "kimi-k3": 1048576,
     "k2.6": 32768,
@@ -403,9 +403,8 @@ _PI_MODEL_MAX_TOKENS_HINTS = {
 _PI_MODEL_CONTEXT_WINDOW_HINTS = {
     "gpt-5.3-codex": 400000,
     "gpt-5.3-codex-spark": 128000,
-    # Kimi Code's plain k3 is 256K for the default tier; policy/profile data
-    # may raise it to 1M. The explicit MMS selector remains 1M.
-    "k3": 262144,
+    # Kimi K3 is natively 1M; the selector is kept only for old config input.
+    "k3": 1048576,
     "k3[1m]": 1048576,
     "kimi-k3": 1048576,
     "qwen3.6-flash": 1000000,

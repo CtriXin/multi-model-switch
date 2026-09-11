@@ -32,8 +32,13 @@ def cached_pi() -> str:
     reported "cannot run sessions" on machines whose terminal runs Pi fine.
     """
     for cache in _npx_caches():
-        for candidate in sorted(cache.glob("_npx/*/node_modules/.bin/pi")):
-            manifest = candidate.parent.parent / "@earendil-works" / "pi-coding-agent" / "package.json"
+        candidates = list(cache.glob("_npx/*/node_modules/.bin/pi"))
+        candidates.extend(cache.glob("_npx/*/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"))
+        for candidate in sorted(candidates):
+            if candidate.name == "pi":
+                manifest = candidate.parent.parent / "@earendil-works" / "pi-coding-agent" / "package.json"
+            else:
+                manifest = candidate.parents[1] / "package.json"
             if os.access(candidate, os.X_OK) and manifest.is_file():
                 return str(candidate)
     return ""

@@ -210,7 +210,7 @@ PREFERENCES_PATHS = [
     os.path.join(PRIMARY_CONFIG_DIR, "preferences.toml"),
 ]
 PREFERENCES_DOC_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs", "MMS_USER_PREFERENCES.md")
-PREFERENCES_EXAMPLE_TOML = """# ~/.config/mms/preferences.toml
+PREFERENCES_EXAMPLE_TOML = """# ~/.config/mms-next/preferences.toml
 # User-owned preference overlay. Install/update never overwrites this file.
 
 [launch]
@@ -1201,7 +1201,6 @@ _VISION_CAPABLE_MODEL_NAMES = {
     "mimo-v2.5",
     "mimo-v2-omni",
     "k3",
-    "k3[1m]",
     "kimi-k3",
     "k2.6",
     "k2.6-code-preview",
@@ -2612,7 +2611,7 @@ This folder stores the real MMS user config.
 - Applies to the whole MMS config tree, including `config.toml`, `override.toml`, `credentials.sh`, `usage.json`, `accounts/**`, `env/**`, and any account state under this folder.
 - Agents may inspect, diff, and propose changes, but must not auto-apply user config edits without human confirmation.
 - Any proposed change must show target path, affected fields/files, before/after values, and reason.
-- If the process is running inside an isolated HOME or gateway session, still resolve and protect the real user config under `~/.config/mms`.
+- If the process is running inside an isolated HOME or gateway session, still resolve and protect the real user config under `~/.config/mms-next`.
 """
 
 
@@ -13842,7 +13841,7 @@ def handle_env_command(cfg, argv):
     )
     parser.add_argument("preset_name", help="预设名称")
     parser.add_argument("--apply", action="store_true",
-                        help="写入 ~/.config/mms/env/<preset>.sh")
+                        help="写入 ~/.config/mms-next/env/<preset>.sh")
     parser.add_argument("--provider", help="临时覆盖预设中的 provider")
     args = parser.parse_args(argv)
 
@@ -15058,7 +15057,7 @@ def _display_preferences_path():
         marker = "active" if os.path.exists(path) else "create-if-needed"
         console.print(f"  {path}  [dim]({marker})[/dim]")
     console.print(f"[dim]文档: {PREFERENCES_DOC_PATH}[/dim]")
-    console.print("[yellow]Human gate:[/yellow] agents may inspect/propose, but must not auto-write real ~/.config/mms/** without human confirmation.")
+    console.print("[yellow]Human gate:[/yellow] agents may inspect/propose, but must not auto-write real ~/.config/mms-next/** without human confirmation.")
 
 
 def _display_preferences_example():
@@ -15068,7 +15067,7 @@ def _display_preferences_example():
 def _display_human_gate_help():
     command = current_command()
     console.print("[bold]MMS Human Gate[/bold]")
-    console.print("- real config tree `~/.config/mms/**` is human-only for agents.")
+    console.print("- real config tree `~/.config/mms-next/**` is human-only for agents.")
     console.print("- allowed for agents: inspect, explain, generate manual diff, print examples.")
     console.print("- blocked without human confirmation: writing config.toml, preferences.toml, override.toml, credentials.sh, accounts/**, env/**, usage/account state, or Claude config.")
     console.print("- required write flow: plan -> backup -> human double check -> audited write -> post-write human double check.")
@@ -15098,7 +15097,7 @@ def _display_preferences_help():
     console.print("\n[bold]Overlay order:[/bold]")
     console.print("  config.toml -> override.toml -> preferences.toml launch allowlist -> confirm screen changes -> launcher")
     console.print(f"[dim]Full doc: {PREFERENCES_DOC_PATH}[/dim]")
-    console.print("[yellow]Human gate:[/yellow] agents can propose edits, but must not auto-write real ~/.config/mms/** without human confirmation.")
+    console.print("[yellow]Human gate:[/yellow] agents can propose edits, but must not auto-write real ~/.config/mms-next/** without human confirmation.")
 
 
 
@@ -15927,7 +15926,7 @@ def _session_gateway_roots(cli_name):
     if cli_name in {"all", "opencode"}:
         gateway_names.append(("opencode", "opencode-gateway"))
     return [
-        (cli, os.path.join(real_home, ".config", "mms", gateway_name, "s"))
+        (cli, os.path.join(real_home, ".config", "mms-next", gateway_name, "s"))
         for cli, gateway_name in gateway_names
     ]
 
@@ -16126,7 +16125,7 @@ def _codex_resume_roots():
     for env_name in ("MMS_CODEX_RESUME_WRITEBACK_ROOT", "CODEX_HOME"):
         add(os.environ.get(env_name))
     real_home = resolve_real_user_home()
-    add(os.path.join(real_home, ".config", "mms", "codex-gateway", ".codex"))
+    add(os.path.join(real_home, ".config", "mms-next", "codex-gateway", ".codex"))
     add(os.path.join(real_home, ".codex"))
     return roots
 
@@ -17448,7 +17447,7 @@ def main():
     parser.add_argument("--export", nargs="?", const="claude", metavar="CLI",
                         help="输出指定 CLI 的 export 环境变量命令")
     parser.add_argument("--apply", action="store_true",
-                        help="配合 --export 使用，写入 ~/.config/mms/env/<cli>.sh")
+                        help="配合 --export 使用，写入 ~/.config/mms-next/env/<cli>.sh")
     parser.add_argument("--account", help="临时使用指定官方账号档案启动")
     parser.add_argument("--provider", help="临时使用指定模型源启动")
     parser.add_argument("--profile", dest="opencode_profile", help="直接指定 OpenCode mode，例如 agent / review / committee / debate / omo / raw")
