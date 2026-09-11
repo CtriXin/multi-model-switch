@@ -169,3 +169,50 @@ apps/mms-web $ npm run build                    ✓
 | 折叠行内容 | 问题 + 回答摘要 + 状态 + 时间，单行不截断布局 |
 
 未重新运行 Python 测试：本次没有改动任何 `.py`。
+
+---
+
+# 补充三：主任务运行中的并发旁问（真实 smoke，同日）
+
+之前一直缺的那条证据：主任务**正在跑**的时候连发旁问，主任务不受影响。这次用真实 Pi 会话和真实模型补上。
+
+## 设置
+
+隔离实例 8879，独立 scratch workspace（`btw-concurrency-ws`，只有 6 个 md 笔记，不指向仓库，避免模型误写）。主任务：MiniMax-M2.7 · newapi-tokyo，提示词为只读地逐个读 6 个文件并总结。驱动脚本走 HTTP API，不经过浏览器。
+
+## 结果
+
+主任务在 `state=running` 期间连发 3 条旁问，每条发出时主任务状态都是 `running`：
+
+| 旁问 | 来源 | 状态 | 用量 | 发出时主任务 |
+|---|---|---|---|---|
+| 现在进行到哪一步了？ | `state` | completed | 无（未调模型） | running |
+| 这轮运行了多久 | `state` | completed | 无（未调模型） | running |
+| 按你看到的状态，这个任务是卡住了还是在正常推进？ | `completion` | completed | 521 tokens | running |
+
+两条状态旁问读到的是**实时**状态而不是陈旧快照：分别报告「本轮已进行 5 秒 / 6 秒」、「当前动作：running / responding」、上下文版本 `r-4` / `r-5`，随主任务推进而变化。
+
+模型旁问在主 Pi loop 正处于回合中间时发出并正常返回：「正常推进。任务在运行中（state: running），已执行完的 bash 和 read 工具状态都是 done，没有错误，队列和审批列表都是空的。」
+
+主任务的最终状态：
+
+```text
+final main state: idle
+tool calls: 7 -> ['bash', 'read', 'read', 'read', 'read', 'read', 'read']
+assistant messages: 7
+side questions stored: 3
+btw ids in main events: []
+queue: []
+pendingMessageCount: 0
+user events: ['只读任务，不要写入或修改任何文件。逐个读取 notes/ 下的 6 个 md 文']
+```
+
+即：7 次工具调用顺序完整、没有被打断，主任务自己跑完并给出了正确总结；旁问没有进入主 transcript（`btw ids in main events` 为空）、没有进入队列（`queue` 为空、`pendingMessageCount` 为 0）、没有变成第二条 user 消息（`user events` 只有原始提示词那一条）；3 条旁问各自独立存储，互不覆盖。
+
+刷新页面后重新打开该会话，3 条旁问仍然可读，最新一条默认展开（173px），前两条折叠（各 32px），主任务 turn 数为 1，与刷新前一致。
+
+## 这条补充没有覆盖的
+
+- 时长是分钟级，不是合同里写的 1 小时。验证的是「运行中不受打断」，不是长时运行的稳定性。
+- 主任务**等待审批**时发旁问，仍然只有 backend 测试覆盖，没有真实审批场景的端到端证据。
+- 仍然只在 MiniMax-M2.7 + newapi 这一条 Anthropic 路由上跑过。
