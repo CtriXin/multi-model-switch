@@ -12,8 +12,20 @@ import stat
 
 import pytest
 
+import mms_capability_resolver
 import mms_vision_relay
 from test_pi_vision_relay import _vision_runtime
+
+
+@pytest.fixture(autouse=True)
+def isolate_capability_root(monkeypatch):
+    """Answer from the provider profiles alone.
+
+    Whether a model reads images otherwise depends on the approved bundle the
+    developer's own config root happens to hold, so these would pass on one
+    machine and fail on another. The sibling Pi suite isolates the same way.
+    """
+    monkeypatch.setattr(mms_capability_resolver, "_load_default_approved_facts_shared", lambda: {})
 
 
 def _catalog(path):
@@ -288,3 +300,40 @@ def test_two_channels_do_not_share_one_catalog(monkeypatch, tmp_path):
     second_path = second["vision"]["environment"][mms_vision_relay.RELAY_CONFIG_ENV]
     assert first_path != second_path
     assert os.path.isfile(first_path) and os.path.isfile(second_path)
+
+
+def test_the_pilot_vision_toggle_reaches_the_new_harnesses(monkeypatch, tmp_path):
+    """Ticking "can read images" in Pilot must change what Claude and OpenCode get.
+
+    That setting is written as model policy, which outranks every curated
+    source. If the relay read capabilities from anywhere else, a user could tick
+    the box and still have no way to use a screenshot.
+    """
+    import mms_launchers
+
+    runtime = _vision_runtime(monkeypatch, ["deepseek-v4-pro", "glm-5.2"])
+    # Neither model declares image input anywhere, so there is nothing to borrow.
+    assert mms_vision_relay.relay_needed(runtime, "deepseek-v4-pro") is False
+
+    monkeypatch.setattr(
+        mms_capability_resolver,
+        "load_default_model_policy",
+        lambda: {"models": {"glm-5.2": {"capabilities": {"supports_vision": True}}}},
+    )
+
+    plan = mms_vision_relay.relay_plan(runtime, "deepseek-v4-pro")
+    assert [entry["selector"] for entry in plan["pool"]] == ["glm-5.2"]
+
+    state = mms_launchers._inject_vision_relay_mcp_server(
+        {}, runtime, "deepseek-v4-pro", session_home=tmp_path / "toggled"
+    )
+    catalog = json.load(
+        open(state["mcpServers"]["vision"]["env"][mms_vision_relay.RELAY_CONFIG_ENV], encoding="utf-8")
+    )
+    sees = [
+        model["id"]
+        for provider in catalog["providers"].values()
+        for model in provider["models"]
+        if "image" in (model.get("input") or [])
+    ]
+    assert sees == ["glm-5.2"]
