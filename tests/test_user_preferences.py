@@ -50,8 +50,6 @@ base_url = "https://should-not-load.example"
     assert prefs["launch"]["defaults"] == {
         "thinking_mode": "disable",
         "reasoning_effort": "xhigh",
-        "caveman_mode": "enable",
-        "caveman_level": "standard",
         "nsr_mode": "enable",
         "bypass": False,
     }

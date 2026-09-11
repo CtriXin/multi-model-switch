@@ -1291,7 +1291,7 @@
       },
       "context_windows": {
         "kimi-k3": 1048576,
-        "k3": 1048576,
+        "k3": 262144,
         "kimi-for-coding": 262144,
         "kimi-for-coding-highspeed": 262144,
         "kimi-k2.5": 262144,

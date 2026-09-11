@@ -69,7 +69,7 @@ python3 scripts/openrouter_recent_models.py --missing   # 只看 profile 里还�
 
 ## 已知的坑
 
-**Kimi Code 的 k3 按套餐分档。** 官方写的是 Moderato 限 256K,Allegretto 及以上到 1M。`kimi-code` profile 里 `k3` 记 262144 是保守档,`k3[1m]` 记 1048576 是显式的 1M 入口,`tests/test_provider_profiles.py` 钉住了这两个值。**不要把 `k3` 改成 1M。** 套餐够的用户在页面上自己设成 1M,那是 `model_policy` 层,优先级高于 profile。官方另有一个固定 256K 的 id 叫 `k3-256k`。
+**Kimi Code 的 k3 按套餐分档。** `kimi-code` profile 的 `k3` 采用默认 256K；高等级账号只有在当前 route/account policy 或 live probe 经人工审核后才能提升到 1M。`k3-256k` 是官方固定 256K wire model；`k3[1m]` 是 MMS compatibility selector，不能直接发给 provider。OpenRouter 只能作为 catalog evidence，不能单独证明当前账号拥有 1M。
 
 **OpenAI 已经下架的模型仍在 profile 里。** `gpt-5`、`gpt-5-pro`、`gpt-5.4`、`gpt-5.4-mini` 不在官方当前列表上了,但很多中转通道还在提供。它们的值保持原样,不要因为官方页面查不到就删。
 

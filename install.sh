@@ -289,7 +289,7 @@ $(t "说明:" "Notes:")
   - $(t "--lang 可设置默认 UI 语言（zh / en）" "--lang sets the default UI language (zh / en)")
   - $(t "安装过程零交互：不询问可选包，也不询问 UI 语言；唯一的提问是装完之后要不要打开 MMS Web" "The install is non-interactive: no optional-pack questions and no UI language prompt; the only question comes after everything is installed and just offers to open MMS Web")
   - $(t "--launch-web 跳过提问直接打开，--no-launch-web 完全不打开；没有终端时不提问，只打印命令" "--launch-web opens it without asking, --no-launch-web never opens it; with no terminal available nothing is asked and the command is printed instead")
-  - $(t "检测到 Pilot 正在使用该安装目录或占用默认端口时，默认请它退出后继续安装；--keep-running-pilot 改为暂停安装" "When a Pilot is using the installation or holding the default port, it is asked to exit and the install continues; --keep-running-pilot stops the install instead")
+  - $(t "检测到 Pilot 正在运行时默认暂停安装，不关闭 Pilot 或其会话；--keep-running-pilot 保持兼容" "When a Pilot is running, installation pauses by default without stopping Pilot or its sessions; --keep-running-pilot is retained for compatibility")
   - $(t "MMS Web 在后台运行，安装进程随即退出；PATH 默认写入 shell 配置，--no-shell-rc 可关闭" "MMS Web runs in the background and the installer exits right after; PATH is written to your shell config by default and --no-shell-rc turns that off")
   - $(t "pi 是必装项，pilot web 端依赖它；缺失的 claude/codex/opencode 会自动补装，已安装的不会被改动" "pi is mandatory because the pilot web app depends on it; missing claude/codex/opencode are installed automatically while existing ones are left untouched")
   - $(t "内建能力（weber 网页路由、grill-me、TOON、NSR）随 MMS 一起安装，只在 MMS 启动的会话里生效" "Built-in tools (weber web routing, grill-me, TOON, NSR) ship with MMS and only apply inside sessions MMS starts")
@@ -1970,33 +1970,9 @@ PY
         return 1
     fi
 
-    echo "• $(t "Pilot 正在使用此安装目录，先请它退出再继续安装" "Pilot is using this installation; asking it to exit before continuing"): $(printf '%s' "$servers" | tr '\n' ' ')"
-    # Remember where it was answering. Coming back on a different port would
-    # strand every open tab and every link the user had already shared.
-    local pid=""
-    for pid in $servers; do
-        STOPPED_PILOT_PORT="$(lsof -nP -a -p "$pid" -iTCP -sTCP:LISTEN -Fn 2>/dev/null | sed -n 's/^n.*:\([0-9][0-9]*\)$/\1/p' | head -1)"
-        [ -n "$STOPPED_PILOT_PORT" ] && break
-    done
-    for pid in $servers; do
-        kill -TERM "$pid" 2>/dev/null || true
-    done
-    local waited=0
-    while [ "$waited" -lt 20 ]; do
-        set +e
-        report="$(inspect_live_pilot)"
-        status=$?
-        set -e
-        if [ "$status" -eq 0 ]; then
-            STOPPED_PILOT=1
-            echo "✓ $(t "Pilot 已退出，继续安装；会话数据保留在原处" "Pilot exited; continuing. Session data is left where it was")"
-            return 0
-        fi
-        sleep 1
-        waited=$((waited + 1))
-    done
-
-    echo "⚠ $(t "Pilot 未能在 20 秒内退出，已暂停安装；没有强制结束任何进程。" "Pilot did not exit within 20s. Installation stopped; nothing was force-killed.")"
+    # Installation must never terminate a running Pilot: doing so also kills
+    # conversations it owns. The user can exit it explicitly and retry.
+    echo "⚠ $(t "Pilot 正在运行，已暂停安装；没有关闭进程或清理会话。请先自行退出后重试。" "Pilot is running. Installation paused; no process or session was stopped. Exit Pilot yourself and retry.")"
     printf '%s\n' "$report" | sed -n 's/^server /  /p'
     return 1
 }

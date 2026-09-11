@@ -44,15 +44,15 @@ def test_installer_refuses_when_only_a_lease_holder_is_found(tmp_path,monkeypatc
     assert guard(home).returncode==0
 
 
-def test_installer_stops_a_live_pilot_server_and_continues(tmp_path):
+def test_installer_pauses_for_a_live_pilot_without_stopping_it(tmp_path):
     home=tmp_path/'installation';(home/'mms_web').mkdir(parents=True)
     (home/'mms_web/__main__.py').write_text('fixture')
     process=_fake_pilot_server(home)
     try:
         result=guard(home,command='guard_live_pilot_install\necho "STOPPED=$STOPPED_PILOT"')
-        assert result.returncode==0,result.stderr
-        assert 'STOPPED=1' in result.stdout
-        assert process.wait(timeout=10)is not None
+        assert result.returncode != 0,result.stderr
+        assert '没有关闭进程或清理会话' in result.stdout
+        assert process.poll() is None
     finally:
         if process.poll()is None:
             process.kill();process.wait(timeout=10)
@@ -80,7 +80,7 @@ def test_install_lease_outlives_python_and_prevents_concurrent_runtime(tmp_path)
     assert result.returncode!=0 and '安装正在进行' in result.stderr
 
 
-def test_installer_stops_a_pilot_started_with_the_mms_web_subcommand(tmp_path):
+def test_installer_pauses_for_a_pilot_started_with_the_mms_web_subcommand(tmp_path):
     """`mms web` serves in-process, so its argv is the CLI entry plus `web`."""
     home=tmp_path/'installation';(home/'mms_web').mkdir(parents=True)
     (home/'mms_web/__main__.py').write_text('fixture')
@@ -89,9 +89,9 @@ def test_installer_stops_a_pilot_started_with_the_mms_web_subcommand(tmp_path):
     time.sleep(1)
     try:
         result=guard(home,command='guard_live_pilot_install\necho "STOPPED=$STOPPED_PILOT"')
-        assert result.returncode==0,result.stdout+result.stderr
-        assert 'STOPPED=1' in result.stdout
-        assert process.wait(timeout=10)is not None
+        assert result.returncode != 0,result.stdout+result.stderr
+        assert '没有关闭进程或清理会话' in result.stdout
+        assert process.poll() is None
     finally:
         if process.poll()is None:
             process.kill();process.wait(timeout=10)
@@ -114,7 +114,7 @@ def _free_port():
         return probe.getsockname()[1]
 
 
-def test_installer_stops_a_pilot_from_another_install_holding_the_port(tmp_path):
+def test_installer_pauses_for_a_pilot_from_another_install_holding_the_port(tmp_path):
     """A Pilot that updated itself, or came from another install dir, serves the
     default port with a foreign source path. It is still asked to exit so the
     fresh install does not end up as a second Pilot on the next port."""
@@ -127,9 +127,9 @@ def test_installer_stops_a_pilot_from_another_install_holding_the_port(tmp_path)
     time.sleep(1)
     try:
         result=guard(home,command='guard_live_pilot_install\necho "STOPPED=$STOPPED_PILOT"',port=port)
-        assert result.returncode==0,result.stdout+result.stderr
-        assert 'STOPPED=1' in result.stdout
-        assert process.wait(timeout=10)is not None
+        assert result.returncode != 0,result.stdout+result.stderr
+        assert '没有关闭进程或清理会话' in result.stdout
+        assert process.poll() is None
     finally:
         if process.poll()is None:
             process.kill();process.wait(timeout=10)

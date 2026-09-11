@@ -111,7 +111,7 @@ def test_adoption_leaves_an_already_configured_shared_root_alone(isolated_home):
     assert list(routes["routes"]) == ["cli-model"]
 
 
-def test_unverifiable_web_config_keeps_using_the_web_owned_root(isolated_home):
+def test_unverifiable_web_config_does_not_fork_runtime_root(isolated_home):
     from mms_web.runtime import default_config_root
 
     state_root = isolated_home / ".local" / "share" / "mms-web"
@@ -124,5 +124,5 @@ def test_unverifiable_web_config_keeps_using_the_web_owned_root(isolated_home):
 
     chosen = default_config_root(state_root)
 
-    assert chosen == web_owned
+    assert chosen == isolated_home / ".config" / "mms-next"
     assert not (isolated_home / ".config" / "mms-next" / "web-config-adopted.json").exists()

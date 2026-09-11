@@ -319,7 +319,7 @@ def test_kimi_k3_profile_uses_reasoning_effort_without_k2_thinking_patch(monkeyp
         "k3",
         provider_id="kimi",
         base_url="https://api.kimi.com/coding/",
-    ) == 1_048_576
+    ) == 262_144
     assert profiles.profile_context_window(
         "k3[1m]",
         provider_id="kimi",
@@ -696,7 +696,7 @@ def test_config_dir_root_missing_latest_bundle_ignores_legacy_profile_overlay(mo
     assert mms_provider_profiles.profile_context_window("any-model", provider_id="config-dir-provider") is None
 
 
-def test_stable_root_without_latest_bundle_keeps_legacy_profile_overlay(monkeypatch, tmp_path):
+def test_legacy_root_without_latest_bundle_ignores_legacy_profile_overlay(monkeypatch, tmp_path):
     stable_root = tmp_path / "xdg" / "mms"
     stable_root.mkdir(parents=True)
     (stable_root / "provider-profiles.json").write_text(
@@ -722,5 +722,5 @@ def test_stable_root_without_latest_bundle_keeps_legacy_profile_overlay(monkeypa
 
     mms_provider_profiles.load_provider_profiles.cache_clear()
 
-    assert mms_provider_profiles.resolve_provider_profile(provider_id="stable-overlay-provider")[0] == "stable-legacy-overlay"
-    assert mms_provider_profiles.profile_context_window("any-model", provider_id="stable-overlay-provider") == 54321
+    assert mms_provider_profiles.resolve_provider_profile(provider_id="stable-overlay-provider")[0] == ""
+    assert mms_provider_profiles.profile_context_window("any-model", provider_id="stable-overlay-provider") is None

@@ -43,7 +43,7 @@ def test_claude_kimi_k3_context_env_uses_selector_window(monkeypatch):
     assert mms_launchers._lookup_context_window("k3[1m]", provider_id="kimi") == 1_048_576
 
 
-def test_claude_kimi_k3_without_policy_keeps_safe_base_window(monkeypatch):
+def test_claude_kimi_k3_without_policy_keeps_default_tier_window(monkeypatch):
     import mms_launchers
 
     monkeypatch.setattr(

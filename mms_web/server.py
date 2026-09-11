@@ -151,7 +151,9 @@ class WebApplication:
         merged = own + [s for s in self._cli_sessions()
                         if s["piSessionId"] not in claimed]
         merged.sort(key=lambda view: view.get("updatedAt") or "", reverse=True)
-        return merged
+        # Transcript source paths remain server-internal; detail lookup resolves
+        # the id again from the scoped session directory.
+        return [{k: v for k, v in row.items() if k != "path"} for row in merged]
 
     def cli_session_detail(self, session_id: str) -> dict:
         """A read-only transcript for one command-line session."""
@@ -165,8 +167,7 @@ class WebApplication:
         if row is None:
             raise WebError("NOT_FOUND", "找不到这个会话。", 404)
         return {"session": {k: v for k, v in row.items() if k != "path"},
-                # Already in the shape the transcript view renders, so the page
-                # needs no second renderer and tools stay collapsible.
+                # The transcript path is server-only and never crosses the API.
                 "events": transcript(row["path"]),
                 # Present and empty, not absent: the view reads these without
                 # checking, and an absent array is what blanked the page.

@@ -219,8 +219,7 @@ disabled_clis = []            # e.g. ["pi", "agy"] hides/disables these MMS laun
 [launch.defaults]
 thinking_mode = "enable"      # enable | disable
 reasoning_effort = "high"     # low | medium | high | xhigh
-caveman_mode = "enable"       # enable | disable
-caveman_level = "light"       # light | standard | full
+# Caveman is retired globally; legacy fields are ignored.
 nsr_mode = "enable"           # enable | disable
 agent_pack = "none"           # none | ecc | omc
 bypass = true                 # true | false
@@ -232,8 +231,6 @@ reasoning_effort = "high"
 agent_pack = "ecc"
 
 [launch.cli.agy]
-caveman_mode = "enable"
-caveman_level = "light"
 
 [session_surfaces.disabled]
 skills = []                   # e.g. ["agent-browser", "token-saver"]
@@ -251,7 +248,6 @@ managed_root = "~/.local/share/mms/assets"
 # codegraph = "~/my-skills/codegraph"
 # token_saver = "~/my-skills/token-saver"
 # toon = "~/my-skills/toon"
-# caveman = "~/my-packs/caveman"
 # nsr = "~/my-packs/non-stop-run"
 # ecc = "~/.mms/agent-packs/everything-claude-code"
 # omc = "~/.mms/agent-packs/oh-my-claudecode"
@@ -3477,12 +3473,7 @@ def _sanitize_launch_preferences(payload):
     effort = _pref_reasoning_effort(payload.get("reasoning_effort"))
     if effort:
         result["reasoning_effort"] = effort
-    caveman_mode = _pref_enable_disable(payload.get("caveman_mode"))
-    if caveman_mode:
-        result["caveman_mode"] = caveman_mode
-    caveman_level = _pref_caveman_level(payload.get("caveman_level"))
-    if caveman_level:
-        result["caveman_level"] = caveman_level
+    # Caveman is retired; legacy preference keys are intentionally ignored.
     nsr_mode = _pref_enable_disable(payload.get("nsr_mode"))
     if nsr_mode:
         result["nsr_mode"] = nsr_mode
@@ -9259,6 +9250,8 @@ def _confirm_context_lines(cli, runtime):
 
 
 def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_nsr=False, has_ecc=False, has_omc=False):
+    # Caveman is retired globally; ignore legacy callers that still pass it.
+    has_caveman = False
     runtime = runtime if isinstance(runtime, dict) else {}
     allow_execution_surfaces = not (
         (cli == "claude" and runtime.get("auth_mode") == "oauth")
@@ -9266,9 +9259,9 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_nsr=F
     )
     preview = {
         "allow_execution_surfaces": allow_execution_surfaces,
-        "mcp": {"always": [], "caveman": [], "nsr": [], "ecc": [], "omc": []},
-        "skills": {"always": [], "caveman": [], "nsr": [], "ecc": [], "omc": []},
-        "hooks": {"always": [], "caveman": [], "nsr": [], "ecc": [], "omc": []},
+        "mcp": {"always": [], "nsr": [], "ecc": [], "omc": []},
+        "skills": {"always": [], "nsr": [], "ecc": [], "omc": []},
+        "hooks": {"always": [], "nsr": [], "ecc": [], "omc": []},
     }
 
     if cli not in {"claude", "codex", "opencode", "pi", "agy"}:
@@ -13602,7 +13595,8 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     "no_proxy_conflicts": [],
                 }
         context_lines = _confirm_context_lines(cli, runtime_runtime)
-        has_caveman = _caveman_available_for_cli(cli)
+        # Caveman is retired globally; legacy assets/preferences are inert.
+        has_caveman = False
         has_nsr = _nsr_available_for_cli(cli)
         has_ecc = (
             cli == "claude"
@@ -13709,6 +13703,9 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             return True
         if action == "b":
             continue
+        # Legacy TUI implementations may return a Caveman toggle even though
+        # the control is no longer exposed; never carry it into runtime.
+        caveman_enabled = False
         if cli in {"claude", "codex", "opencode", "pi", "agy"}:
             runtime_runtime["bypass"] = bool(bypass)
         if bypass:
@@ -15091,11 +15088,11 @@ def _display_preferences_help():
     console.print(f"  {command} config human-gate")
     console.print("\n[bold]Allowed keys:[/bold]")
     console.print("  launch.disabled_clis: hide/disable MMS launch targets such as pi or agy")
-    console.print("  launch.defaults: thinking_mode, reasoning_effort, caveman_mode, caveman_level, nsr_mode, agent_pack, bypass")
+    console.print("  launch.defaults: thinking_mode, reasoning_effort, nsr_mode, agent_pack, bypass")
     console.print("  launch.cli.<claude|codex|opencode|pi|agy>: same launch keys")
     console.print("  session_surfaces.disabled: skills, mcp, hooks")
     console.print("  assets: managed_enabled, managed_root")
-    console.print("  assets.roots: web_access, weber, agent_browser, codegraph, token_saver, toon, caveman, nsr, ecc, omc, auto_github_contributor")
+    console.print("  assets.roots: web_access, weber, agent_browser, codegraph, token_saver, toon, nsr, ecc, omc, auto_github_contributor")
     console.print("\n[bold]Denied / ignored:[/bold]")
     console.print("  api_key, base_url, proxy, account identity, provider routes, OAuth tokens, credentials, Claude config, real HOME/XDG/auth state")
     console.print("\n[bold]Overlay order:[/bold]")
