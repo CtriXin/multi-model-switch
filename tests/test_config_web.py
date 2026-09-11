@@ -4949,7 +4949,7 @@ def test_config_web_mmf_official_overrides_use_provider_profiles(monkeypatch, tm
     assert deepseek["max_output_tokens"] == 393_216
 
     k3 = result["model_capabilities"]["k3"]
-    assert k3["context_window_tokens"] == 262_144
+    assert k3["context_window_tokens"] == 1_048_576
     assert k3["max_output_tokens"] == 131_072
     assert k3["vision"] is True
     assert k3["reasoning_effort"] == "max"
