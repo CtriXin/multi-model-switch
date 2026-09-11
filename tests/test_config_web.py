@@ -1,4 +1,5 @@
 import json
+import signal
 import threading
 from http.server import ThreadingHTTPServer
 from urllib.request import Request, urlopen
@@ -5179,3 +5180,41 @@ def test_config_web_save_preserves_openrouter_vision_when_mmf_overlay_is_partial
     assert caps["tool_use"] is True
     assert caps["reasoning"] is True
     assert caps["thinking"] is True
+
+
+def test_config_web_shutdown_survives_repeat_sigint(monkeypatch):
+    """Regression: a second Ctrl-C during cleanup must not escape as a traceback.
+
+    The cleanup path keeps the main thread in an interruptible wait for the
+    shutdown helper. A SIGINT landing there used to be raised out of the
+    ``except KeyboardInterrupt`` clause, so it escaped ``serve_config_web`` as a
+    traceback instead of exiting cleanly.
+    """
+    original_handler = signal.getsignal(signal.SIGINT)
+    real_join = threading.Thread.join
+
+    def join_with_second_sigint(self, timeout=None):
+        if self.name == "mms-setup-web":
+            # First Ctrl-C: interrupts the wait for the serving thread.
+            raise KeyboardInterrupt
+        # Second Ctrl-C: lands while the main thread waits for cleanup.
+        signal.raise_signal(signal.SIGINT)
+        return real_join(self, timeout)
+
+    # Pin the handler so the test does not depend on ambient signal state.
+    signal.signal(signal.SIGINT, signal.default_int_handler)
+    monkeypatch.setattr(threading.Thread, "join", join_with_second_sigint)
+    try:
+        app = mms_config_web_server.ConfigWebApp({}, command_name="mms")
+        try:
+            url = mms_config_web_server.serve_config_web(
+                app, host="127.0.0.1", port=0, open_browser=False
+            )
+        except BaseException as exc:
+            raise AssertionError(
+                f"second SIGINT escaped the cleanup path as {type(exc).__name__}"
+            ) from exc
+    finally:
+        signal.signal(signal.SIGINT, original_handler)
+
+    assert url.startswith("http://127.0.0.1:")
