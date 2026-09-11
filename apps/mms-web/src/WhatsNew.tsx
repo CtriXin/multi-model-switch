@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { X } from "lucide-react";
+import { ChevronDown, ChevronUp, X } from "lucide-react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { isPreview, request } from "./api";
@@ -17,13 +17,14 @@ type Notes = { version?: string; notes?: string; upgradeNotice?: string };
  */
 export function WhatsNew({ ready }: { ready: boolean }) {
   const [notes, setNotes] = useState<Notes>();
+  const [expanded, setExpanded] = useState(false);
   useEffect(() => {
     if (!ready || isPreview) return;
     let cancelled = false;
     void (async () => {
       try {
         const [status, prefs] = await Promise.all([
-          request<{ whatsNew?: Notes }>("/updates/status"),
+          request<{ whatsNew?: Notes }>("/update"),
           request<{ whatsNewSeenVersion?: string }>("/ui-preferences"),
         ]);
         const current = status.whatsNew?.version;
@@ -68,11 +69,24 @@ export function WhatsNew({ ready }: { ready: boolean }) {
           </div>
         </div>
       )}
-      <div className="update-notes-body">
-        <Markdown remarkPlugins={[remarkGfm]} skipHtml>
-          {notes.notes}
-        </Markdown>
-      </div>
+      {/* Collapsed by default: the notes are long enough to push the composer
+          off the screen, and what an upgrade costs is already above. */}
+      <button
+        type="button"
+        className="whats-new-toggle"
+        onClick={() => setExpanded((open) => !open)}
+        aria-expanded={expanded}
+      >
+        {expanded ? "收起更新内容" : "查看更新内容"}
+        {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+      </button>
+      {expanded && (
+        <div className="update-notes-body whats-new-notes">
+          <Markdown remarkPlugins={[remarkGfm]} skipHtml>
+            {notes.notes}
+          </Markdown>
+        </div>
+      )}
     </section>
   );
 }
