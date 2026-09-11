@@ -11,7 +11,13 @@ import re
 import pytest
 
 import mms_pi_support as pi_support
+import mms_capability_resolver
 from mms_capability_resolver import resolve_model_capabilities
+
+
+@pytest.fixture(autouse=True)
+def isolate_capability_root(monkeypatch):
+    monkeypatch.setattr(mms_capability_resolver, "_load_default_approved_facts_shared", lambda: {})
 
 
 def _caps(model, **kwargs):

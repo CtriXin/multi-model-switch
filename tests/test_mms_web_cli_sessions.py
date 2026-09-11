@@ -296,6 +296,7 @@ def test_listed_command_line_sessions_carry_their_registered_folder(tmp_path):
     app = WebApplication(state_root=state_root, config_root=config_root)
     try:
         rows = {r["id"]: r for r in app.all_sessions(include_cli=True)}
+        assert all("path" not in row for row in rows.values())
         assert rows["cli:cccc-1"]["workspaceId"] == "proj"
         # No match stays empty, and the page groups it by its own directory.
         assert rows["cli:cccc-2"]["workspaceId"] == ""

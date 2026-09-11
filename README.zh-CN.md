@@ -209,15 +209,9 @@ mmf config web
 
 Web UI 模型表里的 `reason` / reasoning 是模型能力 metadata。真正启动时是否开 Thinking，取决于 provider/model compatibility profile 的 `thinking.supported/default_enabled`、effort 配置，以及 runtime 的 `thinking_mode`。
 
-### Caveman 现在怎么选？
+### Caveman
 
-启动确认页按 `C` 在 Off / Light / Standard / Full 之间循环。默认 Light。写偏好时用：
-
-```toml
-[launch.defaults]
-caveman_mode = "enable"
-caveman_level = "light" # light | standard | full
-```
+Caveman 已全局下线，不再随 MMS 安装、显示或注入；旧配置字段会被忽略。
 
 ### 另一台电脑应该装什么？
 
@@ -227,7 +221,6 @@ caveman_level = "light" # light | standard | full
 
 | Pack | 状态 | 用途 |
 |---|---|---|
-| Caveman | 内建 | 低 token 沟通模式；确认页选择 Off/Light/Standard/Full |
 | CodeGraph | 内建 passive skill | 优先用 symbol graph 做代码定位、callers/callees、impact 分析 |
 | TOON | 内建 | 压缩 agent-facing JSON / status / handoff |
 | grill-me | 内建 | 逐题澄清目标、约束和验收，直接可用 |

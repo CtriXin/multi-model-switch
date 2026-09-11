@@ -18,7 +18,7 @@ from typing import Any
 
 CLI_ORDER = ("claude", "codex", "opencode", "pi", "agy")
 SURFACE_KINDS = ("skills", "mcp", "hooks")
-PACK_SCOPES = ("always", "caveman", "nsr", "ecc", "omc")
+PACK_SCOPES = ("always", "nsr", "ecc", "omc")
 
 _CLI_LABELS = {
     "claude": "Claude",
@@ -185,7 +185,7 @@ def _classify_origin(kind: str, scope: str, title: str, details: list[Any], *, h
     repo = _repo_root().lower()
     home_lower = home.lower()
 
-    if scope in {"caveman", "nsr", "ecc", "omc"}:
+    if scope in {"nsr", "ecc", "omc"}:
         return {"group": "mms_dynamic", "origin": "MMS optional pack"}
     if title_key in _MMS_MANAGED_NAMES:
         return {"group": "mms_dynamic", "origin": "MMS managed"}
@@ -207,7 +207,6 @@ def _classify_origin(kind: str, scope: str, title: str, details: list[Any], *, h
 def _scope_label(scope: str) -> str:
     mapping = {
         "always": "默认可见",
-        "caveman": "Caveman 开启时",
         "nsr": "NSR 开启时",
         "ecc": "ECC pack 开启时",
         "omc": "OMC pack 开启时",
@@ -308,11 +307,12 @@ def _call_bool(mms_core: Any | None, name: str, *args: Any) -> bool:
 
 
 def _preview_for_cli(mms_core: Any | None, cli: str, runtime: dict[str, Any]) -> tuple[dict[str, Any], dict[str, bool]]:
-    has_caveman = _call_bool(mms_core, "_caveman_available_for_cli", cli)
+    # Caveman is retired and must remain absent even if an old core exposes it.
+    has_caveman = False
     has_nsr = _call_bool(mms_core, "_nsr_available_for_cli", cli)
     has_ecc = cli == "claude" and _call_bool(mms_core, "_ecc_available_for_claude")
     has_omc = cli == "claude" and _call_bool(mms_core, "_omc_available_for_claude")
-    flags = {"caveman": has_caveman, "nsr": has_nsr, "ecc": has_ecc, "omc": has_omc}
+    flags = {"caveman": False, "nsr": has_nsr, "ecc": has_ecc, "omc": has_omc}
     if cli == "pi":
         flags = {"caveman": False, "nsr": False, "ecc": False, "omc": False}
         return {"allow_execution_surfaces": False, "mcp": {}, "skills": {}, "hooks": {}}, flags
@@ -428,7 +428,6 @@ def _managed_roots(home: str) -> list[dict[str, Any]]:
         ("grill-me", "Skill", "_resolve_grill_me_root"),
         ("toon", "Skill", "_resolve_toon_root"),
         ("auto-github-contributor", "Skill", "_resolve_auto_github_contributor_root"),
-        ("caveman", "能力包", "_resolve_caveman_root"),
         ("nsr", "能力包", "_resolve_nsr_root"),
         ("ecc", "能力包", "_resolve_ecc_root"),
         ("omc", "能力包", "_resolve_omc_root"),
@@ -592,7 +591,6 @@ def _preference_snippet(prefs: dict[str, Any]) -> str:
     assets = (prefs.get("assets") or {}) if isinstance(prefs, dict) else {}
     mms_core = _load_mms_core()
     install = _managed_install_contract(_real_home(mms_core), mms_core)
-    caveman = _safe_text(defaults.get("caveman_mode") or "enable")
     nsr = _safe_text(defaults.get("nsr_mode") or "enable")
     agent_pack = _safe_text(defaults.get("agent_pack") or "none")
     bypass = defaults.get("bypass")
@@ -606,7 +604,6 @@ def _preference_snippet(prefs: dict[str, Any]) -> str:
             f"disabled_clis = [" + ", ".join(f'"{_safe_text(item)}"' for item in disabled_clis) + "]",
             "",
             "[launch.defaults]",
-            f'caveman_mode = "{caveman}"',
             f'nsr_mode = "{nsr}"',
             f'agent_pack = "{agent_pack}"',
             f"bypass = {bypass_text}",
@@ -892,7 +889,7 @@ def _confirm_reference() -> dict[str, Any]:
         "panels": [
             {"id": "summary", "label": "摘要", "description": "CLI / Model / Launch / Bypass / Thinking / Effort / Agent Pack 等启动摘要。"},
             {"id": "mcp", "label": "MCP", "description": "本次启动会注入或继承的 MCP server；可在 TUI 里逐项临时禁用。"},
-            {"id": "skills", "label": "技能", "description": "本次 session 可发现的 skill；按 always / Caveman / NSR / ECC / OMC 展开。"},
+            {"id": "skills", "label": "技能", "description": "本次 session 可发现的 skill；按 always / NSR / ECC / OMC 展开。"},
             {"id": "hooks", "label": "钩子", "description": "启动、工具前后、压缩、会话结束等自动 hook；可查看触发点和命令路径。"},
         ],
         "actions": [
@@ -902,7 +899,7 @@ def _confirm_reference() -> dict[str, Any]:
             {"key": "D / Space", "label": "禁用选择", "description": "进入禁用模式后，对本次启动逐项关闭 surface。"},
             {"key": "Tab", "label": "切 Bypass", "description": "切换本次启动是否绕过审批。"},
             {"key": "M", "label": "切 1M", "description": "仅支持的 Claude Opus/Sonnet 模型显示。"},
-            {"key": "C / N", "label": "Caveman / NSR", "description": "仅对应能力可用时显示。"},
+            {"key": "N", "label": "NSR", "description": "仅对应能力可用时显示。"},
             {"key": "T / E", "label": "思考 / 强度", "description": "仅支持 thinking/effort 的 Claude/Codex 路径显示。"},
             {"key": "X", "label": "能力包", "description": "Claude 可用时在 none / ECC / OMC 间切换。"},
             {"key": "B / Q", "label": "返回 / 取消", "description": "退出确认页，不写回持久配置。"},
@@ -965,16 +962,6 @@ def _cli_control_cards(cli: str, flags: dict[str, bool], defaults: dict[str, Any
             "hint": "对应 TUI 确认页 Tab 切换。",
         }
     ]
-    if flags.get("caveman"):
-        controls.append(
-            {
-                "id": "caveman",
-                "label": "Caveman",
-                "key": "C",
-                "state": "默认开启" if _safe_text(defaults.get("caveman_mode") or "enable") != "disable" else "默认关闭",
-                "hint": "对应 TUI 确认页 C 切换。",
-            }
-        )
     if flags.get("nsr"):
         controls.append(
             {
@@ -1175,7 +1162,6 @@ def build_session_assets_snapshot(
         "bundled_install": _bundled_install_contract(home),
         "global_roots": _global_roots(home),
         "launch_defaults": {
-            "caveman_mode": _safe_text(defaults.get("caveman_mode") or "enable"),
             "nsr_mode": _safe_text(defaults.get("nsr_mode") or "enable"),
             "agent_pack": _safe_text(defaults.get("agent_pack") or "none"),
             "bypass": defaults.get("bypass") is not False,
@@ -1192,7 +1178,7 @@ def build_session_assets_snapshot(
         "guidance": [
             "先看 MMS dynamic：这些是 MMS session 才注入的能力，适合按 CLI/任务开关。",
             "再看 Global / inherited：这些会影响 MMS 外的 CLI，默认只读，不建议新手直接改。",
-            "Caveman/NSR/ECC/OMC 是能力包开关；MCP、skills、hooks 是能力包实际展开后的 surface。",
+            "NSR/ECC/OMC 是能力包开关；MCP、skills、hooks 是能力包实际展开后的 surface。",
         ],
     }
 

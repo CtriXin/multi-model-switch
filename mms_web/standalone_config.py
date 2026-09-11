@@ -100,7 +100,8 @@ def apply_connection(root: Path, request: dict) -> dict:
             service.get("protocol"), ["openai_chat_completions", "anthropic_messages"])
         target = {"id": pid, "name": service["name"], "protocols": protocols,
                   "supported_clis": list(mms_core.PROVIDER_CAPABLE_CLIS),
-                  "models_endpoint": "manual", "enabled": True}
+                  "models_endpoint": "manual",
+                  "enabled": True}
         rows.append(target)
     else:
         target["name"] = service["name"]

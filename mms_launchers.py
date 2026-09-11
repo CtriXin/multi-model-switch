@@ -351,7 +351,7 @@ _MODEL_CONTEXT_WINDOWS = {
     "claude-sonnet-4-6": 1_000_000,
     "claude-haiku-4-5-20251001": 200_000,
     "claude-haiku-4-5": 200_000,
-    # Kimi — Kimi API `kimi-k3` is 1M; Kimi Code plain `k3` is 256K, `k3[1m]` opts into 1M.
+    # Kimi Code Moderato defaults to 256K; approved tier policy may raise it to 1M.
     "k3": 262_144,
     "k3[1m]": 1_048_576,
     "kimi-k3": 1_048_576,
@@ -403,9 +403,7 @@ _ONE_M_SUFFIX_CONTEXT_WINDOWS = {
     "mimo-v2.5": 1_000_000,
 }
 _ONE_M_SUFFIX_BASE_SAFE_CONTEXT_WINDOWS = {
-    # The base wire model can support 1M in some surfaces, but Claude Code must
-    # opt in with the selector suffix before MMS advertises that large window.
-    "k3": 262_144,
+    # MiMo still uses an explicit selector. K3 is resolved by provider profile.
     "mimo-v2.5-pro": 262_144,
     "mimo-v2.5": 262_144,
 }
@@ -480,13 +478,8 @@ def _capability_context_window(model_name, *, provider_id=None, accepted_sources
 
 
 def _plain_kimi_k3_profile_context_window(model_name, *, provider_id=None):
-    normalized = str(model_name or "").strip().lower().rsplit("/", 1)[-1]
-    if normalized != "k3":
-        return None
-    profiled = profile_context_window("k3", provider_id=provider_id or "")
-    safe_base = _ONE_M_SUFFIX_BASE_SAFE_CONTEXT_WINDOWS.get("k3")
-    if profiled is not None and safe_base is not None and profiled <= safe_base:
-        return profiled
+    # K3 is natively 1M. Keep this compatibility seam empty so no old safe-base
+    # guard can downgrade the model after a capability refresh.
     return None
 
 
@@ -649,8 +642,8 @@ def _lookup_context_window(model_name, provider_id=None):
 
     if not has_1m_suffix:
         # Latest-approved capability facts are the WebUI/runtime truth after
-        # preview publish. Keep the MiMo safe-base branch as a fallback only, or
-        # the UI can show 1M while Claude launch still receives 262K.
+        # preview publish. Keep the MiMo safe-base branch as a fallback only;
+        # K3 is resolved by the provider-aware profile below.
         approved_window = _capability_context_window(
             clean,
             provider_id=provider_id,
@@ -3288,7 +3281,8 @@ def _filter_claude_session_hooks(hooks_data, *, allow_execution_surfaces=True):
 
 
 def _caveman_available_for_cli(cli_name):
-    return str(cli_name or "").strip() in {"claude", "codex", "opencode", "agy"} and bool(_resolve_caveman_root())
+    # Caveman is retired globally; legacy assets and preferences are inert.
+    return False
 
 
 def _resolve_nsr_root():
@@ -3364,7 +3358,8 @@ def _normalize_caveman_mode(value, default="disable"):
 
 
 def _runtime_caveman_enabled(runtime):
-    return _normalize_caveman_mode((runtime or {}).get("caveman_mode", "disable")) == "enable"
+    # Keep parsing legacy fields for compatibility, but never inject Caveman.
+    return False
 
 
 def _normalize_caveman_level(value, default="light"):
@@ -3711,33 +3706,8 @@ def _bundled_asset_root_candidates(surface, *names):
 
 
 def _resolve_caveman_root():
-    candidates = []
-    explicit = str(os.environ.get("MMS_CAVEMAN_ROOT") or "").strip()
-    if explicit:
-        candidates.append(os.path.abspath(os.path.expanduser(explicit)))
-    pref = _asset_root_preference("caveman")
-    if pref:
-        candidates.append(os.path.abspath(os.path.expanduser(pref)))
-    candidates.extend(_managed_asset_root_candidates("packs", "caveman"))
-    candidates.extend(_bundled_asset_root_candidates("packs", "caveman"))
-    candidates.extend([
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "caveman"),
-        _real_user_path("auto-skills", "vendor", "caveman"),
-        _real_user_path("vendor", "caveman"),
-        _real_user_path("caveman"),
-    ])
-
-    seen = set()
-    for candidate in candidates:
-        if not candidate or candidate in seen:
-            continue
-        seen.add(candidate)
-        activate = os.path.join(candidate, "hooks", "caveman-activate.js")
-        tracker = os.path.join(candidate, "hooks", "caveman-mode-tracker.js")
-        if os.path.isfile(activate) and os.path.isfile(tracker):
-            return candidate
+    # Caveman is retired globally; legacy assets and preferences are inert.
     return ""
-
 
 def _ecc_available_for_claude():
     return bool(_resolve_ecc_root())
@@ -4009,36 +3979,8 @@ def _resolve_toon_root():
 
 
 def _resolve_token_saver_root():
-    candidates = []
-    explicit = str(os.environ.get("MMS_TOKEN_SAVER_ROOT") or "").strip()
-    if explicit:
-        candidates.append(os.path.abspath(os.path.expanduser(explicit)))
-    pref = _asset_root_preference("token_saver")
-    if pref:
-        candidates.append(os.path.abspath(os.path.expanduser(pref)))
-    candidates.extend(_managed_asset_root_candidates("skills", "token-saver", "token_saver"))
-    candidates.extend(_bundled_asset_root_candidates("skills", "token-saver", "token_saver"))
-    candidates.extend([
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "token-saver"),
-        _real_user_path("auto-skills", "shared-skills", "token-saver"),
-        _real_user_path("auto-skills", "vendor", "token-saver"),
-        _real_user_path("vendor", "token-saver"),
-    ])
-
-    seen = set()
-    for candidate in candidates:
-        if not candidate or candidate in seen:
-            continue
-        seen.add(candidate)
-        if os.path.isfile(os.path.join(candidate, "SKILL.md")):
-            return candidate
+    # Token-saver is retired from the product; old assets stay undiscovered.
     return ""
-
-
-def _resolve_xmem_root():
-    # xmem is global-only now; MMS should not bundle or inject a session-local copy.
-    return ""
-
 
 def _resolve_auto_github_contributor_root():
     candidates = []
@@ -4082,9 +4024,8 @@ def _mms_gain_script_path():
 
 
 def _token_saver_script_path():
-    script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "token-saver")
-    return script_path if os.path.isfile(script_path) else ""
-
+    # Token-saver is retired from the product; never inject its wrapper.
+    return ""
 
 def _token_gain_script_path():
     script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "token-gain")
@@ -4595,62 +4536,10 @@ def _codex_caveman_session_hook(caveman_root, caveman_level="light"):
 
 
 def _configure_codex_caveman_hooks(hooks_data, *, enable_caveman=False, caveman_level="light"):
+    # Retired globally: filter inherited hooks and never add a replacement.
     hooks_data = _filter_hook_commands(hooks_data, _is_loop_family_hook_command)
     hooks_data = _filter_hook_commands(hooks_data, _is_codex_rtk_hook_command)
-    if not enable_caveman:
-        return _filter_hook_commands(hooks_data, _is_caveman_hook_command)
-
-    caveman_root = _resolve_caveman_root()
-    replacement = _codex_caveman_session_hook(caveman_root, caveman_level=caveman_level) if caveman_root else {}
-    replaced = False
-    configured = {}
-
-    for event_name, groups in (hooks_data if isinstance(hooks_data, dict) else {}).items():
-        if not isinstance(groups, list):
-            continue
-        kept_groups = []
-        for group in groups:
-            if not isinstance(group, dict):
-                kept_groups.append(group)
-                continue
-            hook_items = group.get("hooks")
-            if not isinstance(hook_items, list):
-                kept_groups.append(dict(group))
-                continue
-            kept_hooks = []
-            for hook in hook_items:
-                if not isinstance(hook, dict):
-                    kept_hooks.append(hook)
-                    continue
-                command = str(hook.get("command") or "")
-                if _is_caveman_hook_command(command):
-                    existing_compact = "CAVEMAN_HOOK_COMPACT=1" in command and str(event_name) == "SessionStart"
-                    if not replaced and str(event_name) == "SessionStart" and (existing_compact or replacement):
-                        # MMS session owns caveman activation. Do not preserve
-                        # inherited/global caveman hooks, or SessionStart can
-                        # emit duplicate caveman context in Codex.
-                        kept_hooks.append(dict(replacement) if replacement else dict(hook))
-                        replaced = True
-                    continue
-                kept_hooks.append(dict(hook))
-            if kept_hooks:
-                next_group = dict(group)
-                next_group["hooks"] = kept_hooks
-                kept_groups.append(next_group)
-        if kept_groups:
-            configured[event_name] = kept_groups
-
-    if not replaced and replacement:
-        configured = _append_shell_command_hook(
-            configured,
-            "SessionStart",
-            replacement.get("command"),
-            matcher="startup|resume",
-            timeout=replacement.get("timeout"),
-            status_message=replacement.get("statusMessage"),
-        )
-    return configured
-
+    return _filter_hook_commands(hooks_data, _is_caveman_hook_command)
 
 def _configure_claude_nsr_hooks(hooks_data, *, enable_nsr=False):
     # Legacy toggle remains parseable; automatic continuation is retired.
@@ -4662,20 +4551,8 @@ def _configure_codex_nsr_hooks(hooks_data, *, enable_nsr=False):
 
 
 def _configure_claude_caveman_hooks(hooks_data, *, enable_caveman=False, caveman_level="light"):
-    hooks_data = _filter_hook_commands(hooks_data, _is_caveman_hook_command)
-    if not enable_caveman:
-        return hooks_data
-    caveman_root = _resolve_caveman_root()
-    if not caveman_root:
-        return hooks_data
-    hooks_data = _append_shell_command_hook(
-        hooks_data,
-        "SessionStart",
-        _caveman_claude_activate_command(caveman_root, caveman_level=caveman_level),
-        timeout=5,
-        status_message="Loading caveman mode...",
-    )
-    return hooks_data
+    # Retired globally: filter inherited hooks and never add a replacement.
+    return _filter_hook_commands(hooks_data, _is_caveman_hook_command)
 
 
 def _load_ecc_claude_hooks():
@@ -5438,25 +5315,8 @@ def _overlay_session_skill_dir(parent_dir, overlay_root, skill_name, skill_root,
 
 
 def _overlay_caveman_session_entries(parent_dir, session_home, *, enable_caveman=False, disabled_session_surfaces=None):
-    if not enable_caveman:
-        return
-    if _session_skill_disabled(disabled_session_surfaces, "caveman"):
-        return
-    caveman_root = _resolve_caveman_root()
-    if not caveman_root:
-        return
-    overlay_root = os.path.join(session_home, ".mms-caveman-overlay")
-    os.makedirs(overlay_root, exist_ok=True)
-    disabled_names = _normalize_session_surface_disabled(disabled_session_surfaces).get("skills", set())
-    for entry_name in ("commands", "skills"):
-        _overlay_session_entry_dir(
-            parent_dir,
-            overlay_root,
-            entry_name,
-            caveman_root,
-            exclude_names=disabled_names,
-        )
-
+    # Retired globally: never create a Caveman overlay.
+    return None
 
 def _overlay_ecc_session_entries(parent_dir, session_home, *, enable_ecc=False, disabled_session_surfaces=None):
     if not enable_ecc:
@@ -11083,12 +10943,8 @@ def _claude_gateway_env(
 
 
 def _codex_gateway_root():
-    """Keep MMF Codex gateway state inside its selected preview root."""
-    command_name = str(os.environ.get("MMS_COMMAND_NAME") or "").strip().lower()
-    preview_mode = str(os.environ.get("MMS_PREVIEW_MODE") or "").strip().lower()
-    if command_name == "mmf" or preview_mode == "mmf":
-        return os.path.join(_selected_mms_config_root({}), "codex-gateway")
-    return _real_user_path(".config", "mms", "codex-gateway")
+    """Keep Codex gateway state inside the single selected mms-next root."""
+    return os.path.join(_selected_mms_config_root({}), "codex-gateway")
 
 
 def _codex_gateway_env(runtime, base_url, model_info=None):

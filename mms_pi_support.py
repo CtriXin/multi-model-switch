@@ -130,9 +130,12 @@ _PI_BUNDLED_SESSION_SKILLS = (
 )
 
 
-def _pi_bundled_skill_roots():
+def _pi_bundled_skill_roots(disabled_session_surfaces=None):
     roots = []
+    launchers = _launchers_module()
     for name, resolver in _PI_BUNDLED_SESSION_SKILLS:
+        if launchers._session_skill_disabled(disabled_session_surfaces, name):
+            continue
         try:
             root = str(globals()[resolver]() or "").strip()
         except Exception:
@@ -229,8 +232,8 @@ def _pi_project_directories(project_dir):
         current = current.parent
 
 
-def _pi_materialize_skill_overlay(session_home, project_dir):
-    """Merge Pi skill roots so project skills keep their existing precedence."""
+def _pi_materialize_skill_overlay(session_home, project_dir, disabled_session_surfaces=None):
+    """Merge Pi skill roots while honoring per-session disabled surfaces."""
     overlay_dir = Path(session_home) / ".pi" / "skills-overlay"
     try:
         overlay_dir.mkdir(parents=True, exist_ok=True)
@@ -248,7 +251,7 @@ def _pi_materialize_skill_overlay(session_home, project_dir):
 
     linked = 0
     # Bundled skills go first so every user root below can replace them by name.
-    for name, root in _pi_bundled_skill_roots():
+    for name, root in _pi_bundled_skill_roots(disabled_session_surfaces):
         destination = overlay_dir / name
         try:
             if destination.is_symlink() or destination.is_file():
@@ -268,6 +271,8 @@ def _pi_materialize_skill_overlay(session_home, project_dir):
             continue
         for entry in entries:
             if entry.name.startswith(".") or (entry.is_file() and not include_markdown):
+                continue
+            if _launchers_module()._session_skill_disabled(disabled_session_surfaces, entry.name):
                 continue
             destination = overlay_dir / entry.name
             try:
@@ -398,6 +403,8 @@ _PI_MODEL_MAX_TOKENS_HINTS = {
 _PI_MODEL_CONTEXT_WINDOW_HINTS = {
     "gpt-5.3-codex": 400000,
     "gpt-5.3-codex-spark": 128000,
+    # Kimi Code's plain k3 is 256K for the default tier; policy/profile data
+    # may raise it to 1M. The explicit MMS selector remains 1M.
     "k3": 262144,
     "k3[1m]": 1048576,
     "kimi-k3": 1048576,
@@ -867,6 +874,8 @@ def _pi_model_capabilities(runtime, model_name):
             caps.setdefault("sources", {})[field] = "pi_reference_fallback"
 
     reference_row = _pi_reference_model_row(model_name)
+    # Built-in hints may fill only unresolved legacy models; profile/policy
+    # values for the selected provider must remain authoritative.
     if caps.get("sources", {}).get("context_window_tokens") == "conservative_fallback":
         reference_context = _pi_first_positive_int(
             reference_row,
@@ -1543,7 +1552,11 @@ def _pi_gateway_env(runtime, model_info=None):
     global_pi = _pi_global_executable()
     if global_pi:
         env["MMS_PI_EXECUTABLE"] = global_pi
-    skill_overlay = _pi_materialize_skill_overlay(session_home, os.getcwd())
+    skill_overlay = _pi_materialize_skill_overlay(
+        session_home,
+        os.getcwd(),
+        (runtime or {}).get("disabled_session_surfaces"),
+    )
     if skill_overlay:
         env["MMS_PI_SKILLS_OVERLAY"] = skill_overlay
     wrapper_path = launchers._pi_wrapper_path()
