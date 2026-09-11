@@ -5,12 +5,14 @@ import type { FormEvent, ReactNode, RefObject } from "react";
 import {
   CircleAlert,
   ArrowUp,
+  ChevronDown,
   BookOpen,
   AtSign,
   ImagePlus,
   LoaderCircle,
   Paperclip,
   Plus,
+  Send,
   Square,
   Terminal,
   X,
@@ -20,7 +22,8 @@ import { SkillPicker } from "./SkillPicker";
 import type { Skill } from "./SkillPicker";
 import { request } from "./api";
 import { SKILL_PREFERENCES_EVENT } from "./SkillSources";
-import type { Attachment, FileSelection, Workspace } from "./types";
+import type { Attachment, FileSelection, Workspace, SendMode } from "./types";
+import { availableSendModes, resolveSendMode } from "./message-control";
 import { FilesPanel } from "./FilesPanel";
 import { localFilePaths } from "./local-file-paths";
 import { requiredSkillMatches } from "./recipe-core";
@@ -31,6 +34,9 @@ import { droppedItems, folderChildren } from "./dropped-items";
 import { WorkspaceDialog } from "./LaunchOptions";
 
 export interface MessageExtras {
+  /** How this message should reach the session. The service decides what it
+   *  can honour; the composer only offers what it said it supports. */
+  mode: SendMode;
   skillInvocation?: string;
   skills: string[];
   attachments: string[];
@@ -77,6 +83,7 @@ export function Composer({
   draftKey: providedDraftKey,
   placeholder = "继续补充你的想法…",
   scroll,
+  steerAvailable = false,
   enterToSend = true,
 }: {
   initialText?: string;
@@ -107,6 +114,8 @@ export function Composer({
     /** Said up front when only state questions can be answered here. */
     limitation?: string;
   };
+  /** Whether the service accepts a steering message on this session. */
+  steerAvailable?: boolean;
   enterToSend?: boolean;
 }) {
   const draftKey =
@@ -169,6 +178,15 @@ export function Composer({
   });
   const [fileSelections, setFileSelections] = useState<FileSelection[]>(draft?.fileSelections || []);
   const [submitting, setSubmitting] = useState(false);
+  // Remembered only until it is used: steering is a deliberate act, so the next
+  // message goes back to the safe default rather than inheriting the choice.
+  const [chosenMode, setChosenMode] = useState<SendMode>();
+  const sendModes = availableSendModes(!!running, { steer: steerAvailable });
+  const sendMode = resolveSendMode(chosenMode, !!running, {
+    steer: steerAvailable,
+  });
+  const activeMode =
+    sendModes.find((option) => option.mode === sendMode) || sendModes[0];
   const [attachments, setAttachments] = useState<Attachment[]>(
     draft?.attachments || [],
   );
@@ -627,6 +645,7 @@ export function Composer({
             "当前执行工具未提供这个命令。输入 / 查看可用命令，普通路径可用 @ 引用。",
           );
         ok = await send(outgoing || "请查看附件。", {
+          mode: sendMode,
           attachments: attachments.filter(a => referencedInText(a, outgoing)).map((a) => a.id),
           references,
           skills: outgoingSkills,
@@ -635,6 +654,7 @@ export function Composer({
         });
         if (ok) {
           discardDraft(draftKey);
+          setChosenMode(undefined);
           setText("");
           setSelectedSkills([]);
           setAttachments([]);
@@ -1050,6 +1070,61 @@ export function Composer({
           </div>
           <div className="composer-context">{children}</div>
           <div className="composer-actions">
+            {running && (sendModes.length > 1 || !!stop) && (
+              <Popover
+                className="send-mode-trigger"
+                title="发送方式"
+                label={
+                  <>
+                    <span>{activeMode.label}</span>
+                    <ChevronDown size={13} />
+                  </>
+                }
+              >
+                {(close) => (
+                  <div className="send-mode-menu">
+                    {sendModes.map((option) => (
+                      <button
+                        key={option.mode}
+                        type="button"
+                        className={
+                          option.mode === sendMode ? "send-mode active" : "send-mode"
+                        }
+                        aria-pressed={option.mode === sendMode}
+                        onClick={() => {
+                          setChosenMode(option.mode);
+                          close();
+                        }}
+                      >
+                        <strong>{option.label}</strong>
+                        <span>{option.description}</span>
+                      </button>
+                    ))}
+                    {!steerAvailable && (
+                      <p className="section-note">
+                        本地服务尚未提供立即引导，现在只能排队补充或停止。
+                      </p>
+                    )}
+                    {!!stop && (
+                      <button
+                        type="button"
+                        className="send-mode danger"
+                        disabled={busy}
+                        onClick={() => {
+                          close();
+                          stop();
+                        }}
+                      >
+                        <strong>停止当前执行</strong>
+                        <span>
+                          结束这一轮，已排队的消息仍会按顺序继续送达。
+                        </span>
+                      </button>
+                    )}
+                  </div>
+                )}
+              </Popover>
+            )}
             {running && stop && (
               <button
                 type="button"
@@ -1077,15 +1152,17 @@ export function Composer({
                 btwMode
                   ? "发送旁问，不打断当前任务"
                   : running
-                    ? "加入待发送队列"
+                    ? activeMode.description
                     : "发送任务"
               }
               aria-label={
-                btwMode ? "发送旁问" : running ? "加入队列" : "发送任务"
+                btwMode ? "发送旁问" : running ? activeMode.label : "发送任务"
               }
             >
               {busy || submitting ? (
                 <LoaderCircle size={18} className="spin" />
+              ) : sendMode === "steer" ? (
+                <Send size={17} />
               ) : (
                 <ArrowUp size={20} />
               )}

@@ -1,4 +1,5 @@
 import type { SessionEvent } from "./types";
+import { deliveryLabel } from "./message-control";
 
 export interface UsageItem {
   kind: "skill" | "attachment" | "reference" | "selection" | "material";
@@ -22,7 +23,7 @@ export function loadLabel(item: { loadState?: string; invoked?: boolean; partial
 export function ContextUsage({ event }: { event: SessionEvent }) {
   const usage = event.contextUsage;
   if (!usage) return null;
-  const label = usage.state === "uncertain" ? "发送结果待确认" : event.status === "cancelled" ? "已取消" : event.status === "queued" ? "等待处理" :
+  const label = usage.state === "uncertain" ? "发送结果待确认" : event.status === "cancelled" ? "已取消" : event.status === "queued" ? deliveryLabel(event) :
     ({ prepared: "已准备", submitted: "已提交", failed: "发送失败", uncertain: "发送结果待确认" })[usage.state];
   const submitted = usage.state === "submitted" && event.status !== "queued" && event.status !== "cancelled";
   if (!usage.items.length) {

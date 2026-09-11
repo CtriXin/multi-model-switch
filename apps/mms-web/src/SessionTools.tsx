@@ -13,6 +13,7 @@ import { request } from "./api";
 import { copyText } from "./clipboard";
 import { RecipeExport } from "./Recipe";
 import { ContextEvidence } from "./ContextEvidence";
+import { MessageQueue } from "./MessageQueue";
 import type { SessionDetail } from "./types";
 
 type Action = (
@@ -367,23 +368,25 @@ export function RuntimePanel({
           Pi 报告费用：${stats.cost.toFixed(5)}。以模型服务的实际账单为准。
         </p>
       )}
-      {!!r.pendingMessageCount && (
-        <>
-          <h3>待发送消息 · {r.pendingMessageCount}</h3>
-          <ol className="queued-messages">
-            {r.queue?.map((message, i) => (
-              <li key={i}>{message.slice(0, 500)}</li>
-            ))}
-          </ol>
-          <button
-            className="secondary-button"
-            disabled={busy}
-            onClick={() => void control("clearQueue")}
-          >
-            清空待发送队列
-          </button>
-        </>
-      )}
+      <MessageQueue
+        runtime={detail.runtime}
+        capabilities={detail.session.capabilities}
+        busy={busy}
+        remove={(id) =>
+          void action(`/sessions/${detail.session.id}/queue`, {
+            action: "remove",
+            id,
+          })
+        }
+        move={(id, toIndex) =>
+          void action(`/sessions/${detail.session.id}/queue`, {
+            action: "move",
+            id,
+            toIndex,
+          })
+        }
+        clear={() => void control("clearQueue")}
+      />
       <details className="diagnostic-details">
         <summary
           onClick={() => {

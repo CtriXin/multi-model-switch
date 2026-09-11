@@ -57,6 +57,8 @@ import type { GuideAction } from "./guide-content";
 import { ArtifactView } from "./ArtifactView";
 import { ProjectMaterials } from "./ProjectMaterials";
 import { Transcript } from "./Transcript";
+<<<<<<< HEAD
+import { MessageQueue } from "./MessageQueue";
 import { SideQuestions, useSideQuestions } from "./SideQuestions";
 import { ConversationOutline } from "./ConversationOutline";
 import { CurrentActivity, sessionStatus } from "./SessionStatus";
@@ -1729,7 +1731,7 @@ export function App() {
                 }
                 busy={busy}
                 placeholder="想做什么？"
-                send={async (text, extras) => {
+                send={async (text, { mode: _mode, ...extras }) => {
                   if (!recipeReady) return false;
                   const revision = recipeContext.current.revision;
                   if (recipe) {
@@ -2111,6 +2113,31 @@ export function App() {
                       </button>
                     </div>
                   ) : (
+                  <>
+                  <MessageQueue
+                    variant="controls"
+                    runtime={detail.runtime}
+                    capabilities={detail.session.capabilities}
+                    busy={busy}
+                    remove={(id) =>
+                      void runAction(
+                        `/sessions/${encodeURIComponent(detail.session.id)}/queue`,
+                        { action: "remove", id },
+                      )
+                    }
+                    move={(id, toIndex) =>
+                      void runAction(
+                        `/sessions/${encodeURIComponent(detail.session.id)}/queue`,
+                        { action: "move", id, toIndex },
+                      )
+                    }
+                    clear={() =>
+                      void runAction(
+                        `/sessions/${encodeURIComponent(detail.session.id)}/control`,
+                        { action: "clearQueue" },
+                      )
+                    }
+                  />
                   <Composer
                     enterToSend={enterToSend}
                     key={detail.session.id}
@@ -2185,6 +2212,7 @@ export function App() {
                     }
                     busy={busy}
                     running={detail.session.state === "running"}
+                    steerAvailable={!!detail.session.capabilities.steer}
                     send={(text, extras) =>
                       runAction(
                         "/sessions/" +
@@ -2217,6 +2245,7 @@ export function App() {
                       }}
                     />
                   </Composer>
+                  </>
                   )}
                 </div>
               )}
