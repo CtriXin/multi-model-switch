@@ -124,6 +124,21 @@ def test_a_global_pi_still_wins(tmp_path, monkeypatch):
     assert executable == "/usr/local/bin/pi"
 
 
+def test_a_pi_dist_cli_in_npms_own_cache_is_found_too(tmp_path, monkeypatch):
+    """The published package may expose dist/cli.js without a .bin shim."""
+    import mms_web.drivers.launch_bridge as bridge
+
+    cli = tmp_path / "npm-home" / "_npx" / "hash" / "node_modules" / "@earendil-works" / "pi-coding-agent" / "dist" / "cli.js"
+    cli.parent.mkdir(parents=True)
+    cli.write_text("#!/usr/bin/env node\n", encoding="utf-8")
+    cli.chmod(0o755)
+    (cli.parents[1] / "package.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("NPM_CONFIG_CACHE", str(tmp_path / "npm-home"))
+    monkeypatch.setitem(__import__("sys").modules, "mms_pi_support",
+                        type("M", (), {"_pi_npx_cache_dir": staticmethod(lambda: str(tmp_path / "absent"))}))
+    assert bridge.cached_pi() == str(cli)
+
+
 def test_a_pi_installed_into_npms_own_cache_is_found_too(tmp_path, monkeypatch):
     """`npx pi` without the wrapper puts it in npm's default cache.
 

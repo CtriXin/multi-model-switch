@@ -660,6 +660,13 @@ find_cli_binary() {
     local command_name="$1"
     local candidate=""
     local dir=""
+    local npm_prefix=""
+
+    # npm's global prefix is user-configurable (fnm, nvm, Homebrew, etc.);
+    # checking only a fixed PATH misses a successful install.
+    if command -v npm >/dev/null 2>&1; then
+        npm_prefix="$(npm prefix -g 2>/dev/null || true)"
+    fi
 
     if [ -z "$command_name" ]; then
         return 1
@@ -679,6 +686,7 @@ find_cli_binary() {
         "$REAL_HOME/.bun/bin" \
         "$REAL_HOME/.cargo/bin" \
         "$REAL_HOME/.nvm/versions/node/"*/bin \
+        "${npm_prefix:+$npm_prefix/bin}" \
         "/usr/bin" \
         "/bin"; do
         [ -d "$dir" ] || continue
@@ -962,13 +970,16 @@ install_named_cli() {
         return 0
     fi
 
-    npm_global_install_with_nvm_fallback "$label" "$package_spec" || true
+    if ! npm_global_install_with_nvm_fallback "$label" "$package_spec"; then
+        echo "✗ $(t "$label 安装命令失败；本次安装已停止" "$label install command failed; installation stopped")"
+        return 1
+    fi
     if cli_path="$(find_cli_binary "$command_name" 2>/dev/null)"; then
         echo "✓ $label ($cli_path)"
         return 0
     fi
 
-    echo "⚠ $(t "$label 安装未完成；MMS 仍可安装，之后可重新运行 --install-cli $cli_name。" "$label install did not complete; MMS is still installed, rerun --install-cli $cli_name later.")"
+    echo "✗ $(t "$label 安装后未找到可执行文件；本次安装已停止。请检查 Node/npm PATH 后重试。" "$label was not found after install; installation stopped. Check the Node/npm PATH and retry.")"
     return 1
 }
 
@@ -1051,7 +1062,9 @@ install_requested_clis() {
 
     IFS=',' read -r -a _requested_cli_items <<< "$INSTALL_CLI_LIST"
     for cli_name in "${_requested_cli_items[@]}"; do
-        install_named_cli "$cli_name" || true
+        if ! install_named_cli "$cli_name"; then
+            return 1
+        fi
     done
 }
 
@@ -1123,12 +1136,14 @@ warm_pi_runtime_cache() {
     echo "$(t "正在准备 pi 运行环境，第一次会下载，请稍候..." "Preparing the pi runtime; the first run downloads it, please wait...")"
     mkdir -p "$cache_dir"
     if NPM_CONFIG_UPDATE_NOTIFIER=false npx -y --cache "$cache_dir" "$PI_CLI_PACKAGE_SPEC" --version >/dev/null 2>&1; then
-        echo "✓ $(t "pi 运行时 cache 已就绪" "pi runtime cache ready"): $cache_dir"
-        return 0
+        if "$MMS_HOME/scripts/pi-cli-wrapper.sh" --version >/dev/null 2>&1; then
+            echo "✓ $(t "pi 运行时 cache 已就绪" "pi runtime cache ready"): $cache_dir"
+            return 0
+        fi
     fi
 
-    echo "⚠ $(t "pi 运行时预热未成功；pilot 首次启动时会重试下载" "pi runtime warmup did not succeed; the first pilot launch retries the download")"
-    return 0
+    echo "✗ $(t "pi 运行时预热失败；Pilot 无法安全启动，本次安装已停止" "pi runtime warmup failed; Pilot cannot start safely, installation stopped")"
+    return 1
 }
 
 append_claude_hook_command() {
@@ -2742,8 +2757,14 @@ rewrite_shebang "$MMS_HOME/mms" "$PYTHON_PATH"
 
 # ── 4.5 安装必需 CLI（pi 必装，缺失的 claude/codex/opencode 自动补装）──
 install_coding_fonts || echo "⚠ Coding fonts unavailable; continuing MMS installation."
-install_requested_clis
-warm_pi_runtime_cache || true
+if ! install_requested_clis; then
+    echo "✗ $(t "所需 CLI 未全部安装，未完成安装" "Required CLI installation did not complete")" >&2
+    exit 1
+fi
+if ! warm_pi_runtime_cache; then
+    echo "✗ $(t "Pi 运行环境未就绪，未完成安装" "Pi runtime is not ready; installation is incomplete")" >&2
+    exit 1
+fi
 
 # ── 5. 建立命令入口 ──
 echo ""

@@ -298,9 +298,11 @@ export function ChannelModels({
         draft(),
       );
       setRemote(result.models);
-      setNotice(
-        `拉取到 ${result.models.length} 个模型。新模型需勾选后保存；已选模型不会自动移除。`,
-      );
+      // Remote discovery is authoritative for this channel. Replace the
+      // visible selection so removed upstream models leave the local route.
+      setChosen(result.models);
+      setManual([]);
+      setNotice(`已用远端模型列表覆盖当前通道，共 ${result.models.length} 个模型。取消勾选后保存即可继续精简。`);
     } catch (e) {
       setError((e as Error).message);
     } finally {

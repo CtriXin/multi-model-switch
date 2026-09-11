@@ -69,7 +69,7 @@ python3 scripts/openrouter_recent_models.py --missing   # 只看 profile 里还�
 
 ## 已知的坑
 
-**Kimi Code 的 k3 按套餐分档。** `kimi-code` profile 的 `k3` 采用默认 256K；高等级账号只有在当前 route/account policy 或 live probe 经人工审核后才能提升到 1M。`k3-256k` 是官方固定 256K wire model；`k3[1m]` 是 MMS compatibility selector，不能直接发给 provider。OpenRouter 只能作为 catalog evidence，不能单独证明当前账号拥有 1M。
+**Kimi Code 的 k3 原生支持 1M。** `k3` 是新的默认入口；`k3[1m]` 仅为历史 MMS compatibility selector，不能直接发给 provider，也不再作为新的产品入口。OpenRouter 仍然只是 catalog evidence，不能单独证明当前 route/account 的实际能力。
 
 **OpenAI 已经下架的模型仍在 profile 里。** `gpt-5`、`gpt-5-pro`、`gpt-5.4`、`gpt-5.4-mini` 不在官方当前列表上了,但很多中转通道还在提供。它们的值保持原样,不要因为官方页面查不到就删。
 

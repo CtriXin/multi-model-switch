@@ -1291,7 +1291,7 @@
       },
       "context_windows": {
         "kimi-k3": 1048576,
-        "k3": 262144,
+        "k3": 1048576,
         "kimi-for-coding": 262144,
         "kimi-for-coding-highspeed": 262144,
         "kimi-k2.5": 262144,
@@ -1301,8 +1301,7 @@
         "k2.6-code-preview": 262144,
         "kimi-k2.7-code": 262144,
         "kimi-for-code": 262144,
-        "k3[1m]": 1048576,
-        "k3-256k": 262144
+        "k3[1m]": 1048576
       },
       "api_formats": {
         "openai_chat": {
@@ -1316,7 +1315,7 @@
       },
       "max_output_tokens": {
         "kimi-k3": 1048576,
-        "k3": 131072,
+        "k3": 1048576,
         "kimi-k2.7-code": 32768,
         "kimi-for-code": 32768,
         "kimi-for-coding": 32768,
@@ -1340,8 +1339,7 @@
         "k2.6": true,
         "k2.6-code-preview": true,
         "kimi-k2.7-code": true,
-        "k3[1m]": true,
-        "k3-256k": true
+        "k3[1m]": true
       },
       "input_modalities": {
         "kimi-k3": [
@@ -1395,10 +1393,6 @@
           "video"
         ],
         "k3[1m]": [
-          "text",
-          "image"
-        ],
-        "k3-256k": [
           "text",
           "image"
         ]

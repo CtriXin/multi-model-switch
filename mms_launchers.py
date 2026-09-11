@@ -351,8 +351,8 @@ _MODEL_CONTEXT_WINDOWS = {
     "claude-sonnet-4-6": 1_000_000,
     "claude-haiku-4-5-20251001": 200_000,
     "claude-haiku-4-5": 200_000,
-    # Kimi Code Moderato defaults to 256K; approved tier policy may raise it to 1M.
-    "k3": 262_144,
+    # Kimi K3 is a native 1M model. `k3[1m]` remains input compatibility only.
+    "k3": 1_048_576,
     "k3[1m]": 1_048_576,
     "kimi-k3": 1_048_576,
     "moonshotai/kimi-k3": 1_048_576,
@@ -398,7 +398,6 @@ _DEFAULT_CONTEXT_WINDOW = 200_000  # 未知模型的安全默认值
 _ONE_M_CONTEXT_SUFFIX = "[1m]"
 _ONE_M_SUFFIX_CONTEXT_WINDOWS = {
     # MiMo documents [1m] as an opt-in long-context suffix for Claude Code.
-    "k3": 1_048_576,
     "mimo-v2.5-pro": 1_000_000,
     "mimo-v2.5": 1_000_000,
 }
@@ -837,7 +836,7 @@ def _real_user_path(*parts):
 
 
 def _account_guard_state_path():
-    return _real_user_path(".config", "mms", "account-guard-state.json")
+    return _selected_mms_config_root({}) + "/account-guard-state.json"
 
 
 def _load_json_dict_unlocked(path):
@@ -996,7 +995,7 @@ def _claude_guard_runtime(runtime):
     guard_runtime = dict(runtime or {})
     auth_mode = str(guard_runtime.get("auth_mode") or "api_key").strip() or "api_key"
     if auth_mode == "api_key" and not str(guard_runtime.get("home_dir") or "").strip():
-        guard_runtime["home_dir"] = _real_user_path(".config", "mms", "claude-gateway")
+        guard_runtime["home_dir"] = _selected_mms_config_root({}) + "/claude-gateway"
     return guard_runtime
 
 
@@ -2478,7 +2477,7 @@ _CLAUDE_DEFAULT_PERMISSION_DENY = [
 
 
 def _claude_gateway_home():
-    gateway_base = _real_user_path(".config", "mms", "claude-gateway")
+    gateway_base = _selected_mms_config_root({}) + "/claude-gateway"
     sessions_dir = os.path.join(gateway_base, "s")
     return os.path.join(sessions_dir, str(os.getpid()))
 
@@ -2488,11 +2487,11 @@ def _claude_route_status_paths(*, gateway_home=None):
     # 不读 ambient MMS_SESSION_HOME env（继承链不可靠，多 session 会串改）。
     gh = str(gateway_home or "").strip()
     if gh:
-        return [os.path.join(gh, ".config", "mms", "route_status.json")]
+        return [os.path.join(gh, "route_status.json")]
     if str(os.environ.get("MMS_CONFIG_ROOT") or os.environ.get("MMS_CONFIG_DIR") or "").strip():
         return [os.path.join(_resolve_mms_config_dir(), "route_status.json")]
     fallback = _claude_gateway_home()
-    return [os.path.join(fallback, ".config", "mms", "route_status.json")]
+    return [os.path.join(fallback, "route_status.json")]
 
 
 def _anthropic_cache_key(provider_id, configured_url):
@@ -10042,13 +10041,14 @@ def _claude_project_resume_dir_names(project_path):
 
 
 def _claude_slot_roots_for_resume_backfill(account_id):
+    selected_root = _selected_mms_config_root({})
     roots = [
-        _real_user_path(".config", "mms", "claude-gateway", "s"),
+        selected_root + "/claude-gateway/s",
     ]
     normalized_account_id = _normalized_claude_slot_account(account_id)
     if normalized_account_id:
-        roots.append(_real_user_path(".config", "mms", "accounts", normalized_account_id, "s"))
-    accounts_root = _real_user_path(".config", "mms", "accounts")
+        roots.append(selected_root + f"/accounts/{normalized_account_id}/s")
+    accounts_root = selected_root + "/accounts"
     if os.path.isdir(accounts_root):
         for name in os.listdir(accounts_root):
             candidate = os.path.join(accounts_root, name, "s")
@@ -10582,7 +10582,7 @@ def _claude_gateway_env(
     _timings=None,
 ):
     """Gateway api_key 模式独立 HOME（per-PID 会话隔离）：
-    - 每个 mms 进程使用独立的 ~/.config/mms/claude-gateway/s/{pid}/ 作为 HOME
+    - 每个 mms 进程使用独立的 ~/.config/mms-next/claude-gateway/s/{pid}/ 作为 HOME
     - 启动时清理已死进程的残留目录
     - 剥离 migration 标记，防止 claude-sonnet-4-6[1m] 自动升级
     - 自动拉取 gateway 模型列表，填入所有 ANTHROPIC_*_MODEL slot
@@ -10595,7 +10595,7 @@ def _claude_gateway_env(
     light_model: bridge 模式下可选 light model（仅用于展示）。
     """
     import json as _json
-    gateway_base = _real_user_path(".config", "mms", "claude-gateway")
+    gateway_base = _selected_mms_config_root({}) + "/claude-gateway"
     sessions_dir = os.path.join(gateway_base, "s")
     gateway_home, _active_before, _active_after = _reserve_session_home(
         sessions_dir,
@@ -11667,6 +11667,7 @@ def _opencode_gateway_env(runtime, model_info=None):
         model_info=model_info,
         resolve_model=_resolve_model,
         real_user_path=_real_user_path,
+        selected_config_root=lambda: _selected_mms_config_root({}),
         cleanup_stale_sessions=_cleanup_stale_sessions,
         link_shared_dotfiles=_link_shared_dotfiles,
         scrub_inherited_runtime_env=_scrub_inherited_runtime_env,

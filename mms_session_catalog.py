@@ -61,7 +61,6 @@ def claude_project_roots() -> list[Path]:
     roots.extend(
         [
             home / ".config" / "mms-next" / "projects",
-            home / ".config" / "mms" / "projects",
         ]
     )
     return [path for path in _dedupe_paths(roots) if path.exists()]
@@ -76,18 +75,18 @@ def codex_roots() -> list[Path]:
             roots.append(Path(value))
     roots.extend(
         [
-            home / ".config" / "mms" / "codex-gateway" / ".codex",
+            home / ".config" / "mms-next" / "codex-gateway" / ".codex",
             home / ".codex",
         ]
     )
-    roots.extend((home / ".config" / "mms" / "codex-gateway" / "s").glob("*/.codex"))
-    roots.extend((home / ".config" / "mms" / "accounts").glob("*/.codex"))
-    roots.extend((home / ".config" / "mms" / "accounts").glob("*/s/*/.codex"))
+    roots.extend((home / ".config" / "mms-next" / "codex-gateway" / "s").glob("*/.codex"))
+    roots.extend((home / ".config" / "mms-next" / "accounts").glob("*/.codex"))
+    roots.extend((home / ".config" / "mms-next" / "accounts").glob("*/s/*/.codex"))
     return [path for path in _dedupe_paths(roots) if path.exists()]
 
 
 def pi_roots() -> list[Path]:
-    """Return current and legacy Pi history roots without reading auth state."""
+    """Return current Pi history roots without reading auth state."""
     home = _real_user_home()
     roots: list[Path] = []
     try:
@@ -97,7 +96,7 @@ def pi_roots() -> list[Path]:
     roots.extend(
         [
             home / ".config" / "mms-next" / "pi-gateway",
-            home / ".config" / "mms" / "pi-gateway",
+            home / ".config" / "mms-next" / "pi-gateway",
         ]
     )
     return [path for path in _dedupe_paths(roots) if path.exists()]

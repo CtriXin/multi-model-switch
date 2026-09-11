@@ -799,6 +799,7 @@ def opencode_gateway_env(
     *,
     resolve_model,
     real_user_path,
+    selected_config_root=None,
     cleanup_stale_sessions,
     link_shared_dotfiles,
     scrub_inherited_runtime_env,
@@ -836,7 +837,7 @@ def opencode_gateway_env(
         raise ValueError("opencode_profile is required for MMS-managed OpenCode shared state")
     disabled_session_surfaces = runtime.get("disabled_session_surfaces")
     enable_caveman = runtime_caveman_enabled(runtime)
-    gateway_base = real_user_path(".config", "mms", "opencode-gateway")
+    gateway_base = (selected_config_root() if selected_config_root else real_user_path(".config", "mms-next")) + "/opencode-gateway"
     os.makedirs(gateway_base, exist_ok=True)
     sessions_dir = os.path.join(gateway_base, "s")
     session_home = os.path.join(sessions_dir, str(getpid()))
