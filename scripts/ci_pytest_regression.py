@@ -31,6 +31,8 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_TARGET = "tests"
+# Scratch checkouts live here, inside the repo, for the reason in base_worktree().
+GATE_DIR_NAME = ".pytest-gate"
 # Reruns of a candidate regression, to keep an order-dependent or port-flaky
 # test from blocking a PR that did not touch it.
 FLAKE_RERUNS = 2
@@ -115,8 +117,15 @@ def parse_report(report: Path, checkout: Path):
     return failures, collected
 
 
-def base_worktree(base_ref: str, workdir: Path) -> Path:
-    checkout = workdir / "base"
+def base_worktree(base_ref: str) -> Path:
+    """Check the base commit out *inside* the repository.
+
+    Not in a temp directory: some tests discover a sibling checkout by walking
+    up from their own file, so a base run in /tmp skips what the head run
+    executes, and the comparison invents regressions. Keeping both checkouts
+    under the same parent keeps that discovery identical.
+    """
+    checkout = REPO_ROOT / GATE_DIR_NAME / "base"
     proc = _run(["git", "worktree", "add", "--detach", str(checkout), base_ref], cwd=REPO_ROOT)
     if proc.returncode != 0:
         sys.stderr.write(proc.stdout + proc.stderr)
@@ -144,7 +153,7 @@ def main() -> int:
     try:
         head_checkout = REPO_ROOT
         if args.head.strip():
-            head_checkout = workdir / "head"
+            head_checkout = REPO_ROOT / GATE_DIR_NAME / "head"
             proc = _run(["git", "worktree", "add", "--detach", str(head_checkout), args.head], cwd=REPO_ROOT)
             if proc.returncode != 0:
                 sys.stderr.write(proc.stdout + proc.stderr)
@@ -152,7 +161,7 @@ def main() -> int:
             created.append(head_checkout)
 
         print(f"== base {args.base} ==", flush=True)
-        base_checkout = base_worktree(args.base, workdir)
+        base_checkout = base_worktree(args.base)
         created.append(base_checkout)
         base_failures, base_collected = run_suite(base_checkout, args.target, workdir / "base.xml")
         print(f"base: {len(base_failures)} failing of {base_collected}", flush=True)
@@ -205,6 +214,7 @@ def main() -> int:
     finally:
         for checkout in created:
             _run(["git", "worktree", "remove", "--force", str(checkout)], cwd=REPO_ROOT)
+        shutil.rmtree(REPO_ROOT / GATE_DIR_NAME, ignore_errors=True)
         shutil.rmtree(workdir, ignore_errors=True)
 
 
