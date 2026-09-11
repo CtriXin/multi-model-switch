@@ -164,7 +164,7 @@ def test_the_upgrade_notice_is_the_release_section_and_nothing_else():
 
 def _spec(tmp_path, *, old_source: Path, staged: Path) -> dict:
     state = tmp_path / "state"
-    (state / "updates").mkdir(parents=True)
+    (state / "updates").mkdir(parents=True, exist_ok=True)
     operation_root = state / "updates" / "operations" / "op-1"
     operation_root.mkdir(parents=True)
     return {"state": str(state), "source": str(staged), "oldSource": str(old_source),
@@ -211,3 +211,29 @@ def test_a_failed_installation_is_reported_and_not_claimed(tmp_path, monkeypatch
     assert install_alongside(spec) is False
     report = json.loads((Path(spec["armed"]).parent / "installation.json").read_text())
     assert report["installed"] is False and "ValueError" in report["reason"]
+
+
+def test_a_staged_copy_from_an_earlier_update_is_not_an_installation(tmp_path):
+    """A Pilot updated before #195 serves from `<state>/updates/versions/...`.
+
+    Installing into that directory would remove the pointer and leave the next
+    start falling back to the older source the launcher points at, so the web
+    app would silently move backwards.
+    """
+    staged = _release(tmp_path / "state" / "updates" / "versions" / "v4.15.0-abcd" / "source",
+                      version="4.15.0")
+    verdict = describe(staged)
+    assert verdict["updatesCli"] is False
+    assert "暂存副本" in verdict["reason"]
+
+
+def test_a_staged_copy_keeps_the_pointer_instead_of_being_overwritten(tmp_path):
+    from mms_web.update_handoff import install_alongside
+
+    staged_old = _release(tmp_path / "state" / "updates" / "versions" / "v1.0.0-aaaa" / "source",
+                          version="1.0.0")
+    staged_new = _release(tmp_path / "staged", version="2.0.0")
+    spec = _spec(tmp_path, old_source=staged_old, staged=staged_new)
+
+    assert install_alongside(spec) is False
+    assert 'VERSION = "1.0.0"' in (staged_old / "mms_version.py").read_text()

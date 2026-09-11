@@ -59,6 +59,18 @@ def _is_checkout(root: Path) -> bool:
     return any((parent / ".git").exists() for parent in (root, *root.parents))
 
 
+def _is_staged_copy(root: Path) -> bool:
+    """True for a release unpacked under `<state>/updates/versions/<tag>/source`.
+
+    A Pilot that was updated before this existed serves from such a copy, and
+    it is not an installation: writing a newer release into it would leave the
+    pointer removed and the next start falling back to whatever the launcher
+    points at, which is older. Refusing keeps the pointer, which is correct.
+    """
+    return any(parent.name == "versions" and parent.parent.name == "updates"
+               for parent in root.parents)
+
+
 def _writable(root: Path) -> bool:
     try:
         with tempfile.NamedTemporaryFile(dir=root, prefix=".mms-write-probe-"):
@@ -77,6 +89,9 @@ def describe(source: Path | str) -> dict:
     if _is_checkout(root):
         return {"updatesCli": False, "root": str(root),
                 "reason": "这是源码检出，更新不会改工作树；命令行请用 git 更新。"}
+    if _is_staged_copy(root):
+        return {"updatesCli": False, "root": str(root),
+                "reason": "当前服务跑的是上一次更新的暂存副本，不是安装目录；请重新安装一次，之后更新就会同时换掉命令行。"}
     if not _writable(root):
         return {"updatesCli": False, "root": str(root),
                 "reason": "安装目录不可写，更新只换网页服务。"}
