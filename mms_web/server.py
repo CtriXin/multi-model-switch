@@ -427,7 +427,7 @@ class WebApplication:
                 and parts[4] == "cancel"):
             return self._sessions().cancel_side_question(parts[1], parts[3])
         if len(parts) == 3 and parts[0] == "sessions":
-            methods = {"messages": "send", "stop": "stop", "control": "control", "manage": "manage", "fork": "fork", "model": "switch_model", "artifacts": "artifact"}
+            methods = {"messages": "send", "stop": "stop", "control": "control", "manage": "manage", "fork": "fork", "model": "switch_model", "artifacts": "artifact", "queue": "queue"}
             if parts[2] in methods:
                 return getattr(self._sessions(), methods[parts[2]])(parts[1], payload)
         if len(parts) == 4 and parts[0] == "sessions" and parts[2] == "approvals":

@@ -107,6 +107,11 @@ class _LiveSession:
             except (OSError, ValueError):
                 pass
         self.pending_prompts: dict[str, str] = {}
+        # Delivery lane per queued message, and the steers Pi has consumed but
+        # whose answer has not started yet. Both track pending_prompts, which
+        # is in-memory: a restart empties the Pi queue too.
+        self.pending_modes: dict[str, str] = {}
+        self.pending_steers: list[str] = []
         self.stream_tails: dict[tuple[str, str], str] = {}
         self.events: list[dict] = []
         self.event_index: dict[str, dict] = {}
@@ -140,7 +145,10 @@ class _LiveSession:
             "createdAt": now(),
             "updatedAt": now(),
         }
-        for key in ("title", "status", "approvalId", "decision", "arguments", "method", "options", "placeholder", "prefill", "answer", "thinking", "nativeTimestamp", "modelName", "usage", "attachments", "references", "skills", "fileSelections", "contextUsage"):
+        # "mode" and "steeredBy" are facts about delivery, set once when the
+        # event is created: how the message was sent, and which steers reached
+        # this answer.
+        for key in ("title", "status", "approvalId", "decision", "arguments", "method", "options", "placeholder", "prefill", "answer", "thinking", "nativeTimestamp", "modelName", "usage", "attachments", "references", "skills", "fileSelections", "contextUsage", "mode", "steeredBy"):
             if fields.get(key) is not None:
                 event[key] = fields[key]
         self.event_index[event_id] = event
@@ -193,6 +201,7 @@ class _LiveSession:
             "stop": bool(alive),
             "approve": bool(alive and self.approvals),
             "steer": bool(alive),
+            "queueControl": bool(alive),
         }
 
     def session_view(self) -> dict:
@@ -232,7 +241,14 @@ class _LiveSession:
             )],
             "artifacts": self.artifact_history.list(self.events) if self.artifact_history else collect_artifacts(self.meta, self.events),
             "artifactNotice": self.artifact_history.note if self.artifact_history else "",
-            "runtime": self.meta.get("runtimeView", {}),
+            # The cached runtime snapshot is refreshed on a timer, but the queue
+            # is what the caller just acted on: every response carries it live,
+            # or the page would redraw the queue it already changed.
+            "runtime": {**self.meta.get("runtimeView", {}),
+                        "queue": self.meta.get("queue", []),
+                        "queueSteering": self.meta.get("queueSteering", []),
+                        "queueFollowUp": self.meta.get("queueFollowUp", []),
+                        "pending": self.pending_view()},
         }
 
     def finish_pending_tools(self) -> None:
@@ -240,6 +256,24 @@ class _LiveSession:
             if event.get("kind") == "tool" and event.get("status") == "running":
                 event["status"] = "error"
                 event["text"] += "\n本轮已结束，未收到此工具的完成回报。"
+
+    def pending_view(self) -> list[dict]:
+        """Queued messages with the event id that addresses them.
+
+        Steering is delivered before follow-ups, so it is listed first; within
+        a lane the order is the order Pi will deliver.
+        """
+        with self.lock:
+            items = [{"id": event_id,
+                      "text": (self.event_index.get(event_id) or {}).get("text", ""),
+                      "mode": self.pending_modes.get(event_id, "followUp"),
+                      "createdAt": (self.event_index.get(event_id) or {}).get("createdAt")}
+                     for event_id in self.pending_prompts]
+        return sorted(items, key=lambda item: item["mode"] != "steer")
+
+    def forget_pending(self, event_id: str) -> None:
+        self.pending_prompts.pop(event_id, None)
+        self.pending_modes.pop(event_id, None)
 
     def cancel_pending(self):
         """Queue cleared explicitly or invalidated by resume/restart: cancelled."""
@@ -249,6 +283,7 @@ class _LiveSession:
                 if event and event.get("status") == "queued":
                     event["status"] = "cancelled"
             self.pending_prompts.clear()
+            self.pending_modes.clear()
 
     def interrupt_pending(self):
         """abort/stop removed these from the Pi queue mid-turn: interrupted."""
@@ -258,6 +293,7 @@ class _LiveSession:
                 if event and event.get("status") == "queued":
                     event["status"] = "interrupted"
             self.pending_prompts.clear()
+            self.pending_modes.clear()
 
     def activity_view(self) -> dict | None:
         if self.state == "waiting":
@@ -661,10 +697,11 @@ class SessionService(SessionActions, SessionSideQuestions):
                 if session.state not in {"running", "waiting"}:
                     session.state = "running"
                     session.turn_started_at = self._now()
-                event = session.append_event({"kind": "user", "text": text, "skills": selected_skills, "attachments": attachments, "references": payload.get("references", []), "fileSelections": selected, "contextUsage": context}, self._now)
+                event = session.append_event({"kind": "user", "text": text, "mode": mode if previous_state in {"running", "waiting"} else "direct", "skills": selected_skills, "attachments": attachments, "references": payload.get("references", []), "fileSelections": selected, "contextUsage": context}, self._now)
                 if previous_state in {"running", "waiting"}:
                     event["status"] = "queued"
                     session.pending_prompts[event["id"]] = text + suffix
+                    session.pending_modes[event["id"]] = mode
             try:
                 if mode == "steer" and previous_state == "running":
                     self._send_prompt(session, text + suffix, images=images, command="steer")
@@ -674,7 +711,7 @@ class SessionService(SessionActions, SessionSideQuestions):
             except WebError as exc:
                 with session.lock:
                     context["state"] = "uncertain" if exc.code in {"RPC_TIMEOUT", "RPC_UNCONFIRMED"} else "failed"
-                    session.pending_prompts.pop(event["id"], None)
+                    session.forget_pending(event["id"])
                     event["status"] = "failed"
                     if session.last_sequence == event.get("sequence") and session.state == "running":
                         session.state = previous_state
@@ -683,6 +720,119 @@ class SessionService(SessionActions, SessionSideQuestions):
             with session.lock:
                 session.persist(self._state_dir)
                 return session.detail_view()
+
+    def queue(self, session_id: str, payload: dict) -> dict:
+        """Act on one queued message: promote it to steering, drop it, or move it.
+
+        Pi has no command for any of these. The only primitive is clear_queue,
+        which empties both lanes and hands back their text, so each action is
+        "clear, then put back what should stay, in the order it should go".
+        That is why this lives on the service and not on the page.
+        """
+        self._require_open()
+        session = self._get(session_id)
+        payload = self._object_payload(payload)
+        action = payload.get("action")
+        event_id = str(payload.get("id") or "")
+        if action not in {"remove", "steer", "move"}:
+            raise WebError("UNKNOWN_COMMAND", "队列只支持删除、改为引导或调整顺序。", 400)
+        request_id = self._validate_request_id(payload.get("requestId"))
+        op_payload = {"op": "queue", "sessionId": session.meta["id"], "action": action,
+                      "id": event_id, "toIndex": payload.get("toIndex")}
+        with session.mutation_lock, self._request_scope(request_id, op_payload, session) as replay:
+            if replay is not None:
+                with replay.lock:
+                    return replay.detail_view()
+            driver = session.driver
+            if driver is None or not driver.alive():
+                raise WebError("SESSION_NOT_ACTIVE", "该会话已经停止，队列里没有待发送的消息。", 409)
+            with session.lock:
+                if event_id not in session.pending_prompts:
+                    raise WebError("QUEUE_ITEM_GONE", "这条消息已经送达或被移除，队列已刷新。", 409)
+                order = [item["id"] for item in session.pending_view()]
+                if action == "remove":
+                    order.remove(event_id)
+                elif action == "steer":
+                    session.pending_modes[event_id] = "steer"
+                    event = session.event_index.get(event_id)
+                    if event is not None:
+                        # The message's delivery changed, so what it says about
+                        # its own delivery changes with it.
+                        event["mode"] = "steer"
+                    order = [item["id"] for item in session.pending_view()]
+                else:
+                    to_index = payload.get("toIndex")
+                    if not isinstance(to_index, int) or isinstance(to_index, bool):
+                        raise WebError("INVALID_PARAMETER", "请提供目标位置。", 400)
+                    if not 0 <= to_index < len(order):
+                        raise WebError("INVALID_PARAMETER", "目标位置不在队列里。", 400)
+                    lane_of = lambda i: session.pending_modes.get(i, "followUp")
+                    lane = lane_of(event_id)
+                    target = order[to_index]
+                    # Steering is always delivered before follow-ups, so moving
+                    # across lanes would change nothing Pi does. Order is
+                    # rearranged inside the message's own lane.
+                    if lane_of(target) != lane:
+                        raise WebError("INVALID_PARAMETER", "只能在同一送达批次内调整顺序。", 400)
+                    same = [i for i in order if lane_of(i) == lane]
+                    to_pos = same.index(target)
+                    same.insert(to_pos, same.pop(same.index(event_id)))
+                    others = [i for i in order if lane_of(i) != lane]
+                    order = ([*same, *others] if lane == "steer" else [*others, *same])
+                removed = event_id if action == "remove" else None
+            self._rewrite_queue(session, order, removed)
+            with session.lock:
+                session.persist(self._state_dir)
+                return session.detail_view()
+
+    def _rewrite_queue(self, session: _LiveSession, order: list[str], removed: str | None) -> None:
+        driver = session.driver
+        try:
+            cleared = driver.clear_queue()
+        except (DriverClosedError, RpcTimeoutError) as exc:
+            raise WebError("QUEUE_UNCHANGED", "无法读取当前队列，队列未改动，请重试。", 502) from exc
+        waiting = {*cleared["steering"], *cleared["followUp"]}
+        with session.lock:
+            texts = dict(session.pending_prompts)
+            modes = dict(session.pending_modes)
+            if removed:
+                event = session.event_index.get(removed)
+                if event and event.get("status") == "queued":
+                    event["status"] = "cancelled"
+                session.forget_pending(removed)
+        restored: list[str] = []
+        for queued_id in order:
+            text = texts.get(queued_id)
+            # Pi delivered it while the queue was being rewritten: leave it
+            # gone rather than sending the same message a second time.
+            if text is None or text not in waiting:
+                continue
+            try:
+                if modes.get(queued_id) == "steer":
+                    driver.steer(text)
+                else:
+                    driver.follow_up(text)
+            except (DriverClosedError, RpcTimeoutError, DriverWriteUnconfirmedError) as exc:
+                with session.lock:
+                    for lost in order[len(restored):]:
+                        event = session.event_index.get(lost)
+                        if event and event.get("status") == "queued":
+                            event["status"] = "failed"
+                        session.forget_pending(lost)
+                    session.persist(self._state_dir)
+                raise WebError("QUEUE_REWRITE_FAILED",
+                               "队列改动没有全部写回，未写回的消息已标记为发送失败，请重新发送。", 502) from exc
+            restored.append(queued_id)
+        with session.lock:
+            # Re-enqueued in this order, so the record follows it.
+            session.pending_prompts = {i: texts[i] for i in restored}
+            session.pending_modes = {i: modes.get(i, "followUp") for i in restored}
+            for lost in order:
+                if lost in restored:
+                    continue
+                event = session.event_index.get(lost)
+                if event and event.get("status") == "queued":
+                    event["status"] = "delivered"
 
     def _resume(self, session: _LiveSession) -> None:
         if not session.can_resume() or not self.capabilities()["launch"]:
@@ -999,7 +1149,7 @@ class SessionService(SessionActions, SessionSideQuestions):
         )
         if prompt:
             try:
-                event = live.append_event({"kind": "user", "text": prompt, "skills": selected_skills, "attachments": attachments, "references": payload.get("references", []), "contextUsage": context}, self._now)
+                event = live.append_event({"kind": "user", "text": prompt, "mode": "direct", "skills": selected_skills, "attachments": attachments, "references": payload.get("references", []), "contextUsage": context}, self._now)
                 self._send_prompt(live, prompt + suffix, images=images)
                 context["state"] = "submitted" if live.driver else "prepared"
             except WebError as exc:
@@ -1061,10 +1211,13 @@ class SessionService(SessionActions, SessionSideQuestions):
                 prompt = fields["consumedPrompt"]
                 event_id = consume_prompt(session, prompt)
                 if event_id in session.pending_prompts:
-                    session.pending_prompts.pop(event_id, None)
+                    was_steer = session.pending_modes.get(event_id) == "steer"
+                    session.forget_pending(event_id)
                     event = session.event_index[event_id]
                     # Pi actually consumed the queued message: delivered.
                     event["status"] = "delivered"
+                    if was_steer:
+                        session.pending_steers.append(event_id)
                     session.events.remove(event)
                     session.last_sequence += 1
                     event["sequence"] = session.last_sequence
@@ -1092,6 +1245,9 @@ class SessionService(SessionActions, SessionSideQuestions):
             fields = redact(fields, session.secrets)
             if fields.get("kind") == "assistant":
                 fields.setdefault("modelName", session.meta.get("modelName", ""))
+                if session.pending_steers and event_id not in session.event_index:
+                    fields["steeredBy"] = session.pending_steers
+                    session.pending_steers = []
             if isinstance(fields.get("planning"), bool):
                 session.meta["planning"] = fields["planning"]
                 session.persist(self._state_dir)
@@ -1187,6 +1343,7 @@ class SessionService(SessionActions, SessionSideQuestions):
                 if event and event.get("status") == "queued":
                     event["status"] = stranded
             session.pending_prompts.clear()
+            session.pending_modes.clear()
             session.meta["queue"] = []
             session.meta["queueSteering"] = []
             session.meta["queueFollowUp"] = []

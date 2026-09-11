@@ -227,6 +227,31 @@ class PiRpcDriver:
             command["images"] = images
         return self.request(command, timeout=timeout)
 
+    def follow_up(self, text: str, *, images=None, timeout: float | None = None) -> dict:
+        """Queue a message to be delivered once the run settles.
+
+        The explicit command, rather than ``prompt`` with a streaming hint: a
+        rewritten queue is put back while the agent may be between turns, and
+        ``prompt`` would start a new one instead of queueing.
+        """
+        command: dict = {"type": "follow_up", "message": str(text)}
+        if images:
+            command["images"] = images
+        return self.request(command, timeout=timeout)
+
+    def clear_queue(self, *, timeout: float | None = None) -> dict:
+        """Empty the queue and return what was in it, by lane.
+
+        Pi has no per-message delete or reorder. Rewriting the queue means
+        clearing it and putting back what should stay, in order, so the caller
+        needs to know what was actually still waiting.
+        """
+        response = self.request({"type": "clear_queue"},
+                                timeout=self._abort_timeout if timeout is None else timeout)
+        data = response.get("data") if isinstance(response.get("data"), dict) else {}
+        return {"steering": [str(t) for t in (data.get("steering") or [])],
+                "followUp": [str(t) for t in (data.get("followUp") or [])]}
+
     def abort(self, *, timeout: float | None = None) -> dict:
         for approval_id in self.pending_approvals():
             try:

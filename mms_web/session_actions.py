@@ -80,7 +80,10 @@ class SessionActions:
         cached = {**session.meta.get("runtimeView", {}), "contextEvidence": session.meta.get("contextEvidence")}
         queue_view = {"queue": session.meta.get("queue", []),
                       "queueSteering": session.meta.get("queueSteering", []),
-                      "queueFollowUp": session.meta.get("queueFollowUp", [])}
+                      "queueFollowUp": session.meta.get("queueFollowUp", []),
+                      # The same queue keyed by the event id that addresses it,
+                      # which is what /queue acts on.
+                      "pending": session.pending_view()}
         if not session.alive() or time.monotonic() - getattr(session, "runtime_checked", 0) < 4:
             return {**cached, **queue_view, "alive": session.alive(), "cwd": session.meta.get("cwd"), "cached": not session.alive(), "planning": session.meta.get("planning", False)}
         session.runtime_checked = time.monotonic()
@@ -98,6 +101,7 @@ class SessionActions:
             view["queue"] = session.meta.get("queue", [])
             view["queueSteering"] = session.meta.get("queueSteering", [])
             view["queueFollowUp"] = session.meta.get("queueFollowUp", [])
+            view["pending"] = session.pending_view()
             view.update({"model": {key: model[key] for key in ("id", "name", "provider", "api", "reasoning", "input", "contextWindow", "maxTokens") if key in model},
                          "stats": {key: stats[key] for key in ("tokens", "cost", "contextUsage", "toolCalls", "totalMessages") if key in stats},
                          "cwd": session.meta.get("cwd"), "alive": True, "cached": False})

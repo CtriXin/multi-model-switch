@@ -59,6 +59,12 @@ class FakeDriver:
         self.fail_next_prompt: dict | None = None
         self.fail_next_steer: dict | None = None
         self.timeout_next_steer = False
+        # What Pi would still be holding, by lane. Rewriting the queue reads
+        # this back through clear_queue, so the double has to model it.
+        self.queued_steering: list[str] = []
+        self.queued_followup: list[str] = []
+        self.follow_ups: list[str] = []
+        self.fail_next_follow_up = False
 
     def alive(self) -> bool:
         return self._alive
@@ -69,6 +75,7 @@ class FakeDriver:
             return failure
         with self.lock:
             self.prompts.append(text)
+            self.queued_followup.append(text)
         return {"type": "response", "command": "prompt", "success": True}
 
     def steer(self, text: str, *, images=None) -> dict:
@@ -80,7 +87,24 @@ class FakeDriver:
             return failure
         with self.lock:
             self.steers.append(text)
+            self.queued_steering.append(text)
         return {"type": "response", "command": "steer", "success": True}
+
+    def follow_up(self, text: str, *, images=None) -> dict:
+        if self.fail_next_follow_up:
+            self.fail_next_follow_up = False
+            raise DriverClosedError("pi exited")
+        with self.lock:
+            self.follow_ups.append(text)
+            self.queued_followup.append(text)
+        return {"type": "response", "command": "follow_up", "success": True}
+
+    def clear_queue(self, *, timeout=None) -> dict:
+        with self.lock:
+            cleared = {"steering": list(self.queued_steering), "followUp": list(self.queued_followup)}
+            self.queued_steering.clear()
+            self.queued_followup.clear()
+        return cleared
 
     def abort(self) -> dict:
         with self.lock:
@@ -163,6 +187,13 @@ def user_events(detail):
 
 def deliver(service, session, text):
     """Simulate Pi consuming the message: user message_start observed."""
+    driver = getattr(session, "driver", None)
+    if driver is not None:
+        # Pi takes a delivered message out of its own queue.
+        for lane in (driver.queued_steering, driver.queued_followup):
+            if text in lane:
+                lane.remove(text)
+                break
     service._apply_driver_event(session, {"consumedPrompt": text})
 
 
@@ -434,3 +465,194 @@ def test_statuses_survive_service_restart(tmp_path, seeded_seam):
     assert statuses["还排着"] == "cancelled", "restart invalidates an undelivered queue entry"
     runtime = detail["runtime"]
     assert runtime.get("queue", []) == [] and "pendingMessageCount" not in runtime
+
+
+# -- acting on one queued message ------------------------------------------
+#
+# Pi has no per-message delete, promote or reorder: the only primitive is
+# clear_queue. Each of these actions is the service clearing both lanes and
+# putting back what should stay, in the order it should go.
+
+
+def queue_two(service, drivers, tmp_path):
+    """A running session with two follow-ups waiting behind the current work."""
+    detail = launch_ok(service)
+    sid = detail["session"]["id"]
+    session = service._get(sid)
+    driver = drivers[0]
+    # The launch prompt is the work in flight, not something still queued.
+    driver.queued_followup.clear()
+    service.send(sid, {"requestId": "q-a", "text": "先补一段说明"})
+    service.send(sid, {"requestId": "q-b", "text": "最后再总结一次"})
+    return sid, session, driver
+
+
+def queued_ids(service, sid):
+    return [item["id"] for item in service._get(sid).pending_view()]
+
+
+def test_queue_exposes_addressable_ids_and_lanes(tmp_path, seeded_seam):
+    service, drivers = make_service(tmp_path)
+    sid, session, driver = queue_two(service, drivers, tmp_path)
+    pending = session.pending_view()
+    assert [item["text"] for item in pending] == ["先补一段说明", "最后再总结一次"]
+    assert {item["mode"] for item in pending} == {"followUp"}
+    assert all(item["id"] for item in pending)
+    assert service.get_session(sid)["runtime"]["pending"] == pending
+    # Every mutation response carries the queue the caller just acted on, not
+    # the runtime snapshot's older copy.
+    assert service.queue(sid, {"requestId": "q-z", "action": "move",
+                               "id": pending[0]["id"], "toIndex": 0})["runtime"]["pending"] == pending
+    assert service.get_session(sid)["session"]["capabilities"]["queueControl"] is True
+
+
+def test_promoting_a_queued_message_moves_it_into_the_steering_lane(tmp_path, seeded_seam):
+    service, drivers = make_service(tmp_path)
+    sid, session, driver = queue_two(service, drivers, tmp_path)
+    second = queued_ids(service, sid)[1]
+    service.queue(sid, {"requestId": "q-1", "action": "steer", "id": second})
+    pending = session.pending_view()
+    # Steering is delivered first, so the promoted message leads.
+    assert [(item["text"], item["mode"]) for item in pending] == [
+        ("最后再总结一次", "steer"),
+        ("先补一段说明", "followUp"),
+    ]
+    assert driver.steers == ["最后再总结一次"]
+    assert driver.follow_ups == ["先补一段说明"]
+    assert driver.queued_steering == ["最后再总结一次"]
+    assert driver.queued_followup == ["先补一段说明"]
+
+
+def test_removing_one_queued_message_keeps_the_rest_in_order(tmp_path, seeded_seam):
+    service, drivers = make_service(tmp_path)
+    sid, session, driver = queue_two(service, drivers, tmp_path)
+    first = queued_ids(service, sid)[0]
+    detail = service.queue(sid, {"requestId": "q-1", "action": "remove", "id": first})
+    assert [item["text"] for item in session.pending_view()] == ["最后再总结一次"]
+    assert driver.follow_ups == ["最后再总结一次"]
+    dropped = next(e for e in user_events(detail) if e["id"] == first)
+    assert dropped["status"] == "cancelled"
+
+
+def test_reordering_puts_the_queue_back_in_the_new_order(tmp_path, seeded_seam):
+    service, drivers = make_service(tmp_path)
+    sid, session, driver = queue_two(service, drivers, tmp_path)
+    second = queued_ids(service, sid)[1]
+    service.queue(sid, {"requestId": "q-1", "action": "move", "id": second, "toIndex": 0})
+    assert [item["text"] for item in session.pending_view()] == ["最后再总结一次", "先补一段说明"]
+    assert driver.follow_ups == ["最后再总结一次", "先补一段说明"]
+
+
+def test_moving_a_message_onto_itself_leaves_the_queue_alone(tmp_path, seeded_seam):
+    service, drivers = make_service(tmp_path)
+    sid, session, driver = queue_two(service, drivers, tmp_path)
+    before = session.pending_view()
+    service.queue(sid, {"requestId": "q-1", "action": "move", "id": before[0]["id"], "toIndex": 0})
+    assert session.pending_view() == before
+
+
+def test_a_promoted_message_says_it_is_steering_now(tmp_path, seeded_seam):
+    service, drivers = make_service(tmp_path)
+    sid, session, driver = queue_two(service, drivers, tmp_path)
+    first = queued_ids(service, sid)[0]
+    detail = service.queue(sid, {"requestId": "q-1", "action": "steer", "id": first})
+    # The page labels a queued message by this, so it has to follow the lane.
+    assert next(e for e in user_events(detail) if e["id"] == first)["mode"] == "steer"
+
+
+def test_a_message_delivered_during_the_rewrite_is_not_sent_twice(tmp_path, seeded_seam):
+    service, drivers = make_service(tmp_path)
+    sid, session, driver = queue_two(service, drivers, tmp_path)
+    first, second = queued_ids(service, sid)
+    # Pi took the first one while the user was still deciding: it is gone from
+    # Pi's queue, so clear_queue never hands it back.
+    driver.queued_followup.remove("先补一段说明")
+    service.queue(sid, {"requestId": "q-1", "action": "steer", "id": second})
+    assert "先补一段说明" not in driver.follow_ups
+    assert [item["id"] for item in session.pending_view()] == [second]
+    assert session.event_index[first]["status"] == "delivered"
+
+
+def test_queue_refuses_a_message_that_is_no_longer_waiting(tmp_path, seeded_seam):
+    service, drivers = make_service(tmp_path)
+    sid, session, driver = queue_two(service, drivers, tmp_path)
+    first = queued_ids(service, sid)[0]
+    deliver(service, session, "先补一段说明")
+    with pytest.raises(WebError) as excinfo:
+        service.queue(sid, {"requestId": "q-1", "action": "remove", "id": first})
+    assert excinfo.value.code == "QUEUE_ITEM_GONE"
+
+
+def test_queue_refuses_a_move_across_delivery_lanes(tmp_path, seeded_seam):
+    service, drivers = make_service(tmp_path)
+    sid, session, driver = queue_two(service, drivers, tmp_path)
+    first, second = queued_ids(service, sid)
+    service.queue(sid, {"requestId": "q-1", "action": "steer", "id": second})
+    with pytest.raises(WebError) as excinfo:
+        # Index 0 is now the steering lane; a follow-up cannot be moved into it,
+        # because Pi delivers every steer before any follow-up regardless.
+        service.queue(sid, {"requestId": "q-2", "action": "move", "id": first, "toIndex": 0})
+    assert excinfo.value.code == "INVALID_PARAMETER"
+
+
+def test_queue_refuses_unknown_actions_and_dead_sessions(tmp_path, seeded_seam):
+    service, drivers = make_service(tmp_path)
+    sid, session, driver = queue_two(service, drivers, tmp_path)
+    first = queued_ids(service, sid)[0]
+    with pytest.raises(WebError) as unknown:
+        service.queue(sid, {"requestId": "q-1", "action": "shuffle", "id": first})
+    assert unknown.value.code == "UNKNOWN_COMMAND"
+    driver.close()
+    with pytest.raises(WebError) as dead:
+        service.queue(sid, {"requestId": "q-2", "action": "remove", "id": first})
+    assert dead.value.code == "SESSION_NOT_ACTIVE"
+
+
+def test_a_queue_rewrite_that_cannot_be_written_back_reports_the_loss(tmp_path, seeded_seam):
+    service, drivers = make_service(tmp_path)
+    sid, session, driver = queue_two(service, drivers, tmp_path)
+    first = queued_ids(service, sid)[0]
+    driver.fail_next_follow_up = True
+    with pytest.raises(WebError) as excinfo:
+        service.queue(sid, {"requestId": "q-1", "action": "remove", "id": first})
+    assert excinfo.value.code == "QUEUE_REWRITE_FAILED"
+    # Nothing is left claiming to be waiting when it is not.
+    assert session.pending_view() == []
+    assert session.event_index[queued_ids_before(session, first)]["status"] == "failed"
+
+
+def queued_ids_before(session, removed):
+    return next(e["id"] for e in session.events
+                if e["kind"] == "user" and e["id"] != removed and e.get("status") == "failed")
+
+
+def test_a_delivered_steer_is_credited_to_the_answer_it_shapes(tmp_path, seeded_seam):
+    service, drivers = make_service(tmp_path)
+    detail = launch_ok(service)
+    sid = detail["session"]["id"]
+    session = service._get(sid)
+    drivers[0].queued_followup.clear()
+    service._apply_driver_event(session, {"id": "a-1", "kind": "assistant", "text": "写文档中"})
+    service.send(sid, {"requestId": "q-1", "text": "改成看注册页", "mode": "steer"})
+    steer_id = queued_ids(service, sid)[0]
+    deliver(service, session, "改成看注册页")
+    # The steer reaches the next request, so the answer already written is not
+    # the one it changed.
+    assert "steeredBy" not in session.event_index["a-1"]
+    service._apply_driver_event(session, {"id": "a-2", "kind": "assistant", "text": "在看注册页"})
+    assert session.event_index["a-2"]["steeredBy"] == [steer_id]
+    # Credited once, not to every answer that follows.
+    service._apply_driver_event(session, {"id": "a-3", "kind": "assistant", "text": "继续"})
+    assert "steeredBy" not in session.event_index["a-3"]
+
+
+def test_a_sent_message_records_how_it_was_delivered(tmp_path, seeded_seam):
+    service, drivers = make_service(tmp_path)
+    detail = launch_ok(service)
+    sid = detail["session"]["id"]
+    assert user_events(detail)[0]["mode"] == "direct"
+    drivers[0].queued_followup.clear()
+    queued = service.send(sid, {"requestId": "q-1", "text": "补一句"})
+    assert user_events(queued)[-1]["mode"] == "followUp"
+    steered = service.send(sid, {"requestId": "q-2", "text": "换个方向", "mode": "steer"})
+    assert user_events(steered)[-1]["mode"] == "steer"
