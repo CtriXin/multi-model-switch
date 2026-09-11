@@ -54,6 +54,7 @@ CLEANUP_ONLY=0
 LAUNCH_WEB_MODE="ask"
 KEEP_RUNNING_PILOT=0
 STOPPED_PILOT=0
+STOPPED_PILOT_PORT=""
 PRINT_ONLY_VERSION=0
 DRY_RUN=0
 
@@ -1970,7 +1971,13 @@ PY
     fi
 
     echo "• $(t "Pilot 正在使用此安装目录，先请它退出再继续安装" "Pilot is using this installation; asking it to exit before continuing"): $(printf '%s' "$servers" | tr '\n' ' ')"
+    # Remember where it was answering. Coming back on a different port would
+    # strand every open tab and every link the user had already shared.
     local pid=""
+    for pid in $servers; do
+        STOPPED_PILOT_PORT="$(lsof -nP -a -p "$pid" -iTCP -sTCP:LISTEN -Fn 2>/dev/null | sed -n 's/^n.*:\([0-9][0-9]*\)$/\1/p' | head -1)"
+        [ -n "$STOPPED_PILOT_PORT" ] && break
+    done
     for pid in $servers; do
         kill -TERM "$pid" 2>/dev/null || true
     done
@@ -2157,6 +2164,22 @@ for port in range(start, start + limit):
 PY
 }
 
+# True when nothing holds the port, so a restart can return to where the Pilot
+# the installer just stopped was answering.
+web_port_is_free() {
+    "$(_python_bin)" - "$1" <<'PY'
+import socket
+import sys
+
+with socket.socket() as probe:
+    try:
+        probe.bind(("127.0.0.1", int(sys.argv[1])))
+    except (OSError, ValueError):
+        raise SystemExit(1)
+raise SystemExit(0)
+PY
+}
+
 # mms-web binds a fixed port and fails hard when it is taken, so the installer
 # picks a free one instead of letting the last install step die on an OSError.
 find_free_web_port() {
@@ -2232,7 +2255,11 @@ start_mms_web_detached() {
         return 0
     fi
 
-    port="$(find_free_web_port || true)"
+    if [ -n "$STOPPED_PILOT_PORT" ] && web_port_is_free "$STOPPED_PILOT_PORT"; then
+        port="$STOPPED_PILOT_PORT"
+    else
+        port="$(find_free_web_port || true)"
+    fi
     if [ -z "$port" ]; then
         echo "⚠ $(t "找不到可用端口，跳过打开；稍后可手动运行" "No free port found, skipping launch; run it manually later"): mms-web --open"
         return 1
@@ -2704,6 +2731,14 @@ for f in "$SOURCE_DIR"/mms_*.py; do
 done
 [ -f "$SOURCE_DIR/config.example.toml" ] && cp "$SOURCE_DIR/config.example.toml" "$MMS_HOME/"
 echo "✓ $(t "文件已复制到" "Files copied to") $MMS_HOME"
+# An earlier in-page update leaves a pointer to a staged copy under the Web
+# state directory, and startup follows it. Left in place, this install would
+# look like it changed nothing at all in the browser.
+WEB_STATE_ROOT="${XDG_DATA_HOME:-$REAL_HOME/.local/share}/mms-web"
+if [ -f "$WEB_STATE_ROOT/updates/active.json" ]; then
+    rm -f "$WEB_STATE_ROOT/updates/active.json"
+    echo "• $(t "已清除网页端的暂存版本指针，本次安装的版本直接生效" "Cleared the staged web-update pointer so this install takes effect")"
+fi
 write_version_metadata
 repair_managed_claude_settings
 cleanup_legacy_global_session_hooks

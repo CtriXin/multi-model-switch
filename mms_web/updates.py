@@ -15,6 +15,35 @@ REPO = 'CtriXin/multi-model-switch'
 RELEASE_API = f'https://api.github.com/repos/{REPO}/releases/latest'
 CHECK_INTERVAL = 6 * 60 * 60
 TAG = re.compile(r'^v(\d+)\.(\d+)\.(\d+)$')
+# A release says what an upgrade costs under this heading. Everything the
+# reader has to know before confirming lives there: a port that moves, a
+# feature that stops working, a manual step. Prose elsewhere in the notes is
+# release detail and is shown separately.
+UPGRADE_HEADING = '升级须知'
+_HEADING = re.compile(r'^(#{1,6})\s*(.+?)\s*#*\s*$')
+
+
+def upgrade_notice(notes):
+    """The `## 升级须知` section of a release body, or an empty string.
+
+    Absent means "nothing to warn about", not "unknown": authoring the section
+    is what declares a cost, so a release without one upgrades quietly.
+    """
+    level, collected = 0, []
+    for line in str(notes or '').splitlines():
+        heading = _HEADING.match(line)
+        if heading and level:
+            if len(heading.group(1)) <= level:
+                break
+            collected.append(line)
+            continue
+        if heading:
+            if heading.group(2).strip().startswith(UPGRADE_HEADING):
+                level = len(heading.group(1))
+            continue
+        if level:
+            collected.append(line)
+    return '\n'.join(collected).strip()[:4000]
 
 
 def version_tuple(value):
@@ -50,7 +79,8 @@ def fetch_release():
     tag = value.get('tag_name')
     if not isinstance(tag, str) or not TAG.fullmatch(tag) or value.get('draft') or value.get('prerelease'):
         raise ValueError('invalid stable release')
-    return {'tag': tag, 'notes': str(value.get('body') or '')[:16000],
+    body = str(value.get('body') or '')
+    return {'tag': tag, 'notes': body[:16000], 'upgradeNotice': upgrade_notice(body),
             'publishedAt': str(value.get('published_at') or '')[:80],
             'url': f'https://github.com/{REPO}/releases/tag/{tag}'}
 
@@ -76,10 +106,16 @@ class UpdateService:
         remote, current = version_tuple(latest.get('tag')), version_tuple(VERSION)
         available = bool(remote and current and remote > current)
         operation = self.coordinator.status() if self.coordinator else {'phase': 'idle'}
+        # What the confirm step has to state: where the service will answer
+        # afterwards, and whether the command line moves with it.
+        from .update_install import describe
+        installation = describe(self.coordinator.source) if self.coordinator else {}
         return {'currentVersion': VERSION, 'latest': latest, 'updateAvailable': available,
                 'enabled': self.enabled(), 'checking': self._checking,
                 'checkedAt': checked_at(cache), 'checkInterval': CHECK_INTERVAL,
                 'error': str(cache.get('error') or ''), 'operation': operation,
+                'port': self.coordinator.port() if self.coordinator else 0,
+                'installation': installation,
                 'canUpgrade': bool(available and self.coordinator and self.coordinator.available())}
 
     def check(self, *, manual=False):
