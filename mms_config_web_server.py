@@ -11,6 +11,7 @@ import argparse
 import copy
 import errno
 import json
+import signal
 import threading
 import traceback
 import webbrowser
@@ -585,9 +586,13 @@ def serve_config_web(app_or_snapshot: ConfigWebApp | dict[str, Any], *, host: st
         thread.join()
     except KeyboardInterrupt:
         print("\nStopping MMS setup WebUI.")
-        # shutdown() must run from a different thread than serve_forever();
-        # use a short-lived daemon helper so Ctrl-C never enters a second
-        # interruptible wait in the main thread.
+        # Ignore SIGINT for the rest of the cleanup: the waits below are still
+        # interruptible, and a second Ctrl-C used to escape as a traceback.
+        try:
+            signal.signal(signal.SIGINT, signal.SIG_IGN)
+        except (ValueError, OSError):
+            pass
+        # shutdown() must run from a different thread than serve_forever().
         stopper = threading.Thread(target=server.shutdown, daemon=True)
         stopper.start()
         stopper.join(timeout=5)
