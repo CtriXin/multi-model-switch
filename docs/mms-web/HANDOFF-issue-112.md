@@ -41,7 +41,7 @@
 
 唯一开关是 `config.toml` 的 `[vision_sidecar] enabled`。池子为空时 launcher 打印明确提示，不静默降级。
 
-契约写在 `docs/AGENT_GUARDRAILS.md` 的 Vision Capability Single Truth 与 Pi Vision Relay Contract 两节。
+契约写在 `docs/AGENT_GUARDRAILS.md` 的 Vision Capability Single Truth 与 Vision Relay Contract 两节。
 
 ### 验证
 
