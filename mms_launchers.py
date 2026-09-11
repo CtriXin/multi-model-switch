@@ -11710,6 +11710,7 @@ def _opencode_export_config_path(runtime, model):
         runtime,
         model,
         real_user_path=_real_user_path,
+        selected_config_root=lambda: _selected_mms_config_root({}),
     )
 
 

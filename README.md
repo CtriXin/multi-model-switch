@@ -64,7 +64,7 @@ v4 各版累积下来的能力：
 
 v4.0.0 是 MMS Pilot 的首个大版本，之后 4.x 沿 Dev 继续推进。下列 3.x 轨道为此前分支发布历史，不代表 v4 已晋级各分支：Stable/Main `3.4.z`、Dev `3.5.z`、Canary `3.6.z`。`z` 是各 channel 内的 release 计数：单 commit release 就 `z+1`，复合多个已验证 commits 的 release 也只 bump 一次；未 tag 的日常小步 commit 继续用 git hash 追踪。
 
-维护者本地开发命令矩阵：`mms` 是公开安装副本；`mmf` 指 dev worktree；`mmg` 指 canary worktree。`mmd` / `mmm` 已退休。所有入口只读 `~/.config/mms-next`。普通用户不需要配置这些 worktree 命令，只需要使用安装器提供的 channel 参数。
+维护者本地开发命令矩阵：`mms` 是公开安装副本；`mmf` 指 dev worktree；`mmg` 指 canary worktree。`mmd` / `mmm` 已退休。唯一的 config root 是 `~/.config/mms-next`，`mms` / `mmf` / `mmg` 和 Pilot 网页都落在它上面；legacy `~/.config/mms` 不再被任何入口读取。普通用户不需要配置这些 worktree 命令，只需要使用安装器提供的 channel 参数。
 
 ## 维护者开发入口
 
@@ -167,6 +167,14 @@ mmg -> Canary worktree        # preview DB root，固定 ~/.config/mms-next
 当前本机用 `scripts/link_local_channel_commands.sh` 把 5 个命令写到 `~/.local/bin`。另一台家里工作机如果要和白天电脑保持一致，建议同样准备 dev/canary/stable/main worktree 后运行这个脚本；如果只是普通用户安装，仍使用公开 `mms` 安装命令。
 
 启动更新提醒默认只提醒、手动确认更新：`mmg` 每次启动检查，`mmf` 每日检查，`mms` 每日只提示 public installed copy。手动运行 `mmf update` / `mmg update` 时只允许 clean worktree fast-forward；dirty 或分叉会拒绝。
+
+### 配置只有一个根，运行时只信一份 bundle
+
+唯一的 config root 是 `~/.config/mms-next`。`mms` / `mmf` / `mmg` 和 Pilot 网页都落在它上面；legacy `~/.config/mms` 不再被任何入口读取，只剩 `*-gateway/` 这类会话运行时目录还留在那里。
+
+本地修改优先走 Registry v2：TUI / `mms config` / WebUI 先创建 DB candidate，审阅通过后发布成 `generated/model-registry.latest-approved.json`，它引用的 generated Profile 就是 runtime boundary。终端和 Pilot 读的是同一份发布结果，所以两边看到的通道、模型和能力一致。
+
+保存一律走`写入预览 DB + 发布`，没有第二条绕开审阅的写入路径。
 
 ## 配置 Web UI 教程：从通道到模型可见性
 

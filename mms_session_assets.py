@@ -858,7 +858,7 @@ def _global_sources_for_cli(cli: str, cli_rows: list[dict[str, Any]], *, home: s
             sources,
             surface="hooks",
             label="Pi session settings",
-            path="~/.config/mms/pi-gateway",
+            path="~/.config/mms-next/pi-gateway",
             count=0,
             items=[],
             note="Pi 目前由 MMS 生成 models/settings/retry extension；不继承 Skill/MCP/Hook 目录。",
@@ -1169,7 +1169,7 @@ def build_session_assets_snapshot(
         "disabled_defaults": _disabled_defaults(prefs),
         "preference_snippet": _preference_snippet(prefs),
         "configuration_contract": {
-            "persistent_path": preferences_path or "~/.config/mms/preferences.toml",
+            "persistent_path": preferences_path or "~/.config/mms-next/preferences.toml",
             "managed_assets_root": _managed_install_contract(home, mms_core).get("root"),
             "bundled_assets_root": _bundled_install_contract(home).get("root"),
             "launch_override": "TUI 启动确认页本次切换优先级最高，但不写回真实配置。",

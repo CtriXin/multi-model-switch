@@ -5589,3 +5589,22 @@ def test_core_opencode_profile_menu_includes_lite_pro_health_summary(monkeypatch
     assert "health: 1/18 healthy" in agent["summary"]
     assert "1 degraded" in agent["summary"]
     assert "16 untested" in agent["summary"]
+
+
+def test_opencode_export_config_lands_in_the_selected_config_root(monkeypatch, tmp_path):
+    """The export config used to be pinned to the retired ~/.config/mms.
+
+    Every OpenCode launch wrote its generated config into a directory no other
+    entry point reads any more, which is how ~/.config/mms kept getting touched
+    long after it stopped being a config root.
+    """
+    import mms_launchers
+
+    root = tmp_path / "mms-next"
+    root.mkdir()
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(root))
+
+    path = mms_launchers._opencode_export_config_path({"id": "kimi", "name": "kimi"}, "k3")
+
+    assert path == str(root / "opencode-gateway" / "exports" / "kimi-k3.json")
+    assert "/.config/mms/" not in path

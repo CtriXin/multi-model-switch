@@ -26,6 +26,27 @@ fi
 COLS=$(tput cols 2>/dev/null || echo 100)
 model_short=$(echo "$model" | sed 's/ (.*//')
 
+# The config root is ~/.config/mms-next. Gateway homes live inside it, and
+# installs that predate the move left gateway homes under ~/.config/mms, so a
+# session HOME has to be matched against both names before it can be walked
+# back out to its own root.
+MMS_ROOT_NAMES="mms-next mms"
+
+# Echo "<config root>" when $1 sits inside a gateway session home.
+mms_root_from_gateway_path() {
+    local path="$1" name gateway
+    [ -n "$path" ] || return 1
+    for name in $MMS_ROOT_NAMES; do
+        for gateway in claude-gateway codex-gateway pi-gateway opencode-gateway; do
+            if [[ "$path" == *"/.config/$name/$gateway/"* ]]; then
+                echo "${path%%/.config/$name/$gateway/*}/.config/$name"
+                return 0
+            fi
+        done
+    done
+    return 1
+}
+
 mms_config_root() {
     if [ -n "$MMS_CONFIG_ROOT" ]; then
         echo "$MMS_CONFIG_ROOT"
@@ -35,35 +56,32 @@ mms_config_root() {
         echo "$MMS_CONFIG_DIR"
         return
     fi
+    local from_gateway
     if [ -n "$XDG_CONFIG_HOME" ]; then
-        if [[ "$XDG_CONFIG_HOME" == *"/.config/mms/claude-gateway/"* ]]; then
-            echo "${XDG_CONFIG_HOME%%/.config/mms/claude-gateway/*}/.config/mms"
+        if from_gateway=$(mms_root_from_gateway_path "$XDG_CONFIG_HOME"); then
+            echo "$from_gateway"
             return
         fi
-        if [[ "$XDG_CONFIG_HOME" == *"/.config/mms/codex-gateway/"* ]]; then
-            echo "${XDG_CONFIG_HOME%%/.config/mms/codex-gateway/*}/.config/mms"
-            return
-        fi
-        echo "$XDG_CONFIG_HOME/mms"
+        echo "$XDG_CONFIG_HOME/mms-next"
         return
     fi
-    local user_home="$HOME"
-    if [[ "$HOME" == *"/.config/mms/claude-gateway/"* ]]; then
-        user_home="${HOME%%/.config/mms/claude-gateway/*}"
+    if from_gateway=$(mms_root_from_gateway_path "$HOME"); then
+        echo "$from_gateway"
+        return
     fi
-    echo "$user_home/.config/mms"
+    echo "$HOME/.config/mms-next"
 }
 
 pick_route_status_file() {
     local config_root
     config_root="$(mms_config_root)"
     local is_gateway_session=0
-    if [[ "$HOME" == *"/.config/mms/claude-gateway/"* ]]; then
+    if mms_root_from_gateway_path "$HOME" >/dev/null; then
         is_gateway_session=1
     fi
 
     local primary_user="$config_root/route_status.json"
-    local primary_home="$HOME/.config/mms/route_status.json"
+    local primary_home="$HOME/.config/mms-next/route_status.json"
     local gateway_sessions="$config_root/claude-gateway/s"
     local explicit_config_root=0
     if [ -n "$MMS_CONFIG_ROOT" ] || [ -n "$MMS_CONFIG_DIR" ]; then
@@ -137,7 +155,7 @@ pick_route_status_file() {
 # per-session 优先：MMS launch 时注入 MMS_ROUTE_STATUS_PATH 指向本 session 隔离文件
 _ROUTE_STATUS="${MMS_ROUTE_STATUS_PATH:-$(pick_route_status_file)}"
 route_tag=""
-if [[ "$HOME" == *"/.config/mms/claude-gateway/"* ]] && [ -n "$_ROUTE_STATUS" ] && [ -f "$_ROUTE_STATUS" ]; then
+if mms_root_from_gateway_path "$HOME" >/dev/null && [ -n "$_ROUTE_STATUS" ] && [ -f "$_ROUTE_STATUS" ]; then
     route_age=$(( $(date +%s) - $(stat -f %m "$_ROUTE_STATUS" 2>/dev/null || echo 0) ))
     if [ "$route_age" -lt 600 ]; then
         r_model=$(jq -r '.model // empty' "$_ROUTE_STATUS" 2>/dev/null)
