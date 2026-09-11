@@ -51,6 +51,7 @@ import { HelpGuide } from "./HelpGuide";
 import { UpdateCenter } from "./UpdateCenter";
 import { ConnectionDialog } from "./ConnectionDialog";
 import { GuidedTour } from "./GuidedTour";
+import { WhatsNew } from "./WhatsNew";
 import type { TourStep } from "./GuidedTour";
 import type { GuideAction } from "./guide-content";
 import { ArtifactView } from "./ArtifactView";
@@ -1669,6 +1670,7 @@ export function App() {
               className={"home-content" + (homeSplit ? " home-split" : "")}
               ref={setHomeNode}
             >
+              <WhatsNew ready={!loading && connected} />
               <div className="home-intro">
                 <WorkspacePicker
                   workspaces={data.workspaces}
