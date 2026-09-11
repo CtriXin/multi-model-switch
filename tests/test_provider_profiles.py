@@ -319,7 +319,7 @@ def test_kimi_k3_profile_uses_reasoning_effort_without_k2_thinking_patch(monkeyp
         "k3",
         provider_id="kimi",
         base_url="https://api.kimi.com/coding/",
-    ) == 262_144
+    ) == 1_048_576
     assert profiles.profile_context_window(
         "k3[1m]",
         provider_id="kimi",
@@ -724,3 +724,56 @@ def test_legacy_root_without_latest_bundle_ignores_legacy_profile_overlay(monkey
 
     assert mms_provider_profiles.resolve_provider_profile(provider_id="stable-overlay-provider")[0] == ""
     assert mms_provider_profiles.profile_context_window("any-model", provider_id="stable-overlay-provider") is None
+
+
+def test_kimi_k3_aliases_agree_on_one_million_context(monkeypatch, tmp_path):
+    """Every K3 alias must report the same window.
+
+    K3 shipped 1M natively, but the value has been changed back and forth in the
+    profile three times, each round leaving one alias behind. Pin the whole
+    family so a partial edit fails here instead of downgrading a live channel.
+    """
+    profiles = _profiles(monkeypatch, tmp_path)
+
+    for alias in ("k3", "k3[1m]", "kimi-k3"):
+        assert profiles.profile_context_window(
+            alias,
+            provider_id="kimi",
+            base_url="https://api.kimi.com/coding/",
+        ) == 1_048_576, alias
+
+    # The 256K variant is a separate official model, not a downgraded K3.
+    assert profiles.profile_context_window(
+        "k3-256k",
+        provider_id="kimi",
+        base_url="https://api.kimi.com/coding/",
+    ) == 262_144
+
+
+def test_profile_max_output_never_exceeds_its_context_window():
+    """A max-output larger than the context window is always a data error.
+
+    ``k3`` was raised to a 1M max output with no source behind it; that shape of
+    mistake produces requests the upstream rejects, so catch it in the data.
+    """
+    import json
+    from pathlib import Path
+
+    profiles = json.loads(
+        (Path(__file__).resolve().parent.parent / "config" / "provider-profiles.json").read_text(
+            encoding="utf-8"
+        )
+    )["profiles"]
+
+    offenders = []
+    for profile_id, profile in profiles.items():
+        windows = profile.get("context_windows") or {}
+        outputs = profile.get("max_output_tokens") or {}
+        for model, max_output in outputs.items():
+            window = windows.get(model)
+            if window is None:
+                continue
+            if int(max_output) > int(window):
+                offenders.append(f"{profile_id}:{model} output={max_output} > context={window}")
+
+    assert not offenders, "max_output_tokens exceeds context_window: " + "; ".join(offenders)
