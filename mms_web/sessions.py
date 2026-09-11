@@ -275,6 +275,20 @@ class _LiveSession:
 
 
 
+def _route_completion_build() -> bool:
+    """Can this installation send a side question on a session's route at all?
+    Only the transport is checked here; the credentials are per session."""
+    try:
+        from mms_core import _ensure_httpx, httpx  # noqa: F401
+
+        _ensure_httpx()
+        import mms_core
+
+        return mms_core.httpx is not None
+    except Exception:
+        return False
+
+
 class SessionService(SessionActions, SessionSideQuestions):
     """API v1 session adapter. See docs/mms-web/API.md for the contract."""
 
@@ -308,8 +322,9 @@ class SessionService(SessionActions, SessionSideQuestions):
         self._lock = threading.RLock()
         self._sessions: dict[str, _LiveSession] = {}
         self._requests: dict[str, dict] = {}
-        # Read-only /btw sidecar seam. Absent means completion questions fail
-        # closed with a visible error; it is never simulated.
+        # Read-only /btw sidecar seam. Absent falls back to the session's own
+        # route; when neither can answer, the question fails closed with a
+        # visible error. It is never simulated.
         self._sidecar_runner = sidecar_runner
         self._btw_timeout = float(btw_timeout)
         self._btw_timers: dict[str, threading.Timer] = {}
@@ -337,8 +352,30 @@ class SessionService(SessionActions, SessionSideQuestions):
             "launchReason": "" if launch else self._launch_blocker(),
             # /btw is session-owned and read-only: state answers always work.
             "sideQuestions": True,
-            "sidecarCompletion": callable(self._sidecar_runner),
+            # Whether this build can attempt a model-backed side question at
+            # all. Whether one particular session can is a property of its
+            # route, and shows up on that question's own row.
+            "sidecarCompletion": callable(self._sidecar_runner) or _route_completion_build(),
         }
+
+    def _sidecar_runner_for(self, session):
+        """The read-only runner for one side question.
+
+        An injected runner wins, which is what the tests and any future host
+        integration use. Otherwise the question runs on the session's own
+        provider, model and key: the same route as the main task, a separate
+        stateless request. A session with no usable route gets ``None`` and
+        the question fails closed.
+        """
+        injected = getattr(self, "_sidecar_runner", None)
+        if callable(injected):
+            return injected
+        try:
+            from .side_question_model import runner_for
+
+            return runner_for(session)
+        except Exception:
+            return None
 
     def _launch_blocker(self) -> str:
         """What to do about it, in the order the reader can act on."""

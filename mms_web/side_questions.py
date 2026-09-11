@@ -8,12 +8,13 @@ model, channel or effort. Two answer sources exist:
 - ``state``: a deterministic answer built from the session snapshot (phase,
   duration, recent tools, queue, approvals, errors). Always available, even
   after the main process exited, and authoritative about *observed* state.
-- ``completion``: a read-only sidecar injected by the host as
-  ``sidecar_runner``. It receives only a budgeted, redacted context snapshot
-  plus a cancel event, and must never touch the workspace, the main
-  transcript, approvals or the driver. Without a runner the capability
-  fails closed: the question is recorded as ``failed`` with a visible
-  reason, and the main task is untouched.
+- ``completion``: one read-only request on the session's own route, or a
+  runner the host injected as ``sidecar_runner``. Either way it receives only
+  a budgeted, redacted context snapshot plus a cancel event, and must never
+  touch the workspace, the main transcript, approvals or the driver. When no
+  route and no runner can answer, the capability fails closed: the question is
+  recorded as ``failed`` with a visible reason, and the main task is
+  untouched.
 
 Lifecycle: ``prepared -> accepted -> running -> completed | failed |
 cancelled | uncertain``. ``accepted`` means recorded, not answered; updates
@@ -129,9 +130,9 @@ class SessionSideQuestions:
     """SessionService mixin implementing the /btw side-question contract.
 
     Expects the host to provide ``_get``, ``_require_open``, ``_now``,
-    ``_state_dir``, ``_object_payload`` and per-session locks, and to
-    initialise ``self._sidecar_runner``, ``self._btw_timeout``,
-    ``self._btw_timers`` and ``self._btw_cancel``.
+    ``_state_dir``, ``_object_payload``, ``_sidecar_runner_for`` and
+    per-session locks, and to initialise ``self._sidecar_runner``,
+    ``self._btw_timeout``, ``self._btw_timers`` and ``self._btw_cancel``.
     """
 
     # -- reads ------------------------------------------------------
@@ -279,14 +280,17 @@ class SessionSideQuestions:
     # -- completion source --------------------------------------------
 
     def _answer_from_completion(self, session, row: dict) -> None:
-        runner = getattr(self, "_sidecar_runner", None)
+        # Per session, not per service: the read-only answer runs on the route
+        # this session already launched with, so a host that injects nothing
+        # still gets the session's own model rather than no model at all.
+        runner = self._sidecar_runner_for(session)
         if not callable(runner):
             # Fail closed: the capability is absent, so the row records a
             # visible failure instead of silently degrading to a state answer
             # or touching the main agent loop.
             self._btw_finish(
                 session, row, "failed",
-                error="当前环境没有可用的只读旁问模型，未发送任何请求。主任务不受影响。",
+                error="这条会话没有可用于只读旁问模型的路由或凭据，未发送任何请求。主任务不受影响。",
             )
             return
         with session.lock:

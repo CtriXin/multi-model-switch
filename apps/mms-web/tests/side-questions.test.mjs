@@ -124,6 +124,22 @@ test('a failure shows its reason on the folded row', () => {
 });
 
 test('the route line skips the parts the snapshot did not carry', () => {
- assert.equal(routeLine(row({ routeSnapshot: { modelName: 'k3', providerName: '', channel: 'x' } })), 'k3 · x');
- assert.equal(routeLine(row({ routeSnapshot: undefined })), '');
+ const answered = { source: 'completion', startedAt: '2026-09-11T10:00:00', answer: '答完了' };
+ assert.equal(routeLine(row({ ...answered, routeSnapshot: { modelName: 'k3', providerName: '', channel: 'x' } })), 'k3 · x');
+ assert.equal(routeLine(row({ ...answered, routeSnapshot: undefined })), '');
+});
+
+test('a model is named only when one actually answered', () => {
+ const snapshot = { modelName: 'k3', providerName: 'p', channel: 'c' };
+ // Answered from the session snapshot: no model was asked.
+ assert.equal(routeLine(row({ source: 'state', routeSnapshot: snapshot })), '');
+ // Failed closed: nothing was sent, so nothing may be credited.
+ assert.equal(routeLine(row({
+  source: 'completion', status: 'failed', answer: null, startedAt: null,
+  error: '没有可用路由', routeSnapshot: snapshot,
+ })), '');
+ // A real answer names the route it came from.
+ assert.equal(routeLine(row({
+  source: 'completion', startedAt: '2026-09-11T10:00:00', answer: '在跑测试。', routeSnapshot: snapshot,
+ })), 'k3 · p · c');
 });

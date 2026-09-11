@@ -142,7 +142,7 @@ function Facts({ row }: { row: SideQuestion }) {
       )}
       {!!route && (
         <div>
-          <dt>路由</dt>
+          <dt>回答模型</dt>
           <dd>{route}</dd>
         </div>
       )}
@@ -283,13 +283,7 @@ function Detail({ row, close }: { row: SideQuestion; close: () => void }) {
 }
 
 /** Every side question of one session, oldest first. */
-export function SideQuestions({
-  state,
-  sidecarAvailable,
-}: {
-  state: SideQuestionState;
-  sidecarAvailable?: boolean;
-}) {
+export function SideQuestions({ state }: { state: SideQuestionState }) {
   const [choice, setChoice] = useState<Record<string, boolean>>({});
   const [opened, setOpened] = useState("");
   const { rows, notice, clearNotice, cancel } = state;
@@ -324,13 +318,6 @@ export function SideQuestions({
           />
         );
       })}
-      {sidecarAvailable === false &&
-        rows.some((row) => row.source === "completion") && (
-          <p className="btw-notice" role="status">
-            这台机器没有配置只读旁问模型，需要判断的问题无法回答。状态问题
-            （进度、耗时、最近工具、审批、队列）仍然可以问。
-          </p>
-        )}
       {open && <Detail row={open} close={() => setOpened("")} />}
     </section>
   );

@@ -166,8 +166,16 @@ export function readBtwCommand(
   return question ? { kind: "ask", question } : { kind: "compose" };
 }
 
-/** The route the answer was produced against, as one readable line. */
+/** The route the answer was produced against, as one readable line.
+ *
+ *  Empty when nothing was sent. A question answered from the session snapshot
+ *  never reached a model, and one that failed closed never reached the
+ *  network, so printing a model name beside either would read as a claim that
+ *  it answered.
+ */
 export function routeLine(row: SideQuestion): string {
+  if (row.source !== "completion" || !row.startedAt || row.answer === null)
+    return "";
   const route = row.routeSnapshot || {};
   return [route.modelName, route.providerName, route.channel]
     .map((part) => (part || "").trim())

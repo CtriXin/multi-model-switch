@@ -44,11 +44,19 @@ def blocking_runner(release: threading.Event):
     return runner
 
 
-def test_capabilities_expose_btw_and_fail_closed_sidecar(tmp_path, monkeypatch):
+def test_capabilities_expose_btw_and_model_backed_answers(tmp_path, monkeypatch):
+    """`sidecarCompletion` says the build can attempt a model answer.
+
+    Whether one session actually can is a property of that session's route,
+    not of the service, so it is reported on the question's own row instead.
+    """
     service, _ = make_service(tmp_path, monkeypatch=monkeypatch)
     caps = service.capabilities()
     assert caps["sideQuestions"] is True
-    assert caps["sidecarCompletion"] is False
+    assert caps["sidecarCompletion"] is True
+    monkeypatch.setattr("mms_web.sessions._route_completion_build", lambda: False)
+    service3, _ = make_service(tmp_path / "c", monkeypatch=monkeypatch)
+    assert service3.capabilities()["sidecarCompletion"] is False
     service2, _ = make_service(tmp_path / "b", monkeypatch=monkeypatch,
                                sidecar_runner=blocking_runner(threading.Event()))
     assert service2.capabilities()["sidecarCompletion"] is True

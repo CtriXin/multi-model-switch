@@ -2003,10 +2003,7 @@ export function App() {
                           会话已建立。发送第一条消息开始工作。
                         </p>
                       )}
-                      <SideQuestions
-                        state={sideQuestions}
-                        sidecarAvailable={data.capabilities.sidecarCompletion}
-                      />
+                      <SideQuestions state={sideQuestions} />
                     </div>
                   )}
                 </div>
@@ -2127,7 +2124,7 @@ export function App() {
                       ask: sideQuestions.ask,
                       limitation:
                         data.capabilities.sidecarCompletion === false
-                          ? "这台机器没有配置只读旁问模型。进度、耗时、最近工具、审批和队列这类状态问题可以回答；需要判断的问题会明确记为未回答。"
+                          ? "这个版本不能发起需要模型判断的旁问。进度、耗时、最近工具、审批和队列这类状态问题仍然可以回答。"
                           : undefined,
                     }}
                     onCommand={async (command, args) => {

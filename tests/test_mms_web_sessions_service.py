@@ -156,10 +156,12 @@ def test_launch_disabled_without_real_launch(tmp_path, seeded_seam):
     service, _ = make_service(tmp_path, real_launch=False)
     # The blocker travels with the flag now: a page full of unavailable models
     # has to be able to say what is missing.
+    # sidecarCompletion is a build capability, not a launch one: an existing
+    # session can still be asked a question after new launches are blocked.
     assert service.capabilities() == {"launch": False,
                                       "launchReason": "没有选定 MMS 配置根，无法启动会话。",
                                       "sideQuestions": True,
-                                      "sidecarCompletion": False}
+                                      "sidecarCompletion": True}
     with pytest.raises(WebError) as err:
         launch_ok(service)
     assert err.value.status == 409
