@@ -84,3 +84,48 @@
   margin: 0 0 6px;
   font-size: max(11px, 0.8571rem);
 }
+
+/* The post-update changelog on the home page. Same note styling as the update
+   dialog, in a card that sits in the page rather than over it. */
+.whats-new {
+  margin-bottom: 18px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface);
+}
+.whats-new-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.whats-new-head h3 {
+  margin: 0;
+  font-size: max(12px, 0.9286rem);
+}
+.whats-new .update-notes-body > h1:first-child {
+  display: none;
+}
+
+.whats-new-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: max(11px, 0.8571rem);
+  cursor: pointer;
+}
+.whats-new-toggle:hover {
+  color: var(--ink);
+}
+.whats-new-notes {
+  margin-top: 10px;
+  max-height: 320px;
+  overflow-y: auto;
+}

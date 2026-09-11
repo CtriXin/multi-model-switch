@@ -125,6 +125,7 @@ from mms_project_store import (
 from mms_provider_profiles import profile_context_window, resolve_provider_profile
 from mms_reasoning_effort import model_supports_max_reasoning_effort
 import mms_pi_support as _pi_support
+import mms_vision_relay
 from mms_runtime import cli_search_dirs, prepare_cli_command
 from mms_session_index import finalize_claude_session, list_indexed_sessions, record_claude_session_start
 from mms_session_packet import write_session_packet
@@ -6025,6 +6026,45 @@ def _session_managed_mcp_servers(settings_data, *, allow_execution_surfaces=True
     return _normalize_session_mcp_servers(inherited, disabled_session_surfaces=disabled_session_surfaces)
 
 
+def _inject_vision_relay_mcp_server(
+    state,
+    runtime,
+    model_name,
+    *,
+    session_home,
+    disabled_session_surfaces=None,
+):
+    """Give a text-only model a way to read images, when the channel can.
+
+    Pi does this through its own extension. Claude Code has no extension
+    surface but speaks MCP, so the same pool is reached through a small stdio
+    server. Nothing is added when the selected model reads images itself, when
+    no model on this channel can, or when the user disabled the surface.
+    """
+    state = dict(state) if isinstance(state, dict) else {}
+    if _session_surface_disabled(disabled_session_surfaces, "mcp", mms_vision_relay.RELAY_SERVER_NAME):
+        return state
+    try:
+        config_path = mms_vision_relay.write_relay_catalog(
+            mms_vision_relay.session_catalog_path(session_home), runtime, model_name
+        )
+        spec = mms_vision_relay.mcp_server_spec(config_path)
+    except Exception:
+        spec = None
+    servers = state.get("mcpServers")
+    servers = dict(servers) if isinstance(servers, dict) else {}
+    if spec:
+        servers[mms_vision_relay.RELAY_SERVER_NAME] = spec
+    else:
+        # A channel that lost its vision model must not keep a stale relay.
+        servers.pop(mms_vision_relay.RELAY_SERVER_NAME, None)
+    if servers:
+        state["mcpServers"] = servers
+    else:
+        state.pop("mcpServers", None)
+    return state
+
+
 def _inject_managed_mcp_servers_into_claude_state(
     payload,
     settings_data=None,
@@ -10654,6 +10694,13 @@ def _claude_gateway_env(
         disabled_session_surfaces=disabled_session_surfaces,
         agent_pack=agent_pack,
     )
+    data = _inject_vision_relay_mcp_server(
+        data,
+        runtime,
+        selected_model or display_model,
+        session_home=gateway_home,
+        disabled_session_surfaces=disabled_session_surfaces,
+    )
 
     # 当用户在 TUI 选择不 bypass 时，主动移除持久化的 bypass 状态，
     # 避免旧 session 残留的 bypassPermissionsModeAccepted 导致 Claude Code 自动进入 bypass
@@ -11682,7 +11729,7 @@ def _build_opencode_config_payload(runtime, model_name=""):
     )
 
 
-def _build_opencode_config_content(runtime, model_name=""):
+def _build_opencode_config_content(runtime, model_name="", *, vision_relay_mcp=None):
     return _opencode_build_config_content_impl(
         runtime,
         model_name,
@@ -11692,15 +11739,49 @@ def _build_opencode_config_content(runtime, model_name=""):
             provider_id=provider_id,
             accepted_sources={"model_policy", "manual_override", "approved_facts"},
         ),
+        vision_relay_mcp=vision_relay_mcp,
     )
 
 
+def _opencode_vision_relay_mcp(config_path, runtime, model_name):
+    """The relay entry for OpenCode, or None when this channel needs no relay.
+
+    The catalog lands beside the config OpenCode is about to read, so it is as
+    session-local as the config itself.
+    """
+    if _session_surface_disabled(
+        (runtime or {}).get("disabled_session_surfaces"),
+        "mcp",
+        mms_vision_relay.RELAY_SERVER_NAME,
+    ):
+        return None
+    try:
+        target = os.path.abspath(str(config_path))
+        # Named after the config it serves: the shared export directory holds
+        # one config per channel and model, and they must not share a catalog.
+        catalog = mms_vision_relay.write_relay_catalog(
+            mms_vision_relay.session_catalog_path(
+                os.path.dirname(target),
+                os.path.splitext(os.path.basename(target))[0],
+            ),
+            runtime,
+            model_name,
+        )
+        entry = mms_vision_relay.opencode_mcp_entry(catalog)
+    except Exception:
+        return None
+    return {mms_vision_relay.RELAY_SERVER_NAME: entry} if entry else None
+
+
 def _write_opencode_config(path, runtime, model):
+    relay = _opencode_vision_relay_mcp(path, runtime, model)
     return _opencode_write_config_impl(
         path,
         runtime,
         model,
-        build_config_content=_build_opencode_config_content,
+        build_config_content=lambda rt, mdl: _build_opencode_config_content(
+            rt, mdl, vision_relay_mcp=relay
+        ),
         atomic_write_text=atomic_write_text,
     )
 

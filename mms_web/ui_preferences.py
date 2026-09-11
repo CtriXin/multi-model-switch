@@ -10,6 +10,10 @@ from pathlib import Path
 from .runtime import private_json
 
 _BOOL_KEYS = ("tourSeen",)
+# The version whose release notes this install has already shown. A version
+# string rather than a flag, so every upgrade surfaces its own notes once.
+_STRING_KEYS = ("whatsNewSeenVersion",)
+_MAX_STRING = 64
 
 
 class UiPreferences:
@@ -23,7 +27,10 @@ class UiPreferences:
             value = {}
         if not isinstance(value, dict):
             value = {}
-        return {key: value.get(key) is True for key in _BOOL_KEYS}
+        result = {key: value.get(key) is True for key in _BOOL_KEYS}
+        for key in _STRING_KEYS:
+            result[key] = str(value.get(key) or "")[:_MAX_STRING]
+        return result
 
     def update(self, payload) -> dict:
         current = self.read()
@@ -31,5 +38,8 @@ class UiPreferences:
             for key in _BOOL_KEYS:
                 if key in payload:
                     current[key] = payload.get(key) is True
+            for key in _STRING_KEYS:
+                if key in payload:
+                    current[key] = str(payload.get(key) or "")[:_MAX_STRING]
         private_json(self.path, current)
         return current

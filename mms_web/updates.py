@@ -69,6 +69,23 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         raise WebError('UPDATE_DOWNLOAD_FAILED', '更新来源发生了意外跳转，请稍后重试。', 502)
 
 
+def release_notes(version):
+    """The notes shipped with this install for the version now running.
+
+    Read locally rather than from the release API: after an update the page
+    reloads and the user is owed what changed, whether or not the network is
+    reachable, and whether or not a newer release has since appeared.
+    """
+    tag = str(version or '').strip()
+    if not re.fullmatch(r'\d+\.\d+\.\d+', tag):
+        return ''
+    path = Path(__file__).resolve().parent.parent / 'docs' / 'mms-web' / f'RELEASE-v{tag}.md'
+    try:
+        return path.read_text(encoding='utf-8')[:16000]
+    except OSError:
+        return ''
+
+
 def fetch_release():
     request = urllib.request.Request(RELEASE_API, headers={'User-Agent': 'MMS-Pilot', 'Accept': 'application/vnd.github+json'})
     with urllib.request.build_opener(NoRedirect()).open(request, timeout=10) as response:
@@ -111,12 +128,20 @@ class UpdateService:
         from .update_install import describe
         installation = describe(self.coordinator.source) if self.coordinator else {}
         return {'currentVersion': VERSION, 'latest': latest, 'updateAvailable': available,
+                'whatsNew': self.whats_new(),
                 'enabled': self.enabled(), 'checking': self._checking,
                 'checkedAt': checked_at(cache), 'checkInterval': CHECK_INTERVAL,
                 'error': str(cache.get('error') or ''), 'operation': operation,
                 'port': self.coordinator.port() if self.coordinator else 0,
                 'installation': installation,
                 'canUpgrade': bool(available and self.coordinator and self.coordinator.available())}
+
+    def whats_new(self):
+        """What this version changed, for the release the user is now running."""
+        notes = release_notes(VERSION)
+        if not notes:
+            return {}
+        return {'version': VERSION, 'notes': notes, 'upgradeNotice': upgrade_notice(notes)}
 
     def check(self, *, manual=False):
         if not manual and not self.enabled():
