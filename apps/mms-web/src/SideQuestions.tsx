@@ -217,6 +217,7 @@ function Card({
         role="button"
         tabIndex={0}
         aria-expanded={expanded}
+        aria-label={`旁问，不影响主任务：${row.question}`}
         // Double-click is the pointer gesture the product asks for; a single
         // click only focuses, so the two never race. Enter and Space are the
         // same toggle for a keyboard or a screen reader.
@@ -240,7 +241,9 @@ function Card({
           <MessageCircleQuestion size={13} />
           BTW
         </span>
-        <span className="btw-aside">不影响主任务</span>
+        {/* Repeated on every folded row this is just noise; the mark, the
+            label and the opened card all still carry it. */}
+        {expanded && <span className="btw-aside">不影响主任务</span>}
         <span className="btw-question">{row.question}</span>
         {!expanded && !!summary && (
           <span className="btw-summary">{summary}</span>
@@ -254,16 +257,18 @@ function Card({
         </time>
       </div>
       {expanded && <Body row={row} />}
-      <div className="btw-actions">
-        <button type="button" onClick={view}>
-          查看
-        </button>
-        {isInFlight(row) && (
-          <button type="button" onClick={cancel}>
-            取消旁问
+      {(expanded || isInFlight(row)) && (
+        <div className="btw-actions">
+          <button type="button" onClick={view}>
+            查看
           </button>
-        )}
-      </div>
+          {isInFlight(row) && (
+            <button type="button" onClick={cancel}>
+              取消旁问
+            </button>
+          )}
+        </div>
+      )}
     </article>
   );
 }
@@ -302,8 +307,8 @@ export function SideQuestions({ state }: { state: SideQuestionState }) {
           </button>
         </p>
       )}
-      {rows.map((row) => {
-        const fallback = defaultExpanded(row);
+      {rows.map((row, index) => {
+        const fallback = defaultExpanded(row, index === rows.length - 1);
         const expanded = choice[row.btwId] ?? fallback;
         return (
           <Card

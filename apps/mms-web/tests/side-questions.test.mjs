@@ -39,12 +39,16 @@ test('only the four final statuses count as settled', () => {
  }
 });
 
-test('a card is open while answering and folded once it settles', () => {
+test('a card is open while answering, whatever its place in the list', () => {
  assert.equal(defaultExpanded(row({ status: 'running' })), true);
  assert.equal(defaultExpanded(row({ status: 'accepted' })), true);
- assert.equal(defaultExpanded(row({ status: 'completed' })), false);
- assert.equal(defaultExpanded(row({ status: 'failed' })), false);
- assert.equal(defaultExpanded(row({ status: 'cancelled' })), false);
+});
+
+test('the newest question stays open and the ones behind it fold', () => {
+ for (const status of ['completed', 'failed', 'cancelled', 'uncertain']) {
+  assert.equal(defaultExpanded(row({ status }), true), true, `newest ${status}`);
+  assert.equal(defaultExpanded(row({ status }), false), false, `older ${status}`);
+ }
 });
 
 test('bare /btw opens the input and /btw with text asks', () => {

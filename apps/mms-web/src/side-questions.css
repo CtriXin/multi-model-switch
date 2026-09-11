@@ -5,37 +5,55 @@
 .btw-stack {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 4px;
   margin: 12px 0 24px;
 }
+/* A folded side question is a footnote: one line, no fill, a hairline edge.
+   Weight is spent on the one that is open, which is the one being read. */
 .btw-card {
-  border: 1px solid var(--line);
-  border-left: 3px solid var(--muted);
+  border: 1px solid transparent;
+  border-left: 2px solid var(--line);
+  /* Square on the left so the folded edge reads as a rule, not a stub. */
+  border-radius: 0 8px 8px 0;
+  background: transparent;
+}
+.btw-card:hover {
+  border-left-color: var(--muted);
+}
+.btw-card:has(.btw-row[aria-expanded="true"]) {
   border-radius: 10px;
+  border-color: var(--line);
+  border-left-width: 3px;
+  border-left-color: var(--accent);
   background: var(--soft);
+  margin: 6px 0;
 }
-.btw-card[data-tone="running"] {
-  border-left-color: var(--accent);
-}
-.btw-card[data-tone="done"] {
-  border-left-color: var(--accent);
-}
+/* Failure keeps its edge even folded: a question that went unanswered should
+   still be findable while scanning. */
 .btw-card[data-tone="error"] {
   border-left-color: var(--danger);
 }
-.btw-card[data-tone="cancelled"],
-.btw-card[data-tone="unknown"] {
+.btw-card[data-tone="error"]:has(.btw-row[aria-expanded="true"]) {
+  border-left-color: var(--danger);
+}
+.btw-card[data-tone="cancelled"]:has(.btw-row[aria-expanded="true"]),
+.btw-card[data-tone="unknown"]:has(.btw-row[aria-expanded="true"]) {
   border-left-color: var(--amber);
 }
 .btw-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 9px 12px;
-  min-height: 40px;
+  padding: 5px 12px;
+  min-height: 30px;
   cursor: default;
-  font-size: max(11px, 0.9286rem);
+  font-size: max(10px, 0.8571rem);
   border-radius: 8px;
+}
+.btw-row[aria-expanded="true"] {
+  padding: 9px 12px 5px;
+  min-height: 36px;
+  font-size: max(11px, 0.9286rem);
 }
 .btw-row:focus-visible {
   outline: 2px solid var(--accent);
@@ -61,8 +79,14 @@
   gap: 4px;
   font-weight: 600;
   letter-spacing: 0.04em;
-  color: var(--accent);
+  color: var(--muted);
   white-space: nowrap;
+}
+.btw-row[aria-expanded="true"] .btw-mark {
+  color: var(--accent);
+}
+.btw-row:not([aria-expanded="true"]) .btw-question {
+  color: var(--muted);
 }
 .btw-aside,
 .btw-state,
@@ -153,7 +177,7 @@
 .btw-actions {
   display: flex;
   gap: 6px;
-  padding: 0 12px 9px 34px;
+  padding: 2px 12px 9px 34px;
 }
 .btw-actions button {
   border: 1px solid var(--line);

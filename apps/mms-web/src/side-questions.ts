@@ -119,10 +119,15 @@ export function upsertSideQuestion(
   );
 }
 
-/** Open while the answer is still arriving, folded once it has settled.
- *  A card the reader has toggled keeps their choice instead of this. */
-export function defaultExpanded(row: SideQuestion): boolean {
-  return isInFlight(row);
+/** Open while the answer is arriving, and open for the newest question.
+ *
+ *  Folding the moment an answer lands means reading the thing you just asked
+ *  takes another click. So the latest question stays open until the next one
+ *  takes its place, and everything behind it folds to one line. A card the
+ *  reader has toggled keeps their choice instead of this.
+ */
+export function defaultExpanded(row: SideQuestion, newest = false): boolean {
+  return isInFlight(row) || newest;
 }
 
 export function sourceLabel(row: SideQuestion): string {
