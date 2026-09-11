@@ -31,19 +31,31 @@ def cached_pi() -> str:
     gate in front of it has to accept the same installs; looking only at PATH
     reported "cannot run sessions" on machines whose terminal runs Pi fine.
     """
+    for cache in _npx_caches():
+        for candidate in sorted(cache.glob("_npx/*/node_modules/.bin/pi")):
+            manifest = candidate.parent.parent / "@earendil-works" / "pi-coding-agent" / "package.json"
+            if os.access(candidate, os.X_OK) and manifest.is_file():
+                return str(candidate)
+    return ""
+
+
+def _npx_caches() -> list[Path]:
+    """Where an npx-installed Pi can be, most specific first.
+
+    The wrapper points npx at the installation's own cache, but a Pi installed
+    by a plain `npx` call — or by a run that never saw MMS_PI_NPX_CACHE — lands
+    in npm's default cache instead, and that machine can still run Pi.
+    """
+    caches = []
     try:
         from mms_pi_support import _pi_npx_cache_dir
+
+        caches.append(Path(_pi_npx_cache_dir()))
     except Exception:
-        return ""
-    try:
-        cache = Path(_pi_npx_cache_dir())
-    except Exception:
-        return ""
-    for candidate in sorted(cache.glob("_npx/*/node_modules/.bin/pi")):
-        manifest = candidate.parent.parent / "@earendil-works" / "pi-coding-agent" / "package.json"
-        if os.access(candidate, os.X_OK) and manifest.is_file():
-            return str(candidate)
-    return ""
+        pass
+    npm_cache = str(os.environ.get("NPM_CONFIG_CACHE") or os.environ.get("npm_config_cache") or "").strip()
+    caches.append(Path(npm_cache).expanduser() if npm_cache else Path.home() / ".npm")
+    return [cache for cache in caches if cache.is_dir()]
 
 
 def pi_runtime() -> tuple[str, str]:

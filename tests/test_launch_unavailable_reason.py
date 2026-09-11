@@ -81,6 +81,13 @@ def _warm_cache(root: Path, *, executable=True, manifest=True) -> Path:
     return binary
 
 
+@pytest.fixture(autouse=True)
+def _no_real_npm_cache(tmp_path_factory, monkeypatch):
+    """Keep this machine's own ~/.npm out of the cache search."""
+    monkeypatch.setenv("NPM_CONFIG_CACHE", str(tmp_path_factory.mktemp("empty-npm")))
+    monkeypatch.delenv("npm_config_cache", raising=False)
+
+
 def test_the_warmed_npx_cache_counts_as_an_installed_pi(tmp_path, monkeypatch):
     """The wrapper a launch goes through accepts it, so the gate must too.
 
@@ -115,3 +122,29 @@ def test_a_global_pi_still_wins(tmp_path, monkeypatch):
     monkeypatch.setattr(bridge, "cached_pi", lambda: pytest.fail("PATH pi must be preferred"))
     executable, _node = bridge.pi_runtime()
     assert executable == "/usr/local/bin/pi"
+
+
+def test_a_pi_installed_into_npms_own_cache_is_found_too(tmp_path, monkeypatch):
+    """`npx pi` without the wrapper puts it in npm's default cache.
+
+    That machine can run Pi, so the gate has to see it; only the wrapper's own
+    cache was consulted before.
+    """
+    import mms_web.drivers.launch_bridge as bridge
+
+    binary = _warm_cache(tmp_path / "npm-home")
+    monkeypatch.setenv("NPM_CONFIG_CACHE", str(tmp_path / "npm-home"))
+    monkeypatch.setitem(__import__("sys").modules, "mms_pi_support",
+                        type("M", (), {"_pi_npx_cache_dir": staticmethod(lambda: str(tmp_path / "absent"))}))
+    assert bridge.cached_pi() == str(binary)
+
+
+def test_the_installation_cache_is_preferred_over_npms(tmp_path, monkeypatch):
+    import mms_web.drivers.launch_bridge as bridge
+
+    mine = _warm_cache(tmp_path / "mms-cache")
+    _warm_cache(tmp_path / "npm-home")
+    monkeypatch.setenv("NPM_CONFIG_CACHE", str(tmp_path / "npm-home"))
+    monkeypatch.setitem(__import__("sys").modules, "mms_pi_support",
+                        type("M", (), {"_pi_npx_cache_dir": staticmethod(lambda: str(tmp_path / "mms-cache"))}))
+    assert bridge.cached_pi() == str(mine)
