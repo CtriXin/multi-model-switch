@@ -23,7 +23,8 @@ def test_runtime_reasoning_helpers_normalize_values():
     assert mms_launchers._claude_code_effort_env_value("gpt-5.4", {"reasoning_effort": "xhigh"}) == ""
 
 
-def test_claude_kimi_k3_context_env_uses_selector_window(monkeypatch):
+def test_claude_kimi_k3_context_env_follows_user_policy(monkeypatch):
+    """K3 has no MMS-specific ``[1m]`` selector: user policy wins for every alias."""
     import mms_launchers
 
     monkeypatch.setattr(
@@ -40,10 +41,11 @@ def test_claude_kimi_k3_context_env_uses_selector_window(monkeypatch):
     monkeypatch.setattr(mms_launchers, "_capability_context_window", fake_capability_context_window)
 
     assert mms_launchers._lookup_context_window("k3", provider_id="kimi") == 1_000_000
-    assert mms_launchers._lookup_context_window("k3[1m]", provider_id="kimi") == 1_048_576
+    assert mms_launchers._lookup_context_window("k3[1m]", provider_id="kimi") == 1_000_000
 
 
-def test_claude_kimi_k3_without_policy_keeps_default_tier_window(monkeypatch):
+def test_claude_kimi_k3_without_policy_uses_profile_one_million_window(monkeypatch):
+    """Without a policy the provider profile decides, and it records K3 as native 1M."""
     import mms_launchers
 
     monkeypatch.setattr(
@@ -53,7 +55,8 @@ def test_claude_kimi_k3_without_policy_keeps_default_tier_window(monkeypatch):
     )
     monkeypatch.setattr(mms_launchers, "_capability_context_window", lambda *_a, **_k: None)
 
-    assert mms_launchers._lookup_context_window("k3", provider_id="kimi") == 262_144
+    assert mms_launchers._lookup_context_window("k3", provider_id="kimi") == 1_048_576
+    assert mms_launchers._lookup_context_window("k3[1m]", provider_id="kimi") == 1_048_576
 
 
 def test_get_export_env_for_claude_kimi_k3_sets_effort_and_context(monkeypatch):
