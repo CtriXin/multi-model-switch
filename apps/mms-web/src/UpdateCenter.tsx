@@ -6,9 +6,12 @@ import { isPreview, request } from "./api";
 import "./updates.css";
 
 type UpdateStatus = {
-  currentVersion: string; latest: { tag?: string; notes?: string; url?: string };
+  currentVersion: string;
+  latest: { tag?: string; notes?: string; url?: string; upgradeNotice?: string };
   updateAvailable: boolean; enabled: boolean; checking: boolean; checkedAt: number;
-  error: string; canUpgrade: boolean;
+  error: string; canUpgrade: boolean; port?: number;
+  /** Whether this update also replaces the `mms` command line, and why not. */
+  installation?: { updatesCli?: boolean; root?: string; reason?: string };
   operation: { phase: string; message?: string; target?: string; cancellable?: boolean };
 };
 
@@ -24,6 +27,7 @@ export function UpdateCenter({ ready, open, setOpen, onStatus }: {
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const [allowIdleRestart, setAllowIdleRestart] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const initialVersion = useRef<string | undefined>(undefined);
@@ -35,7 +39,15 @@ export function UpdateCenter({ ready, open, setOpen, onStatus }: {
     const poll = async () => {
       try {
         const result = await request<UpdateStatus>("/update");
-        if (!stopped) { initialVersion.current ||= result.currentVersion; setData(result); setError(""); }
+        if (stopped) return;
+        if (initialVersion.current && result.currentVersion !== initialVersion.current) {
+          // The service is back on the same port running the new code. Drafts
+          // are stored, so reloading costs nothing and is the only way this
+          // page stops running the version it was served with.
+          location.reload();
+          return;
+        }
+        initialVersion.current ||= result.currentVersion; setData(result); setError("");
       } catch (e) {
         if (!stopped && open) setError(e instanceof Error ? e.message : "暂时无法读取更新状态。");
       } finally {
@@ -79,11 +91,24 @@ export function UpdateCenter({ ready, open, setOpen, onStatus }: {
         {data?.operation.message && <p className="update-progress" role="status">{data.operation.message}</p>}
         {(error || data?.error) && <p className="update-error" role="alert">{error || data?.error}</p>}
         {isPreview && <p className="update-muted">预览模式不检查或安装更新。</p>}
-        {data?.canUpgrade && !activePhases.has(phase) && <label className="update-preference"><span>允许重启空闲会话<small>历史和文件保留，续聊时恢复 Pi。关掉时保留所有活跃进程。执行中、待确认或有排队消息的会话仍会等待。</small></span><input type="checkbox" role="switch" aria-label="允许重启空闲会话" checked={allowIdleRestart} disabled={pending} onChange={e => setAllowIdleRestart(e.target.checked)} /></label>}
+        {confirming && data?.canUpgrade && !activePhases.has(phase) && <section className="update-confirm" aria-label={`确认更新到 ${data.latest.tag}`}>
+          <h3>确认更新到 {data.latest.tag}</h3>
+          {data.latest.upgradeNotice && <div className="update-warning"><h4>升级须知</h4><div className="update-notes-body"><Markdown remarkPlugins={[remarkGfm]} skipHtml>{data.latest.upgradeNotice}</Markdown></div></div>}
+          <ul className="update-facts">
+            <li>地址不变，仍然是 <code>http://127.0.0.1:{data.port || 8765}</code>；更新完成后这个页面会自动刷新到新版本。</li>
+            <li>{data.installation?.updatesCli
+              ? <>命令行会一起更新：<code>{data.installation.root}</code> 里的 <code>mms</code>、<code>mmf</code> 也会变成 {data.latest.tag}，之后两边版本一致。</>
+              : <>只更新网页服务，命令行保持当前版本。{data.installation?.reason}</>}</li>
+            <li>{allowIdleRestart ? "空闲会话会重启，历史和文件保留，续聊时恢复 Pi。" : "不重启任何会话；执行中、待确认或有排队消息的会话都会等它们结束。"}</li>
+          </ul>
+          <label className="update-preference"><span>允许重启空闲会话<small>历史和文件保留，续聊时恢复 Pi。关掉时保留所有活跃进程。执行中、待确认或有排队消息的会话仍会等待。</small></span><input type="checkbox" role="switch" aria-label="允许重启空闲会话" checked={allowIdleRestart} disabled={pending} onChange={e => setAllowIdleRestart(e.target.checked)} /></label>
+        </section>}
       </div>
       <footer>
         <p>更新前检查会话并备份记录。有任务执行、等待确认或排队消息时，会等待完成后再更新。</p>
-        <div>{data && initialVersion.current && data.currentVersion !== initialVersion.current && <button type="button" className="button primary" onClick={() => location.reload()}>刷新使用新版本</button>}{data?.operation.cancellable && <button type="button" className="button" disabled={pending} onClick={() => void act("cancel")}>取消本次更新</button>}{data?.canUpgrade && !activePhases.has(phase) && <button type="button" className="button primary" disabled={busy} onClick={() => void act("start", { target: data.latest.tag, allowIdleRestart })}>更新到 {data.latest.tag}</button>}<button type="button" className="button" onClick={() => setOpen(false)}>关闭</button></div>
+        <div>{data?.operation.cancellable && <button type="button" className="button" disabled={pending} onClick={() => void act("cancel")}>取消本次更新</button>}{data?.canUpgrade && !activePhases.has(phase) && (confirming
+          ? <><button type="button" className="button" onClick={() => setConfirming(false)}>返回</button><button type="button" className="button primary" disabled={busy} onClick={() => { setConfirming(false); void act("start", { target: data.latest.tag, allowIdleRestart }); }}>确认更新</button></>
+          : <button type="button" className="button primary" disabled={busy} onClick={() => setConfirming(true)}>更新到 {data.latest.tag}</button>)}<button type="button" className="button" onClick={() => setOpen(false)}>关闭</button></div>
       </footer>
     </dialog>}
   </>;
