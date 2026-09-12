@@ -23,6 +23,8 @@ from .runtime import private_json
 from .bot_memory import BotMemoryStore, BotMemoryError
 from .bot_communications import BotCommunications
 from .bot_coordinator import plan_for
+from . import bot_retry
+from .bot_notify import Notifier
 
 TERMINAL = {"completed", "failed", "cancelled", "interrupted"}
 MAX_TASKS = 2000
@@ -110,6 +112,7 @@ class BotRuntime(BotCommunications):
         self._file_lock = None
         self._endpoint = ""
         self._load_error = ""
+        self.notifier = Notifier(self.root)
         self.can_dispatch = lambda: True
         self._load()
 
@@ -194,6 +197,7 @@ class BotRuntime(BotCommunications):
                 self._persist()
                 self._file_lock.close()
                 self._file_lock = None
+        self.notifier.close()
 
     def capabilities(self):
         available = bool(self.executor and self.executor.available() and not self._load_error)
@@ -527,6 +531,19 @@ class BotRuntime(BotCommunications):
                 pass
         return view
 
+    def list_notifications(self, since=None):
+        """Events the page has not acknowledged yet; the client keeps the cursor."""
+        with self._lock:
+            return {"events": self.notifier.list_events(since)}
+
+    def notify_config(self):
+        with self._lock:
+            return self.notifier.config()
+
+    def update_notify_config(self, payload):
+        with self._lock:
+            return self.notifier.update_config(payload)
+
     def memory_mutate(self, bot_id, payload):
         with self._lock:
             bot = self._bot(bot_id)
@@ -557,11 +574,20 @@ class BotRuntime(BotCommunications):
             task = self._task(task_id)
             if task.get("orphanAlive"):
                 raise WebError("BOT_PREVIOUS_PROCESS_ALIVE", "上次执行进程仍存在，先检查该会话；不会重复启动或终止不明进程。", 409)
+            if task.get("retry"):
+                # An explicit wake skips the remaining backoff instead of
+                # silently waiting for the timer.
+                task.pop("retry", None)
+                task.update(status="queued", queueReason="已唤醒，等待调度", updatedAt=now())
+                self._message(task_id, "system", "已跳过等待重试，立即重新排队。")
+                self._persist()
+                return self._view(task)
             if task["status"] in {"scheduled", "interrupted", "failed", "waiting"} and task.get("waitReason") not in {"approval", "connection", "stopping"}:
                 if task.get("waitReason") == "children" and any(self._task(c)["status"] not in TERMINAL for c in task["children"]):
                     return self._view(task)
                 task.update(status="queued", waitReason=None, runAt=None, error=None, acceptedAt=None,
                             resumeText="继续本任务。先检查已有记录和成果，避免重复副作用。")
+                task.pop("retry", None)
                 self._message(task_id, "system", "已唤醒，等待执行。")
                 self._persist()
             return self._view(task)
@@ -600,6 +626,7 @@ class BotRuntime(BotCommunications):
             else:
                 task.update(status="queued", waitReason=None, acceptedAt=None, error=None,
                             resumeText=content, runAt=None)
+                task.pop("retry", None)
             self._remember(key, value, task_id)
             self._persist()
             return self._view(task)
@@ -632,7 +659,25 @@ class BotRuntime(BotCommunications):
                     self._message(task["id"], "error", "停止请求尚未确认，请查看对应会话。")
         return self.get_task(task_id)
 
-    def _finish(self, task, state, message):
+    def _finish(self, task, state, message, *, error_code="", error_detail="", error_status=None):
+        # Only a task that never reached execution may be replayed. Anything
+        # after that is reported to the user, because the first attempt may
+        # already have changed something a silent retry would duplicate.
+        if state in {"failed", "interrupted"} and task.get("status") == "starting":
+            if bot_retry.classify(error_code, message, error_detail, status=error_status) == "transient":
+                retry = bot_retry.schedule(task, message, error_code=error_code, detail=error_detail)
+                if retry:
+                    task["error"] = message
+                    self._bot(task["botId"])["status"] = "idle"
+                    self._message(task["id"], "system", f"基础设施暂时不可用：{message}"
+                                  f" 将在 {retry['nextAt']} 自动重试（第 {retry['count']} 次）。")
+                    self._notify(task, "task.retrying")
+                    return
+                # The whole budget is spent: this is a real failure now, not
+                # an uncertain launch, and the message lists every attempt.
+                message = bot_retry.exhausted_message(task, message)
+                state = "failed"
+        task.pop("retry", None)
         task.update(status=state, updatedAt=now(), completedAt=now(), token="", waitReason=None)
         self._mailbox_receipt(task, "processed" if state == "completed" else "failed")
         if state == "completed":
@@ -655,6 +700,15 @@ class BotRuntime(BotCommunications):
             parent = self._task(task["parentTaskId"])
             self._message(parent["id"], "result", f"子任务 {task['id']} ({state})：{message}", task["botId"], childTaskId=task["id"])
             parent["childrenChanged"] = True
+        if state in {"completed", "failed"}:
+            self._notify(task, "task.completed" if state == "completed" else "task.failed")
+
+    def _notify(self, task, event_type, wait_reason=None, note=""):
+        """Best-effort delivery; a broken receiver never fails the task."""
+        try:
+            self.notifier.emit_task(self._bot(task["botId"]), task, event_type, wait_reason, note)
+        except Exception:
+            pass
 
     def _resume_children(self, task):
         if not task.get("childrenChanged") or not task.get("children"):
@@ -729,6 +783,13 @@ class BotRuntime(BotCommunications):
                 key=lambda task: (-int(task.get("priority", 50)), task.get("createdAt", "")),
             )
             for task in queued:
+                retry = task.get("retry") or {}
+                if retry.get("nextAt"):
+                    if datetime.fromisoformat(retry["nextAt"]) > datetime.now(timezone.utc):
+                        continue
+                    retry.pop("nextAt", None)
+                    task["queueReason"] = "等待重试"
+                    changed = True
                 if len(busy) + len(launches) >= self.max_concurrent:
                     if task.get("queueReason") != "等待并发资源":
                         task["queueReason"] = "等待并发资源"
@@ -782,6 +843,7 @@ class BotRuntime(BotCommunications):
             with self._lock:
                 live = self._task(task["id"])
                 live.update(outcome)
+                live.pop("retry", None)
                 live["status"] = "running"
                 self._mailbox_receipt(live, "delivered")
                 self._bot(bot["id"])["sessionId"] = outcome["sessionId"]
@@ -794,10 +856,11 @@ class BotRuntime(BotCommunications):
             with self._lock:
                 live = self._task(task["id"])
                 message = exc.message if isinstance(exc, WebError) else "Pi 启动结果待检查，请查看本地会话诊断。"
-                # Once the launch seam is entered, do not silently retry a
-                # possibly delivered prompt. A human may resume explicitly.
-                self._finish(live, "interrupted", message)
-                live["error"] = message
+                # This is the only replayable seam; `_finish` retries a
+                # transient reason and otherwise keeps the prompt unmodified
+                # for an explicit human resume.
+                self._finish(live, "interrupted", message, error_code=getattr(exc, "code", ""),
+                             error_detail=str(exc), error_status=getattr(exc, "status", None))
                 self._persist()
         finally:
             self._workers.discard(threading.current_thread())
@@ -870,7 +933,9 @@ class BotRuntime(BotCommunications):
             changed = True
         state = snapshot.get("state")
         if state == "waiting":
-            task.update(status="waiting", waitReason="approval", updatedAt=now())
+            if task["status"] != "waiting" or task.get("waitReason") != "approval":
+                task.update(status="waiting", waitReason="approval", updatedAt=now())
+                self._notify(task, "task.waiting", "approval", "Bot 在执行中等待你的确认。")
             changed = True
         elif state == "running":
             if task["status"] != "running":
@@ -897,6 +962,9 @@ class BotRuntime(BotCommunications):
             elif task.get("waitRequested"):
                 task.update(status="waiting", waitReason="user", token="")
                 self._bot(task["botId"])["status"] = "idle"
+                reason = next((m.get("content") for m in reversed(self._messages.get(task["id"], []))
+                               if m.get("type") == "progress"), "")
+                self._notify(task, "task.waiting", "input", reason or "Bot 在等你的输入。")
             else:
                 bad = any(e.get("status") == "error" for e in snapshot.get("events", []) if e.get("kind") == "user")
                 if bad:

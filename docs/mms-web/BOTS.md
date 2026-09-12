@@ -60,6 +60,8 @@ Pi Bot 在 worker 中执行 `screenshot` 后，截图会保存为 task-private a
 | POST | `/bots/:botId/memory` | `remember`/`forget` 一条记忆；正文为 `{ "action": "remember", "content": "..." }` |
 | POST | `/bots/:botId/communications/:messageId/wake` | 手动继续投递处于等待状态的协作消息 |
 | POST | `/bots/:botId/tasks` | 给指定 Bot 创建任务 |
+| GET | `/bots/notifications?since=<iso>` | 拉取任务事件（完成/失败/等待/重试），`since` 之后的事件 |
+| GET / POST | `/bots/notifications/config` | 读取或写入 webhook 列表（`state_root/bots/notify.json`） |
 | GET | `/tasks`、`/tasks/:id` | 查询任务 |
 | GET | `/tasks/:id/messages` | 查询任务事件和内部回传 |
 | GET | `/tasks/:id/artifacts` | 查询成果元数据 |
@@ -135,3 +137,21 @@ Bot 的默认回报是 1–3 句自然语言。文件路径、截图和其他证
 ### 模型与通道
 
 Bot 编辑器复用 Pilot 的 `ModelPicker` / `ModelExplorer`：先从模型目录选模型，再在详情中选择实际通道；`Harness` 保持在路由信息中单独可见。Bot 最终保存的仍是精确 `presetId`，所以不会改变现有 MMS 启动解析链。
+
+## v2.3 失败重试与结果送达
+
+### 退避重试只在执行前发生
+
+只有任务还没真正开始执行时才可能自动重试：`tick` 选中任务后的 `starting` 阶段，或 `_launch` 在把提示交给 Pi 之前抛错。退避固定为 30 秒、2 分钟、8 分钟，最多 3 次；用完仍失败则记为 `failed`，失败消息按时间列出三次重试和原因。任务上的 `retry` 记录 `count`、`nextAt`、`lastError` 以及每次尝试的时间、原因和错误码，`queueReason` 会显示“等待重试（第 n 次，原因：…）”。
+
+`mms_web/bot_retry.py` 的 `classify(error_code, message)` 把失败分成 `transient` 和 `permanent`。基础设施类（`BOT_EXECUTOR_UNAVAILABLE`、`BOT_SESSION_BUSY`、`BOT_ENDPOINT_UNAVAILABLE`、Pi 未启动就退出、连接被拒绝/重置/超时、HTTP 429/502/503/504）可以重试；配置和用户决定类（`BOT_MODEL_REQUIRED`、`BOT_GLOBAL_WORKSPACE_REQUIRED`、模型明确拒绝、用户取消、Pi 正常结束但没有结果）立即失败。无法识别的错误按 permanent 处理，不做静默重放。
+
+`running` 之后的失败永远不会自动重试：第一次尝试可能已经产生外部副作用，继续只能由用户显式唤醒。用户取消、显式唤醒或追加消息都会清空待执行的 `retry`；唤醒一个正在等待重试的任务会跳过剩余退避立即重新排队。
+
+### 结果送达
+
+任务完成、失败、进入等待（`approval` 或需要输入）或安排重试时，`mms_web/bot_notify.py` 会写入一条事件：Bot 名、任务一句话、结论摘要（`outcome.summary` 前 200 字）和任务链接 `#page=bots&bot=<botId>&task=<taskId>`。事件保存在 `state_root/bots/notifications.json`（最近 500 条），页面通过 `GET /bots/notifications?since=` 增量拉取，未读游标保存在浏览器本地；打开某个 Bot 的对话即清空它的未读，侧栏显示未读数量。
+
+桌面通知只有在用户点击“开启桌面通知”并授予浏览器权限后才会在页面不在前台时弹出一次；没授权或关闭时只保留未读。
+
+Webhook 配置保存在 `state_root/bots/notify.json`，形状为 `{"webhooks": [{"url": "...", "events": ["task.completed", "task.failed"], "secret": "..."}]}`，只允许 http(s) 地址，最多 10 个。投递是 5 秒超时、失败重试一次，并且永远不阻塞任务；请求体是事件 JSON，带 `X-MMS-Signature: sha256=<hmac_sha256(secret, body)>` 和 `X-MMS-Event`。`events` 留空表示全部事件。这个文件由 Bot 记忆面板的“通知”小节读写，不会写入真实 `~/.config/mms*`。
