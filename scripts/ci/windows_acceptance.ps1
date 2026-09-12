@@ -310,13 +310,16 @@ try {
 
   $restart = Invoke-MmsVerb @("web", "restart", "--port", "$port", "--json")
   Assert-True ($restart.exit -eq 0) "mms web restart exited $($restart.exit): $($restart.text)"
-  Assert-True ((ConvertFrom-CommandJson $restart.text).url -eq "http://127.0.0.1:$port") "restart url drifted: $($restart.text)"
+  $restarted = ConvertFrom-CommandJson $restart.text
+  Assert-True ($restarted.url -eq "http://127.0.0.1:$port") "restart url drifted: $($restart.text)"
+  $restartPid = [int]$restarted.pid
+  Assert-True ($restartPid -gt 0) "restart did not report a pid: $($restart.text)"
 
   $stop = Invoke-MmsVerb @("web", "stop", "--port", "$port", "--json")
   Assert-True ($stop.exit -eq 0) "mms web stop exited $($stop.exit): $($stop.text)"
   $stopped = @(ConvertFrom-CommandJson $stop.text)
-  Assert-True ($stopped.Count -eq 1 -and [int]$stopped[0].pid -eq $startPid) `
-    "graceful stop did not stop the instance (known Windows seam: CloseMainWindow on a console process): $($stop.text)"
+  Assert-True ($stopped.Count -eq 1 -and [int]$stopped[0].pid -eq $restartPid) `
+    "graceful stop did not stop the restarted instance (pid=$restartPid): $($stop.text)"
 
   $after = Invoke-MmsVerb @("web", "status", "--port", "$port", "--json")
   Assert-True ($after.exit -eq 1) "status after stop must report no own instance: $($after.text)"
