@@ -402,7 +402,7 @@ class SessionService(SessionActions, SessionSideQuestions):
             # Whether this build can attempt a model-backed side question at
             # all. Whether one particular session can is a property of its
             # route, and shows up on that question's own row.
-            "sidecarCompletion": callable(self._sidecar_runner) or _route_completion_build(),
+            "sidecarCompletion": callable(getattr(self, "_sidecar_runner", None)) or _route_completion_build(),
         }
 
     def _sidecar_runner_for(self, session):
