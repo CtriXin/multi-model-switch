@@ -98,7 +98,6 @@ _KNOWN_VISION_MODELS = {
     "gpt-5.4",
     "gpt-5.5",
     "k3",
-    "k3[1m]",
     "kimi-k3",
     "k2.6",
     "k2.6-code-preview",
@@ -5569,7 +5568,7 @@ def _preferences_target_path(*, config_path: str = "", preferences_path: str = "
     paths = getattr(mms_core, "PREFERENCES_PATHS", None)
     if isinstance(paths, list) and paths:
         return os.path.abspath(os.path.expanduser(str(paths[0])))
-    return os.path.abspath(os.path.expanduser("~/.config/mms/preferences.toml"))
+    return os.path.abspath(os.path.expanduser("~/.config/mms-next/preferences.toml"))
 
 
 def _preferences_lock_path(*, config_path: str = "", preferences_path: str = "") -> str:

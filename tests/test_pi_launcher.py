@@ -799,13 +799,16 @@ def test_pi_openai_provider_compat_uses_profile_specific_flags(monkeypatch, tmp_
         "supportsDeveloperRole": False,
         "thinkingFormat": "deepseek",
     }
-    assert provider["models"][0]["maxTokens"] == 384_000
+    # The 2026-09-10 live probes moved the whole deepseek family onto the
+    # v4.1 backend: 393216 output tokens and every tier accepted as itself,
+    # so xhigh is no longer folded into max.
+    assert provider["models"][0]["maxTokens"] == 393_216
     assert provider["models"][0]["thinkingLevelMap"] == {
-        "minimal": None,
-        "low": None,
-        "medium": None,
+        "minimal": "minimal",
+        "low": "low",
+        "medium": "medium",
         "high": "high",
-        "xhigh": "max",
+        "xhigh": "xhigh",
         "max": "max",
     }
 
@@ -874,12 +877,14 @@ def test_pi_profile_derived_effort_maps_expose_only_truthful_levels():
         "qwen3.6-plus",
         {"supports_thinking": True},
     )
+    # qwen3.6 accepts six values; only max is refused, and the map has to say
+    # so rather than hiding tiers this route can actually execute.
     assert qwen_map == {
-        "minimal": None,
-        "low": None,
-        "medium": None,
+        "minimal": "minimal",
+        "low": "low",
+        "medium": "medium",
         "high": "high",
-        "xhigh": None,
+        "xhigh": "xhigh",
         "max": None,
     }
 
@@ -1196,7 +1201,7 @@ def test_pi_kimi_k3_exports_1m_context_and_openai_protocol(monkeypatch, tmp_path
     assert model_by_id["k3[1m]"]["maxTokens"] == 1_048_576
     assert model_by_id["k3[1m]"]["reasoning"] is True
     assert model_by_id["k3"]["input"] == ["text", "image"]
-    assert model_by_id["k3"]["contextWindow"] == 262_144
+    assert model_by_id["k3"]["contextWindow"] == 1_048_576
     assert model_by_id["k3"]["maxTokens"] == 131_072
     assert model_by_id["k3"]["reasoning"] is True
     assert model_by_id["kimi-for-coding-highspeed"]["contextWindow"] == 262_144

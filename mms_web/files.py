@@ -97,7 +97,8 @@ class FileService:
     def import_to_workspace(self, payload: dict) -> dict:
         """Persist browser-provided bytes as a normal project file, then reference it."""
         root = self.workspace(str(payload.get("workspaceId") or ""))
-        self.prune_workspace_attachments(root)
+        # Imported attachments are durable workspace files; cleanup is explicit,
+        # never a side effect of a later import.
         raw = str(payload.get("data") or "")
         try:
             if len(raw) > MAX_FILE * 1.4:

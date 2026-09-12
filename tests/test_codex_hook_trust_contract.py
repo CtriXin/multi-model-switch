@@ -70,6 +70,8 @@ def test_contract_codex_gateway_keeps_stable_codex_home(monkeypatch, tmp_path):
     import mms_launchers
 
     real_home = tmp_path / "real-home"
+    monkeypatch.setenv("MMS_CONFIG_DIR", str(real_home / ".config" / "mms-next"))
+    monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
     real_codex = real_home / ".codex"
     real_codex.mkdir(parents=True)
     (real_codex / "config.toml").write_text('base_url = "https://api.example.com"\n', encoding="utf-8")
@@ -117,7 +119,7 @@ def test_contract_codex_gateway_keeps_stable_codex_home(monkeypatch, tmp_path):
         model_info={"model": "gpt-5.5"},
     )
 
-    gateway_codex = real_home / ".config" / "mms" / "codex-gateway" / ".codex"
+    gateway_codex = real_home / ".config" / "mms-next" / "codex-gateway" / ".codex"
     assert Path(env1["CODEX_HOME"]) == gateway_codex
     assert Path(env2["CODEX_HOME"]) == gateway_codex
     assert Path(env1["MMS_SESSION_HOME"]) != Path(env2["MMS_SESSION_HOME"])

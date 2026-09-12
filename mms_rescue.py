@@ -108,7 +108,7 @@ def utc_now_iso() -> str:
 def resolve_real_mms_config_dir(env: Mapping[str, str] | None = None) -> Path:
     """Resolve real MMS config root without trusting isolated session HOME."""
     real_home = resolve_real_user_home(dict(env or os.environ))
-    return Path(real_home) / ".config" / "mms"
+    return Path(real_home) / ".config" / "mms-next"
 
 
 def redact_text(value: Any) -> str:

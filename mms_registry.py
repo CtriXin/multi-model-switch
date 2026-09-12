@@ -16,7 +16,7 @@ from mms_registry_schema import (
     REVISION_STATUSES,
     migrate as migrate_schema,
 )
-from mms_state_io import mms_config_root_mode, resolve_mms_config_dir
+from mms_state_io import mms_config_root_mode, resolve_mms_config_dir, DEFAULT_CONFIG_ROOT_NAME
 
 
 LATEST_APPROVED_SCHEMA = "mms.model_registry.latest_approved.v1"
@@ -1770,11 +1770,10 @@ def assert_legacy_artifact_publish_allowed(
 ) -> Path:
     """Return config root or reject legacy-artifact publish for preview roots."""
     config_root = Path(config_dir) if config_dir is not None else Path(resolve_mms_config_dir())
-    try:
-        root_mode = mms_config_root_mode(config_root)
-    except Exception:
-        root_mode = "stable"
-    if root_mode == "preview":
+    # Every root is preview mode now, so the guard keys on what makes a root
+    # DB-truth: the manifest the v2 initializer writes. A plain directory of
+    # legacy artifacts can still be published from those artifacts.
+    if (config_root / "root-manifest.json").is_file() or config_root.name == DEFAULT_CONFIG_ROOT_NAME:
         raise RegistryValidationError(
             "publish-approved from legacy root artifacts is disabled for preview config roots; "
             "use publish-preview so the latest-approved bundle is generated from DB candidates"

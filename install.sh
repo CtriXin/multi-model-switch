@@ -54,6 +54,7 @@ CLEANUP_ONLY=0
 LAUNCH_WEB_MODE="ask"
 KEEP_RUNNING_PILOT=0
 STOPPED_PILOT=0
+STOPPED_PILOT_PORT=""
 PRINT_ONLY_VERSION=0
 DRY_RUN=0
 
@@ -288,7 +289,7 @@ $(t "说明:" "Notes:")
   - $(t "--lang 可设置默认 UI 语言（zh / en）" "--lang sets the default UI language (zh / en)")
   - $(t "安装过程零交互：不询问可选包，也不询问 UI 语言；唯一的提问是装完之后要不要打开 MMS Web" "The install is non-interactive: no optional-pack questions and no UI language prompt; the only question comes after everything is installed and just offers to open MMS Web")
   - $(t "--launch-web 跳过提问直接打开，--no-launch-web 完全不打开；没有终端时不提问，只打印命令" "--launch-web opens it without asking, --no-launch-web never opens it; with no terminal available nothing is asked and the command is printed instead")
-  - $(t "检测到 Pilot 正在使用该安装目录时，默认请它退出后继续安装；--keep-running-pilot 改为暂停安装" "When Pilot is using the installation, it is asked to exit and the install continues; --keep-running-pilot stops the install instead")
+  - $(t "检测到 Pilot 正在运行时默认暂停安装，不关闭 Pilot 或其会话；--keep-running-pilot 保持兼容" "When a Pilot is running, installation pauses by default without stopping Pilot or its sessions; --keep-running-pilot is retained for compatibility")
   - $(t "MMS Web 在后台运行，安装进程随即退出；PATH 默认写入 shell 配置，--no-shell-rc 可关闭" "MMS Web runs in the background and the installer exits right after; PATH is written to your shell config by default and --no-shell-rc turns that off")
   - $(t "pi 是必装项，pilot web 端依赖它；缺失的 claude/codex/opencode 会自动补装，已安装的不会被改动" "pi is mandatory because the pilot web app depends on it; missing claude/codex/opencode are installed automatically while existing ones are left untouched")
   - $(t "内建能力（weber 网页路由、grill-me、TOON、NSR）随 MMS 一起安装，只在 MMS 启动的会话里生效" "Built-in tools (weber web routing, grill-me, TOON, NSR) ship with MMS and only apply inside sessions MMS starts")
@@ -659,6 +660,13 @@ find_cli_binary() {
     local command_name="$1"
     local candidate=""
     local dir=""
+    local npm_prefix=""
+
+    # npm's global prefix is user-configurable (fnm, nvm, Homebrew, etc.);
+    # checking only a fixed PATH misses a successful install.
+    if command -v npm >/dev/null 2>&1; then
+        npm_prefix="$(npm prefix -g 2>/dev/null || true)"
+    fi
 
     if [ -z "$command_name" ]; then
         return 1
@@ -678,6 +686,7 @@ find_cli_binary() {
         "$REAL_HOME/.bun/bin" \
         "$REAL_HOME/.cargo/bin" \
         "$REAL_HOME/.nvm/versions/node/"*/bin \
+        "${npm_prefix:+$npm_prefix/bin}" \
         "/usr/bin" \
         "/bin"; do
         [ -d "$dir" ] || continue
@@ -961,13 +970,16 @@ install_named_cli() {
         return 0
     fi
 
-    npm_global_install_with_nvm_fallback "$label" "$package_spec" || true
+    if ! npm_global_install_with_nvm_fallback "$label" "$package_spec"; then
+        echo "✗ $(t "$label 安装命令失败；本次安装已停止" "$label install command failed; installation stopped")"
+        return 1
+    fi
     if cli_path="$(find_cli_binary "$command_name" 2>/dev/null)"; then
         echo "✓ $label ($cli_path)"
         return 0
     fi
 
-    echo "⚠ $(t "$label 安装未完成；MMS 仍可安装，之后可重新运行 --install-cli $cli_name。" "$label install did not complete; MMS is still installed, rerun --install-cli $cli_name later.")"
+    echo "✗ $(t "$label 安装后未找到可执行文件；本次安装已停止。请检查 Node/npm PATH 后重试。" "$label was not found after install; installation stopped. Check the Node/npm PATH and retry.")"
     return 1
 }
 
@@ -1050,7 +1062,9 @@ install_requested_clis() {
 
     IFS=',' read -r -a _requested_cli_items <<< "$INSTALL_CLI_LIST"
     for cli_name in "${_requested_cli_items[@]}"; do
-        install_named_cli "$cli_name" || true
+        if ! install_named_cli "$cli_name"; then
+            return 1
+        fi
     done
 }
 
@@ -1122,12 +1136,18 @@ warm_pi_runtime_cache() {
     echo "$(t "正在准备 pi 运行环境，第一次会下载，请稍候..." "Preparing the pi runtime; the first run downloads it, please wait...")"
     mkdir -p "$cache_dir"
     if NPM_CONFIG_UPDATE_NOTIFIER=false npx -y --cache "$cache_dir" "$PI_CLI_PACKAGE_SPEC" --version >/dev/null 2>&1; then
-        echo "✓ $(t "pi 运行时 cache 已就绪" "pi runtime cache ready"): $cache_dir"
-        return 0
+        if "$MMS_HOME/scripts/pi-cli-wrapper.sh" --version >/dev/null 2>&1; then
+            echo "✓ $(t "pi 运行时 cache 已就绪" "pi runtime cache ready"): $cache_dir"
+            return 0
+        fi
     fi
 
-    echo "⚠ $(t "pi 运行时预热未成功；pilot 首次启动时会重试下载" "pi runtime warmup did not succeed; the first pilot launch retries the download")"
-    return 0
+    # The wrapper resolves an installed pi on PATH or under npm's global
+    # prefix before it ever needs the cache, so reaching here means no pi is
+    # runnable at all — not merely that npx declined to fill the cache.
+    echo "✗ $(t "pi 运行时未就绪：PATH 上没有可运行的 pi，npm 全局目录下也没有，缓存预热同样没产出" "The pi runtime is not ready: no runnable pi on PATH, none under npm's global prefix, and the cache warmup produced nothing")"
+    echo "  $(t "先确认 pi 可用再重装：npm install -g" "Make pi runnable, then reinstall: npm install -g") $PI_CLI_PACKAGE_SPEC"
+    return 1
 }
 
 append_claude_hook_command() {
@@ -1820,35 +1840,6 @@ print_version_overview() {
     echo "  $(t "安装通道" "Install channel"): $(install_channel_label)"
 }
 
-legacy_config_has_route_candidates() {
-    "$(_python_bin)" - "$LEGACY_CONFIG_ROOT" <<'PY' >/dev/null 2>&1
-import sys
-import tomllib
-from pathlib import Path
-
-root = Path(sys.argv[1]).expanduser()
-config_path = root / "config.toml"
-if not config_path.exists():
-    raise SystemExit(1)
-try:
-    config = tomllib.loads(config_path.read_text(encoding="utf-8"))
-except Exception:
-    raise SystemExit(1)
-
-providers = config.get("providers")
-if not isinstance(providers, list):
-    raise SystemExit(1)
-
-for provider in providers:
-    if not isinstance(provider, dict) or provider.get("enabled") is False:
-        continue
-    for key in ("fallback_models", "extra_models"):
-        models = provider.get(key)
-        if isinstance(models, list) and any(str(item).strip() for item in models):
-            raise SystemExit(0)
-raise SystemExit(1)
-PY
-}
 
 run_install_check() {
     local node_label=""
@@ -1998,27 +1989,9 @@ PY
         return 1
     fi
 
-    echo "• $(t "Pilot 正在使用此安装目录，先请它退出再继续安装" "Pilot is using this installation; asking it to exit before continuing"): $(printf '%s' "$servers" | tr '\n' ' ')"
-    local pid=""
-    for pid in $servers; do
-        kill -TERM "$pid" 2>/dev/null || true
-    done
-    local waited=0
-    while [ "$waited" -lt 20 ]; do
-        set +e
-        report="$(inspect_live_pilot)"
-        status=$?
-        set -e
-        if [ "$status" -eq 0 ]; then
-            STOPPED_PILOT=1
-            echo "✓ $(t "Pilot 已退出，继续安装；会话数据保留在原处" "Pilot exited; continuing. Session data is left where it was")"
-            return 0
-        fi
-        sleep 1
-        waited=$((waited + 1))
-    done
-
-    echo "⚠ $(t "Pilot 未能在 20 秒内退出，已暂停安装；没有强制结束任何进程。" "Pilot did not exit within 20s. Installation stopped; nothing was force-killed.")"
+    # Installation must never terminate a running Pilot: doing so also kills
+    # conversations it owns. The user can exit it explicitly and retry.
+    echo "⚠ $(t "Pilot 正在运行，已暂停安装；没有关闭进程或清理会话。请先自行退出后重试。" "Pilot is running. Installation paused; no process or session was stopped. Exit Pilot yourself and retry.")"
     printf '%s\n' "$report" | sed -n 's/^server /  /p'
     return 1
 }
@@ -2027,11 +2000,12 @@ PY
 # <pid> <command>" line per process that merely uses this installation.
 # Exit 0 when the installation is free, 3 when it is in use.
 inspect_live_pilot() {
-    "$(_python_bin)" - "$MMS_HOME" <<'PY'
+    "$(_python_bin)" - "$MMS_HOME" "${MMS_WEB_DEFAULT_PORT:-${MMS_WEB_PORT_BASE:-8765}}" <<'PY'
 import fcntl, os, shlex, subprocess, sys
 from pathlib import Path
 
 root = Path(sys.argv[1]).resolve()
+port = int(sys.argv[2] or 0)
 lease_held = False
 try:
     fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -2078,6 +2052,21 @@ def is_server(command):
     return False
 
 
+def listening_on_port():
+    """PIDs bound to the Pilot port. A Pilot from another install, or one that
+    updated itself from the page, serves here with a different source path;
+    leaving it alive would make the fresh install start a second Pilot."""
+    if port <= 0:
+        return set()
+    try:
+        out = subprocess.run(['lsof', '-nP', '-iTCP:%d' % port, '-sTCP:LISTEN', '-Fp'],
+                             capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    return {line[1:] for line in out.splitlines() if line.startswith('p')}
+
+
+port_holders = listening_on_port()
 servers = []
 others = []
 for row in rows:
@@ -2088,6 +2077,9 @@ for row in rows:
     if pid == str(os.getpid()):
         continue
     if not any(word in command for word in ('-m mms_web', '/mms-web', '/mms web')):
+        continue
+    if pid in port_holders:
+        servers.append((pid, command))
         continue
     if not uses_installation(pid, command):
         continue
@@ -2135,7 +2127,7 @@ confirm_open_web() {
 
 # Report the port of an MMS Web instance that is already serving, if any.
 running_mms_web_port() {
-    "$(_python_bin)" - "$MMS_WEB_DEFAULT_PORT" "$MMS_WEB_PORT_SEARCH_LIMIT" "$MMS_HOME" "${XDG_DATA_HOME:-$REAL_HOME/.local/share}/mms-web/config" <<'PY'
+    "$(_python_bin)" - "$MMS_WEB_DEFAULT_PORT" "$MMS_WEB_PORT_SEARCH_LIMIT" "$MMS_HOME" "$CONFIG_ROOT" <<'PY'
 import hashlib
 import re
 from pathlib import Path
@@ -2164,6 +2156,22 @@ for port in range(start, start + limit):
     if response.status == 200 and response.getheader("X-MMS-Web-Identity") == identity:
         print(port)
         break
+PY
+}
+
+# True when nothing holds the port, so a restart can return to where the Pilot
+# the installer just stopped was answering.
+web_port_is_free() {
+    "$(_python_bin)" - "$1" <<'PY'
+import socket
+import sys
+
+with socket.socket() as probe:
+    try:
+        probe.bind(("127.0.0.1", int(sys.argv[1])))
+    except (OSError, ValueError):
+        raise SystemExit(1)
+raise SystemExit(0)
 PY
 }
 
@@ -2242,7 +2250,11 @@ start_mms_web_detached() {
         return 0
     fi
 
-    port="$(find_free_web_port || true)"
+    if [ -n "$STOPPED_PILOT_PORT" ] && web_port_is_free "$STOPPED_PILOT_PORT"; then
+        port="$STOPPED_PILOT_PORT"
+    else
+        port="$(find_free_web_port || true)"
+    fi
     if [ -z "$port" ]; then
         echo "⚠ $(t "找不到可用端口，跳过打开；稍后可手动运行" "No free port found, skipping launch; run it manually later"): mms-web --open"
         return 1
@@ -2714,6 +2726,14 @@ for f in "$SOURCE_DIR"/mms_*.py; do
 done
 [ -f "$SOURCE_DIR/config.example.toml" ] && cp "$SOURCE_DIR/config.example.toml" "$MMS_HOME/"
 echo "✓ $(t "文件已复制到" "Files copied to") $MMS_HOME"
+# An earlier in-page update leaves a pointer to a staged copy under the Web
+# state directory, and startup follows it. Left in place, this install would
+# look like it changed nothing at all in the browser.
+WEB_STATE_ROOT="${XDG_DATA_HOME:-$REAL_HOME/.local/share}/mms-web"
+if [ -f "$WEB_STATE_ROOT/updates/active.json" ]; then
+    rm -f "$WEB_STATE_ROOT/updates/active.json"
+    echo "• $(t "已清除网页端的暂存版本指针，本次安装的版本直接生效" "Cleared the staged web-update pointer so this install takes effect")"
+fi
 write_version_metadata
 repair_managed_claude_settings
 cleanup_legacy_global_session_hooks
@@ -2741,8 +2761,14 @@ rewrite_shebang "$MMS_HOME/mms" "$PYTHON_PATH"
 
 # ── 4.5 安装必需 CLI（pi 必装，缺失的 claude/codex/opencode 自动补装）──
 install_coding_fonts || echo "⚠ Coding fonts unavailable; continuing MMS installation."
-install_requested_clis
-warm_pi_runtime_cache || true
+if ! install_requested_clis; then
+    echo "✗ $(t "所需 CLI 未全部安装，未完成安装" "Required CLI installation did not complete")" >&2
+    exit 1
+fi
+if ! warm_pi_runtime_cache; then
+    echo "✗ $(t "Pi 运行环境未就绪，未完成安装" "Pi runtime is not ready; installation is incomplete")" >&2
+    exit 1
+fi
 
 # ── 5. 建立命令入口 ──
 echo ""
@@ -2828,17 +2854,10 @@ if [ -x "$BIN_DIR/mms" ]; then
 
     if [ "$PREVIEW_CHANNEL_INSTALL" -eq 1 ]; then
         echo ""
-        if legacy_config_has_route_candidates; then
-            echo "  $(t "下一步（首次 preview/mmf 只做这两行）:" "Next step (first preview/mmf run: only do these two lines):")"
-            echo "    $NEXT_MMF_CMD preview prepare"
-            echo "    $NEXT_MMF_CMD"
-            echo "  $(t "说明：prepare 只读取 ~/.config/mms，并写入 ~/.config/mms-next；不会改 stable 配置。" "Note: prepare only reads ~/.config/mms and writes ~/.config/mms-next; stable config is not modified.")"
-        else
-            echo "  $(t "下一步（全新机器先配通道）:" "Next step (fresh machine: configure providers first):")"
-            echo "    $NEXT_MMF_CMD config web"
-            echo "    $NEXT_MMF_CMD"
-            echo "  $(t "说明：没有检测到可迁移的旧模型路由，先在 WebUI 添加 provider/API Key 并保存。" "Note: no migratable legacy model routes were detected; add providers/API keys in the WebUI first.")"
-        fi
+        echo "  $(t "下一步（先配通道）:" "Next step (configure providers first):")"
+        echo "    $NEXT_MMF_CMD config web"
+        echo "    $NEXT_MMF_CMD"
+        echo "  $(t "说明：所有入口只读 ~/.config/mms-next；旧的 ~/.config/mms 不再被读取，请在 WebUI 添加 provider/API Key 并保存。" "Note: every entrance reads only ~/.config/mms-next; the old ~/.config/mms is no longer read, so add providers/API keys in the WebUI and save.")"
         echo ""
         echo "  $(t "以后需要排查时再运行:" "Only run this later when debugging:") $NEXT_MMF_CMD config doctor"
     fi

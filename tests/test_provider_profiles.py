@@ -142,7 +142,7 @@ def test_qwen_chat_template_profile_is_explicit_overlay_only(monkeypatch, tmp_pa
     assert payload["chat_template_kwargs"] == {"enable_thinking": True}
 
 
-def test_deepseek_effort_maps_xhigh_to_max_and_disables_cleanly(monkeypatch, tmp_path):
+def test_deepseek_effort_passes_through_and_disables_cleanly(monkeypatch, tmp_path):
     profiles = _profiles(monkeypatch, tmp_path)
     payload = {
         "model": "deepseek-v4-pro",
@@ -162,7 +162,7 @@ def test_deepseek_effort_maps_xhigh_to_max_and_disables_cleanly(monkeypatch, tmp
     )
     assert profile_id == "deepseek"
     assert payload["thinking"] == {"type": "enabled"}
-    assert payload["output_config"] == {"effort": "max", "format": "markdown"}
+    assert payload["output_config"] == {"effort": "xhigh", "format": "markdown"}
 
     profiles.apply_profile_body_patches(
         payload,
@@ -319,7 +319,7 @@ def test_kimi_k3_profile_uses_reasoning_effort_without_k2_thinking_patch(monkeyp
         "k3",
         provider_id="kimi",
         base_url="https://api.kimi.com/coding/",
-    ) == 262_144
+    ) == 1_048_576
     assert profiles.profile_context_window(
         "k3[1m]",
         provider_id="kimi",
@@ -458,11 +458,11 @@ def test_deepseek_context_and_wire_model_are_profile_driven(monkeypatch, tmp_pat
     assert profiles.profile_context_window(
         "deepseek-v4-pro",
         provider_id="newapi-personal-tokyo",
-    ) == 1_000_000
+    ) == 1_048_576
     assert profiles.profile_context_window(
         "deepseek-v4-flash",
         provider_id="newapi-personal-tokyo",
-    ) == 1_000_000
+    ) == 1_048_576
     assert profiles.profile_model_alias(
         "deepseek-v4-pro",
         protocol="anthropic_messages",
@@ -528,7 +528,7 @@ def test_glm_capabilities_are_profile_driven(monkeypatch, tmp_path):
 
     assert caps["profile"] == "glm"
     assert caps["thinking_supported"] is True
-    assert caps["effort_supported"] is False
+    assert caps["effort_supported"] is True
     assert profile_id == "glm"
     assert payload["thinking"] == {"type": "disabled"}
 
@@ -696,7 +696,7 @@ def test_config_dir_root_missing_latest_bundle_ignores_legacy_profile_overlay(mo
     assert mms_provider_profiles.profile_context_window("any-model", provider_id="config-dir-provider") is None
 
 
-def test_stable_root_without_latest_bundle_keeps_legacy_profile_overlay(monkeypatch, tmp_path):
+def test_legacy_root_without_latest_bundle_ignores_legacy_profile_overlay(monkeypatch, tmp_path):
     stable_root = tmp_path / "xdg" / "mms"
     stable_root.mkdir(parents=True)
     (stable_root / "provider-profiles.json").write_text(
@@ -722,5 +722,58 @@ def test_stable_root_without_latest_bundle_keeps_legacy_profile_overlay(monkeypa
 
     mms_provider_profiles.load_provider_profiles.cache_clear()
 
-    assert mms_provider_profiles.resolve_provider_profile(provider_id="stable-overlay-provider")[0] == "stable-legacy-overlay"
-    assert mms_provider_profiles.profile_context_window("any-model", provider_id="stable-overlay-provider") == 54321
+    assert mms_provider_profiles.resolve_provider_profile(provider_id="stable-overlay-provider")[0] == ""
+    assert mms_provider_profiles.profile_context_window("any-model", provider_id="stable-overlay-provider") is None
+
+
+def test_kimi_k3_aliases_agree_on_one_million_context(monkeypatch, tmp_path):
+    """Every K3 alias must report the same window.
+
+    K3 shipped 1M natively, but the value has been changed back and forth in the
+    profile three times, each round leaving one alias behind. Pin the whole
+    family so a partial edit fails here instead of downgrading a live channel.
+    """
+    profiles = _profiles(monkeypatch, tmp_path)
+
+    for alias in ("k3", "k3[1m]", "kimi-k3"):
+        assert profiles.profile_context_window(
+            alias,
+            provider_id="kimi",
+            base_url="https://api.kimi.com/coding/",
+        ) == 1_048_576, alias
+
+    # The 256K variant is a separate official model, not a downgraded K3.
+    assert profiles.profile_context_window(
+        "k3-256k",
+        provider_id="kimi",
+        base_url="https://api.kimi.com/coding/",
+    ) == 262_144
+
+
+def test_profile_max_output_never_exceeds_its_context_window():
+    """A max-output larger than the context window is always a data error.
+
+    ``k3`` was raised to a 1M max output with no source behind it; that shape of
+    mistake produces requests the upstream rejects, so catch it in the data.
+    """
+    import json
+    from pathlib import Path
+
+    profiles = json.loads(
+        (Path(__file__).resolve().parent.parent / "config" / "provider-profiles.json").read_text(
+            encoding="utf-8"
+        )
+    )["profiles"]
+
+    offenders = []
+    for profile_id, profile in profiles.items():
+        windows = profile.get("context_windows") or {}
+        outputs = profile.get("max_output_tokens") or {}
+        for model, max_output in outputs.items():
+            window = windows.get(model)
+            if window is None:
+                continue
+            if int(max_output) > int(window):
+                offenders.append(f"{profile_id}:{model} output={max_output} > context={window}")
+
+    assert not offenders, "max_output_tokens exceeds context_window: " + "; ".join(offenders)

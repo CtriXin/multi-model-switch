@@ -127,6 +127,50 @@ class ModelSettings:
             self._check(payload)
             return result
 
+    def auto_refresh(self, provider_id: str, models: list[str] | None = None) -> dict:
+        """Apply only trusted capability facts after a new channel is saved."""
+        with self.lock:
+            snapshot = self.read()
+            target = next((p for p in snapshot["providers"] if p["id"] == provider_id), None)
+            if target is None:
+                return {"synced": False, "applied": 0, "warnings": ["通道保存后未找到对应模型目录。"]}
+            model_ids = list(models or [m["id"] for m in target["models"] if m.get("visible")])
+            result = self.worker({
+                "action": "refresh",
+                "providerId": provider_id,
+                "models": model_ids,
+                # Automatic onboarding uses only local official/approved facts.
+                # OpenRouter remains an explicit review action, never a save-time dependency.
+                "sources": ["official", "approved"],
+                "openrouter_timeout": 3,
+                "revision": snapshot["revision"],
+            })
+            edits = {"visions": {}, "contextWindows": {}, "efforts": {}}
+            for item in result.get("proposals", []):
+                for field in item.get("fields", []):
+                    if field.get("userSet") or field.get("source") == "catalog":
+                        continue
+                    model = item.get("model")
+                    if field.get("field") == "vision":
+                        edits["visions"][model] = field.get("value")
+                    elif field.get("field") == "context":
+                        edits["contextWindows"][model] = field.get("value")
+                    elif field.get("field") == "effort":
+                        edits["efforts"][model] = field.get("value")
+            if not any(edits.values()):
+                return {"synced": True, "applied": 0, "reports": result.get("reports", [])}
+            draft = {
+                "fingerprint": snapshot["fingerprint"],
+                "revision": snapshot["revision"],
+                "providerId": provider_id,
+                "models": model_ids,
+                **edits,
+            }
+            preview = self.preview(draft)
+            applied = self.apply({"previewId": preview["previewId"], "confirmed": True})
+            return {"synced": True, "applied": len(preview.get("changes", [])),
+                    "reports": result.get("reports", []), "result": applied}
+
     def preview(self, payload):
         with self.lock:
             self._check(payload)
@@ -152,8 +196,9 @@ class ModelSettings:
 
     def apply(self, payload):
         token = str(payload.get("previewId", ""))
-        if not re.fullmatch(r"[a-f0-9]{32}", token) or payload.get("confirmPhrase") != self.confirmation():
-            raise WebError("CONFIRM_REQUIRED", "请检查具体变更并输入确认文字后保存。", 409)
+        confirmed = payload.get("confirmed") is True
+        if not re.fullmatch(r"[a-f0-9]{32}", token) or (not confirmed and payload.get("confirmPhrase") != self.confirmation()):
+            raise WebError("CONFIRM_REQUIRED", "请在确认弹窗中确认后保存。", 409)
         with self.serialized():
             path = self.state / f"{token}.json"
             if not path.is_file():

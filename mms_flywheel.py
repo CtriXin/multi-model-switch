@@ -206,7 +206,7 @@ def _config_root(explicit: str = "") -> Path:
     raw = explicit or os.environ.get("MMS_CONFIG_ROOT") or os.environ.get("MMS_CONFIG_DIR")
     if raw:
         return Path(raw).expanduser().resolve()
-    return (Path.home() / ".config" / "mms").resolve()
+    return (Path.home() / ".config" / "mms-next").resolve()
 
 
 def _load_flywheel_config(root: Path, explicit_config: str = "") -> tuple[dict[str, Any], list[str]]:

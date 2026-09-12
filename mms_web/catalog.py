@@ -258,8 +258,12 @@ class CatalogService:
         return (self._config_root / "root-manifest.json").is_file()
 
     def _registry_owned(self) -> bool:
-        """True when saves publish through the Registry: Web-owned or v2 root."""
-        return self._local_setup() or self._registry_published_root()
+        """True when saves publish through the Registry, including first-run mms-next."""
+        if self._local_setup() or self._registry_published_root():
+            return True
+        if self._config_root is None:
+            return False
+        return self._config_root.resolve() == (self._real_home() / ".config/mms-next").resolve()
 
     def _load_bundle(self, diagnostics: list) -> dict:
         """Load the verified latest-approved bundle; secrets stay in-process."""
@@ -389,10 +393,8 @@ class CatalogService:
         read = (self._config_root / "config.toml").exists() or (self._config_root / "generated").exists()
         if self._state_root_protected():
             return {"catalogRead": read, "configure": False}
-        if self._is_protected_real_root() and not self._registry_published_root():
-            # A legacy stable root stays human-gated: the web UI would have to
-            # write config.toml and credentials.sh by hand. A v2 root publishes
-            # through the Registry, which is the same path MMS itself uses.
+        if self._is_protected_real_root() and not self._registry_owned():
+            # Only the shared mms-next root may be initialized by Web on first run.
             return {"catalogRead": read, "configure": False}
         return {"catalogRead": read, "configure": True}
 
@@ -972,7 +974,7 @@ class CatalogService:
                 {
                     "label": "模型列表模式",
                     "before": "",
-                    "after": "manual（由这份列表手工维护）",
+                    "after": "manual（保存后自动同步能力；模型列表可在高级设置中刷新）",
                 }
             )
         else:
@@ -1130,8 +1132,22 @@ class CatalogService:
             # The write is already committed. A failed catalog read must not
             # invite a second save or claim that no configuration was written.
             presets = []
+        capability_sync = {"synced": False, "applied": 0}
+        if self._registry_owned() and provider_id:
+            try:
+                from .model_settings import ModelSettings
+                capability_sync = ModelSettings(self).auto_refresh(
+                    provider_id,
+                    list(record.get("service", {}).get("models") or []),
+                )
+                presets = [p["id"] for p in self.snapshot()["presets"]
+                           if p.get("providerId") == provider_id and p.get("available")]
+            except Exception as exc:
+                # The route write already committed; capability sync is best effort.
+                capability_sync = {"synced": False, "applied": 0,
+                                   "warnings": [f"自动能力同步未完成：{type(exc).__name__}"]}
         return {"applied": True, "message": "配置已应用", "providerId": provider_id,
-                "presetIds": presets}
+                "presetIds": presets, "capabilitySync": capability_sync}
 
     def configuration_discard(self, payload: dict) -> dict:
         """Drop an abandoned preview, including its temporary key, under the apply lock."""

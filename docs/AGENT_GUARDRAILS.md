@@ -137,6 +137,16 @@
 - 为了实现新功能，直接覆盖已有选择流程、确认流程或 bridge 路由
 - 把一次性的实验逻辑直接变成默认行为，且没有显式开关或任务上下文说明
 
+## Single Config Root（2026-09-10，#177）
+
+配置只有一个来源：`~/.config/mms-next`。这条高于任何"兼容旧目录"的实现倾向：
+
+- `mms` / `mmf` / `mmg` / Pilot 都读写同一个根；Pilot 保存通道后 terminal 读到的是同一份 approved bundle。
+- legacy `~/.config/mms` 已退出配置来源：不做自动导入，不做回退，`MMS_CONFIG_ROOT_MODE=stable` 被忽略；`mmd` / `mmm` 包装器已退休。
+- `~/.config/mms/*-gateway/`、`accounts/`、`fake-upstream/` 仍是运行时 / 会话状态目录，不是配置；Codex gateway `CODEX_HOME` 契约不变。
+- 安装脚本会请任何占用默认端口的 Pilot 退出（不按安装目录区分），并用 `source|config_root|version` 判断已有实例，避免第二个 8766 实例和跨进程 403。
+- 新增一处读取 `~/.config/mms` 作为配置来源属于回归；`tests/test_single_config_root.py` 与 fresh-user gate 覆盖这条契约。
+
 ## Global OAuth Hard Cut
 
 这条规则高于一般“方便复用”的实现倾向：
@@ -185,7 +195,7 @@ MMS-managed Codex launch must not repeatedly stop on `Hooks need review` in isol
 - 把 `conservative_fallback` 当成「这个模型不支持图片」。它的含义是没有任何来源声明过。
 - 新增第五份硬编码 vision 名单。要补数据就写 provider profile。
 
-## Pi Vision Relay Contract
+## Vision Relay Contract
 
 Pi 用 `--model` 启动，扩展看不到这个参数，所以主模型能力由 mmf 在启动前算好注入：
 
@@ -196,7 +206,17 @@ Pi 用 `--model` 启动，扩展看不到这个参数，所以主模型能力由
 
 唯一的开关是 `config.toml` 的 `[vision_sidecar] enabled`。池子只从当前通道已暴露的模型里取，不往 Pi 的模型列表里加条目。池子为空时 launcher 必须打印可见提示，不允许静默降级。
 
-改这条链路要跑 `tests/test_pi_vision_relay.py`，其中包含一条禁止硬编码模型名的断言。
+### Claude Code 和 OpenCode 走 MCP
+
+这两个 harness 没有扩展位，但都说 MCP，所以同一个池子通过 `scripts/mms-vision-mcp.mjs` 这个 stdio server 暴露成同名的 `describe_image` 工具。
+
+- 池子规则和 Pi 完全一致：来自 `mms_vision_relay.relay_plan()`，它直接复用 `_pi_vision_plan`。不允许在这里另起一套判定。
+- mmf 把 Pi 同款 models.json 写进当前 session 目录的 `vision-relay/models.json`，`0600`，通过 `MMS_VISION_RELAY_CONFIG` 传给 server。凭据只出现在请求头，不进工具返回、不进日志。
+- 主模型自己能读图、或本通道没有能读图的模型时，不注册这个 server；切到能读图的模型时要把已有条目**删掉**，不能留着过期的。
+- `session_surfaces.disabled` 里的 `mcp:vision` 可以关掉它。
+- Codex 不接入：按 owner 2026-09-11 的决定，Codex 不做 vision 特殊处理。
+
+改这条链路要跑 `tests/test_pi_vision_relay.py` 和 `tests/test_vision_relay_harnesses.py`。前者含一条禁止硬编码模型名的断言，后者含一条断言 MCP server 与 Pi 扩展的 endpoint 规则没有各改各的。
 
 ## User Preferences And Human Gate
 

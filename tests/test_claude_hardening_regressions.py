@@ -821,7 +821,7 @@ def test_build_claude_session_settings_strips_headroom_runtime_hooks(monkeypatch
     assert "enabledPlugins" not in result
 
 
-def test_build_claude_session_settings_rewrites_caveman_hooks_per_session(monkeypatch, tmp_path):
+def test_build_claude_session_settings_removes_retired_caveman_hooks(monkeypatch, tmp_path):
     import mms_launchers
 
     caveman_root = tmp_path / "caveman"
@@ -897,10 +897,7 @@ def test_build_claude_session_settings_rewrites_caveman_hooks_per_session(monkey
     ]
     assert "/tmp/keep-session-start.sh" in session_start_commands
     caveman_activate_commands = [command for command in session_start_commands if "caveman-activate.js" in command]
-    assert len(caveman_activate_commands) == 1
-    assert "CAVEMAN_HOOK_COMPACT=1" in caveman_activate_commands[0]
-    assert "CAVEMAN_HOOK_EVENT=SessionStart" in caveman_activate_commands[0]
-    assert f'node "{caveman_root / "hooks" / "caveman-activate.js"}"' in caveman_activate_commands[0]
+    assert caveman_activate_commands == []
     assert user_prompt_commands == []
 
 
@@ -933,7 +930,7 @@ def test_filter_claude_session_hooks_drops_stale_managed_stop_hook(tmp_path):
     assert str(keep_hook) in commands
 
 
-def test_resolve_caveman_root_prefers_bundled_vendor_before_legacy_home(monkeypatch, tmp_path):
+def test_resolve_caveman_root_is_retired(monkeypatch, tmp_path):
     import mms_launchers
 
     bundled_root = tmp_path / "mms-install" / "vendor" / "caveman"
@@ -952,7 +949,7 @@ def test_resolve_caveman_root_prefers_bundled_vendor_before_legacy_home(monkeypa
         lambda *parts: str((tmp_path / "real-home").joinpath(*parts)),
     )
 
-    assert mms_launchers._resolve_caveman_root() == str(bundled_root)
+    assert mms_launchers._resolve_caveman_root() == ""
 
 
 def test_resolve_nsr_root_prefers_current_shared_skill_before_deprecated_root(monkeypatch, tmp_path):
@@ -1024,7 +1021,7 @@ def test_resolve_local_hooks_dir_canonicalizes_repo_worktree(tmp_path):
     assert mms_launchers._resolve_local_hooks_dir(str(worktree_module)) == str(hooks_dir)
 
 
-def test_build_codex_session_hooks_respects_session_caveman_toggle(monkeypatch, tmp_path):
+def test_build_codex_session_hooks_removes_retired_caveman_hooks(monkeypatch, tmp_path):
     import mms_launchers
 
     caveman_root = tmp_path / "caveman"
@@ -1117,7 +1114,7 @@ def test_build_codex_session_hooks_respects_session_caveman_toggle(monkeypatch, 
     assert "PreToolUse" not in enabled["hooks"]
 
 
-def test_build_codex_session_hooks_replaces_inherited_compact_caveman_with_session_hook(monkeypatch, tmp_path):
+def test_build_codex_session_hooks_filters_inherited_retired_caveman_hook(monkeypatch, tmp_path):
     import mms_launchers
 
     caveman_root = tmp_path / "caveman"
@@ -1157,17 +1154,9 @@ def test_build_codex_session_hooks_replaces_inherited_compact_caveman_with_sessi
 
     session_group = rendered["hooks"]["SessionStart"][1]
     session_commands = [hook["command"] for hook in session_group["hooks"]]
-    assert session_commands == [
-        "/tmp/map.sh",
-        (
-            'CAVEMAN_DEFAULT_MODE=lite CAVEMAN_HOOK_COMPACT=1 CAVEMAN_HOOK_EVENT=SessionStart '
-            'CLAUDE_CONFIG_DIR="$HOME/.codex" '
-            f'node "{caveman_root / "hooks" / "caveman-activate.js"}"'
-        ),
-    ]
+    assert session_commands == ["/tmp/map.sh"]
     assert compact_command not in session_commands
     assert stale_echo_command not in session_commands
-    assert session_group["hooks"][1]["statusMessage"] == "Loading caveman [CAVEMAN]"
 
 
 def test_build_codex_session_hooks_strips_inherited_looop_hooks():
@@ -1367,7 +1356,7 @@ def test_build_codex_session_hooks_respects_session_disabled_hook_commands():
     assert "/tmp/keep.sh" in commands
 
 
-def test_mms_caveman_level_maps_to_hook_mode(tmp_path):
+def test_mms_caveman_legacy_helpers_are_inert(tmp_path):
     import mms_launchers
 
     caveman_root = tmp_path / "caveman"
@@ -1375,22 +1364,13 @@ def test_mms_caveman_level_maps_to_hook_mode(tmp_path):
     hooks_dir.mkdir(parents=True)
     (hooks_dir / "caveman-activate.js").write_text("// activate\n", encoding="utf-8")
 
-    assert mms_launchers._normalize_caveman_mode("standard") == "enable"
+    assert mms_launchers._runtime_caveman_enabled({"caveman_mode": "enable"}) is False
     assert mms_launchers._runtime_caveman_level({"caveman_level": "lite"}) == "light"
-    assert mms_launchers._runtime_caveman_level({"caveman_level": "standard"}) == "standard"
-    assert mms_launchers._runtime_caveman_level({"caveman_level": "full"}) == "full"
-    assert "CAVEMAN_DEFAULT_MODE=lite" in mms_launchers._caveman_claude_activate_command(
-        str(caveman_root),
-        caveman_level="light",
-    )
-    assert "CAVEMAN_DEFAULT_MODE=full" in mms_launchers._caveman_codex_activate_command(
-        str(caveman_root),
-        caveman_level="standard",
-    )
-    assert "CAVEMAN_DEFAULT_MODE=ultra" in mms_launchers._caveman_codex_activate_command(
-        str(caveman_root),
-        caveman_level="full",
-    )
+    assert mms_launchers._resolve_caveman_root() == ""
+    assert mms_launchers._configure_claude_caveman_hooks(
+        {"SessionStart": [{"hooks": [{"type": "command", "command": "echo caveman"}]}]},
+        enable_caveman=True,
+    )["SessionStart"] == []
 
 
 def test_map_auto_index_hook_keeps_codex_stdout_empty(tmp_path):
@@ -1846,7 +1826,7 @@ def test_codex_gateway_env_refreshes_durable_hook_trust_cache_from_sibling(monke
             ]
         }
     }
-    old_session_codex = real_home / ".config" / "mms" / "codex-gateway" / "s" / "old" / ".codex"
+    old_session_codex = real_home / ".config" / "mms-next" / "codex-gateway" / "s" / "old" / ".codex"
     old_session_codex.mkdir(parents=True)
     old_hooks_path = old_session_codex / "hooks.json"
     old_hooks_path.write_text(json.dumps(hooks_payload), encoding="utf-8")
@@ -1881,7 +1861,7 @@ def test_codex_gateway_env_refreshes_durable_hook_trust_cache_from_sibling(monke
         model_info={"model": "gpt-5.4"},
     )
 
-    gateway_codex = real_home / ".config" / "mms" / "codex-gateway" / ".codex"
+    gateway_codex = real_home / ".config" / "mms-next" / "codex-gateway" / ".codex"
     gateway_hooks_path = gateway_codex / "hooks.json"
     target_config = (gateway_codex / "config.toml").read_text(encoding="utf-8")
     assert json.loads(gateway_hooks_path.read_text(encoding="utf-8")) == hooks_payload
@@ -1907,7 +1887,7 @@ def test_codex_gateway_env_reuses_stable_codex_home_for_hook_trust(monkeypatch, 
             ],
         },
     }
-    gateway_base = real_home / ".config" / "mms" / "codex-gateway"
+    gateway_base = real_home / ".config" / "mms-next" / "codex-gateway"
     old_session_codex = gateway_base / "s" / "old" / ".codex"
     old_session_codex.mkdir(parents=True)
     old_hooks_path = old_session_codex / "hooks.json"
@@ -2173,9 +2153,7 @@ def test_codex_gateway_env_materializes_session_caveman_hooks_and_assets(monkeyp
     ]
     assert "/tmp/notify.sh" in commands
     caveman_commands = [command for command in commands if "caveman-activate.js" in command]
-    assert len(caveman_commands) == 1
-    assert "CAVEMAN_HOOK_COMPACT=1" in caveman_commands[0]
-    assert "CAVEMAN_HOOK_EVENT=SessionStart" in caveman_commands[0]
+    assert caveman_commands == []
     assert os.path.islink(session_codex / "commands")
     assert os.path.islink(session_codex / "skills")
     assert os.path.islink(session_codex / "commands" / "keep.toml")

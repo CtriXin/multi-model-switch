@@ -56,7 +56,7 @@ class _LazyConsole:
 console = _LazyConsole()
 
 _DEFAULT_CONFIG_DIRS = [
-    os.path.expanduser("~/.config/mms"),
+    os.path.expanduser("~/.config/mms-next"),
 ]
 _CONFIG_DIRS = list(_DEFAULT_CONFIG_DIRS)
 

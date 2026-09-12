@@ -22,7 +22,21 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 
 macOS 也可以在 Finder 打开 `~/.mms/MMS Pilot.command`。如果从 Finder 启动时找不到通过 shell 管理器安装的 Node/Pi，先从能运行 `pi` 的终端启动上面的命令。系统文件选择器的交互与 macOS 本机权限有关。
 
-独立命令 `mms-web --open` 与 `mms web --open` 都可打开 Web。终端中按 Ctrl+C 停止服务；浏览器关闭只关闭页面。服务重启后，对话保留，继续发送时会恢复 Pi 会话。
+独立命令 `mms-web --open` 与 `mms web --open` 都可在前台打开 Web。终端中按 Ctrl+C 停止服务；浏览器关闭只关闭页面。服务重启后，对话保留，继续发送时会恢复 Pi 会话。
+
+安装脚本装完后会在后台起一个服务，它不是系统服务：机器重启或进程被结束后不会自己回来。用下面几个命令管理它，不用再翻进程列表：
+
+| 命令 | 作用 |
+|---|---|
+| `mms web status` | 列出本机所有在监听的 Pilot（地址、版本、pid、state-root、config-root、来源目录），● 标出属于当前 state-root 的那个 |
+| `mms web url` | 只打印当前实例的地址；没在跑就返回非零并提示 `mms web start` |
+| `mms web start [--open]` | 已在跑就直接返回地址；没跑就在后台启动，日志在 `<state-root>/logs/mms-web.log` |
+| `mms web stop [--all]` | 请当前实例退出（`--all` 是本机全部 Pilot），等待最多 20 秒，不会 `kill -9` |
+| `mms web restart` | 先停再起 |
+
+`mmf web status` 等同样可用。`--state-root` / `--port` 与前台启动时的含义一致；`--json` 给脚本用。
+
+不带任何参数直接输入 `mms web`（或 `mms web help`）会打印这一页帮助，列出上面的命令、常用例子和可用选项，不会占住终端起服务；帮助里的命令名跟随你实际用的入口。带上 `--open`、`--port` 这类选项时行为不变，仍然是前台启动。
 
 ## 第一次配置
 
@@ -46,7 +60,7 @@ macOS 也可以在 Finder 打开 `~/.mms/MMS Pilot.command`。如果从 Finder �
 
 ## 已经在使用 MMF
 
-`mmf` 指向开发工作树，`mmd` 指向 stable，`mmg` 指向 canary，`mmm` 指向 main，`mms` 是公开安装副本。这些命令的通道意义没有改变。只有包含 v4 代码的工作树才能运行新的 `web` 子命令。
+`mmf` 指向开发工作树，`mmg` 指向 canary，`mms` 是公开安装副本；`mmd` / `mmm` 已退休，所有入口只读 `~/.config/mms-next`。只有包含 v4 代码的工作树才能运行新的 `web` 子命令。
 
 如果对应的 MMF 工作树已经更新到 v4：
 

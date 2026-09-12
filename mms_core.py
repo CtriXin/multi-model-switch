@@ -210,7 +210,7 @@ PREFERENCES_PATHS = [
     os.path.join(PRIMARY_CONFIG_DIR, "preferences.toml"),
 ]
 PREFERENCES_DOC_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs", "MMS_USER_PREFERENCES.md")
-PREFERENCES_EXAMPLE_TOML = """# ~/.config/mms/preferences.toml
+PREFERENCES_EXAMPLE_TOML = """# ~/.config/mms-next/preferences.toml
 # User-owned preference overlay. Install/update never overwrites this file.
 
 [launch]
@@ -219,8 +219,7 @@ disabled_clis = []            # e.g. ["pi", "agy"] hides/disables these MMS laun
 [launch.defaults]
 thinking_mode = "enable"      # enable | disable
 reasoning_effort = "high"     # low | medium | high | xhigh
-caveman_mode = "enable"       # enable | disable
-caveman_level = "light"       # light | standard | full
+# Caveman is retired globally; legacy fields are ignored.
 nsr_mode = "enable"           # enable | disable
 agent_pack = "none"           # none | ecc | omc
 bypass = true                 # true | false
@@ -232,8 +231,6 @@ reasoning_effort = "high"
 agent_pack = "ecc"
 
 [launch.cli.agy]
-caveman_mode = "enable"
-caveman_level = "light"
 
 [session_surfaces.disabled]
 skills = []                   # e.g. ["agent-browser", "token-saver"]
@@ -251,7 +248,6 @@ managed_root = "~/.local/share/mms/assets"
 # codegraph = "~/my-skills/codegraph"
 # token_saver = "~/my-skills/token-saver"
 # toon = "~/my-skills/toon"
-# caveman = "~/my-packs/caveman"
 # nsr = "~/my-packs/non-stop-run"
 # ecc = "~/.mms/agent-packs/everything-claude-code"
 # omc = "~/.mms/agent-packs/oh-my-claudecode"
@@ -1205,7 +1201,6 @@ _VISION_CAPABLE_MODEL_NAMES = {
     "mimo-v2.5",
     "mimo-v2-omni",
     "k3",
-    "k3[1m]",
     "kimi-k3",
     "k2.6",
     "k2.6-code-preview",
@@ -2616,7 +2611,7 @@ This folder stores the real MMS user config.
 - Applies to the whole MMS config tree, including `config.toml`, `override.toml`, `credentials.sh`, `usage.json`, `accounts/**`, `env/**`, and any account state under this folder.
 - Agents may inspect, diff, and propose changes, but must not auto-apply user config edits without human confirmation.
 - Any proposed change must show target path, affected fields/files, before/after values, and reason.
-- If the process is running inside an isolated HOME or gateway session, still resolve and protect the real user config under `~/.config/mms`.
+- If the process is running inside an isolated HOME or gateway session, still resolve and protect the real user config under `~/.config/mms-next`.
 """
 
 
@@ -3477,12 +3472,7 @@ def _sanitize_launch_preferences(payload):
     effort = _pref_reasoning_effort(payload.get("reasoning_effort"))
     if effort:
         result["reasoning_effort"] = effort
-    caveman_mode = _pref_enable_disable(payload.get("caveman_mode"))
-    if caveman_mode:
-        result["caveman_mode"] = caveman_mode
-    caveman_level = _pref_caveman_level(payload.get("caveman_level"))
-    if caveman_level:
-        result["caveman_level"] = caveman_level
+    # Caveman is retired; legacy preference keys are intentionally ignored.
     nsr_mode = _pref_enable_disable(payload.get("nsr_mode"))
     if nsr_mode:
         result["nsr_mode"] = nsr_mode
@@ -9259,6 +9249,8 @@ def _confirm_context_lines(cli, runtime):
 
 
 def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_nsr=False, has_ecc=False, has_omc=False):
+    # Caveman is retired globally; ignore legacy callers that still pass it.
+    has_caveman = False
     runtime = runtime if isinstance(runtime, dict) else {}
     allow_execution_surfaces = not (
         (cli == "claude" and runtime.get("auth_mode") == "oauth")
@@ -9266,9 +9258,9 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_nsr=F
     )
     preview = {
         "allow_execution_surfaces": allow_execution_surfaces,
-        "mcp": {"always": [], "caveman": [], "nsr": [], "ecc": [], "omc": []},
-        "skills": {"always": [], "caveman": [], "nsr": [], "ecc": [], "omc": []},
-        "hooks": {"always": [], "caveman": [], "nsr": [], "ecc": [], "omc": []},
+        "mcp": {"always": [], "nsr": [], "ecc": [], "omc": []},
+        "skills": {"always": [], "nsr": [], "ecc": [], "omc": []},
+        "hooks": {"always": [], "nsr": [], "ecc": [], "omc": []},
     }
 
     if cli not in {"claude", "codex", "opencode", "pi", "agy"}:
@@ -13602,7 +13594,8 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     "no_proxy_conflicts": [],
                 }
         context_lines = _confirm_context_lines(cli, runtime_runtime)
-        has_caveman = _caveman_available_for_cli(cli)
+        # Caveman is retired globally; legacy assets/preferences are inert.
+        has_caveman = False
         has_nsr = _nsr_available_for_cli(cli)
         has_ecc = (
             cli == "claude"
@@ -13709,6 +13702,9 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             return True
         if action == "b":
             continue
+        # Legacy TUI implementations may return a Caveman toggle even though
+        # the control is no longer exposed; never carry it into runtime.
+        caveman_enabled = False
         if cli in {"claude", "codex", "opencode", "pi", "agy"}:
             runtime_runtime["bypass"] = bool(bypass)
         if bypass:
@@ -13845,7 +13841,7 @@ def handle_env_command(cfg, argv):
     )
     parser.add_argument("preset_name", help="预设名称")
     parser.add_argument("--apply", action="store_true",
-                        help="写入 ~/.config/mms/env/<preset>.sh")
+                        help="写入 ~/.config/mms-next/env/<preset>.sh")
     parser.add_argument("--provider", help="临时覆盖预设中的 provider")
     args = parser.parse_args(argv)
 
@@ -15061,7 +15057,7 @@ def _display_preferences_path():
         marker = "active" if os.path.exists(path) else "create-if-needed"
         console.print(f"  {path}  [dim]({marker})[/dim]")
     console.print(f"[dim]文档: {PREFERENCES_DOC_PATH}[/dim]")
-    console.print("[yellow]Human gate:[/yellow] agents may inspect/propose, but must not auto-write real ~/.config/mms/** without human confirmation.")
+    console.print("[yellow]Human gate:[/yellow] agents may inspect/propose, but must not auto-write real ~/.config/mms-next/** without human confirmation.")
 
 
 def _display_preferences_example():
@@ -15071,7 +15067,7 @@ def _display_preferences_example():
 def _display_human_gate_help():
     command = current_command()
     console.print("[bold]MMS Human Gate[/bold]")
-    console.print("- real config tree `~/.config/mms/**` is human-only for agents.")
+    console.print("- real config tree `~/.config/mms-next/**` is human-only for agents.")
     console.print("- allowed for agents: inspect, explain, generate manual diff, print examples.")
     console.print("- blocked without human confirmation: writing config.toml, preferences.toml, override.toml, credentials.sh, accounts/**, env/**, usage/account state, or Claude config.")
     console.print("- required write flow: plan -> backup -> human double check -> audited write -> post-write human double check.")
@@ -15091,17 +15087,17 @@ def _display_preferences_help():
     console.print(f"  {command} config human-gate")
     console.print("\n[bold]Allowed keys:[/bold]")
     console.print("  launch.disabled_clis: hide/disable MMS launch targets such as pi or agy")
-    console.print("  launch.defaults: thinking_mode, reasoning_effort, caveman_mode, caveman_level, nsr_mode, agent_pack, bypass")
+    console.print("  launch.defaults: thinking_mode, reasoning_effort, nsr_mode, agent_pack, bypass")
     console.print("  launch.cli.<claude|codex|opencode|pi|agy>: same launch keys")
     console.print("  session_surfaces.disabled: skills, mcp, hooks")
     console.print("  assets: managed_enabled, managed_root")
-    console.print("  assets.roots: web_access, weber, agent_browser, codegraph, token_saver, toon, caveman, nsr, ecc, omc, auto_github_contributor")
+    console.print("  assets.roots: web_access, weber, agent_browser, codegraph, token_saver, toon, nsr, ecc, omc, auto_github_contributor")
     console.print("\n[bold]Denied / ignored:[/bold]")
     console.print("  api_key, base_url, proxy, account identity, provider routes, OAuth tokens, credentials, Claude config, real HOME/XDG/auth state")
     console.print("\n[bold]Overlay order:[/bold]")
     console.print("  config.toml -> override.toml -> preferences.toml launch allowlist -> confirm screen changes -> launcher")
     console.print(f"[dim]Full doc: {PREFERENCES_DOC_PATH}[/dim]")
-    console.print("[yellow]Human gate:[/yellow] agents can propose edits, but must not auto-write real ~/.config/mms/** without human confirmation.")
+    console.print("[yellow]Human gate:[/yellow] agents can propose edits, but must not auto-write real ~/.config/mms-next/** without human confirmation.")
 
 
 
@@ -15693,51 +15689,13 @@ def _load_config_or_preview_bundle():
     return load_config()
 
 
-def _legacy_root_import_candidate():
-    """Return the stable root when it still holds an importable legacy config."""
-    status = mms_config_root_status(command=current_command())
-    stable_root = str(status.get("stable_root") or "")
-    if not stable_root or os.path.normpath(stable_root) == os.path.normpath(PRIMARY_CONFIG_DIR):
-        return ""
-    if not os.path.exists(os.path.join(stable_root, "config.toml")):
-        return ""
-    return stable_root
-
-
-def _import_legacy_root_into_v2(stable_root):
-    """Import an existing stable root into this v2 root, keeping the source read-only."""
-    from mms_registry_cli import preview_prepare
-
-    console.print(
-        f"[cyan]{_L('正在从', 'Importing from')} {stable_root} {_L('导入现有配置，源目录只读不会被修改…', 'into this root; the source stays read-only…')}[/cyan]"
-    )
-    try:
-        summary = preview_prepare(
-            config_dir=PRIMARY_CONFIG_DIR,
-            source_config_dir=stable_root,
-            include_secrets=True,
-            command_name=f"{current_command()} preview prepare",
-        )
-    except Exception as exc:
-        console.print(f"[red]{_L('导入失败', 'Import failed')}: {type(exc).__name__}: {exc}[/red]")
-        return None
-    cfg = _load_config_or_preview_bundle()
-    if cfg is None:
-        detail = str(summary.get("status") or summary.get("result") or "unknown")
-        console.print(
-            f"[yellow]{_L('导入完成但没有可用路由', 'Import finished without usable routes')}: {detail}[/yellow]"
-        )
-        return None
-    console.print(f"[green]✓ {_L('已导入现有配置', 'Existing config imported')}[/green]\n")
-    return cfg
-
-
 def _bootstrap_preview_root_config(ui_language=None):
     """Configure an empty v2 root, writing DB truth instead of config.toml.
 
-    Imports an existing stable root when one is present, otherwise collects one
-    channel. Returns the freshly loaded runtime config, or None when the caller
-    should fall back to the read-only preview guidance.
+    Collects one channel interactively. The legacy ~/.config/mms root is never
+    read: Pilot (`mms web`) and this prompt are the only ways to fill the root.
+    Returns the freshly loaded runtime config, or None when the caller should
+    fall back to the read-only preview guidance.
     """
     if not sys.stdin.isatty():
         return None
@@ -15746,23 +15704,9 @@ def _bootstrap_preview_root_config(ui_language=None):
     set_language(language)
     title = display_title()
 
-    legacy_root = _legacy_root_import_candidate()
-    if legacy_root:
-        console.print(Panel(
-            f"[bold cyan]{_L('发现旧配置目录', 'Found an existing config root')}: {legacy_root}[/bold cyan]\n\n"
-            f"{_L('当前配置根使用配置库真值，可以一次性导入旧配置的通道、模型和 Key。', 'This root keeps DB truth; the channels, models and keys from the old root can be imported once.')}\n"
-            f"{_L('导入只读取旧目录，不会修改它。', 'The import only reads the old root and never modifies it.')}",
-            title=f"{title} Setup",
-        ))
-        if Confirm.ask(_L("现在导入", "Import now"), default=True):
-            cfg = _import_legacy_root_into_v2(legacy_root)
-            if cfg is not None:
-                return cfg
-            console.print(f"[dim]{_L('改为手动配置一个通道。', 'Falling back to configuring one channel manually.')}[/dim]\n")
-
     console.print(Panel(
         f"[bold cyan]{_L(f'欢迎使用 {title} — AI Coding CLI 统一启动器', f'Welcome to {title} — unified AI coding CLI launcher')}[/bold cyan]\n\n"
-        f"{_L('首次使用，需要配置 API 地址和认证信息', 'First-time setup needs an API endpoint and credentials')}\n"
+        f"{_L('首次使用，需要配置 API 地址和认证信息；也可以运行', 'First-time setup needs an API endpoint and credentials; alternatively run')} `{current_command()} web` {_L('在 Pilot 页面里完成', 'and finish it in Pilot')}\n"
         f"{_L('这个配置根使用配置库真值，填写的内容会写入配置库和 secret backend', 'This config root keeps DB truth; your answers go into the registry database and the secret backend')}",
         title=f"{title} Setup",
     ))
@@ -15982,7 +15926,7 @@ def _session_gateway_roots(cli_name):
     if cli_name in {"all", "opencode"}:
         gateway_names.append(("opencode", "opencode-gateway"))
     return [
-        (cli, os.path.join(real_home, ".config", "mms", gateway_name, "s"))
+        (cli, os.path.join(real_home, ".config", "mms-next", gateway_name, "s"))
         for cli, gateway_name in gateway_names
     ]
 
@@ -16181,7 +16125,7 @@ def _codex_resume_roots():
     for env_name in ("MMS_CODEX_RESUME_WRITEBACK_ROOT", "CODEX_HOME"):
         add(os.environ.get(env_name))
     real_home = resolve_real_user_home()
-    add(os.path.join(real_home, ".config", "mms", "codex-gateway", ".codex"))
+    add(os.path.join(real_home, ".config", "mms-next", "codex-gateway", ".codex"))
     add(os.path.join(real_home, ".codex"))
     return roots
 
@@ -17135,7 +17079,7 @@ def _exit_preview_legacy_config_disabled(args_rest=None):
     console.print("[red]Preview root uses v2 DB truth; legacy config.toml writes are disabled.[/red]")
     console.print(f"[dim]config_root={root}[/dim]")
     console.print(f"[cyan]下一步:[/cyan] {current_command()} config doctor --json")
-    console.print("[dim]准备预览 root: mmf preview prepare --from ~/.config/mms --json[/dim]")
+    console.print(f"[dim]在 Pilot 里添加通道: {current_command()} web[/dim]")
     console.print(
         f"[dim]已审核 plan 后写入预览 DB: {current_command()} config apply-plan "
         "--plan-json <plan.json> --apply --confirm-preview-apply --json[/dim]"
@@ -17503,7 +17447,7 @@ def main():
     parser.add_argument("--export", nargs="?", const="claude", metavar="CLI",
                         help="输出指定 CLI 的 export 环境变量命令")
     parser.add_argument("--apply", action="store_true",
-                        help="配合 --export 使用，写入 ~/.config/mms/env/<cli>.sh")
+                        help="配合 --export 使用，写入 ~/.config/mms-next/env/<cli>.sh")
     parser.add_argument("--account", help="临时使用指定官方账号档案启动")
     parser.add_argument("--provider", help="临时使用指定模型源启动")
     parser.add_argument("--profile", dest="opencode_profile", help="直接指定 OpenCode mode，例如 agent / review / committee / debate / omo / raw")

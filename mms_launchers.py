@@ -125,6 +125,7 @@ from mms_project_store import (
 from mms_provider_profiles import profile_context_window, resolve_provider_profile
 from mms_reasoning_effort import model_supports_max_reasoning_effort
 import mms_pi_support as _pi_support
+import mms_vision_relay
 from mms_runtime import cli_search_dirs, prepare_cli_command
 from mms_session_index import finalize_claude_session, list_indexed_sessions, record_claude_session_start
 from mms_session_packet import write_session_packet
@@ -351,8 +352,8 @@ _MODEL_CONTEXT_WINDOWS = {
     "claude-sonnet-4-6": 1_000_000,
     "claude-haiku-4-5-20251001": 200_000,
     "claude-haiku-4-5": 200_000,
-    # Kimi — Kimi API `kimi-k3` is 1M; Kimi Code plain `k3` is 256K, `k3[1m]` opts into 1M.
-    "k3": 262_144,
+    # Kimi K3 is a native 1M model. `k3[1m]` remains input compatibility only.
+    "k3": 1_048_576,
     "k3[1m]": 1_048_576,
     "kimi-k3": 1_048_576,
     "moonshotai/kimi-k3": 1_048_576,
@@ -398,14 +399,11 @@ _DEFAULT_CONTEXT_WINDOW = 200_000  # 未知模型的安全默认值
 _ONE_M_CONTEXT_SUFFIX = "[1m]"
 _ONE_M_SUFFIX_CONTEXT_WINDOWS = {
     # MiMo documents [1m] as an opt-in long-context suffix for Claude Code.
-    "k3": 1_048_576,
     "mimo-v2.5-pro": 1_000_000,
     "mimo-v2.5": 1_000_000,
 }
 _ONE_M_SUFFIX_BASE_SAFE_CONTEXT_WINDOWS = {
-    # The base wire model can support 1M in some surfaces, but Claude Code must
-    # opt in with the selector suffix before MMS advertises that large window.
-    "k3": 262_144,
+    # MiMo still uses an explicit selector. K3 is resolved by provider profile.
     "mimo-v2.5-pro": 262_144,
     "mimo-v2.5": 262_144,
 }
@@ -480,13 +478,8 @@ def _capability_context_window(model_name, *, provider_id=None, accepted_sources
 
 
 def _plain_kimi_k3_profile_context_window(model_name, *, provider_id=None):
-    normalized = str(model_name or "").strip().lower().rsplit("/", 1)[-1]
-    if normalized != "k3":
-        return None
-    profiled = profile_context_window("k3", provider_id=provider_id or "")
-    safe_base = _ONE_M_SUFFIX_BASE_SAFE_CONTEXT_WINDOWS.get("k3")
-    if profiled is not None and safe_base is not None and profiled <= safe_base:
-        return profiled
+    # K3 is natively 1M. Keep this compatibility seam empty so no old safe-base
+    # guard can downgrade the model after a capability refresh.
     return None
 
 
@@ -517,7 +510,7 @@ def _model_context_overrides_path():
     try:
         config_root = _resolve_mms_config_dir()
     except Exception:
-        config_root = _real_user_path(".config", "mms")
+        config_root = _real_user_path(".config", "mms-next")
     return os.path.join(config_root, "model-context-overrides.json")
 
 
@@ -649,8 +642,8 @@ def _lookup_context_window(model_name, provider_id=None):
 
     if not has_1m_suffix:
         # Latest-approved capability facts are the WebUI/runtime truth after
-        # preview publish. Keep the MiMo safe-base branch as a fallback only, or
-        # the UI can show 1M while Claude launch still receives 262K.
+        # preview publish. Keep the MiMo safe-base branch as a fallback only;
+        # K3 is resolved by the provider-aware profile below.
         approved_window = _capability_context_window(
             clean,
             provider_id=provider_id,
@@ -844,7 +837,7 @@ def _real_user_path(*parts):
 
 
 def _account_guard_state_path():
-    return _real_user_path(".config", "mms", "account-guard-state.json")
+    return _selected_mms_config_root({}) + "/account-guard-state.json"
 
 
 def _load_json_dict_unlocked(path):
@@ -1003,7 +996,7 @@ def _claude_guard_runtime(runtime):
     guard_runtime = dict(runtime or {})
     auth_mode = str(guard_runtime.get("auth_mode") or "api_key").strip() or "api_key"
     if auth_mode == "api_key" and not str(guard_runtime.get("home_dir") or "").strip():
-        guard_runtime["home_dir"] = _real_user_path(".config", "mms", "claude-gateway")
+        guard_runtime["home_dir"] = _selected_mms_config_root({}) + "/claude-gateway"
     return guard_runtime
 
 
@@ -1174,7 +1167,7 @@ def _selected_mms_config_root(env):
     try:
         return _resolve_mms_config_dir(merged_env)
     except Exception:
-        return _real_user_path(".config", "mms")
+        return _real_user_path(".config", "mms-next")
 
 
 def _config_root_is_explicit(env):
@@ -2485,7 +2478,7 @@ _CLAUDE_DEFAULT_PERMISSION_DENY = [
 
 
 def _claude_gateway_home():
-    gateway_base = _real_user_path(".config", "mms", "claude-gateway")
+    gateway_base = _selected_mms_config_root({}) + "/claude-gateway"
     sessions_dir = os.path.join(gateway_base, "s")
     return os.path.join(sessions_dir, str(os.getpid()))
 
@@ -2495,11 +2488,11 @@ def _claude_route_status_paths(*, gateway_home=None):
     # 不读 ambient MMS_SESSION_HOME env（继承链不可靠，多 session 会串改）。
     gh = str(gateway_home or "").strip()
     if gh:
-        return [os.path.join(gh, ".config", "mms", "route_status.json")]
+        return [os.path.join(gh, "route_status.json")]
     if str(os.environ.get("MMS_CONFIG_ROOT") or os.environ.get("MMS_CONFIG_DIR") or "").strip():
         return [os.path.join(_resolve_mms_config_dir(), "route_status.json")]
     fallback = _claude_gateway_home()
-    return [os.path.join(fallback, ".config", "mms", "route_status.json")]
+    return [os.path.join(fallback, "route_status.json")]
 
 
 def _anthropic_cache_key(provider_id, configured_url):
@@ -3288,7 +3281,8 @@ def _filter_claude_session_hooks(hooks_data, *, allow_execution_surfaces=True):
 
 
 def _caveman_available_for_cli(cli_name):
-    return str(cli_name or "").strip() in {"claude", "codex", "opencode", "agy"} and bool(_resolve_caveman_root())
+    # Caveman is retired globally; legacy assets and preferences are inert.
+    return False
 
 
 def _resolve_nsr_root():
@@ -3364,7 +3358,8 @@ def _normalize_caveman_mode(value, default="disable"):
 
 
 def _runtime_caveman_enabled(runtime):
-    return _normalize_caveman_mode((runtime or {}).get("caveman_mode", "disable")) == "enable"
+    # Keep parsing legacy fields for compatibility, but never inject Caveman.
+    return False
 
 
 def _normalize_caveman_level(value, default="light"):
@@ -3711,33 +3706,8 @@ def _bundled_asset_root_candidates(surface, *names):
 
 
 def _resolve_caveman_root():
-    candidates = []
-    explicit = str(os.environ.get("MMS_CAVEMAN_ROOT") or "").strip()
-    if explicit:
-        candidates.append(os.path.abspath(os.path.expanduser(explicit)))
-    pref = _asset_root_preference("caveman")
-    if pref:
-        candidates.append(os.path.abspath(os.path.expanduser(pref)))
-    candidates.extend(_managed_asset_root_candidates("packs", "caveman"))
-    candidates.extend(_bundled_asset_root_candidates("packs", "caveman"))
-    candidates.extend([
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "caveman"),
-        _real_user_path("auto-skills", "vendor", "caveman"),
-        _real_user_path("vendor", "caveman"),
-        _real_user_path("caveman"),
-    ])
-
-    seen = set()
-    for candidate in candidates:
-        if not candidate or candidate in seen:
-            continue
-        seen.add(candidate)
-        activate = os.path.join(candidate, "hooks", "caveman-activate.js")
-        tracker = os.path.join(candidate, "hooks", "caveman-mode-tracker.js")
-        if os.path.isfile(activate) and os.path.isfile(tracker):
-            return candidate
+    # Caveman is retired globally; legacy assets and preferences are inert.
     return ""
-
 
 def _ecc_available_for_claude():
     return bool(_resolve_ecc_root())
@@ -4009,36 +3979,8 @@ def _resolve_toon_root():
 
 
 def _resolve_token_saver_root():
-    candidates = []
-    explicit = str(os.environ.get("MMS_TOKEN_SAVER_ROOT") or "").strip()
-    if explicit:
-        candidates.append(os.path.abspath(os.path.expanduser(explicit)))
-    pref = _asset_root_preference("token_saver")
-    if pref:
-        candidates.append(os.path.abspath(os.path.expanduser(pref)))
-    candidates.extend(_managed_asset_root_candidates("skills", "token-saver", "token_saver"))
-    candidates.extend(_bundled_asset_root_candidates("skills", "token-saver", "token_saver"))
-    candidates.extend([
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "token-saver"),
-        _real_user_path("auto-skills", "shared-skills", "token-saver"),
-        _real_user_path("auto-skills", "vendor", "token-saver"),
-        _real_user_path("vendor", "token-saver"),
-    ])
-
-    seen = set()
-    for candidate in candidates:
-        if not candidate or candidate in seen:
-            continue
-        seen.add(candidate)
-        if os.path.isfile(os.path.join(candidate, "SKILL.md")):
-            return candidate
+    # Token-saver is retired from the product; old assets stay undiscovered.
     return ""
-
-
-def _resolve_xmem_root():
-    # xmem is global-only now; MMS should not bundle or inject a session-local copy.
-    return ""
-
 
 def _resolve_auto_github_contributor_root():
     candidates = []
@@ -4082,9 +4024,8 @@ def _mms_gain_script_path():
 
 
 def _token_saver_script_path():
-    script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "token-saver")
-    return script_path if os.path.isfile(script_path) else ""
-
+    # Token-saver is retired from the product; never inject its wrapper.
+    return ""
 
 def _token_gain_script_path():
     script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "token-gain")
@@ -4595,62 +4536,10 @@ def _codex_caveman_session_hook(caveman_root, caveman_level="light"):
 
 
 def _configure_codex_caveman_hooks(hooks_data, *, enable_caveman=False, caveman_level="light"):
+    # Retired globally: filter inherited hooks and never add a replacement.
     hooks_data = _filter_hook_commands(hooks_data, _is_loop_family_hook_command)
     hooks_data = _filter_hook_commands(hooks_data, _is_codex_rtk_hook_command)
-    if not enable_caveman:
-        return _filter_hook_commands(hooks_data, _is_caveman_hook_command)
-
-    caveman_root = _resolve_caveman_root()
-    replacement = _codex_caveman_session_hook(caveman_root, caveman_level=caveman_level) if caveman_root else {}
-    replaced = False
-    configured = {}
-
-    for event_name, groups in (hooks_data if isinstance(hooks_data, dict) else {}).items():
-        if not isinstance(groups, list):
-            continue
-        kept_groups = []
-        for group in groups:
-            if not isinstance(group, dict):
-                kept_groups.append(group)
-                continue
-            hook_items = group.get("hooks")
-            if not isinstance(hook_items, list):
-                kept_groups.append(dict(group))
-                continue
-            kept_hooks = []
-            for hook in hook_items:
-                if not isinstance(hook, dict):
-                    kept_hooks.append(hook)
-                    continue
-                command = str(hook.get("command") or "")
-                if _is_caveman_hook_command(command):
-                    existing_compact = "CAVEMAN_HOOK_COMPACT=1" in command and str(event_name) == "SessionStart"
-                    if not replaced and str(event_name) == "SessionStart" and (existing_compact or replacement):
-                        # MMS session owns caveman activation. Do not preserve
-                        # inherited/global caveman hooks, or SessionStart can
-                        # emit duplicate caveman context in Codex.
-                        kept_hooks.append(dict(replacement) if replacement else dict(hook))
-                        replaced = True
-                    continue
-                kept_hooks.append(dict(hook))
-            if kept_hooks:
-                next_group = dict(group)
-                next_group["hooks"] = kept_hooks
-                kept_groups.append(next_group)
-        if kept_groups:
-            configured[event_name] = kept_groups
-
-    if not replaced and replacement:
-        configured = _append_shell_command_hook(
-            configured,
-            "SessionStart",
-            replacement.get("command"),
-            matcher="startup|resume",
-            timeout=replacement.get("timeout"),
-            status_message=replacement.get("statusMessage"),
-        )
-    return configured
-
+    return _filter_hook_commands(hooks_data, _is_caveman_hook_command)
 
 def _configure_claude_nsr_hooks(hooks_data, *, enable_nsr=False):
     # Legacy toggle remains parseable; automatic continuation is retired.
@@ -4662,20 +4551,8 @@ def _configure_codex_nsr_hooks(hooks_data, *, enable_nsr=False):
 
 
 def _configure_claude_caveman_hooks(hooks_data, *, enable_caveman=False, caveman_level="light"):
-    hooks_data = _filter_hook_commands(hooks_data, _is_caveman_hook_command)
-    if not enable_caveman:
-        return hooks_data
-    caveman_root = _resolve_caveman_root()
-    if not caveman_root:
-        return hooks_data
-    hooks_data = _append_shell_command_hook(
-        hooks_data,
-        "SessionStart",
-        _caveman_claude_activate_command(caveman_root, caveman_level=caveman_level),
-        timeout=5,
-        status_message="Loading caveman mode...",
-    )
-    return hooks_data
+    # Retired globally: filter inherited hooks and never add a replacement.
+    return _filter_hook_commands(hooks_data, _is_caveman_hook_command)
 
 
 def _load_ecc_claude_hooks():
@@ -5438,25 +5315,8 @@ def _overlay_session_skill_dir(parent_dir, overlay_root, skill_name, skill_root,
 
 
 def _overlay_caveman_session_entries(parent_dir, session_home, *, enable_caveman=False, disabled_session_surfaces=None):
-    if not enable_caveman:
-        return
-    if _session_skill_disabled(disabled_session_surfaces, "caveman"):
-        return
-    caveman_root = _resolve_caveman_root()
-    if not caveman_root:
-        return
-    overlay_root = os.path.join(session_home, ".mms-caveman-overlay")
-    os.makedirs(overlay_root, exist_ok=True)
-    disabled_names = _normalize_session_surface_disabled(disabled_session_surfaces).get("skills", set())
-    for entry_name in ("commands", "skills"):
-        _overlay_session_entry_dir(
-            parent_dir,
-            overlay_root,
-            entry_name,
-            caveman_root,
-            exclude_names=disabled_names,
-        )
-
+    # Retired globally: never create a Caveman overlay.
+    return None
 
 def _overlay_ecc_session_entries(parent_dir, session_home, *, enable_ecc=False, disabled_session_surfaces=None):
     if not enable_ecc:
@@ -6164,6 +6024,45 @@ def _session_managed_mcp_servers(settings_data, *, allow_execution_surfaces=True
         if isinstance(pilot_spec, dict) and str(pilot_spec.get("command") or "").strip():
             inherited.setdefault("pilot", copy.deepcopy(pilot_spec))
     return _normalize_session_mcp_servers(inherited, disabled_session_surfaces=disabled_session_surfaces)
+
+
+def _inject_vision_relay_mcp_server(
+    state,
+    runtime,
+    model_name,
+    *,
+    session_home,
+    disabled_session_surfaces=None,
+):
+    """Give a text-only model a way to read images, when the channel can.
+
+    Pi does this through its own extension. Claude Code has no extension
+    surface but speaks MCP, so the same pool is reached through a small stdio
+    server. Nothing is added when the selected model reads images itself, when
+    no model on this channel can, or when the user disabled the surface.
+    """
+    state = dict(state) if isinstance(state, dict) else {}
+    if _session_surface_disabled(disabled_session_surfaces, "mcp", mms_vision_relay.RELAY_SERVER_NAME):
+        return state
+    try:
+        config_path = mms_vision_relay.write_relay_catalog(
+            mms_vision_relay.session_catalog_path(session_home), runtime, model_name
+        )
+        spec = mms_vision_relay.mcp_server_spec(config_path)
+    except Exception:
+        spec = None
+    servers = state.get("mcpServers")
+    servers = dict(servers) if isinstance(servers, dict) else {}
+    if spec:
+        servers[mms_vision_relay.RELAY_SERVER_NAME] = spec
+    else:
+        # A channel that lost its vision model must not keep a stale relay.
+        servers.pop(mms_vision_relay.RELAY_SERVER_NAME, None)
+    if servers:
+        state["mcpServers"] = servers
+    else:
+        state.pop("mcpServers", None)
+    return state
 
 
 def _inject_managed_mcp_servers_into_claude_state(
@@ -10182,13 +10081,14 @@ def _claude_project_resume_dir_names(project_path):
 
 
 def _claude_slot_roots_for_resume_backfill(account_id):
+    selected_root = _selected_mms_config_root({})
     roots = [
-        _real_user_path(".config", "mms", "claude-gateway", "s"),
+        selected_root + "/claude-gateway/s",
     ]
     normalized_account_id = _normalized_claude_slot_account(account_id)
     if normalized_account_id:
-        roots.append(_real_user_path(".config", "mms", "accounts", normalized_account_id, "s"))
-    accounts_root = _real_user_path(".config", "mms", "accounts")
+        roots.append(selected_root + f"/accounts/{normalized_account_id}/s")
+    accounts_root = selected_root + "/accounts"
     if os.path.isdir(accounts_root):
         for name in os.listdir(accounts_root):
             candidate = os.path.join(accounts_root, name, "s")
@@ -10722,7 +10622,7 @@ def _claude_gateway_env(
     _timings=None,
 ):
     """Gateway api_key 模式独立 HOME（per-PID 会话隔离）：
-    - 每个 mms 进程使用独立的 ~/.config/mms/claude-gateway/s/{pid}/ 作为 HOME
+    - 每个 mms 进程使用独立的 ~/.config/mms-next/claude-gateway/s/{pid}/ 作为 HOME
     - 启动时清理已死进程的残留目录
     - 剥离 migration 标记，防止 claude-sonnet-4-6[1m] 自动升级
     - 自动拉取 gateway 模型列表，填入所有 ANTHROPIC_*_MODEL slot
@@ -10735,7 +10635,7 @@ def _claude_gateway_env(
     light_model: bridge 模式下可选 light model（仅用于展示）。
     """
     import json as _json
-    gateway_base = _real_user_path(".config", "mms", "claude-gateway")
+    gateway_base = _selected_mms_config_root({}) + "/claude-gateway"
     sessions_dir = os.path.join(gateway_base, "s")
     gateway_home, _active_before, _active_after = _reserve_session_home(
         sessions_dir,
@@ -10793,6 +10693,13 @@ def _claude_gateway_env(
         data,
         disabled_session_surfaces=disabled_session_surfaces,
         agent_pack=agent_pack,
+    )
+    data = _inject_vision_relay_mcp_server(
+        data,
+        runtime,
+        selected_model or display_model,
+        session_home=gateway_home,
+        disabled_session_surfaces=disabled_session_surfaces,
     )
 
     # 当用户在 TUI 选择不 bypass 时，主动移除持久化的 bypass 状态，
@@ -11083,12 +10990,42 @@ def _claude_gateway_env(
 
 
 def _codex_gateway_root():
-    """Keep MMF Codex gateway state inside its selected preview root."""
-    command_name = str(os.environ.get("MMS_COMMAND_NAME") or "").strip().lower()
-    preview_mode = str(os.environ.get("MMS_PREVIEW_MODE") or "").strip().lower()
-    if command_name == "mmf" or preview_mode == "mmf":
-        return os.path.join(_selected_mms_config_root({}), "codex-gateway")
-    return _real_user_path(".config", "mms", "codex-gateway")
+    """Keep Codex gateway state inside the single selected mms-next root."""
+    return os.path.join(_selected_mms_config_root({}), "codex-gateway")
+
+
+_CODEX_CONTEXT_WINDOW_FLOOR = 1_000_000
+
+
+def _codex_gateway_context_window(runtime, model_info):
+    """Return a context window worth telling Codex about, or None.
+
+    Codex ships a catalog for the models it knows and falls back to its own
+    default for anything routed through a custom provider, so a 1M model
+    behaves like a small one and compacts far too early. ``model_context_window``
+    in the gateway config.toml is how Codex takes our number instead.
+
+    Only widen, and only for models Codex cannot already know. Its catalog
+    carries OpenAI's own models with an effective window below their maximum,
+    so overriding those would push requests past a limit Codex was respecting
+    on purpose. A window we overstate becomes a rejected request, not an early
+    compaction.
+    """
+    model = str((model_info or {}).get("model") or "").strip()
+    if not model:
+        return None
+    normalized = model.lower()
+    if normalized.startswith(("gpt-", "o1", "o3", "o4")) or "codex" in normalized:
+        return None
+    try:
+        window = _coerce_context_window(
+            _lookup_context_window(model, provider_id=(runtime or {}).get("id"))
+        )
+    except Exception:
+        return None
+    if window is None or window < _CODEX_CONTEXT_WINDOW_FLOOR:
+        return None
+    return window
 
 
 def _codex_gateway_env(runtime, base_url, model_info=None):
@@ -11195,6 +11132,15 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
             if preamble and not preamble.endswith("\n"):
                 preamble += "\n"
             preamble += f"{replacement}\n"
+        return preamble + rest
+
+    def _remove_top_level_scalar(text, key):
+        import re
+        section_match = re.search(r'^\[', text, flags=re.MULTILINE)
+        preamble_end = section_match.start() if section_match else len(text)
+        preamble = text[:preamble_end]
+        rest = text[preamble_end:]
+        preamble = re.sub(rf'^{re.escape(key)}\s*=\s*.+$\n?', '', preamble, flags=re.MULTILINE)
         return preamble + rest
 
     def _set_project_base_url(text, project_path, value):
@@ -11321,6 +11267,7 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
     # may contain stale custom sections from previous buggy generations.
     source_config = real_config if os.path.exists(real_config) else gateway_config_template
     gateway_config = os.path.join(codex_dir, "config.toml")
+    codex_context_window = _codex_gateway_context_window(runtime, model_info)
     if os.path.exists(source_config):
         try:
             with open(source_config, "r", encoding="utf-8") as f:
@@ -11328,6 +11275,12 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
             config_text = _set_top_level_scalar(config_text, "forced_login_method", "api")
             config_text = _set_top_level_scalar(config_text, "disable_response_storage", True)
             config_text = _set_top_level_scalar(config_text, "base_url", base_url)
+            if codex_context_window:
+                config_text = _set_top_level_scalar(config_text, "model_context_window", codex_context_window)
+            else:
+                # A previous session may have written a window for a different
+                # model; this config is reused, so stale must mean removed.
+                config_text = _remove_top_level_scalar(config_text, "model_context_window")
             config_text = _set_project_base_url(config_text, _safe_getcwd(), base_url)
             config_text = _set_project_scalar(config_text, _safe_getcwd(), "trust_level", "trusted")
             config_text = _rewrite_table_block(
@@ -11361,6 +11314,8 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
             f.write('forced_login_method = "api"\n')
             f.write('disable_response_storage = true\n')
             f.write(f'base_url = "{base_url}"\n')
+            if codex_context_window:
+                f.write(f'model_context_window = {codex_context_window}\n')
             f.write('\n[model_providers.custom]\n')
             f.write('name = "custom"\n')
             f.write('wire_api = "responses"\n')
@@ -11774,7 +11729,7 @@ def _build_opencode_config_payload(runtime, model_name=""):
     )
 
 
-def _build_opencode_config_content(runtime, model_name=""):
+def _build_opencode_config_content(runtime, model_name="", *, vision_relay_mcp=None):
     return _opencode_build_config_content_impl(
         runtime,
         model_name,
@@ -11784,15 +11739,49 @@ def _build_opencode_config_content(runtime, model_name=""):
             provider_id=provider_id,
             accepted_sources={"model_policy", "manual_override", "approved_facts"},
         ),
+        vision_relay_mcp=vision_relay_mcp,
     )
 
 
+def _opencode_vision_relay_mcp(config_path, runtime, model_name):
+    """The relay entry for OpenCode, or None when this channel needs no relay.
+
+    The catalog lands beside the config OpenCode is about to read, so it is as
+    session-local as the config itself.
+    """
+    if _session_surface_disabled(
+        (runtime or {}).get("disabled_session_surfaces"),
+        "mcp",
+        mms_vision_relay.RELAY_SERVER_NAME,
+    ):
+        return None
+    try:
+        target = os.path.abspath(str(config_path))
+        # Named after the config it serves: the shared export directory holds
+        # one config per channel and model, and they must not share a catalog.
+        catalog = mms_vision_relay.write_relay_catalog(
+            mms_vision_relay.session_catalog_path(
+                os.path.dirname(target),
+                os.path.splitext(os.path.basename(target))[0],
+            ),
+            runtime,
+            model_name,
+        )
+        entry = mms_vision_relay.opencode_mcp_entry(catalog)
+    except Exception:
+        return None
+    return {mms_vision_relay.RELAY_SERVER_NAME: entry} if entry else None
+
+
 def _write_opencode_config(path, runtime, model):
+    relay = _opencode_vision_relay_mcp(path, runtime, model)
     return _opencode_write_config_impl(
         path,
         runtime,
         model,
-        build_config_content=_build_opencode_config_content,
+        build_config_content=lambda rt, mdl: _build_opencode_config_content(
+            rt, mdl, vision_relay_mcp=relay
+        ),
         atomic_write_text=atomic_write_text,
     )
 
@@ -11802,6 +11791,7 @@ def _opencode_export_config_path(runtime, model):
         runtime,
         model,
         real_user_path=_real_user_path,
+        selected_config_root=lambda: _selected_mms_config_root({}),
     )
 
 
@@ -11811,6 +11801,7 @@ def _opencode_gateway_env(runtime, model_info=None):
         model_info=model_info,
         resolve_model=_resolve_model,
         real_user_path=_real_user_path,
+        selected_config_root=lambda: _selected_mms_config_root({}),
         cleanup_stale_sessions=_cleanup_stale_sessions,
         link_shared_dotfiles=_link_shared_dotfiles,
         scrub_inherited_runtime_env=_scrub_inherited_runtime_env,

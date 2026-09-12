@@ -69,7 +69,11 @@ python3 scripts/openrouter_recent_models.py --missing   # 只看 profile 里还�
 
 ## 已知的坑
 
-**Kimi Code 的 k3 按套餐分档。** 官方写的是 Moderato 限 256K,Allegretto 及以上到 1M。`kimi-code` profile 里 `k3` 记 262144 是保守档,`k3[1m]` 记 1048576 是显式的 1M 入口,`tests/test_provider_profiles.py` 钉住了这两个值。**不要把 `k3` 改成 1M。** 套餐够的用户在页面上自己设成 1M,那是 `model_policy` 层,优先级高于 profile。官方另有一个固定 256K 的 id 叫 `k3-256k`。
+**Kimi Code 的 k3 原生支持 1M。** `k3` 是新的默认入口；`k3[1m]` 仅为历史 MMS compatibility selector，不能直接发给 provider，也不再作为新的产品入口。OpenRouter 仍然只是 catalog evidence，不能单独证明当前 route/account 的实际能力。
+
+**k3 的 context 不要再改回 262144。** 这个值在 profile 里被来回改过三轮，每轮都漏掉一个 alias，导致同一个模型在 terminal 和 Pilot 上读出不同的窗口。`k3` / `k3[1m]` / `kimi-k3` 现在由 `tests/test_provider_profiles.py::test_kimi_k3_aliases_agree_on_one_million_context` 一起锁住。`k3-256k` 是官方另一个 256K 变体，不是被降级的 k3，它有自己的 profile 条目。
+
+**k3 的输出上限没有官方来源。** 2026-09-02 的标定记录里 `official_max_output_tokens` 是 `null`。profile 保留 131072，不要在没有来源的情况下把它抬到 context 那么大：上游会直接拒绝超限的 `max_tokens`。`tests/test_provider_profiles.py::test_profile_max_output_never_exceeds_its_context_window` 覆盖这条。
 
 **OpenAI 已经下架的模型仍在 profile 里。** `gpt-5`、`gpt-5-pro`、`gpt-5.4`、`gpt-5.4-mini` 不在官方当前列表上了,但很多中转通道还在提供。它们的值保持原样,不要因为官方页面查不到就删。
 

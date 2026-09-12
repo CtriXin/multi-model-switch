@@ -84,7 +84,7 @@ type Preview = {
   previewId: string;
   changes: Change[];
   configRoot: string;
-  confirmPhrase: string;
+  confirmPhrase?: string;
   writeSummary: string;
 };
 
@@ -160,7 +160,6 @@ export function ChannelModels({
   const [refresh, setRefresh] = useState<Refresh>();
   const [refreshPicks, setRefreshPicks] = useState<Record<string, boolean>>({});
   const [preview, setPreview] = useState<Preview>();
-  const [phrase, setPhrase] = useState("");
   const [leave, setLeave] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<{ id: string; name: string } | null>(null);
@@ -299,9 +298,11 @@ export function ChannelModels({
         draft(),
       );
       setRemote(result.models);
-      setNotice(
-        `拉取到 ${result.models.length} 个模型。新模型需勾选后保存；已选模型不会自动移除。`,
-      );
+      // Remote discovery is authoritative for this channel. Replace the
+      // visible selection so removed upstream models leave the local route.
+      setChosen(result.models);
+      setManual([]);
+      setNotice(`已用远端模型列表覆盖当前通道，共 ${result.models.length} 个模型。取消勾选后保存即可继续精简。`);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -374,7 +375,6 @@ export function ChannelModels({
     setError("");
     try {
       setPreview(await request<Preview>("/model-settings/preview", draft()));
-      setPhrase("");
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -388,7 +388,7 @@ export function ChannelModels({
     try {
       const result = await request<{ applied: boolean; runtimeReady: boolean }>(
         "/model-settings/apply",
-        { previewId: preview.previewId, confirmPhrase: phrase },
+        { previewId: preview.previewId, confirmed: true },
       );
       setPreview(undefined);
       saved();
@@ -425,7 +425,7 @@ export function ChannelModels({
       });
       await request<{ applied: boolean }>("/model-settings/apply", {
         previewId: preview.previewId,
-        confirmPhrase: preview.confirmPhrase,
+        confirmed: true,
       });
       setConfirmDelete(null);
       saved();
@@ -1143,16 +1143,9 @@ export function ChannelModels({
                 </li>
               ))}
             </ul>
-            <label>
-              输入“{preview.confirmPhrase}”确认保存
-              <input
-                aria-label="MMF 保存确认文字"
-                value={phrase}
-                onChange={(e) => setPhrase(e.target.value)}
-                disabled={!!busy}
-                autoComplete="off"
-              />
-            </label>
+            <p className="form-hint">
+              确认后将写入当前配置并刷新已发布模型目录。
+            </p>
             {error && (
               <p role="alert" className="form-error">
                 {error}
@@ -1168,8 +1161,10 @@ export function ChannelModels({
               </button>
               <button
                 className="button primary"
-                disabled={!!busy || phrase !== preview.confirmPhrase}
-                onClick={() => void apply()}
+                disabled={!!busy}
+                onClick={() => {
+                  if (window.confirm("确认写入当前配置并刷新已发布模型目录？")) void apply();
+                }}
               >
                 {busy === "apply" ? "正在保存并校验…" : snapshot?.configScope === "standalone" ? "保存设置" : "保存到 MMF"}
               </button>

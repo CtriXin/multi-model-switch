@@ -6,6 +6,7 @@ import copy
 import json
 import os
 import shutil
+import subprocess
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -130,9 +131,12 @@ _PI_BUNDLED_SESSION_SKILLS = (
 )
 
 
-def _pi_bundled_skill_roots():
+def _pi_bundled_skill_roots(disabled_session_surfaces=None):
     roots = []
+    launchers = _launchers_module()
     for name, resolver in _PI_BUNDLED_SESSION_SKILLS:
+        if launchers._session_skill_disabled(disabled_session_surfaces, name):
+            continue
         try:
             root = str(globals()[resolver]() or "").strip()
         except Exception:
@@ -211,11 +215,36 @@ def _pi_npx_cache_dir():
     return str(Path(__file__).resolve().parent / ".ai" / "cache" / "pi-npx")
 
 
+_PI_NPM_PREFIX_CACHE = None
+
+
+def _npm_global_prefix():
+    """npm's global prefix, asked once. Empty when npm is unavailable."""
+    global _PI_NPM_PREFIX_CACHE
+    if _PI_NPM_PREFIX_CACHE is None:
+        try:
+            result = subprocess.run(["npm", "prefix", "-g"], capture_output=True, text=True, timeout=10)
+            _PI_NPM_PREFIX_CACHE = result.stdout.strip() if result.returncode == 0 else ""
+        except (OSError, subprocess.SubprocessError):
+            _PI_NPM_PREFIX_CACHE = ""
+    return _PI_NPM_PREFIX_CACHE
+
+
 def _pi_global_executable():
-    """Use an active global Pi install when available; the wrapper owns fallback."""
+    """An installed global Pi, whether or not its bin directory is on PATH.
+
+    A session started from Finder or by the installer does not inherit the
+    shell PATH that nvm/fnm/npm-global rely on, so `which` alone reported no
+    Pi on machines that run it fine from a terminal.
+    """
     candidate = shutil.which("pi")
     if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
         return candidate
+    prefix = _npm_global_prefix()
+    if prefix:
+        candidate = os.path.join(prefix, "bin", "pi")
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
     return ""
 
 
@@ -229,8 +258,8 @@ def _pi_project_directories(project_dir):
         current = current.parent
 
 
-def _pi_materialize_skill_overlay(session_home, project_dir):
-    """Merge Pi skill roots so project skills keep their existing precedence."""
+def _pi_materialize_skill_overlay(session_home, project_dir, disabled_session_surfaces=None):
+    """Merge Pi skill roots while honoring per-session disabled surfaces."""
     overlay_dir = Path(session_home) / ".pi" / "skills-overlay"
     try:
         overlay_dir.mkdir(parents=True, exist_ok=True)
@@ -248,7 +277,7 @@ def _pi_materialize_skill_overlay(session_home, project_dir):
 
     linked = 0
     # Bundled skills go first so every user root below can replace them by name.
-    for name, root in _pi_bundled_skill_roots():
+    for name, root in _pi_bundled_skill_roots(disabled_session_surfaces):
         destination = overlay_dir / name
         try:
             if destination.is_symlink() or destination.is_file():
@@ -268,6 +297,8 @@ def _pi_materialize_skill_overlay(session_home, project_dir):
             continue
         for entry in entries:
             if entry.name.startswith(".") or (entry.is_file() and not include_markdown):
+                continue
+            if _launchers_module()._session_skill_disabled(disabled_session_surfaces, entry.name):
                 continue
             destination = overlay_dir / entry.name
             try:
@@ -368,11 +399,11 @@ _PI_CAPABILITY_REFERENCE_PATH = (
 )
 
 _PI_MODEL_MAX_TOKENS_HINTS = {
-    "deepseek-v4-flash": 384000,
-    "deepseek-v4-pro": 384000,
+    "deepseek-v4-flash": 393216,
+    "deepseek-v4-pro": 393216,
     "gpt-5.3-codex": 128000,
     "gpt-5.3-codex-spark": 32000,
-    "k3": 131072,
+    "k3": 1048576,
     "k3[1m]": 1048576,
     "kimi-k3": 1048576,
     "k2.6": 32768,
@@ -398,7 +429,8 @@ _PI_MODEL_MAX_TOKENS_HINTS = {
 _PI_MODEL_CONTEXT_WINDOW_HINTS = {
     "gpt-5.3-codex": 400000,
     "gpt-5.3-codex-spark": 128000,
-    "k3": 262144,
+    # Kimi K3 is natively 1M; the selector is kept only for old config input.
+    "k3": 1048576,
     "k3[1m]": 1048576,
     "kimi-k3": 1048576,
     "qwen3.6-flash": 1000000,
@@ -867,6 +899,8 @@ def _pi_model_capabilities(runtime, model_name):
             caps.setdefault("sources", {})[field] = "pi_reference_fallback"
 
     reference_row = _pi_reference_model_row(model_name)
+    # Built-in hints may fill only unresolved legacy models; profile/policy
+    # values for the selected provider must remain authoritative.
     if caps.get("sources", {}).get("context_window_tokens") == "conservative_fallback":
         reference_context = _pi_first_positive_int(
             reference_row,
@@ -1136,8 +1170,9 @@ def _pi_model_thinking_level_map(runtime, profile_id, protocol, model_name, caps
         return {}
 
     # 2026-09-09: deepseek 档位改由 provider-profiles.json 驱动（v4.1 实测 7 档
-    # none/minimal/low/medium/high/xhigh/max；v4-pro/flash 由 model_overrides 钉住旧保守表）。
-    # 见 config/provider-profiles.json deepseek.effort + model_overrides。
+    # none/minimal/low/medium/high/xhigh/max）。
+    # 2026-09-10: v4-pro/flash 旧 model_overrides pin 已删（实测全家同 v4.1 后端，
+    # 枚举/区间一致），档位直通 profile。见 config/provider-profiles.json deepseek.effort。
 
     profile_caps = profile_thinking_capabilities(
         model_name,
@@ -1542,7 +1577,11 @@ def _pi_gateway_env(runtime, model_info=None):
     global_pi = _pi_global_executable()
     if global_pi:
         env["MMS_PI_EXECUTABLE"] = global_pi
-    skill_overlay = _pi_materialize_skill_overlay(session_home, os.getcwd())
+    skill_overlay = _pi_materialize_skill_overlay(
+        session_home,
+        os.getcwd(),
+        (runtime or {}).get("disabled_session_surfaces"),
+    )
     if skill_overlay:
         env["MMS_PI_SKILLS_OVERLAY"] = skill_overlay
     wrapper_path = launchers._pi_wrapper_path()

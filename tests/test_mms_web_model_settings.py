@@ -436,3 +436,70 @@ def test_delete_last_channel_is_refused(settings):
             "fingerprint": snap["fingerprint"], "revision": snap["revision"],
             "providerId": "channel-a", "removeProviderId": "channel-a",
         })
+
+
+def test_fetching_models_replaces_the_route_instead_of_merging(settings, tmp_path):
+    """A model deleted upstream has to leave this machine, not just lose a tick.
+
+    Fetching used to union the remote list into the local one, so a model the
+    channel had dropped stayed selectable in the terminal forever. The remote
+    list is authoritative: saving it must remove what it no longer contains,
+    from the published routes and from a freshly launched session alike.
+    """
+    from mms_web.server import WebApplication
+
+    snapshot = settings.read()
+    seeded = settings.preview({
+        "fingerprint": snapshot["fingerprint"],
+        "revision": snapshot["revision"],
+        "providerId": "channel-a",
+        "models": ["gpt-5", "gpt-4.1", "retired-model"],
+        "efforts": {},
+    })
+    settings.apply({"previewId": seeded["previewId"], "confirmPhrase": "写入预览DB"})
+    snapshot = settings.read()
+    channel = next(p for p in snapshot["providers"] if p["id"] == "channel-a")
+    assert "retired-model" in {m["id"] for m in channel["models"] if m["visible"]}
+
+    # The upstream fixture never serves retired-model, so this is the real shape
+    # of "the channel deleted a model".
+    found = settings.discover({
+        "fingerprint": snapshot["fingerprint"],
+        "revision": snapshot["revision"],
+        "providerId": "channel-a",
+        "models": ["gpt-5"],
+    })
+    assert "retired-model" not in found["models"]
+
+    preview = settings.preview({
+        "fingerprint": snapshot["fingerprint"],
+        "revision": snapshot["revision"],
+        "providerId": "channel-a",
+        "models": sorted(found["models"]),
+        "efforts": {},
+    })
+    assert {"kind": "remove", "model": "retired-model"} in preview["changes"]
+    settings.apply({"previewId": preview["previewId"], "confirmPhrase": "写入预览DB"})
+
+    channel = next(p for p in settings.read()["providers"] if p["id"] == "channel-a")
+    # Not merely hidden: gone from the rows the page and the terminal read.
+    assert {m["id"] for m in channel["models"]} == set(found["models"])
+
+    published = json.loads((settings.root / "generated" / "model-routes.json").read_text(encoding="utf-8"))
+    assert "retired-model" not in json.dumps(published)
+    assert "retired-model" not in (settings.root / "config.toml").read_text(encoding="utf-8")
+
+    app = WebApplication(state_root=tmp_path / "web-overwrite", config_root=settings.root)
+    project = tmp_path / "project-overwrite"
+    project.mkdir()
+    try:
+        workspace = app.catalog.add_workspace({"path": str(project)})
+        with pytest.raises(WebError):
+            app.post(["launch-options"], {"presetId": "web:pi:channel-a:retired-model",
+                                          "workspaceId": workspace["id"]})
+        # The models that survived the fetch still launch.
+        options = app.post(["launch-options"], {"presetId": "web:pi:channel-a:gpt-5",
+                                                "workspaceId": workspace["id"]})
+        assert options["model"]["id"] == "gpt-5"
+    finally:
+        app.close()

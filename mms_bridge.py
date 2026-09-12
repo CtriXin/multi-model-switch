@@ -2145,7 +2145,7 @@ def _incident_log_path(server=None):
         try:
             config_root = resolve_mms_config_dir()
         except Exception:
-            config_root = os.path.join(os.path.expanduser("~"), ".config", "mms")
+            config_root = os.path.join(os.path.expanduser("~"), ".config", "mms-next")
     return os.path.join(str(config_root), "logs", "incidents.jsonl")
 
 
@@ -3654,13 +3654,13 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
         if _gateway_marker in _real_home:
             _user_home = _real_home.split(_gateway_marker, 1)[0]
             if _user_home:
-                _lb_debug_paths.append(os.path.join(_user_home, ".config", "mms", "lb_debug.log"))
+                _lb_debug_paths.append(os.path.join(_user_home, ".config", "mms-next", "lb_debug.log"))
         elif f"{os.sep}claude-gateway{os.sep}" in _real_home:
             _user_home = _real_home.split(f"{os.sep}claude-gateway{os.sep}", 1)[0]
             if _user_home.endswith(f"{os.sep}.config{os.sep}mms"):
                 _user_home = os.path.dirname(os.path.dirname(_user_home))
             if _user_home:
-                _lb_debug_paths.append(os.path.join(_user_home, ".config", "mms", "lb_debug.log"))
+                _lb_debug_paths.append(os.path.join(_user_home, ".config", "mms-next", "lb_debug.log"))
         try:
             light_model = getattr(self.server, "light_model", None)
             medium_model = getattr(self.server, "medium_model", None)

@@ -98,6 +98,17 @@ class UpdateCoordinator:
                 pass
             self._status('error', '新版准备或安全检查未完成，当前服务继续运行；会话未清理。可以稍后重试。')
 
+    def port(self):
+        """The port the update keeps: the handoff re-launches on this one.
+
+        Reporting it must never be the reason the update status fails to load,
+        so an unreadable address is 0 rather than an exception.
+        """
+        try:
+            return int(self.server.server_address[1])
+        except (AttributeError, IndexError, TypeError, ValueError):
+            return 0
+
     def _cutover(self, candidate, target):
         operation_root = self.root/'operations'/self._operation['id']
         backup = operation_root/'backup'

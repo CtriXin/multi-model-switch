@@ -11,6 +11,8 @@ import argparse
 import copy
 import errno
 import json
+import signal
+import sys
 import threading
 import traceback
 import webbrowser
@@ -585,10 +587,34 @@ def serve_config_web(app_or_snapshot: ConfigWebApp | dict[str, Any], *, host: st
         thread.join()
     except KeyboardInterrupt:
         print("\nStopping MMS setup WebUI.")
+        # Ignore SIGINT for the rest of the cleanup: the waits below are still
+        # interruptible, and a second Ctrl-C used to escape as a traceback.
+        try:
+            signal.signal(signal.SIGINT, signal.SIG_IGN)
+        except (ValueError, OSError):
+            pass
+        # shutdown() must run from a different thread than serve_forever().
+        stopper = threading.Thread(target=server.shutdown, daemon=True)
+        stopper.start()
+        stopper.join(timeout=5)
     finally:
-        server.shutdown()
         server.server_close()
     return url
+
+
+def deprecation_notice(command_name: str = "mms") -> str:
+    """Tell the user this page is no longer the way to configure MMS.
+
+    Pilot writes the same config root, so channels, models and capabilities
+    edited there reach the terminal directly. This page stays for what Pilot
+    does not cover yet, and for reading a machine's setup.
+    """
+    command = str(command_name or "mms").strip() or "mms"
+    return "\n".join((
+        f"提示：{command} config web 已降级为维护入口，不再是配置 MMS 的推荐方式。",
+        f"  配置通道、拉取模型、改能力开关请用 {command} web（Pilot）；它和终端写同一个配置根，改完即时生效。",
+        "  这个页面保留给 Pilot 尚未覆盖的部分：账号、偏好、Skill / MCP、迁移，以及需要人工确认的动作。",
+    ))
 
 
 def run_config_web(
@@ -606,6 +632,8 @@ def run_config_web(
     parser.add_argument("--print-summary", action="store_true", help="Print redacted setup JSON and exit")
     parser.add_argument("--print-markdown", action="store_true", help="Print setup markdown and exit")
     args = parser.parse_args(argv or [])
+    # stderr, so a piped --print-summary stays valid JSON.
+    print(deprecation_notice(command_name), file=sys.stderr)
     app = ConfigWebApp(cfg, config_path=config_path, preferences_path=preferences_path, command_name=command_name)
     if args.print_summary:
         snapshot = app.snapshot()

@@ -22,6 +22,7 @@ type Saved = {
   message: string;
   providerId: string;
   presetIds: string[];
+  capabilitySync?: { synced: boolean; applied: number; warnings?: string[] };
 };
 const modelNames = (text: string) => [
   ...new Set(
@@ -162,6 +163,7 @@ export function ConnectionDialog({
       const result = await mutate<Saved>("/configuration/apply", {
         previewId: preview.previewId,
         revision: preview.revision,
+        confirmed: true,
       });
       if (!result.applied) throw new Error(result.message);
       setKey("");
@@ -509,7 +511,9 @@ export function ConnectionDialog({
                 className="button primary"
                 data-setup-next
                 disabled={!!busy}
-                onClick={() => void apply()}
+                onClick={() => {
+                  if (window.confirm("确认保存通道，并自动同步模型能力？")) void apply();
+                }}
               >
                 {busy === "apply" ? (
                   <>

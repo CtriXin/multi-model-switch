@@ -84,13 +84,18 @@ class WebApplication:
         if self.sessions:
             capabilities.update(self.sessions.capabilities())
         if not capabilities["launch"]:
+            # The probe knows what is missing — an absent pi, a Node too old to
+            # run it. Repeating "not ready" instead leaves the reader with
+            # nothing to act on, which is what a whole machine of greyed-out
+            # models looked like.
+            blocker = str(capabilities.get("launchReason") or "").strip() or "Web 会话接入尚未就绪。"
             snapshot = {
                 **snapshot,
                 "models": [{**model, "available": False,
-                            "reason": model.get("reason") or "Web 会话接入尚未就绪。"}
+                            "reason": model.get("reason") or blocker}
                            for model in snapshot.get("models", [])],
                 "presets": [{**preset, "available": False,
-                             "reason": preset.get("reason") or "Web 会话接入尚未就绪。"}
+                             "reason": preset.get("reason") or blocker}
                             for preset in snapshot.get("presets", [])],
             }
         if capabilities["launch"]:
@@ -151,7 +156,9 @@ class WebApplication:
         merged = own + [s for s in self._cli_sessions()
                         if s["piSessionId"] not in claimed]
         merged.sort(key=lambda view: view.get("updatedAt") or "", reverse=True)
-        return merged
+        # Transcript source paths remain server-internal; detail lookup resolves
+        # the id again from the scoped session directory.
+        return [{k: v for k, v in row.items() if k != "path"} for row in merged]
 
     def cli_session_detail(self, session_id: str) -> dict:
         """A read-only transcript for one command-line session."""
@@ -165,8 +172,7 @@ class WebApplication:
         if row is None:
             raise WebError("NOT_FOUND", "找不到这个会话。", 404)
         return {"session": {k: v for k, v in row.items() if k != "path"},
-                # Already in the shape the transcript view renders, so the page
-                # needs no second renderer and tools stay collapsible.
+                # The transcript path is server-only and never crosses the API.
                 "events": transcript(row["path"]),
                 # Present and empty, not absent: the view reads these without
                 # checking, and an absent array is what blanked the page.
@@ -217,8 +223,11 @@ class WebApplication:
             raise WebError("INVALID_PARAMETER", "enabled 必须是 true 或 false。", 400)
         wanted = "lan" if payload["enabled"] else "loopback"
         # "all" is a deliberate command-line choice; the switch never widens
-        # past the machine's own addresses on its own.
-        if self.access.mode == "all" and wanted == "lan":
+        # past the machine's own addresses on its own, and it must not narrow
+        # it either: the wildcard socket stays bound for the life of the
+        # process, so dropping to loopback would only clear the token gate
+        # while the network can still reach every endpoint.
+        if self.access.mode == "all":
             return self.remote_access_state()
         self.access.set_mode(wanted)
         if self.listeners:
@@ -276,7 +285,7 @@ class WebApplication:
             return self._sessions().skills.preferences()
         if parts == ["ui-preferences"]:
             from .ui_preferences import UiPreferences
-            return UiPreferences(self.state_root).read()
+            return UiPreferences(self.state_root).read(seed_version=VERSION)
         if parts == ["sessions"]:
             return {"sessions": self.all_sessions(include_cli)}
         if len(parts) == 2 and parts[0] == "attachments":
@@ -474,6 +483,7 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-MMS-Web-Identity", identity)
+            self.send_header("X-MMS-Web-Version", VERSION)
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
             self.send_header("X-Frame-Options", "SAMEORIGIN" if preview else "DENY")

@@ -129,7 +129,7 @@ def public_rows(rows):
 # own figure, and so never outranks the other two.
 REFRESH_SOURCES = {
     "official": ({"mmf_official_overrides": True}, "MMF 官方数据", 3),
-    "approved": ({}, "本地已知快照", 2),
+    "approved": ({"refresh_sources": False}, "本地已知快照", 2),
     "catalog": ({"openrouter_catalog": True}, "OpenRouter 目录", 1),
 }
 # Read without touching the network by default. OpenRouter is fetched only
@@ -306,8 +306,9 @@ def draft_for(rows, request, revision):
     if changed_routes:
         # Unchanged hidden routes remain published. Only explicitly deselected
         # visible models are removed; adding one model must not prune history.
-        retained = set(target.get("approved_route_models") or []) - (original - set(selected))
-        target["models"] = [{"id": m, "visible": True} for m in sorted(retained | set(selected))]
+        # The selected list is authoritative for the current channel. Hidden
+        # history is retained in policy, but never re-enters this route.
+        target["models"] = [{"id": m, "visible": True} for m in selected]
         target["hidden_models"] = sorted((set(target.get("hidden_models", [])) | (original - set(selected))) - set(selected))
         target["extra_models"] = []
         target["fallback_models"] = []
@@ -424,9 +425,10 @@ def run(request):
         if not plan.get("ok") or guard:
             raise WebError("CONFIG_PLAN_BLOCKED", "MMF 未允许这组修改，未保存。请检查是否移除了全部可用模型，或重新加载配置后再试。", 409)
         return {"changes": changes}
-    if action != "apply" or request.get("confirmPhrase") != "写入预览DB":
-        raise WebError("CONFIRM_REQUIRED", "请先检查变更并输入确认文字。", 409)
-    payload.update(confirm_v2_preview=True, confirm_phrase=request["confirmPhrase"])
+    confirmed = request.get("confirmed") is True
+    if action != "apply" or (not confirmed and request.get("confirmPhrase") != "写入预览DB"):
+        raise WebError("CONFIRM_REQUIRED", "请先在确认弹窗中确认变更。", 409)
+    payload.update(confirm_v2_preview=True, confirm_phrase="写入预览DB")
     result = web.apply_registry_v2_preview_plan(cfg, payload, config_path=str(root / "config.toml"))
     if not result.get("ok"):
         raise WebError("CONFIG_APPLY_FAILED", "MMF 配置保存未通过，请重新加载配置检查。失败详情已保留在本地记录。", 409)

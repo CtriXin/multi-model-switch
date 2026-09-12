@@ -116,9 +116,8 @@ def default_config_root(state_root: Path) -> Path:
     """Pick the config root a Pilot without ``--config-root`` should use.
 
     Everything shares the v2 root the CLI uses, so one setup serves both
-    entrances. A Web install that already owns configuration has it adopted
-    into that shared root once; if the adoption cannot be verified, the
-    Web-owned root stays in use rather than losing those channels.
+    entrances. A Web install that already owns configuration is copied into
+    that shared root once; failed adoption never creates a second runtime root.
     """
     web_owned = Path(state_root) / "config"
     try:
@@ -131,10 +130,10 @@ def default_config_root(state_root: Path) -> Path:
     except Exception:
         return web_owned
     if _root_has_configuration(web_owned):
-        return adopt_web_owned_config(state_root, shared)
-    if is_registry_root(shared) or not shared.exists():
-        return shared
-    return web_owned
+        # Keep the shared root as the only runtime source. Adoption is best
+        # effort; a failed verification must not recreate a private Web root.
+        adopt_web_owned_config(state_root, shared)
+    return shared
 
 
 def require_publishable_root(root: Path) -> Path:

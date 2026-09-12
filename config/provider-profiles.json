@@ -399,6 +399,51 @@
           "thinking": {
             "mode": "always_on"
           }
+        },
+        "qwen3.8-max": {
+          "effort": {
+            "openai_chat": {
+              "allowed": [
+                "none",
+                "minimal",
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max"
+              ]
+            }
+          }
+        },
+        "qwen3.8-max-preview": {
+          "effort": {
+            "openai_chat": {
+              "allowed": [
+                "none",
+                "minimal",
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max"
+              ]
+            }
+          }
+        },
+        "qwen3.8-flash": {
+          "effort": {
+            "openai_chat": {
+              "allowed": [
+                "none",
+                "minimal",
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max"
+              ]
+            }
+          }
         }
       },
       "api_formats": {
@@ -431,6 +476,20 @@
           "text",
           "image"
         ]
+      },
+      "effort": {
+        "openai_chat": {
+          "path": "reasoning_effort",
+          "default": "high",
+          "allowed": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
       }
     },
     "qwen-chat-template": {
@@ -1101,80 +1160,43 @@
           ]
         }
       },
-      "model_overrides": {
-        "deepseek-v4-pro": {
-          "effort": {
-            "openai_chat": {
-              "default": "high",
-              "allowed": [
-                "high",
-                "xhigh",
-                "max"
-              ],
-              "map": {
-                "low": "high",
-                "medium": "high",
-                "xhigh": "max"
-              }
-            },
-            "anthropic_messages": {
-              "default": "high",
-              "allowed": [
-                "high",
-                "xhigh",
-                "max"
-              ],
-              "map": {
-                "low": "high",
-                "medium": "high",
-                "xhigh": "max"
-              }
-            }
-          }
-        },
-        "deepseek-v4-flash": {
-          "effort": {
-            "openai_chat": {
-              "default": "high",
-              "allowed": [
-                "high",
-                "xhigh",
-                "max"
-              ],
-              "map": {
-                "low": "high",
-                "medium": "high",
-                "xhigh": "max"
-              }
-            },
-            "anthropic_messages": {
-              "default": "high",
-              "allowed": [
-                "high",
-                "xhigh",
-                "max"
-              ],
-              "map": {
-                "low": "high",
-                "medium": "high",
-                "xhigh": "max"
-              }
-            }
-          }
-        }
-      },
+      "model_overrides": {},
       "context_windows": {
-        "deepseek-v4-pro": 1000000,
-        "deepseek-v4-flash": 1000000,
+        "deepseek-v4-pro": 1048576,
+        "deepseek-v4-flash": 1048576,
         "deepseek-v4.1-flash-expires-on-0910": 1048576,
-        "deepseek-chat": 1000000,
-        "deepseek-reasoner": 1000000,
-        "deepseek-v4-flash-vision-exp": 1000000
+        "deepseek-chat": 1048576,
+        "deepseek-reasoner": 1048576,
+        "deepseek-v4-flash-vision-exp": 1048576
       },
       "supports_vision": {
+        "deepseek-v4-flash": true,
+        "deepseek-v4-pro": false,
+        "deepseek-v4-flash-vision-exp": true,
+        "deepseek-chat": true,
+        "deepseek-reasoner": true,
         "deepseek-v4.1-flash-expires-on-0910": true
       },
       "input_modalities": {
+        "deepseek-v4-flash": [
+          "text",
+          "image"
+        ],
+        "deepseek-v4-pro": [
+          "text"
+        ],
+        "deepseek-v4-flash-vision-exp": [
+          "text",
+          "image"
+        ],
+        "deepseek-chat": [
+          "text",
+          "image"
+        ],
+        "deepseek-reasoner": [
+          "text",
+          "image"
+        ],
         "deepseek-v4.1-flash-expires-on-0910": [
           "text",
           "image"
@@ -1201,29 +1223,12 @@
         }
       },
       "max_output_tokens": {
-        "deepseek-v4-pro": 384000,
-        "deepseek-v4-flash": 384000,
+        "deepseek-v4-pro": 393216,
+        "deepseek-v4-flash": 393216,
         "deepseek-v4.1-flash-expires-on-0910": 393216,
-        "deepseek-chat": 384000,
-        "deepseek-reasoner": 384000,
-        "deepseek-v4-flash-vision-exp": 384000
-      },
-      "supports_vision": {
-        "deepseek-v4-flash": false,
-        "deepseek-v4-pro": false,
-        "deepseek-v4-flash-vision-exp": true
-      },
-      "input_modalities": {
-        "deepseek-v4-flash": [
-          "text"
-        ],
-        "deepseek-v4-pro": [
-          "text"
-        ],
-        "deepseek-v4-flash-vision-exp": [
-          "text",
-          "image"
-        ]
+        "deepseek-chat": 393216,
+        "deepseek-reasoner": 393216,
+        "deepseek-v4-flash-vision-exp": 393216
       }
     },
     "kimi-code": {
@@ -1286,7 +1291,7 @@
       },
       "context_windows": {
         "kimi-k3": 1048576,
-        "k3": 262144,
+        "k3": 1048576,
         "kimi-for-coding": 262144,
         "kimi-for-coding-highspeed": 262144,
         "kimi-k2.5": 262144,
@@ -1993,7 +1998,21 @@
           }
         }
       },
-      "effort": null,
+      "effort": {
+        "openai_chat": {
+          "path": "reasoning_effort",
+          "default": "max",
+          "allowed": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      },
       "supports_vision": {
         "glm-5.2": false,
         "glm-5.3": false
@@ -2162,14 +2181,18 @@
         "openai_chat": {
           "path": "reasoning_effort",
           "default": "max",
+          "allowed": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "official_default": "max",
           "recommended_default": "max",
-          "request_default": "max",
-          "allowed": [
-            "low",
-            "high",
-            "max"
-          ]
+          "request_default": "max"
         }
       },
       "context_windows": {

@@ -86,3 +86,52 @@ def test_application_creation_and_read_never_call_network(tmp_path):
     assert app.get(['update'])['operation']['phase'] == 'idle'
     assert not (tmp_path / 'state').exists()
     app.close()
+
+
+def test_whats_new_reads_the_notes_shipped_with_this_version(tmp_path):
+    """After an update the page reloads owing the user what changed.
+
+    Read from the install rather than the release API: the answer must not
+    depend on the network, and must not drift to a newer release that this
+    machine is not running.
+    """
+    from mms_version import VERSION
+    from mms_web.updates import release_notes
+
+    notes = release_notes(VERSION)
+    assert notes.startswith(f"# v{VERSION}"), notes[:80]
+
+    whats_new = service(tmp_path).status()['whatsNew']
+    assert whats_new['version'] == VERSION
+    assert whats_new['notes'] == notes
+    # The costs of the upgrade are pulled out of the notes, as the confirm step
+    # already does, so the panel can lead with them.
+    assert whats_new['upgradeNotice']
+    assert whats_new['upgradeNotice'] in notes
+    assert '## 升级须知' not in whats_new['upgradeNotice']
+
+
+def test_whats_new_will_not_read_outside_the_release_notes_directory():
+    from mms_web.updates import release_notes
+
+    for value in ('../../etc/passwd', 'v4.16.0', '4.16', '', None, '4.16.0/../../x'):
+        assert release_notes(value) == '', value
+
+
+def test_ui_preferences_remember_which_notes_were_read(tmp_path):
+    from mms_web.ui_preferences import UiPreferences
+
+    prefs = UiPreferences(tmp_path)
+    assert prefs.read()['whatsNewSeenVersion'] == ''
+
+    prefs.update({'whatsNewSeenVersion': '4.16.0'})
+    assert UiPreferences(tmp_path).read()['whatsNewSeenVersion'] == '4.16.0'
+
+    # Still a flag store for the tour; the two must not overwrite each other.
+    prefs.update({'tourSeen': True})
+    reread = UiPreferences(tmp_path).read()
+    assert reread['tourSeen'] is True
+    assert reread['whatsNewSeenVersion'] == '4.16.0'
+
+    prefs.update({'whatsNewSeenVersion': 'x' * 200})
+    assert len(UiPreferences(tmp_path).read()['whatsNewSeenVersion']) == 64
