@@ -1692,7 +1692,6 @@ export function App() {
               className={"home-content" + (homeSplit ? " home-split" : "")}
               ref={setHomeNode}
             >
-              <WhatsNew ready={!loading && connected} />
               <div className="home-intro">
                 <WorkspacePicker
                   workspaces={data.workspaces}
@@ -1929,7 +1928,7 @@ export function App() {
             refresh={() => void load()}
           />
         )}
-        {page === "bots" && !settingsOpen && <BotStudio data={data} onOpenSession={openSession} onExit={() => navigate("new")} />}
+        {page === "bots" && !settingsOpen && <BotStudio data={data} enterToSend={enterToSend} onOpenSession={openSession} onExit={() => navigate("new")} />}
         {page === "session" && (
           <div className={"session-layout " + (panel ? "with-panel" : "")}>
             <div className="conversation">
