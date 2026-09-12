@@ -4,7 +4,7 @@ MMS Pilot 把 MMF 日常使用的模型、通道、effort、工作文件夹和 P
 
 ## 安装
 
-支持 macOS、Linux。Windows 暂建议在 WSL2 内运行服务；Windows 原生安装与系统文件选择尚未验收。
+支持 macOS、Linux；Windows Native 当前为 Preview。Windows 可通过 `npx @ctrixin/mms` 使用 PowerShell bootstrap（Python 3.11+、Node 18.17+），新 PowerShell 窗口需重新加载 PATH；WSL2 仍是 fallback。Windows Native 尚未达到 Stable，Edge/Chrome CDP、Pi 生命周期和升级保护需按平台 acceptance matrix 验证。
 
 安装程序会准备 Python 3.11+、兼容的 Node.js 和 Pi，已有 CLI 保留，缺失的 Claude/Codex/OpenCode 会自动补装。发布包自带编译好的页面，使用者不需要构建 Web。
 

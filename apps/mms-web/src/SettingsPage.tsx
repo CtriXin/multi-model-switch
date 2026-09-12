@@ -106,6 +106,20 @@ export function SettingsPage({
         </button>
         <AppVersion version={data.appVersion} onClick={openUpdates} updateAvailable={updateAvailable} />
       </nav>
+      <section className="platform-capability" aria-label="运行环境能力">
+        <div>
+          <strong>{data.platform?.os === "win32" ? "Windows Native Preview" : "当前运行环境"}</strong>
+          <span>{data.platform?.pathStyle || "unknown"} · {data.platform?.processControl || "能力未知"}</span>
+        </div>
+        <div className="platform-browser-capabilities">
+          {(data.browser || []).map((capability) => (
+            <span className={capability.supported ? "capability-chip" : "capability-chip unavailable"} key={capability.backend}>
+              {capability.backend}: {capability.loggedIn === "unknown" ? "登录态未知" : capability.loggedIn ? "已登录" : "独立环境"}
+              {capability.reason ? ` · ${capability.reason}` : ""}
+            </span>
+          ))}
+        </div>
+      </section>
       {tab === "models" ? (
         <Models
           connectionCompleted={connectionCompleted}

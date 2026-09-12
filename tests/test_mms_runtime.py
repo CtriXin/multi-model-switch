@@ -117,3 +117,21 @@ def test_cli_resolver_preserves_nvm_bin_symlink(tmp_path):
     assert binary == str(symlink)
     assert cmd[0] == str(symlink)
     assert env["PATH"].split(":")[0] == str(node22)
+
+
+def test_windows_cli_resolver_skips_posix_wrapper_for_cmd_shim(tmp_path, monkeypatch):
+    import mms_runtime
+
+    wrapper = tmp_path / "pi-cli-wrapper.sh"
+    wrapper.write_text("#!/bin/sh\n", encoding="utf-8")
+    wrapper.chmod(0o755)
+    cmd = tmp_path / "pi.cmd"
+    cmd.write_text("@echo off\n", encoding="utf-8")
+    cmd.chmod(0o755)
+    monkeypatch.setattr(mms_runtime.os, "name", "nt")
+    monkeypatch.setattr(mms_runtime, "_repo_cli_wrapper", lambda name: str(wrapper))
+    monkeypatch.setattr(mms_runtime.shutil, "which", lambda name, path=None: str(cmd))
+
+    resolved = mms_runtime.resolve_cli_binary("pi", env={"MMS_PI_BIN": str(wrapper), "PATH": str(tmp_path)})
+
+    assert resolved == str(cmd)

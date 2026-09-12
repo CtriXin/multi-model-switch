@@ -1,4 +1,3 @@
-import fcntl
 import os
 import subprocess
 import sys
@@ -9,6 +8,10 @@ from mms_web.install_lock import acquire_runtime_lease
 from test_install_script_paths import _extract_shell_function_body
 
 ROOT=Path(__file__).resolve().parents[1]
+
+pytestmark = pytest.mark.skipif(
+    os.name == "nt", reason="installer shell checks require a POSIX bash environment"
+)
 
 
 def guard(home, command='guard_live_pilot_install', keep_running=0, port=0):

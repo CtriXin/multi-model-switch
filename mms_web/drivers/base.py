@@ -7,6 +7,7 @@ available. Tests inject their own process or driver factory.
 
 from __future__ import annotations
 
+import os
 import subprocess
 
 
@@ -18,6 +19,11 @@ class PipedProcessLauncher:
     """
 
     def popen(self, cmd, *, env, cwd=None) -> subprocess.Popen:
+        extra = {}
+        if os.name == "nt":
+            # A detached Pilot has no console, so a console child would pop up a
+            # window of its own on the user's desktop.
+            extra["creationflags"] = subprocess.CREATE_NO_WINDOW
         return subprocess.Popen(
             list(cmd),
             env=dict(env),
@@ -26,6 +32,7 @@ class PipedProcessLauncher:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             start_new_session=True,
+            **extra,
         )
 
 

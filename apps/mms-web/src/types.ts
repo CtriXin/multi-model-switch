@@ -237,6 +237,24 @@ export interface Bootstrap {
   appVersion?: string;
   mode: "live" | "preview";
   csrfToken: string;
+  platform?: {
+    os: "darwin" | "linux" | "win32";
+    shell: string;
+    home: string;
+    configRoot: string;
+    stateRoot: string;
+    tempRoot: string;
+    pathStyle: "posix" | "windows";
+    processControl: string;
+    filePicker: string;
+  };
+  browser?: {
+    backend: string;
+    supported: boolean;
+    loggedIn: boolean | "unknown";
+    reason?: string;
+    requires?: string[];
+  }[];
   capabilities: {
     catalogRead: boolean;
     configure: boolean;

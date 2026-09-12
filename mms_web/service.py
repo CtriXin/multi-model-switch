@@ -5,8 +5,9 @@ nothing restarts it later. These commands answer the two questions that
 kept getting lost — "which of the Pilots on this machine is mine, and what
 is its address" — and start or stop that one. Discovery is by port probe:
 every Pilot answers HEAD / with `X-MMS-Web-Identity` (source|config_root|
-version) and `X-MMS-Web-Version`; the process details come from `lsof` and
-`ps`, never from a pid file that could go stale.
+version), `X-MMS-Web-Version` and `X-MMS-Web-State` (a fingerprint of its
+state root, which is what makes an instance "mine"); the process details come
+from `lsof`/`ps` or `netstat`/CIM, never from a pid file that could go stale.
 """
 from __future__ import annotations
 
@@ -26,6 +27,10 @@ DEFAULT_PORT_BASE = 8765
 PORT_SEARCH_LIMIT = 20
 START_TIMEOUT = 30
 STOP_TIMEOUT = 20
+# A Windows Pilot cannot be asked to exit by signal: it has no console of its
+# own and no window for CloseMainWindow. It watches this file in its state root
+# instead, so `stop` stays a request and never a forced kill.
+STOP_REQUEST = "stop-requested"
 
 
 def command_label() -> str:
@@ -124,12 +129,31 @@ def help_text(command: str | None = None) -> str:
 
 
 def default_state_root() -> Path:
-    base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local/share")
-    return (Path(base) / "mms-web").expanduser().resolve()
+    from mms_platform import describe_platform
+    return Path(describe_platform().state_root)
 
 
 def source_root() -> Path:
     return Path(__file__).resolve().parent.parent
+
+
+def _is_windows() -> bool:
+    """One seam for every Windows branch, so each can be tested on any host."""
+    return os.name == "nt"
+
+
+def state_identity(path) -> str:
+    """A path-free fingerprint of one state root, published by the server.
+
+    `mine` used to be decided by re-parsing the server's command line. On
+    Windows that means CIM plus POSIX-escaped splitting of `C:\\Users\\...`,
+    which drops every separator, so no instance was ever recognized as its
+    own. Comparing fingerprints needs neither the process list nor the path.
+    """
+    import hashlib
+
+    resolved = Path(path).expanduser().resolve()
+    return hashlib.sha256(os.path.normcase(str(resolved)).encode("utf-8")).hexdigest()
 
 
 def _probe(port: int, timeout: float = 0.4):
@@ -148,11 +172,23 @@ def _probe(port: int, timeout: float = 0.4):
     identity = response.getheader("X-MMS-Web-Identity")
     if not identity:
         return None
-    return {"identity": identity, "version": response.getheader("X-MMS-Web-Version") or ""}
+    return {"identity": identity, "version": response.getheader("X-MMS-Web-Version") or "",
+            "stateIdentity": response.getheader("X-MMS-Web-State") or ""}
 
 
 def _listening_pids(port: int) -> list[int]:
     try:
+        if _is_windows():
+            out = subprocess.run(["netstat", "-ano", "-p", "TCP"],
+                                 capture_output=True, text=True, timeout=5).stdout
+            pids = []
+            for line in out.splitlines():
+                fields = line.split()
+                if len(fields) >= 5 and fields[0].upper() == "TCP":
+                    local = fields[1].rsplit(":", 1)
+                    if len(local) == 2 and local[1] == str(port) and fields[3].upper() == "LISTENING" and fields[4].isdigit():
+                        pids.append(int(fields[4]))
+            return sorted(set(pids))
         out = subprocess.run(["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-Fp"],
                              capture_output=True, text=True, timeout=5).stdout
     except (OSError, subprocess.SubprocessError):
@@ -166,14 +202,32 @@ def _listening_pids(port: int) -> list[int]:
 
 def _command_line(pid: int) -> list[str]:
     try:
-        out = subprocess.run(["ps", "-o", "command=", "-p", str(pid)],
-                             capture_output=True, text=True, timeout=5).stdout.strip()
+        if _is_windows():
+            command = "$p=Get-CimInstance Win32_Process -Filter 'ProcessId=%s'; if ($p) { $p.CommandLine }" % pid
+            out = subprocess.run(["powershell.exe", "-NoProfile", "-Command", command],
+                                 capture_output=True, text=True, timeout=5).stdout.strip()
+        else:
+            out = subprocess.run(["ps", "-o", "command=", "-p", str(pid)],
+                                 capture_output=True, text=True, timeout=5).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         return []
+    return _split_command_line(out)
+
+
+def _split_command_line(text: str) -> list[str]:
+    """Split one command line the way the platform that wrote it meant it."""
+    if _is_windows():
+        # POSIX escaping would eat the backslashes in every `C:\...` argument.
+        try:
+            tokens = shlex.split(text, posix=False)
+        except ValueError:
+            tokens = text.split()
+        return [token[1:-1] if len(token) > 1 and token[0] == token[-1] == '"' else token
+                for token in tokens]
     try:
-        return shlex.split(out)
+        return shlex.split(text)
     except ValueError:
-        return out.split()
+        return text.split()
 
 
 def _option(argv: list[str], name: str) -> str:
@@ -186,6 +240,8 @@ def _option(argv: list[str], name: str) -> str:
 
 
 def _cwd(pid: int) -> str:
+    if _is_windows():
+        return ""
     try:
         out = subprocess.run(["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"],
                              capture_output=True, text=True, timeout=5).stdout
@@ -201,6 +257,7 @@ def discover(port_base: int = DEFAULT_PORT_BASE, limit: int = PORT_SEARCH_LIMIT,
              state_root: Path | None = None) -> list[dict]:
     """Every Pilot answering on the probed ports, ours flagged by state root."""
     mine_root = (state_root or default_state_root())
+    mine_fingerprint = state_identity(mine_root)
     found = []
     for port in range(port_base, port_base + limit):
         probe = _probe(port)
@@ -211,6 +268,10 @@ def discover(port_base: int = DEFAULT_PORT_BASE, limit: int = PORT_SEARCH_LIMIT,
         argv = _command_line(pid) if pid else []
         raw_state = _option(argv, "--state-root")
         state = str(Path(raw_state).expanduser().resolve()) if raw_state else str(default_state_root())
+        fingerprint = probe.get("stateIdentity") or ""
+        # The header is authoritative. The command line is a fallback for a
+        # Pilot older than the header, and the only source for pid and source.
+        mine = fingerprint == mine_fingerprint if fingerprint else (bool(argv) and state == str(mine_root))
         entry = {
             "port": port,
             "pid": pid,
@@ -220,7 +281,7 @@ def discover(port_base: int = DEFAULT_PORT_BASE, limit: int = PORT_SEARCH_LIMIT,
             "configRoot": _option(argv, "--config-root"),
             "source": _cwd(pid) if pid else "",
             "url": f"http://127.0.0.1:{port}",
-            "mine": bool(argv) and state == str(mine_root),
+            "mine": mine,
         }
         token_file = Path(state) / "remote-access-token"
         if entry["mine"] and (Path(state) / "remote-access.json").is_file() and token_file.is_file():
@@ -297,9 +358,17 @@ def start(*, state_root: Path, port_base: int, limit: int, open_browser: bool,
                *(extra_args or [])]
     env = dict(os.environ)
     env.setdefault("PYTHONPATH", str(source_root()))
+    creationflags = 0
+    if _is_windows():
+        # subprocess ignores start_new_session on Windows, so without these
+        # flags the "detached" Pilot keeps the launching console: closing the
+        # window or pressing Ctrl+C in it takes the Pilot and every Pi session
+        # with it.
+        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
     with log_path.open("ab") as log:
         subprocess.Popen(command, cwd=str(source_root()), env=env, stdin=subprocess.DEVNULL,
-                         stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+                         stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
+                         creationflags=creationflags)
     deadline = time.monotonic() + START_TIMEOUT
     while time.monotonic() < deadline:
         mine = _mine(discover(port_base, limit, state_root))
@@ -316,7 +385,7 @@ def start(*, state_root: Path, port_base: int, limit: int, open_browser: bool,
 
 
 def stop(*, state_root: Path, port_base: int, limit: int, everyone: bool, quiet: bool = False) -> list[dict]:
-    """SIGTERM ours (or every Pilot with --all) and wait; never kill -9."""
+    """Gracefully request ours (or every Pilot with --all) and wait."""
     targets = [e for e in discover(port_base, limit, state_root) if everyone or e["mine"]]
     targets = [e for e in targets if e["pid"]]
     if not targets:
@@ -325,7 +394,18 @@ def stop(*, state_root: Path, port_base: int, limit: int, everyone: bool, quiet:
         return []
     for entry in targets:
         try:
-            os.kill(entry["pid"], signal.SIGTERM)
+            if _is_windows():
+                # A detached Pilot has no console to receive CTRL_BREAK and no
+                # window for CloseMainWindow, and taskkill /F is a forced kill
+                # that would take its Pi sessions with it. Write the request the
+                # Pilot itself watches for.
+                request = Path(entry["stateRoot"]) / STOP_REQUEST
+                try:
+                    request.write_text(str(entry["port"]), encoding="utf-8")
+                except OSError as error:
+                    print(f"无法请求 pid {entry['pid']} 退出（{entry['url']}）：{error}", file=sys.stderr)
+            else:
+                os.kill(entry["pid"], signal.SIGTERM)
         except ProcessLookupError:
             pass
         except PermissionError:
@@ -337,6 +417,9 @@ def stop(*, state_root: Path, port_base: int, limit: int, everyone: bool, quiet:
         remaining = [e for e in remaining if _probe(e["port"]) is not None]
     for entry in targets:
         if entry in remaining:
+            if _is_windows():
+                # Leave no request behind that a later start would consume.
+                Path(entry["stateRoot"]).joinpath(STOP_REQUEST).unlink(missing_ok=True)
             print(f"⚠ pid {entry['pid']}（{entry['url']}）在 {STOP_TIMEOUT}s 内没有退出，未强制结束。", file=sys.stderr)
         elif not quiet:
             print(f"已停止 {entry['url']}（pid {entry['pid']}）")
