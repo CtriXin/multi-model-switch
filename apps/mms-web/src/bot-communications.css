@@ -199,26 +199,34 @@
   padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: 9px;
-  background: var(--bg);
+  background: var(--soft);
 }
 
 .bot-communication-message.from-current {
   border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
-  background: var(--soft);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
 }
 
 .bot-communication-meta {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 5px;
   margin-bottom: 6px;
   color: var(--muted);
   font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .bot-communication-meta strong {
   color: var(--ink);
   font-size: 11px;
+}
+
+.bot-communication-meta-sep {
+  color: var(--muted);
+  opacity: 0.6;
 }
 
 .bot-communication-meta time {
@@ -229,19 +237,72 @@
   color: var(--ink);
   font-size: 12px;
   line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.bot-communication-content p {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .bot-communication-content .markdown > :first-child { margin-top: 0; }
 .bot-communication-content .markdown > :last-child { margin-bottom: 0; }
 
 .bot-communication-content .markdown pre {
+  margin: 6px 0 0;
   max-height: 150px;
   overflow: auto;
   color: var(--ink);
-  background: var(--surface);
-  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+  border: 0;
   padding: 8px;
   border-radius: 6px;
+  overflow-wrap: anywhere;
+}
+
+.bot-communication-artifacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.bot-communication-artifacts .bot-file-preview-trigger {
+  height: 38px;
+  min-height: 38px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: none;
+  font: inherit;
+  font-size: 12px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: border-color 150ms ease-out;
+}
+
+.bot-communication-artifacts .bot-file-preview-trigger:hover {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+
+.bot-communication-artifacts .bot-file-preview-trigger svg {
+  color: var(--accent);
+  flex: 0 0 14px;
+}
+
+.bot-communication-artifacts .bot-file-preview-trigger span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .bot-communication-status {
@@ -270,8 +331,7 @@
   color: var(--bot-danger);
 }
 
-.bot-communication-status button,
-.bot-communications-refresh {
+.bot-communication-status button {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -286,16 +346,10 @@
   transition: all 120ms ease-out;
 }
 
-.bot-communication-status button:hover,
-.bot-communications-refresh:hover {
+.bot-communication-status button:hover {
   border-color: var(--accent);
   color: var(--accent);
   background: var(--soft);
-}
-
-.bot-communications-refresh {
-  margin-top: 10px;
-  border-color: var(--line);
 }
 
 @media (max-width: 640px) {

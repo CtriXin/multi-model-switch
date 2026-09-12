@@ -10,6 +10,8 @@ import {
   Brain,
   Camera,
   Check,
+  ChevronDown,
+  Calendar,
   CircleAlert,
   Clock3,
   FileText,
@@ -153,6 +155,9 @@ import {
   getStatusBadgeText,
   waitReasonLabel,
   taskStatusLabels,
+  formatScheduledTaskTime,
+  getBotSecondLine,
+  getIndicatorStatus,
 } from "./bot-visual-system.ts";
 
 export {
@@ -160,6 +165,9 @@ export {
   getStatusBadgeText,
   waitReasonLabel,
   taskStatusLabels,
+  formatScheduledTaskTime,
+  getBotSecondLine,
+  getIndicatorStatus,
 };
 
 export function PixelAvatar({
@@ -225,6 +233,7 @@ export function BotCard({
   bot,
   selected = false,
   task,
+  tasks = [],
   onSelect,
   onWake,
   onEdit,
@@ -233,6 +242,7 @@ export function BotCard({
   bot: BotDefinition;
   selected?: boolean;
   task?: BotTask;
+  tasks?: BotTask[];
   onSelect?: (bot: BotDefinition) => void;
   onWake?: (botId: string) => void;
   onEdit?: (bot: BotDefinition) => void;
@@ -259,6 +269,9 @@ export function BotCard({
     };
   }, [menuOpen]);
 
+  const indicatorStatus = getIndicatorStatus(bot, task, tasks);
+  const secondLine = getBotSecondLine(bot, task, tasks);
+
   return (
     <article className={`bot-card bot-card-${bot.status}${selected ? " is-selected" : ""}`}>
       <button
@@ -267,21 +280,24 @@ export function BotCard({
         onClick={() => onSelect?.(bot)}
         aria-pressed={selected}
       >
-        <PixelAvatar avatarId={bot.avatarId} color={bot.avatarColor} seed={bot.id} active={bot.status === "busy"} />
+        <span className="bot-card-avatar-wrap">
+          <PixelAvatar avatarId={bot.avatarId} color={bot.avatarColor} seed={bot.id} />
+          {indicatorStatus !== "idle" && (
+            <span
+              className={`bot-card-status-dot is-${indicatorStatus}`}
+              aria-label={indicatorStatus}
+            />
+          )}
+        </span>
         <span className="bot-card-copy">
           <span className="bot-card-title">
-            <strong>{bot.name}</strong>
-            <BotStatusBadge status={bot.status} />
-            {bot.wakeEnabled && (
-              <span className="bot-card-wake-tag" title="自动唤醒已开启">
-                <AlarmClockCheck size={12} />
-                <span>自动唤醒</span>
-              </span>
-            )}
+            <strong title={bot.name}>{bot.name}</strong>
           </span>
-          <span className="bot-card-description">
-            {task ? task.prompt : (bot.description || "MMS Bot")}
-          </span>
+          {secondLine && (
+            <span className="bot-card-description" title={secondLine}>
+              {secondLine}
+            </span>
+          )}
         </span>
       </button>
       {bot.status === "paused" && onWake && (
@@ -402,6 +418,7 @@ export function BotList({
                     "waiting",
                   ].includes(task.status),
               )}
+              tasks={tasks}
               onSelect={onSelect}
               onWake={onWake}
               onEdit={onEdit}
@@ -1198,6 +1215,7 @@ export function BotChat({
   onUpdateBot,
   onExit,
   disabled = false,
+  enterToSend = true,
 }: {
   bot?: BotDefinition;
   bots: BotDefinition[];
@@ -1220,14 +1238,81 @@ export function BotChat({
   onUpdateBot?: (botId: string, patch: Partial<Pick<BotDefinition, "name" | "presetId" | "systemPrompt" | "description">>) => Promise<void>;
   onExit?: () => void;
   disabled?: boolean;
+  enterToSend?: boolean;
 }) {
   const [value, setValue] = useState("");
   const [runAt, setRunAt] = useState("");
-  const [scheduleOpen, setScheduleOpen] = useState(false);
-  const scheduleInputRef = useRef<HTMLInputElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const [customSchedule, setCustomSchedule] = useState(false);
+  const [customDate, setCustomDate] = useState("");
+  const [customTime, setCustomTime] = useState("09:00");
+  const [customQuickTime, setCustomQuickTime] = useState("09:00");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [previewArtifact, setPreviewArtifact] = useState<BotArtifact | null>(null);
+
+  function selectSchedulePreset(preset: "1h" | "tonight" | "tomorrow") {
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    if (preset === "1h") {
+      const d = new Date(now.getTime() + 60 * 60 * 1000);
+      d.setSeconds(0, 0);
+      setRunAt(
+        `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`,
+      );
+    } else if (preset === "tonight") {
+      const d = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate(),
+        20,
+        0,
+        0,
+        0,
+      );
+      if (d.getTime() <= now.getTime()) {
+        d.setDate(d.getDate() + 1);
+      }
+      setRunAt(
+        `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T20:00`,
+      );
+    } else if (preset === "tomorrow") {
+      const d = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate() + 1,
+        9,
+        0,
+        0,
+        0,
+      );
+      setRunAt(
+        `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T09:00`,
+      );
+    }
+    popoverRef.current?.hidePopover();
+    setCustomSchedule(false);
+  }
+
+  const scheduleDateOptions = (() => {
+    const options = [];
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const now = new Date();
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i);
+      const val = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+      const label =
+        i === 0
+          ? `今天 (${d.getMonth() + 1}月${d.getDate()}日)`
+          : i === 1
+            ? `明天 (${d.getMonth() + 1}月${d.getDate()}日)`
+            : i === 2
+              ? `后天 (${d.getMonth() + 1}月${d.getDate()}日)`
+              : `${d.getMonth() + 1}月${d.getDate()}日`;
+      options.push({ value: val, label });
+    }
+    return options;
+  })();
   const [onboarding, setOnboarding] = useState<{ focus?: string; style?: string; autonomy?: string }>({});
   const [onboardingBusy, setOnboardingBusy] = useState(false);
   const [onboardingDone, setOnboardingDone] = useState(false);
@@ -1302,7 +1387,12 @@ export function BotChat({
       });
       setValue("");
       setRunAt("");
-      setScheduleOpen(false);
+      try {
+        popoverRef.current?.hidePopover();
+      } catch {
+        // popover might not be open
+      }
+      setCustomSchedule(false);
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : "消息发送失败，请稍后重试。",
@@ -1628,71 +1718,193 @@ export function BotChat({
             rows={1}
             disabled={disabled || busy || !bot}
             aria-label="发送给 Bot 的消息"
+            title={enterToSend ? "按 Enter 发送，Shift + Enter 换行" : "按 ⌘/Ctrl + Enter 发送，Enter 换行"}
             onKeyDown={(event) => {
-              if (
-                event.key === "Enter" &&
-                !event.shiftKey &&
-                !event.nativeEvent.isComposing
-              ) {
+              if (event.nativeEvent.isComposing) return;
+              const sendCombo = enterToSend
+                ? event.key === "Enter" && !event.shiftKey
+                : (event.metaKey || event.ctrlKey) && event.key === "Enter";
+              if (sendCombo) {
                 event.preventDefault();
                 event.currentTarget.form?.requestSubmit();
               }
             }}
           />
           <div className="bot-chat-composer-footer">
-            <div className="bot-chat-schedule">
-              {scheduleOpen || runAt ? (
-                <div className="bot-chat-schedule-picker">
+            <div className="bot-chat-composer-meta">
+              {runAt && (
+                <span className="bot-schedule-chip">
                   <Timer size={12} />
-                  <input
-                    ref={scheduleInputRef}
-                    type="datetime-local"
-                    value={runAt}
-                    onChange={(event) => setRunAt(event.target.value)}
-                    disabled={disabled || busy}
-                    aria-label="定时执行时间"
-                  />
+                  <span>{formatScheduledTaskTime(runAt)}</span>
                   <button
                     type="button"
-                    className="bot-chat-schedule-clear"
-                    onClick={() => {
-                      setRunAt("");
-                      setScheduleOpen(false);
-                    }}
+                    className="bot-schedule-chip-clear"
+                    onClick={() => setRunAt("")}
                     aria-label="清除定时"
                     title="清除定时"
                   >
                     <X size={12} />
                   </button>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  className="bot-chat-schedule-trigger"
-                  onClick={() => {
-                    setScheduleOpen(true);
-                    setTimeout(() => scheduleInputRef.current?.focus(), 50);
-                  }}
-                  disabled={disabled || busy}
-                >
-                  <Timer size={12} />
-                  <span>定时…</span>
-                </button>
+                </span>
               )}
             </div>
-            <button
-              className="bot-chat-send"
-              type="submit"
-              disabled={disabled || busy || !value.trim() || !bot}
-              aria-label="发送"
-              title={busy ? "发送中" : "发送"}
+            <div className="bot-chat-send-group">
+              <button
+                className="bot-chat-send"
+                type="submit"
+                disabled={disabled || busy || !value.trim() || !bot}
+                aria-label={busy ? "发送中" : runAt ? "定时执行" : "发送"}
+                title={busy ? "发送中" : runAt ? "定时执行" : "发送"}
+              >
+                {busy ? (
+                  <LoaderCircle className="bot-spin" size={15} />
+                ) : (
+                  <Send size={15} />
+                )}
+              </button>
+              <button
+                type="button"
+                className="bot-chat-schedule-trigger"
+                disabled={disabled || busy || !bot}
+                aria-label="定时执行选项"
+                title="定时选项"
+                onClick={(e) => {
+                  const popover = popoverRef.current;
+                  if (!popover) return;
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  popover.style.position = "fixed";
+                  popover.style.margin = "0";
+                  popover.style.bottom = `${window.innerHeight - rect.top + 6}px`;
+                  popover.style.right = `${Math.max(16, window.innerWidth - rect.right)}px`;
+                  popover.style.top = "auto";
+                  popover.style.left = "auto";
+                  try {
+                    popover.togglePopover();
+                  } catch {
+                    // fallback
+                  }
+                }}
+              >
+                <ChevronDown size={14} />
+              </button>
+            </div>
+            <div
+              id="bot-schedule-popover"
+              popover="auto"
+              ref={popoverRef}
+              className="bot-schedule-popover"
+              onToggle={(e: any) => {
+                if (e.newState === "closed") {
+                  setCustomSchedule(false);
+                }
+              }}
             >
-              {busy ? (
-                <LoaderCircle className="bot-spin" size={15} />
+              {!customSchedule ? (
+                <div className="bot-schedule-presets">
+                  <button
+                    type="button"
+                    className="bot-schedule-option"
+                    onClick={() => selectSchedulePreset("1h")}
+                  >
+                    <Clock3 size={14} />
+                    <span>1 小时后</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="bot-schedule-option"
+                    onClick={() => selectSchedulePreset("tonight")}
+                  >
+                    <Clock3 size={14} />
+                    <span>今晚 20:00</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="bot-schedule-option"
+                    onClick={() => selectSchedulePreset("tomorrow")}
+                  >
+                    <Calendar size={14} />
+                    <span>明天 09:00</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="bot-schedule-option"
+                    onClick={() => {
+                      if (!customDate) {
+                        setCustomDate(scheduleDateOptions[1]?.value || scheduleDateOptions[0]?.value);
+                      }
+                      setCustomSchedule(true);
+                    }}
+                  >
+                    <Calendar size={14} />
+                    <span>自定义…</span>
+                  </button>
+                </div>
               ) : (
-                <Send size={15} />
+                <div className="bot-schedule-custom-panel">
+                  <div className="bot-schedule-custom-row">
+                    <select
+                      className="bot-schedule-select"
+                      value={customDate || scheduleDateOptions[1]?.value}
+                      onChange={(e) => setCustomDate(e.target.value)}
+                      aria-label="选择日期"
+                    >
+                      {scheduleDateOptions.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      className="bot-schedule-select"
+                      value={customQuickTime}
+                      onChange={(e) => {
+                        setCustomQuickTime(e.target.value);
+                        setCustomTime(e.target.value);
+                      }}
+                      aria-label="常用时段"
+                    >
+                      <option value="09:00">09:00</option>
+                      <option value="12:00">12:00</option>
+                      <option value="14:00">14:00</option>
+                      <option value="18:00">18:00</option>
+                      <option value="20:00">20:00</option>
+                      <option value="22:00">22:00</option>
+                    </select>
+                    <input
+                      type="text"
+                      className="bot-schedule-time-input"
+                      value={customTime}
+                      placeholder="HH:mm"
+                      maxLength={5}
+                      onChange={(e) => setCustomTime(e.target.value)}
+                      aria-label="精确时间"
+                    />
+                  </div>
+                  <div className="bot-schedule-custom-actions">
+                    <button
+                      type="button"
+                      className="bot-schedule-back-btn"
+                      onClick={() => setCustomSchedule(false)}
+                    >
+                      返回
+                    </button>
+                    <button
+                      type="button"
+                      className="bot-schedule-confirm-btn"
+                      onClick={() => {
+                        const d = customDate || scheduleDateOptions[1]?.value || scheduleDateOptions[0]?.value;
+                        const t = customTime.trim() || "09:00";
+                        setRunAt(`${d}T${t}`);
+                        popoverRef.current?.hidePopover();
+                        setCustomSchedule(false);
+                      }}
+                    >
+                      确定
+                    </button>
+                  </div>
+                </div>
               )}
-            </button>
+            </div>
           </div>
           {error && (
             <p className="bot-chat-input-error" role="alert">

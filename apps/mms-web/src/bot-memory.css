@@ -163,10 +163,13 @@
   color: var(--ink);
 }
 
-.bot-memory-search input {
+.bot-memory-search input,
+.bot-memory-search input:focus,
+.bot-memory-search input:focus-visible {
   width: 100%;
-  border: 0;
-  outline: 0;
+  border: 0 !important;
+  outline: none !important;
+  box-shadow: none !important;
   color: var(--ink);
   background: transparent;
   font: inherit;
@@ -288,6 +291,7 @@
 .bot-memory-note textarea:focus,
 .bot-memory-add textarea:focus {
   border-color: var(--accent);
+  outline: none;
 }
 
 .bot-memory-note-actions {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { MouseEvent } from "react";
-import { Download, FileText, X } from "lucide-react";
+import { Check, Copy, Download, FileText, X } from "lucide-react";
 import { RichText } from "./components";
 import type { BotArtifact } from "./Bot";
 import { artifactContentUrl, decodePreviewText, parseDelimited, PREVIEW_BYTE_LIMIT, previewType, TEXT_BYTE_LIMIT, TEXT_DISPLAY_LIMIT, readPreviewBytes } from "./bot-artifact-preview";
@@ -9,6 +9,7 @@ type Props = { artifact: BotArtifact; onClose: () => void };
 
 export function BotArtifactPreview({ artifact, onClose }: Props) {
   const [state, setState] = useState<{ status: "loading" | "ready" | "error"; text?: string; url?: string; message?: string }>({ status: "loading" });
+  const [copied, setCopied] = useState(false);
   const type = previewType(artifact);
   const contentUrl = artifactContentUrl(artifact.url, window.location.origin);
   useEffect(() => {
@@ -45,12 +46,34 @@ export function BotArtifactPreview({ artifact, onClose }: Props) {
   const closeOnBackdrop = (event: MouseEvent<HTMLDivElement>) => { if (event.target === event.currentTarget) onClose(); };
   const htmlUrl = contentUrl.replace(/\/content$/, "/preview");
   const title = artifact.name;
+  const handleCopy = async () => {
+    if (!state.text) return;
+    try {
+      await navigator.clipboard.writeText(state.text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* ignore */
+    }
+  };
   return (
     <div className="bot-artifact-lightbox" role="dialog" aria-modal="true" aria-label={`预览 ${title}`} onMouseDown={closeOnBackdrop}>
       <div className={`bot-artifact-lightbox-card bot-preview-${type.kind}`}>
         <header className="bot-artifact-lightbox-toolbar">
           <span><FileText size={15} />{title}</span>
           <div>
+            {state.text !== undefined && (
+              <button
+                type="button"
+                className={`bot-preview-copy${copied ? " is-copied" : ""}`}
+                onClick={() => void handleCopy()}
+                title={copied ? "已复制到剪贴板" : "复制全文"}
+                aria-label={copied ? "已复制到剪贴板" : "复制全文"}
+              >
+                {copied ? <Check size={13} /> : <Copy size={13} />}
+                <span>{copied ? "已复制" : "复制"}</span>
+              </button>
+            )}
             <a className="bot-preview-download" href={artifact.url} download={artifact.name} title="下载文件"><Download size={15} />下载</a>
             <button type="button" className="bot-icon-button" onClick={onClose} aria-label="关闭预览"><X size={17} /></button>
           </div>
