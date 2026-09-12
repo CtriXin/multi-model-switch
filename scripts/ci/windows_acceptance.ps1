@@ -118,7 +118,7 @@ Assert-True (Test-Path -LiteralPath $installer) "install.ps1 not found at $insta
 $installRoot = Join-Path $TempRoot "install"
 $dryConfig = Join-Path $TempRoot "dry-cfg"
 $dryState = Join-Path $TempRoot "dry-state"
-$dry = Invoke-Installer @("-DryRun", "-Ref", "ci-probe", "-InstallRoot", $installRoot, "-ConfigRoot", $dryConfig, "-StateRoot", $dryState)
+$dry = Invoke-Installer -installerArgs @("-Ref", "ci-probe", "-InstallRoot", $installRoot, "-ConfigRoot", $dryConfig, "-StateRoot", $dryState, "-DryRun")
 Assert-True ($dry.exit -eq 0) "installer dry-run exited $($dry.exit): $($dry.text)"
 $dryText = $dry.text
 Assert-True ($dryText -match "Windows Native Preview bootstrap") "dry-run missing bootstrap banner: $dryText"
@@ -134,7 +134,7 @@ Write-Phase "3 installer-missing-deps"
 $realPath = $env:PATH
 try {
   $env:PATH = "$env:SystemRoot\System32"
-  $neg = Invoke-Installer @("-DryRun", "-Ref", "ci-probe", "-InstallRoot", $installRoot)
+  $neg = Invoke-Installer -installerArgs @("-Ref", "ci-probe", "-InstallRoot", $installRoot, "-DryRun")
 } finally {
   $env:PATH = $realPath
 }
