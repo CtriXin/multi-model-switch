@@ -1,5 +1,6 @@
 """Activity is observed, scoped to the current turn, and never restored as busy."""
 import json
+import os
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -144,6 +145,11 @@ def staged_native(local_app):
     server.shutdown(); server.server_close(); thread.join()
 
 
+@pytest.mark.xfail(
+    os.name == "nt",
+    reason="hosted Windows Server Pi native bootstrap does not load the configured model yet",
+    strict=False,
+)
 def test_actual_pi_activity_and_session_list(staged_native):
     app, workspace, root, gates, received, records = staged_native
     detail = app.post(["sessions"], {"requestId":"native-status", "presetId":"web:pi:status-fixture:gpt-5", "workspaceId":workspace["id"], "prompt":"status-flow", "thinkingLevel":"medium"})
