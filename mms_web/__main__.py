@@ -115,8 +115,12 @@ def main(argv=None):
                         stop_request.unlink()
                     except OSError:
                         pass
-                    # shutdown() must not run in serve_forever's own thread.
-                    server.shutdown()
+                    # BaseServer.shutdown() waits for serve_forever() to
+                    # acknowledge the flag.  Keep the watcher non-blocking on
+                    # Windows: the main thread owns serve_forever() and will
+                    # observe this flag on its next poll, then run the normal
+                    # app/server/lock cleanup below.
+                    server._BaseServer__shutdown_request = True
                     return
                 time.sleep(0.4)
 

@@ -291,7 +291,8 @@ try {
 
   $status = Invoke-MmsVerb @("web", "status", "--port", "$port", "--json")
   Assert-True ($status.exit -eq 0) "mms web status exited $($status.exit): $($status.text)"
-  $statusRows = @(ConvertFrom-CommandJson $status.text).instances
+  $statusPayload = ConvertFrom-CommandJson $status.text
+  $statusRows = @($statusPayload.instances)
   Assert-True ($statusRows.Count -eq 1) "expected exactly one instance: $($status.text)"
   Assert-True ($statusRows[0].pid -eq $startPid) "status pid drifted: $($status.text)"
 
@@ -319,7 +320,8 @@ try {
 
   $after = Invoke-MmsVerb @("web", "status", "--port", "$port", "--json")
   Assert-True ($after.exit -eq 1) "status after stop must report no own instance: $($after.text)"
-  Assert-True (@(ConvertFrom-CommandJson $after.text).instances.Count -eq 0) "instance still visible after stop: $($after.text)"
+  $afterPayload = ConvertFrom-CommandJson $after.text
+  Assert-True (@($afterPayload.instances).Count -eq 0) "instance still visible after stop: $($after.text)"
   Write-Host "mms web lifecycle OK via shims (start/status/url/restart/stop)"
 } finally {
   try { $null = & $mmsCmd web stop --all --port "$port" --json 2>&1 } catch { }
