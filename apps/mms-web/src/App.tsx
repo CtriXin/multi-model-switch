@@ -57,7 +57,6 @@ import type { GuideAction } from "./guide-content";
 import { ArtifactView } from "./ArtifactView";
 import { ProjectMaterials } from "./ProjectMaterials";
 import { Transcript } from "./Transcript";
-<<<<<<< HEAD
 import { MessageQueue } from "./MessageQueue";
 import { SideQuestions, useSideQuestions } from "./SideQuestions";
 import { ConversationOutline } from "./ConversationOutline";
