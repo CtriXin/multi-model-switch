@@ -763,38 +763,6 @@ export function BotStudio({
         </div>
       )}
       <main className="bot-main">
-        <div className="bot-chat-toolbar">
-          <div className="bot-header-actions">
-            {onExit && <button className="bot-quiet-button bot-exit-button" type="button" onClick={onExit} title="返回 MMS Pilot"><ArrowLeft size={14} /> Pilot</button>}
-            <span
-              className={`bot-executor ${capability?.available === true ? "available" : capability?.available === false ? "unavailable" : "unknown"}`}
-            >
-              <span />
-              {previewNotice}
-            </span>
-            <button
-              className="bot-quiet-button"
-              type="button"
-              onClick={() => {
-                setRefreshing(true);
-                void sync()
-                  .catch((cause) =>
-                    setLoadError(
-                      cause instanceof Error
-                        ? cause.message
-                        : "Bot 状态刷新失败。",
-                    ),
-                  )
-                  .finally(() => setRefreshing(false));
-              }}
-              disabled={isPreview || refreshing}
-              title="刷新 Bot 和任务"
-            >
-              <RefreshCw className={refreshing ? "bot-spin" : ""} size={14} />
-              刷新
-            </button>
-          </div>
-        </div>
         {loadError && (
           <p className="bot-banner bot-banner-error" role="alert">
             <CircleAlert size={15} />

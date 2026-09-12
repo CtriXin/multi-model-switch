@@ -15,6 +15,7 @@ import {
   FileText,
   LoaderCircle,
   MessageSquare,
+  MoreHorizontal,
   Pause,
   Play,
   Plus,
@@ -24,6 +25,7 @@ import {
   Square,
   Timer,
   Trash2,
+  X,
   Zap,
 } from "lucide-react";
 import { previewType } from "./bot-artifact-preview";
@@ -148,22 +150,39 @@ export const PIXEL_AVATAR_COLORS = [
   "#f18bd5",
 ] as const;
 
+import {
+  resolveAvatarColor,
+  getStatusBadgeText,
+  waitReasonLabel,
+  taskStatusLabels,
+} from "./bot-visual-system.ts";
+
+export {
+  resolveAvatarColor,
+  getStatusBadgeText,
+  waitReasonLabel,
+  taskStatusLabels,
+};
+
 function PixelAvatar({
   avatarId,
   color,
   seed = "",
   className = "bot-avatar",
+  active = false,
 }: {
   avatarId?: string;
   color?: string;
   seed?: string;
   className?: string;
+  active?: boolean;
 }) {
   const seedValue = [...seed].reduce((sum, char) => sum + char.charCodeAt(0), 0);
   const avatar = PIXEL_AVATARS.find((item) => item.id === avatarId) || PIXEL_AVATARS[seedValue % PIXEL_AVATARS.length];
   const avatarColor = color || PIXEL_AVATAR_COLORS[seedValue % PIXEL_AVATAR_COLORS.length];
+  const effectiveColor = resolveAvatarColor(avatarColor);
   return (
-    <span className={`${className} pixel-avatar`} style={{ "--pixel-color": avatarColor } as CSSProperties} aria-hidden="true">
+    <span className={`${className} pixel-avatar${active ? " is-active" : ""}`} style={{ "--pixel-color": effectiveColor } as CSSProperties} aria-hidden="true">
       <span className="pixel-avatar-grid">
         {avatar.rows.flatMap((row, rowIndex) => [...row].map((cell, cellIndex) => (
           <i className={`pixel-cell pixel-${cell}`} key={`${rowIndex}-${cellIndex}`} />
@@ -173,42 +192,6 @@ function PixelAvatar({
   );
 }
 
-export const taskStatusLabels: Record<TaskStatus, string> = {
-  queued: "排队中",
-  scheduled: "已安排",
-  starting: "正在启动",
-  running: "执行中",
-  waiting: "等待输入",
-  completed: "已完成",
-  failed: "执行失败",
-  cancelled: "已取消",
-  interrupted: "已中断",
-};
-
-export function waitReasonLabel(reason?: string | null) {
-  if (!reason) return "";
-  const normalized = reason.toLowerCase();
-  if (normalized.includes("approval") || normalized.includes("confirm")) {
-    return "等待你在会话中确认";
-  }
-  if (normalized.includes("connection") || normalized.includes("connect")) {
-    return "等待模型服务恢复连接";
-  }
-  if (normalized.includes("stopping") || normalized.includes("stop")) {
-    return "正在停止，稍后刷新状态";
-  }
-  if (normalized.includes("schedule") || normalized.includes("runat")) {
-    return "已安排在指定时间运行";
-  }
-  if (normalized.includes("input") || normalized.includes("user")) {
-    return "等待你补充信息";
-  }
-  if (normalized === "manual") {
-    return "等待你手动唤醒";
-  }
-  return reason;
-}
-
 export function BotStatusBadge({
   status,
   compact = false,
@@ -216,38 +199,13 @@ export function BotStatusBadge({
   status: BotStatus | TaskStatus;
   compact?: boolean;
 }) {
-  const active =
-    status === "busy" || status === "starting" || status === "running";
-  const label =
-    status === "busy"
-      ? "运行中"
-      : status === "idle"
-        ? "待命"
-        : status === "paused"
-          ? "已暂停"
-          : taskStatusLabels[status as TaskStatus];
-  const icon =
-    status === "completed" ? (
-      <Check size={14} />
-    ) : status === "failed" ? (
-      <CircleAlert size={14} />
-    ) : status === "cancelled" ||
-      status === "interrupted" ||
-      status === "paused" ? (
-      <Pause size={14} />
-    ) : status === "queued" || status === "scheduled" ? (
-      <Clock3 size={14} />
-    ) : active ? (
-      <LoaderCircle className="bot-spin" size={14} />
-    ) : (
-      <span className="bot-state-dot" aria-hidden="true" />
-    );
+  const label = getStatusBadgeText(status);
   return (
     <span
       className={`bot-state bot-state-${status}${compact ? " bot-state-compact" : ""}`}
       title={label}
-                >
-      {icon}
+    >
+      <span className="bot-state-dot" aria-hidden="true" />
       {!compact && label}
     </span>
   );
@@ -282,6 +240,27 @@ export function BotCard({
   onEdit?: (bot: BotDefinition) => void;
   onDelete?: (bot: BotDefinition) => void;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    function handlePointerDown(event: PointerEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setMenuOpen(false);
+    }
+    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [menuOpen]);
+
   return (
     <article className={`bot-card bot-card-${bot.status}${selected ? " is-selected" : ""}`}>
       <button
@@ -290,16 +269,21 @@ export function BotCard({
         onClick={() => onSelect?.(bot)}
         aria-pressed={selected}
       >
-        <PixelAvatar avatarId={bot.avatarId} color={bot.avatarColor} seed={bot.id} />
+        <PixelAvatar avatarId={bot.avatarId} color={bot.avatarColor} seed={bot.id} active={bot.status === "busy"} />
         <span className="bot-card-copy">
           <span className="bot-card-title">
             <strong>{bot.name}</strong>
             <BotStatusBadge status={bot.status} />
+            {bot.wakeEnabled && (
+              <span className="bot-card-wake-tag" title="自动唤醒已开启">
+                <AlarmClockCheck size={12} />
+                <span>自动唤醒</span>
+              </span>
+            )}
           </span>
           <span className="bot-card-description">
-            {bot.description || "MMS Bot"}
+            {task ? task.prompt : (bot.description || "MMS Bot")}
           </span>
-          {task && <span className="bot-card-task">{task.prompt}</span>}
         </span>
       </button>
       {bot.status === "paused" && onWake && (
@@ -313,32 +297,55 @@ export function BotCard({
           <Play size={14} />
         </button>
       )}
-      {onEdit && (
-        <button
-          className="bot-icon-button bot-edit-button"
-          type="button"
-          onClick={() => onEdit(bot)}
-          aria-label={`编辑 ${bot.name}`}
-          title="编辑 Bot"
-        >
-          <Settings2 size={14} />
-        </button>
-      )}
-      {onDelete && (
-        <button
-          className="bot-icon-button bot-delete-button"
-          type="button"
-          onClick={() => onDelete(bot)}
-          aria-label={`删除 ${bot.name}`}
-          title="删除 Bot"
-        >
-          <Trash2 size={14} />
-        </button>
-      )}
-      {bot.wakeEnabled && (
-        <span className="bot-auto-wake" title="自动唤醒已开启">
-          <AlarmClockCheck size={14} />
-        </span>
+      {(onEdit || onDelete) && (
+        <div className="bot-card-actions" ref={menuRef}>
+          <button
+            className="bot-card-more-button"
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              setMenuOpen((prev) => !prev);
+            }}
+            aria-label={`操作 ${bot.name}`}
+            aria-expanded={menuOpen}
+          >
+            <MoreHorizontal size={15} />
+          </button>
+          {menuOpen && (
+            <div className="bot-card-menu" role="menu">
+              {onEdit && (
+                <button
+                  type="button"
+                  className="bot-card-menu-item"
+                  role="menuitem"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setMenuOpen(false);
+                    onEdit(bot);
+                  }}
+                >
+                  <Settings2 size={13} />
+                  编辑 Bot
+                </button>
+              )}
+              {onDelete && (
+                <button
+                  type="button"
+                  className="bot-card-menu-item is-danger"
+                  role="menuitem"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setMenuOpen(false);
+                    onDelete(bot);
+                  }}
+                >
+                  <Trash2 size={13} />
+                  删除 Bot
+                </button>
+              )}
+            </div>
+          )}
+        </div>
       )}
     </article>
   );
@@ -379,34 +386,36 @@ export function BotList({
           </button>
         )}
       </div>
-      {bots.length ? (
-        bots.map((bot) => (
-          <BotCard
-            key={bot.id}
-            bot={bot}
-            selected={bot.id === selectedBotId}
-            task={tasks.find(
-              (task) =>
-                task.botId === bot.id &&
-                [
-                  "queued",
-                  "scheduled",
-                  "starting",
-                  "running",
-                  "waiting",
-                ].includes(task.status),
-            )}
-            onSelect={onSelect}
-            onWake={onWake}
-            onEdit={onEdit}
-            onDelete={onDelete}
-          />
-        ))
-      ) : (
-        <p className="bot-empty">
-          还没有 Bot。创建一个后，就能把任务交给它在电脑上执行。
-        </p>
-      )}
+      <div className="bot-card-list">
+        {bots.length ? (
+          bots.map((bot) => (
+            <BotCard
+              key={bot.id}
+              bot={bot}
+              selected={bot.id === selectedBotId}
+              task={tasks.find(
+                (task) =>
+                  task.botId === bot.id &&
+                  [
+                    "queued",
+                    "scheduled",
+                    "starting",
+                    "running",
+                    "waiting",
+                  ].includes(task.status),
+              )}
+              onSelect={onSelect}
+              onWake={onWake}
+              onEdit={onEdit}
+              onDelete={onDelete}
+            />
+          ))
+        ) : (
+          <p className="bot-empty">
+            还没有 Bot。创建一个后，就能把任务交给它在电脑上执行。
+          </p>
+        )}
+      </div>
     </section>
   );
 }
@@ -1110,46 +1119,61 @@ function BotOnboarding({
   onEditAnswer?: (key: keyof OnboardingAnswers) => void;
   onComplete: () => Promise<void>;
 }) {
-  const current = onboardingQuestions.find((question) => !answers[question.key]);
-  const complete = !current;
+  const allAnswered = Boolean(answers.focus && answers.style && answers.autonomy);
   return (
-    <div className="bot-onboarding" aria-label="创建 Bot 的工作预设">
-      <div className="bot-onboarding-greeting">
-        <PixelAvatar className="bot-chat-event-avatar" avatarId={bot.avatarId} color={bot.avatarColor} seed={bot.id} />
-        <div>
-          <strong>嗨，我是 {bot.name}。</strong>
-          <p>先用几个小问题告诉我你的习惯，之后我会把它当成默认工作方式。</p>
+    <div className="bot-chat-message bot-chat-onboarding" aria-label="工作预设向导">
+      <PixelAvatar
+        className="bot-chat-event-avatar"
+        avatarId={bot.avatarId}
+        color={bot.avatarColor}
+        seed={bot.id}
+      />
+      <div className="bot-onboarding-content">
+        <div className="bot-onboarding-greeting">
+          <p>
+            嗨，我是 <strong>{bot.name}</strong>。告诉我几个你的偏好，之后我会作为默认工作方式：
+          </p>
         </div>
-      </div>
-      {Object.entries(answers).filter(([, value]) => value).map(([key, value]) => (
-        <button className="bot-onboarding-answer" type="button" key={key} onClick={() => onEditAnswer?.(key as keyof OnboardingAnswers)} disabled={disabled || busy}>
-          <span>{onboardingQuestions.find((question) => question.key === key)?.title}</span>
-          <b>{value}</b>
-        </button>
-      ))}
-      {current && (
-        <div className="bot-onboarding-question">
-          <strong>{current.title}</strong>
-          <div className="bot-onboarding-options">
-            {current.options.map((option) => (
-              <button
-                key={option}
-                type="button"
-                disabled={disabled || busy}
-                onClick={() => onAnswer(current.key, option)}
-              >
-                {option}
-              </button>
-            ))}
+        <div className="bot-onboarding-questions">
+          {onboardingQuestions.map((q) => {
+            const selectedValue = answers[q.key];
+            return (
+              <div className="bot-onboarding-question-block" key={q.key}>
+                <span className="bot-onboarding-question-title">{q.title}</span>
+                <div className="bot-onboarding-chips">
+                  {q.options.map((opt) => {
+                    const isSelected = selectedValue === opt;
+                    return (
+                      <button
+                        key={opt}
+                        type="button"
+                        className={`bot-onboarding-chip${isSelected ? " is-selected" : ""}`}
+                        disabled={disabled || busy}
+                        onClick={() => onAnswer(q.key, opt)}
+                      >
+                        {opt}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        {allAnswered && (
+          <div className="bot-onboarding-actions">
+            <button
+              className="bot-primary-button"
+              type="button"
+              disabled={disabled || busy}
+              onClick={() => void onComplete()}
+            >
+              {busy ? "正在保存…" : "保存为工作预设"}
+            </button>
           </div>
-        </div>
-      )}
-      {complete && (
-        <button className="bot-onboarding-save" type="button" disabled={disabled || busy} onClick={() => void onComplete()}>
-          {busy ? "正在记住…" : "保存为工作预设"}
-        </button>
-      )}
-      {error && <p className="bot-onboarding-error" role="alert">{error}</p>}
+        )}
+        {error && <p className="bot-inline-error" role="alert">{error}</p>}
+      </div>
     </div>
   );
 }
@@ -1201,6 +1225,8 @@ export function BotChat({
 }) {
   const [value, setValue] = useState("");
   const [runAt, setRunAt] = useState("");
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const scheduleInputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [previewArtifact, setPreviewArtifact] = useState<BotArtifact | null>(null);
@@ -1278,6 +1304,7 @@ export function BotChat({
       });
       setValue("");
       setRunAt("");
+      setScheduleOpen(false);
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : "消息发送失败，请稍后重试。",
@@ -1290,32 +1317,40 @@ export function BotChat({
     <section className="bot-chat-shell" aria-label="Bot 对话窗口">
       <header className="bot-chat-header">
         <div className="bot-chat-identity">
-          <PixelAvatar className="bot-chat-avatar" avatarId={bot?.avatarId} color={bot?.avatarColor} seed={bot?.id} />
-          <div>
-            <h1>{bot?.name || "选择一个 Bot"}</h1>
+          <PixelAvatar
+            className="bot-chat-avatar"
+            avatarId={bot?.avatarId}
+            color={bot?.avatarColor}
+            seed={bot?.id}
+            active={bot?.status === "busy"}
+          />
+          <div className="bot-chat-title-group">
+            <div className="bot-chat-title-row">
+              <h1>{bot?.name || "选择一个 Bot"}</h1>
+              {bot && <BotStatusBadge status={bot.status} />}
+            </div>
             <p>{bot?.description || "随时可以接活"}</p>
           </div>
         </div>
         <div className="bot-chat-header-actions">
           {bot && onOpenMemory && (
-            <button className="bot-memory-trigger" type="button" onClick={onOpenMemory} aria-label="打开记忆面板" title="记忆">
+            <button className="bot-quiet-button" type="button" onClick={onOpenMemory} aria-label="打开记忆面板" title="记忆">
               <Brain size={14} />
-              记忆
+              <span>记忆</span>
             </button>
           )}
           {bot && onboardingDone && onUpdateBot && (
-            <button className="bot-memory-trigger" type="button" onClick={() => setOnboardingEditing(true)} aria-label="调整工作预设" title="工作预设">
+            <button className="bot-quiet-button" type="button" onClick={() => setOnboardingEditing(true)} aria-label="调整工作预设" title="工作预设">
               <Settings2 size={14} />
-              预设
+              <span>预设</span>
             </button>
           )}
           {bot && onOpenCommunications && (
-            <button className="bot-memory-trigger" type="button" onClick={() => onOpenCommunications()} aria-label="打开协作面板" title="协作">
+            <button className="bot-quiet-button" type="button" onClick={() => onOpenCommunications()} aria-label="打开协作面板" title="协作">
               <MessageSquare size={14} />
-              协作{communications.length ? ` · ${communications.length}` : ""}
+              <span>协作{communications.length ? ` · ${communications.length}` : ""}</span>
             </button>
           )}
-          {bot && <BotStatusBadge status={bot.status} />}
         </div>
       </header>
       <div
@@ -1350,14 +1385,10 @@ export function BotChat({
               answers={onboarding}
               busy={onboardingBusy}
               disabled={disabled || !onUpdateBot}
+              error={onboardingError}
               onAnswer={(key, value) => {
                 const next = { ...onboarding, [key]: value };
                 setOnboarding(next);
-                if (onUpdateBot) {
-                  void onUpdateBot(bot.id, { systemPrompt: onboardingPrompt(next) }).catch((cause) => {
-                    setOnboardingError(cause instanceof Error ? cause.message : "工作预设保存失败，请重试。");
-                  });
-                }
               }}
               onEditAnswer={(key) => setOnboarding((current) => ({ ...current, [key]: undefined }))}
               onComplete={async () => {
@@ -1365,13 +1396,7 @@ export function BotChat({
                 setOnboardingBusy(true);
                 setOnboardingError("");
                 try {
-                  const prompt = [
-                    "这是创建时确认的工作预设，请持续遵守：",
-                    `- 主要帮我处理：${onboarding.focus}`,
-                    `- 回报方式：${onboarding.style}`,
-                    `- 执行方式：${onboarding.autonomy}`,
-                    "- 结果优先，过程保持安静；遇到无法安全判断的关键分歧时再询问。",
-                  ].join("\n");
+                  const prompt = onboardingPrompt(onboarding);
                   await onUpdateBot(bot.id, { systemPrompt: prompt });
                   setOnboardingDone(true);
                   setOnboardingEditing(false);
@@ -1381,7 +1406,6 @@ export function BotChat({
                   setOnboardingBusy(false);
                 }
               }}
-              error={onboardingError}
             />
           )
         )}
@@ -1429,12 +1453,26 @@ export function BotChat({
           return (
           <Fragment key={conversationTask.id}>
             <div className={`bot-chat-message ${taskFromBot ? "bot-chat-event bot-chat-event-handoff" : "bot-chat-user"}`}>
-              <span className="bot-chat-message-label">{taskFromBot ? `来自 ${taskSender?.name || "Bot"}` : "你"}</span>
+              {taskFromBot && (
+                <PixelAvatar
+                  className="bot-chat-event-avatar"
+                  avatarId={taskSender?.avatarId}
+                  color={taskSender?.avatarColor}
+                  seed={taskSender?.id}
+                />
+              )}
               <RichText text={conversationTask.prompt} />
             </div>
             {conversationEvents.map((event) => event.type === "instruction" ? (
               <div className={`bot-chat-message ${event.senderBotId && event.senderBotId !== bot.id ? "bot-chat-event bot-chat-event-handoff" : "bot-chat-user"}`} key={event.id}>
-                <span className="bot-chat-message-label">{event.senderBotId && event.senderBotId !== bot.id ? `来自 ${bots.find((item) => item.id === event.senderBotId)?.name || "Bot"}` : "你"}</span>
+                {event.senderBotId && event.senderBotId !== bot.id && (
+                  <PixelAvatar
+                    className="bot-chat-event-avatar"
+                    avatarId={bots.find((item) => item.id === event.senderBotId)?.avatarId}
+                    color={bots.find((item) => item.id === event.senderBotId)?.avatarColor}
+                    seed={event.senderBotId}
+                  />
+                )}
                 <RichText text={event.content} />
               </div>
             ) : (
@@ -1442,25 +1480,14 @@ export function BotChat({
                 className={`bot-chat-message bot-chat-event bot-chat-event-${event.type}`}
                 key={event.id}
               >
-                <span className="bot-chat-event-mark">
-                  {event.type === "result" ? (
-                    <Check size={14} />
-                  ) : event.type === "error" ? (
-                    <CircleAlert size={14} />
-                  ) : (
-                    <LoaderCircle size={14} />
-                  )}
-                </span>
-                <div>
-                  <span className="bot-chat-message-label">
-                    {event.type === "handoff"
-                      ? "交接"
-                      : event.type === "result"
-                        ? "结果"
-                        : event.type === "error"
-                          ? "错误"
-                          : bot?.name || "Bot"}
-                  </span>
+                <PixelAvatar
+                  className="bot-chat-event-avatar"
+                  avatarId={bot?.avatarId}
+                  color={bot?.avatarColor}
+                  seed={bot?.id}
+                  active={conversationTask.status === "running"}
+                />
+                <div className="bot-chat-event-body">
                   <RichText text={event.content} repair />
                 </div>
               </div>
@@ -1478,33 +1505,29 @@ export function BotChat({
                   aria-label={`${sent ? "已发消息给" : "消息来自"} ${peer.name}，${group.messages.length}条消息往来`}
                 >
                   <MessageSquare size={13} />
-                  {sent ? `已发消息给 ${peer.name}` : `消息来自 ${peer.name}`}
-                  <small>{group.messages.length}条消息往来</small>
+                  <span>{sent ? `已发消息给 ${peer.name}` : `消息来自 ${peer.name}`}</span>
+                  <small>· {group.messages.length}条消息往来</small>
                 </button>
               );
             })}
             {conversationTask.waitReason && (
               <div className="bot-chat-notice">
-                <Timer size={14} />
-                {waitReasonLabel(conversationTask.waitReason)}
+                <Timer size={13} />
+                <span>{waitReasonLabel(conversationTask.waitReason)}</span>
               </div>
             )}
             {resultText && (
               <div className="bot-chat-message bot-chat-event bot-chat-final">
                 <PixelAvatar className="bot-chat-event-avatar" avatarId={bot.avatarId} color={bot.avatarColor} seed={bot.id} />
-                <div>
-                  <span className="bot-chat-message-label">{bot.name}</span>
+                <div className="bot-chat-event-body">
                   <RichText text={resultText} repair />
                 </div>
               </div>
             )}
             {conversationTask.error && cleanTranscriptText(conversationTask.error) && (
               <div className="bot-chat-error">
-                <CircleAlert size={15} />
-                <div>
-                  <strong>执行失败</strong>
-                  <RichText text={cleanTranscriptText(conversationTask.error)} repair />
-                </div>
+                <CircleAlert size={14} />
+                <span>执行失败：{cleanTranscriptText(conversationTask.error)}</span>
               </div>
             )}
             {conversationArtifacts.length > 0 && (
@@ -1520,7 +1543,7 @@ export function BotChat({
                     >
                       <img src={artifact.url} alt={artifact.name} />
                       <span>
-                        <Camera size={13} />
+                        <Camera size={12} />
                         {artifact.name}
                       </span>
                     </button>
@@ -1532,17 +1555,18 @@ export function BotChat({
                       onClick={() => setPreviewArtifact(artifact)}
                       aria-label={`预览 ${artifact.name}`}
                     >
-                      <FileText size={16} />
+                      <FileText size={15} />
                       <span>{artifact.name}</span>
                     </button>
                   ) : (
                     <a
+                      className="bot-file-preview-trigger"
                       key={artifact.id}
                       href={artifact.url}
                       target="_blank"
                       rel="noreferrer"
                     >
-                      <FileText size={16} />
+                      <FileText size={15} />
                       <span>{artifact.name}</span>
                     </a>
                   ),
@@ -1596,56 +1620,88 @@ export function BotChat({
             )}
         </div>
       )}
-      <form className="bot-chat-composer" onSubmit={submit}>
-        <textarea
-          value={value}
-          onChange={(event) => setValue(event.target.value)}
-          placeholder={`告诉 ${bot?.name || "Bot"} 现在要做什么…`}
-          rows={1}
-          disabled={disabled || busy || !bot}
-          aria-label="发送给 Bot 的消息"
-          onKeyDown={(event) => {
-            if (
-              event.key === "Enter" &&
-              !event.shiftKey &&
-              !event.nativeEvent.isComposing
-            ) {
-              event.preventDefault();
-              event.currentTarget.form?.requestSubmit();
-            }
-          }}
-        />
-        <div className="bot-chat-composer-footer">
-          <label>
-            <Timer size={13} />
-            <input
-              type="datetime-local"
-              value={runAt}
-              onChange={(event) => setRunAt(event.target.value)}
-              disabled={disabled || busy}
-              aria-label="定时执行时间"
-            />
-            <span>{runAt ? "已安排执行" : "立即执行"}</span>
-          </label>
-          <button
-            className="bot-chat-send"
-            type="submit"
-            disabled={disabled || busy || !value.trim() || !bot}
-          >
-            {busy ? (
-              <LoaderCircle className="bot-spin" size={16} />
-            ) : (
-              <Send size={16} />
-            )}
-            <span>{busy ? "发送中" : "发送"}</span>
-          </button>
-        </div>
-        {error && (
-          <p className="bot-chat-input-error" role="alert">
-            {error}
-          </p>
-        )}
-      </form>
+      <div className="bot-chat-composer-container">
+        <form className="bot-chat-composer" onSubmit={submit}>
+          <textarea
+            value={value}
+            onChange={(event) => setValue(event.target.value)}
+            placeholder={`告诉 ${bot?.name || "Bot"} 现在要做什么…`}
+            rows={1}
+            disabled={disabled || busy || !bot}
+            aria-label="发送给 Bot 的消息"
+            onKeyDown={(event) => {
+              if (
+                event.key === "Enter" &&
+                !event.shiftKey &&
+                !event.nativeEvent.isComposing
+              ) {
+                event.preventDefault();
+                event.currentTarget.form?.requestSubmit();
+              }
+            }}
+          />
+          <div className="bot-chat-composer-footer">
+            <div className="bot-chat-schedule">
+              {scheduleOpen || runAt ? (
+                <div className="bot-chat-schedule-picker">
+                  <Timer size={12} />
+                  <input
+                    ref={scheduleInputRef}
+                    type="datetime-local"
+                    value={runAt}
+                    onChange={(event) => setRunAt(event.target.value)}
+                    disabled={disabled || busy}
+                    aria-label="定时执行时间"
+                  />
+                  <button
+                    type="button"
+                    className="bot-chat-schedule-clear"
+                    onClick={() => {
+                      setRunAt("");
+                      setScheduleOpen(false);
+                    }}
+                    aria-label="清除定时"
+                    title="清除定时"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="bot-chat-schedule-trigger"
+                  onClick={() => {
+                    setScheduleOpen(true);
+                    setTimeout(() => scheduleInputRef.current?.focus(), 50);
+                  }}
+                  disabled={disabled || busy}
+                >
+                  <Timer size={12} />
+                  <span>定时…</span>
+                </button>
+              )}
+            </div>
+            <button
+              className="bot-chat-send"
+              type="submit"
+              disabled={disabled || busy || !value.trim() || !bot}
+              aria-label="发送"
+              title={busy ? "发送中" : "发送"}
+            >
+              {busy ? (
+                <LoaderCircle className="bot-spin" size={15} />
+              ) : (
+                <Send size={15} />
+              )}
+            </button>
+          </div>
+          {error && (
+            <p className="bot-chat-input-error" role="alert">
+              {error}
+            </p>
+          )}
+        </form>
+      </div>
     </section>
   );
 }
