@@ -120,12 +120,13 @@ jobs:
           MMS_CONFIG_ROOT: ${{ runner.temp }}\mms-ci-config
           MMS_STATE_ROOT: ${{ runner.temp }}\mms-ci-state
         run: |
+          $piPresent = [bool]::Parse('${{ matrix.pi_present }}')
           & .\scripts\ci\windows_acceptance.ps1 `
             -RepoRoot $PWD.Path `
             -PythonExe ((Get-Command python).Source) `
             -TempRoot (Join-Path $env:RUNNER_TEMP 'mms-win-acceptance') `
             -ShellEdition '5.1' `
-            -PiPresent:${{ matrix.pi_present }}
+            -PiPresent $piPresent
 
       - name: Windows acceptance driver (PowerShell 7)
         if: matrix.powershell == 'pwsh-7'
@@ -134,12 +135,13 @@ jobs:
           MMS_CONFIG_ROOT: ${{ runner.temp }}\mms-ci-config
           MMS_STATE_ROOT: ${{ runner.temp }}\mms-ci-state
         run: |
+          $piPresent = [bool]::Parse('${{ matrix.pi_present }}')
           & .\scripts\ci\windows_acceptance.ps1 `
             -RepoRoot $PWD.Path `
             -PythonExe ((Get-Command python).Source) `
             -TempRoot (Join-Path $env:RUNNER_TEMP 'mms-win-acceptance') `
             -ShellEdition '7' `
-            -PiPresent:${{ matrix.pi_present }}
+            -PiPresent $piPresent
 
       - name: Windows pytest suite
         shell: pwsh
