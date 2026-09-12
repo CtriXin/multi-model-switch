@@ -748,7 +748,7 @@ export function ChannelModels({
                             : !model
                               ? "手工添加，保存后可配置默认值"
                               : remote && !remote.includes(id)
-                                ? "本次拉取未返回，已保留原选择"
+                                ? "本次拉取未返回，已按远端列表取消勾选"
                                 : capabilityOrigin(model)}
                         </small>
                       </span>
