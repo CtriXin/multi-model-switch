@@ -154,6 +154,25 @@ def test_link_or_reparse_detects_symlinks_and_ignores_plain_entries(tmp_path):
     assert _is_link_or_reparse(tmp_path / 'missing') is False
 
 
+def test_link_or_reparse_detects_windows_reparse_attribute(tmp_path, monkeypatch):
+    from mms_web import files as files_module
+
+    plain = tmp_path / 'junction-like-entry'
+    plain.mkdir()
+    real_stat = files_module.os.stat
+
+    class ReparseStat:
+        st_file_attributes = 0x400
+
+    def fake_stat(path, *args, **kwargs):
+        if Path(path) == plain:
+            return ReparseStat()
+        return real_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(files_module.os, 'stat', fake_stat)
+    assert files_module._is_link_or_reparse(plain) is True
+
+
 @pytest.mark.parametrize('part', ['.pilot', 'attachments'])
 def test_windows_import_branch_rejects_redirected_directories(tmp_path, monkeypatch, part):
     """The Windows branch must refuse symlink/junction redirection like the dir_fd path."""

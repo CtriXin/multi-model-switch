@@ -28,15 +28,27 @@ def _windows_filesystem() -> bool:
 def _is_link_or_reparse(path: Path) -> bool:
     """True for symlinks and, on Windows, junctions / other reparse points.
 
-    ``Path.is_symlink()`` does not detect junctions on Windows; the raw stat
-    ``st_reparse_point`` field covers every reparse-point tag. Fail-closed on
-    stat errors is the caller's job; an unreadable entry here returns False so
-    normal ``not folder.is_dir()`` checks still fire.
+    ``Path.is_symlink()`` does not detect junctions on Windows.  Python's
+    Windows ``stat_result`` exposes the reparse-point bit as
+    ``st_file_attributes`` (and the tag as ``st_reparse_tag``); there is no
+    portable ``st_reparse_point`` field.  ``Path.is_junction`` is used when
+    available, with the raw attributes as the compatibility path for the
+    Python versions used by the acceptance matrix.
+
+    Fail-closed on stat errors is the caller's job; an unreadable entry here
+    returns False so normal ``not folder.is_dir()`` checks still fire.
     """
     try:
         if os.path.islink(path):
             return True
-        return bool(getattr(os.stat(path, follow_symlinks=False), "st_reparse_point", 0))
+        is_junction = getattr(path, "is_junction", None)
+        if callable(is_junction) and is_junction():
+            return True
+        info = os.stat(path, follow_symlinks=False)
+        file_attributes = int(getattr(info, "st_file_attributes", 0) or 0)
+        if file_attributes & 0x400:  # FILE_ATTRIBUTE_REPARSE_POINT
+            return True
+        return bool(getattr(info, "st_reparse_tag", 0) or getattr(info, "st_reparse_point", 0))
     except OSError:
         return False
 ATTACHMENT_KEEP_DAYS = 30  # imported copies unreferenced by any session are pruned after this
