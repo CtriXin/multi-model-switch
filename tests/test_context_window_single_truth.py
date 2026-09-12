@@ -202,6 +202,34 @@ def test_the_user_file_outranks_everything(monkeypatch):
     assert mms_context_window.resolve_context_window("k3[1m]", provider_id="kimi-code") == 123_456
 
 
+def test_a_context_the_user_set_in_pilot_is_final(monkeypatch):
+    """The owner's rule (2026-09-12): a context set on the Pilot model page is
+    the user's confirmed knowledge. Nothing calibrates it, nothing caps it, no
+    `[1m]` is added to the wire name, and every harness carries it as given.
+    """
+    # The profile says 262144 for this variant; the user says otherwise.
+    monkeypatch.setattr(
+        mms_capability_resolver,
+        "load_default_model_policy",
+        lambda: {"models": {"k3-256k": {"capabilities": {"context_window_tokens": 1_048_576}}}},
+    )
+    mms_context_window.clear_context_window_caches()
+    answer = mms_context_window.context_window_sources("k3-256k", provider_id="kimi-code")
+    assert answer["context_window_tokens"] == 1_048_576
+    assert answer["source"] == "model_policy"
+
+    runtime = _runtime("kimi-code", models=["k3-256k"])
+    assert claude_code_window(runtime, "k3-256k") == 1_048_576
+    assert codex_window(runtime, "k3-256k") == 1_048_576
+    assert pi_window(monkeypatch, runtime, "k3-256k") == 1_048_576
+    assert opencode_window(runtime, "k3-256k") == 1_048_576
+
+    # No harness renames the model to carry the window.
+    assert mms_launchers._with_1m_suffix("k3-256k", enable_1m=True, provider_id="kimi-code") == "k3-256k"
+    assert "[1m]" not in json.dumps(mms_pi_support._pi_model_entry(runtime, "k3-256k"))
+    assert "[1m]" not in json.dumps(mms_launchers._opencode_model_config(runtime, "k3-256k"))
+
+
 # ── a model nobody has heard of ──────────────────────────────────────────────
 
 def test_a_new_model_from_a_provider_listing_needs_no_code_change(monkeypatch, tmp_path):

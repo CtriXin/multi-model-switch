@@ -209,6 +209,8 @@ MMS-managed Codex launch must not repeatedly stop on `Hooks need review` in isol
 6. `config/model-context-windows.json`：没有任何 profile 覆盖时的兜底数据，每行写明来源。
 7. Claude 家族规则：Anthropic 自家模型 opus/sonnet 记 1M、haiku 记 200K。查不到就返回 `None`，由调用方套自己的默认值（launcher 是 200K）。
 
+用户在 Pilot 模型页给某个模型设了 context，就当他确认过（2026-09-12 owner 决定）：不校准、不封顶、不给 wire 名加 `[1m]`，四个 harness 原样带过去；Pilot 的自动刷新（`ModelSettings.auto_refresh`）跳过 `userSet` 字段。以后不要再为 `[1m]` 开讨论：非 Claude 模型它只是输入归一化。
+
 不允许的做法：
 
 - 在代码里新增按模型名映射 context 的 dict 或特判（Claude 家族规则和默认常量除外）。要补数据就写 provider profile；profile 覆盖不到再写 `config/model-context-windows.json`，并填上 `source`。
