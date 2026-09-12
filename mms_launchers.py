@@ -126,8 +126,6 @@ from mms_context_window import (
     ONE_M_SELECTOR_SUFFIX as _ONE_M_CONTEXT_SUFFIX,
     DEFAULT_CONTEXT_WINDOW as _DEFAULT_CONTEXT_WINDOW,
     coerce_context_window as _coerce_context_window,
-    context_window_sources,
-    load_model_context_overrides,
     resolve_context_window,
     strip_one_m_selector as _strip_one_m_context_suffix,
 )
