@@ -1,0 +1,362 @@
+/* Bot Communications Panel - Token-based visual system */
+.bot-communications-panel {
+  position: fixed;
+  z-index: 50;
+  top: 14px;
+  right: 18px;
+  bottom: 14px;
+  width: min(430px, calc(100vw - 36px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: 0 12px 36px color-mix(in srgb, var(--ink) 12%, transparent);
+}
+
+.bot-communications-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.bot-communications-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.bot-communications-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  border-radius: 8px;
+  color: var(--accent);
+  background: var(--soft);
+}
+
+.bot-communications-heading h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.bot-communications-heading p {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.bot-communications-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  transition: all 150ms ease-out;
+}
+
+.bot-communications-close:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.bot-communications-close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.bot-communications-body {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.bot-communications-preview,
+.bot-communications-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  background: var(--soft);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.bot-communications-error {
+  color: var(--bot-danger);
+  border-color: color-mix(in srgb, var(--bot-danger) 35%, var(--line));
+  background: var(--bot-danger-bg);
+}
+
+.bot-communications-empty {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 48px 10px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.bot-communications-empty p {
+  margin: 0;
+  font-size: 12px;
+}
+
+.bot-communications-peers {
+  display: grid;
+  gap: 4px;
+}
+
+.bot-communications-peers button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--ink);
+  background: transparent;
+  text-align: left;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 120ms ease-out;
+}
+
+.bot-communications-peers button:hover,
+.bot-communications-peers button.is-selected {
+  border-color: var(--line);
+  color: var(--accent);
+  background: var(--soft);
+}
+
+.bot-communications-peer-avatar {
+  display: inline-flex;
+  color: var(--accent);
+}
+
+.bot-communications-peers small {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.bot-communications-conversation {
+  margin-top: 12px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.bot-communications-conversation-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.bot-communications-conversation-heading strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.bot-communications-conversation-heading span {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.bot-communication-message {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--soft);
+}
+
+.bot-communication-message.from-current {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+
+.bot-communication-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bot-communication-meta strong {
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.bot-communication-meta-sep {
+  color: var(--muted);
+  opacity: 0.6;
+}
+
+.bot-communication-meta time {
+  margin-left: auto;
+}
+
+.bot-communication-content {
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.bot-communication-content p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.bot-communication-content .markdown > :first-child { margin-top: 0; }
+.bot-communication-content .markdown > :last-child { margin-bottom: 0; }
+
+.bot-communication-content .markdown pre {
+  margin: 6px 0 0;
+  max-height: 150px;
+  overflow: auto;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+  border: 0;
+  padding: 8px;
+  border-radius: 6px;
+  overflow-wrap: anywhere;
+}
+
+.bot-communication-artifacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.bot-communication-artifacts .bot-file-preview-trigger {
+  height: 38px;
+  min-height: 38px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: none;
+  font: inherit;
+  font-size: 12px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: border-color 150ms ease-out;
+}
+
+.bot-communication-artifacts .bot-file-preview-trigger:hover {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+
+.bot-communication-artifacts .bot-file-preview-trigger svg {
+  color: var(--accent);
+  flex: 0 0 14px;
+}
+
+.bot-communication-artifacts .bot-file-preview-trigger span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bot-communication-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.bot-communication-delivery {
+  color: var(--muted);
+}
+
+.bot-communication-delivery.is-processed {
+  color: var(--bot-success);
+}
+
+.bot-communication-delivery.is-waiting {
+  color: var(--bot-amber);
+}
+
+.bot-communication-delivery.is-failed {
+  color: var(--bot-danger);
+}
+
+.bot-communication-status button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--muted);
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 120ms ease-out;
+}
+
+.bot-communication-status button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--soft);
+}
+
+@media (max-width: 640px) {
+  .bot-communications-panel {
+    top: 8px;
+    right: 8px;
+    bottom: 8px;
+    width: calc(100vw - 16px);
+  }
+}

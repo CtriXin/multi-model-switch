@@ -62,6 +62,13 @@ class WebApplication:
             "mms_web.sessions", "SessionService",
             config_root=config_root, state_root=state_root, catalog=self.catalog, real_launch=config_root is not None,
         ) if self.catalog else None
+        from .bots import BotRuntime
+        from .bot_executor import PiBotExecutor
+        from .bot_computer import EgoComputer
+        self.bots = BotRuntime(state_root=state_root,
+                               executor=PiBotExecutor(self.sessions, self.catalog),
+                               computer=EgoComputer(state_root))
+        self.bots.can_dispatch = lambda: not self.maintenance
 
     def _model_settings(self):
         if not hasattr(self, "model_settings"):
@@ -273,10 +280,35 @@ class WebApplication:
         return service.adopt(row, payload)
 
     def get(self, parts: list[str], query: dict[str, list[str]] | None = None) -> dict:
+        if parts == ["bots"]:
+            return {"bots": self.bots.list_bots(), "capabilities": self.bots.capabilities()}
+        if parts == ["bots", "status"]:
+            return self.bots.capabilities()
+        if parts == ["bots", "notifications"]:
+            return self.bots.list_notifications((query or {}).get("since", [None])[0])
+        if parts == ["bots", "notifications", "config"]:
+            return self.bots.notify_config()
+        if len(parts) == 3 and parts[0] == "bots" and parts[2] == "communications":
+            return {"messages": self.bots.list_communications(parts[1], (query or {}).get("peerBotId", [None])[0])}
+        if parts == ["tasks"]:
+            return {"tasks": self.bots.list_tasks()}
+        if len(parts) == 2 and parts[0] == "tasks":
+            return self.bots.get_task(parts[1])
+        if len(parts) == 3 and parts[0] == "tasks":
+            if parts[2] == "messages":
+                return {"messages": self.bots.list_messages(parts[1])}
+            if parts[2] == "artifacts":
+                return {"artifacts": self.bots.list_artifacts(parts[1])}
+        if len(parts) == 3 and parts[0] == "bots" and parts[2] == "memory":
+            query_text = (query or {}).get("query", [""])[0]
+            return self.bots.memory_view(parts[1], query_text)
         include_cli = (query or {}).get("cli", ["0"])[0] == "1"
         if parts == ["update", "identity"]:
             from .update_handoff import path_identity, session_inventory
             return {"version": VERSION, "processId": os.getpid(), "instance": self.instance, "identity": path_identity(Path(__file__).resolve().parent.parent, self.state_root, self.config_root, Path.cwd()), "sessions": session_inventory(self.sessions)}
+        if parts == ["update", "history"]:
+            from .updates import release_history
+            return {"releases": release_history()}
         if parts == ["update"]:
             return self.updates.status()
         if parts == ["remote-access"]:
@@ -355,6 +387,35 @@ class WebApplication:
             return self._post(parts, payload)
 
     def _post(self, parts: list[str], payload: dict) -> dict:
+        if parts == ["bots"]:
+            return self.bots.create_bot(payload)
+        if parts == ["bots", "auto", "tasks"]:
+            return self.bots.auto_task(payload)
+        if parts == ["bots", "notifications", "config"]:
+            return self.bots.update_notify_config(payload)
+        if len(parts) == 5 and parts[0] == "bots" and parts[2] == "communications" and parts[4] == "wake":
+            return self.bots.wake_communication(parts[1], parts[3])
+        if len(parts) == 2 and parts[0] == "bots":
+            return self.bots.update_bot(parts[1], payload)
+        if len(parts) == 3 and parts[0] == "bots" and parts[2] == "delete":
+            return self.bots.delete_bot(parts[1])
+        if len(parts) == 3 and parts[0] == "bots" and parts[2] == "memory":
+            return self.bots.memory_mutate(parts[1], payload)
+        if len(parts) == 3 and parts[0] == "bots":
+            if parts[2] == "tasks":
+                return self.bots.create_task({**payload, "botId": parts[1]})
+            if parts[2] == "wake":
+                return self.bots.wake_bot(parts[1])
+        if len(parts) == 3 and parts[0] == "tasks":
+            task_id, action = parts[1:]
+            if action in {"wake", "cancel", "accept"}:
+                return getattr(self.bots, action + "_task")(task_id)
+            if action == "plan":
+                return self.bots.plan_action(task_id, payload)
+            if action == "messages":
+                return self.bots.add_message(task_id, payload)
+            if action == "dispatch":
+                return self.bots.create_task({**payload, "parentTaskId": task_id})
         if parts in (["update", "start"], ["update", "cancel"]):
             coordinator = self.updates.coordinator
             if not coordinator:
@@ -447,6 +508,7 @@ class WebApplication:
         return self.catalog
 
     def close(self):
+        self.bots.close()
         self.updates.close()
         if self.listeners:
             self.listeners.close()
@@ -516,7 +578,8 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
             from .artifact_preview import PREVIEW_CSP
             self.send_header("Content-Security-Policy", PREVIEW_CSP if preview else
                              "default-src 'self'; script-src 'self'; style-src 'self'; "
-                             "img-src 'self' data:; connect-src 'self'; "
+                             "img-src 'self' data: blob:; connect-src 'self'; "
+                             "frame-src 'self' blob:; media-src 'self' blob:; "
                              "object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
             self.end_headers()
             if self.command != "HEAD":
@@ -577,6 +640,15 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
                 path = unquote(urlsplit(self.path).path)
                 if path.startswith("/api/"):
                     parts = self._parts()
+                    if len(parts) == 5 and parts[0] == "tasks" and parts[2] == "artifacts" and parts[4] == "preview":
+                        body = app.bots.artifact_html_preview(parts[1], parts[3])
+                        return self._send(200, body, "text/html; charset=utf-8", preview=True)
+                    if len(parts) == 5 and parts[0] == "tasks" and parts[2] == "artifacts" and parts[4] == "content":
+                        body, content_type = app.bots.artifact_content(parts[1], parts[3])
+                        # Bot artifacts are data, never executable HTML on the app origin.
+                        if content_type not in {"image/png", "image/jpeg", "image/webp", "image/gif"}:
+                            content_type = "text/plain; charset=utf-8"
+                        return self._send(200, body, content_type)
                     if len(parts) == 6 and parts[0] == "sessions" and parts[2] == "artifacts" and parts[4] == "preview":
                         if not parts[5].isdigit():
                             raise WebError("INVALID_REVISION", "成果版本无效。", 400)
@@ -601,8 +673,18 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
 
         def do_POST(self):
             try:
-                self._check_origin(mutation=True)
-                if not self._gate():
+                parts = self._parts()
+                worker = parts == ["bot-worker"]
+                self._check_origin(mutation=not worker)
+                worker_id = None
+                if worker:
+                    if self.client_address[0] != "127.0.0.1" or self.headers.get("Origin") is not None:
+                        raise WebError("INVALID_WORKER", "内部接口只允许本机 Bot 使用。", 403)
+                    authorization = self.headers.get("Authorization", "")
+                    worker_id = app.bots.authorize_worker(authorization.removeprefix("Bearer ") if authorization.startswith("Bearer ") else "")
+                    if app.maintenance:
+                        raise WebError("UPDATE_IN_PROGRESS", "正在更新，请稍后再试。", 409)
+                elif not self._gate():
                     return
                 if self.headers.get_content_type() != "application/json":
                     raise WebError("INVALID_BODY", "请求必须使用 JSON。", 415)
@@ -619,7 +701,7 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
                     raise WebError("INVALID_BODY", "无法读取请求内容。") from None
                 if not isinstance(payload, dict):
                     raise WebError("INVALID_BODY", "请求内容必须是一个对象。")
-                self._json(200, app.post(self._parts(), payload))
+                self._json(200, app.bots.worker(worker_id, payload) if worker else app.post(parts, payload))
             except (BrokenPipeError, ConnectionResetError):
                 pass
             except Exception as exc:
@@ -629,6 +711,8 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
     server.daemon_threads = True
     app.listeners = RemoteListeners(Handler, server.server_address[1])
     app.listeners.sync(app.access.extra_binds())
+    app.bots.configure_endpoint(f"http://127.0.0.1:{server.server_address[1]}/api/v1/bot-worker")
+    app.bots.start()
     return server
 
 

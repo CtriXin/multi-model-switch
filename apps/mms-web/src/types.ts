@@ -280,4 +280,65 @@ export interface ConfigPreview {
   changes: { label: string; before: string; after: string }[];
   warnings: string[];
 }
-export type Page = "new" | "models" | "session";
+export interface UpdateHistoryItem {
+  version: string;
+  notes: string;
+  upgradeNotice?: string;
+  publishedAt?: string;
+}
+export type Page = "new" | "models" | "bots" | "session";
+
+// Bot 结果送达（T3）：页面通知与 webhook 共用同一事件形状。
+export type BotNotificationType =
+  | "task.completed"
+  | "task.failed"
+  | "task.waiting"
+  | "task.retrying";
+export interface BotNotification {
+  id: string;
+  at: string;
+  type: BotNotificationType;
+  botId: string;
+  botName: string;
+  taskId: string;
+  title: string;
+  summary: string;
+  waitReason?: "approval" | "input" | null;
+  link: string;
+}
+export interface BotNotifyWebhook {
+  url: string;
+  events: BotNotificationType[];
+  secret: string;
+}
+export interface BotNotifyConfig {
+  webhooks: BotNotifyWebhook[];
+  events: BotNotificationType[];
+  timeoutSeconds?: number;
+}
+
+/** Coordinator plan attached to a Bot task (T2). */
+export type BotPlanStepStatus = "pending" | "dispatched" | "done" | "failed" | "blocked";
+export interface BotPlanStep {
+  id: string;
+  kind: "execute" | "delegate" | string;
+  botId: string;
+  goal?: string;
+  dependsOn?: string[];
+  presetId?: string | null;
+  status: BotPlanStepStatus | string;
+  taskId?: string | null;
+  error?: string;
+}
+export type BotPlanStatus = "proposed" | "auto" | "approved" | "rejected";
+export interface BotTaskPlan {
+  version?: number;
+  mode: "direct" | "delegate";
+  reason?: string;
+  steps?: BotPlanStep[];
+  candidates?: Array<{ id: string; name: string; description?: string }>;
+  merge?: string;
+  source?: "model" | "keywords" | "fallback" | "off" | "user";
+  status?: BotPlanStatus;
+  modelDecision?: boolean;
+}

@@ -38,6 +38,20 @@
 :root[data-theme="dark"][data-accent="pink"] { --accent: #ff6482; --accent-hover: #ff90a5; }
 :root[data-theme="dark"][data-accent="orange"] { --accent: #ff9f0a; --accent-hover: #ffbb52; }
 :root[data-theme="dark"][data-accent="green"] { --accent: #30d158; --accent-hover: #6ade8b; }
+html[data-theme],
+body,
+.app-shell,
+.bot-workspace {
+  transition: background-color 160ms ease, color 160ms ease, border-color 160ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme],
+  body,
+  .app-shell,
+  .bot-workspace {
+    transition: none;
+  }
+}
 .sidebar {
   width: 264px;
   border-right: 1px solid var(--line);
@@ -431,6 +445,8 @@
   gap: 14px;
   border-top-color: var(--line);
 }
+.sidebar-footer.has-bots-entry { flex-wrap: wrap; row-gap: 2px; }
+.sidebar-footer.has-bots-entry .bot-entry { flex: 0 0 100%; white-space: nowrap; }
 .settings-entry {
   display: flex;
   align-items: center;
@@ -1009,12 +1025,24 @@
   color: var(--ink);
   border-bottom-color: var(--accent);
 }
-.settings-shell .settings-page {
-  padding: 16px 0 0;
-  max-width: none;
+.settings-shell .settings-page,
+.settings-shell .general-settings {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 16px 0 24px;
   width: 100%;
-  margin: auto;
-  overflow: visible;
+  max-width: none;
+  margin: 0;
+  box-sizing: border-box;
+  scroll-padding-bottom: 72px;
+}
+.settings-shell .channel-models {
+  width: 100%;
+  max-width: none;
+  padding: 0 0 28px 0;
+  box-sizing: border-box;
 }
 .settings-shell .page-heading {
   margin-bottom: 10px;
@@ -1062,11 +1090,95 @@
 .model-group.selected {
   box-shadow: none;
 }
-/* The pane used to be centred inside a full page; inside the sheet it must
-   share the same edges as the tab row and the models pane. */
-.general-settings {
-  max-width: none;
+/* Runtime environment capability card and chips (high-contrast dark and light themes) */
+.runtime-settings {
+  display: flex;
+  flex-direction: column;
+}
+.platform-capability-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.platform-capability strong {
+  display: block;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 3px;
+}
+.platform-meta {
+  font-size: 11px;
+  color: var(--muted);
+}
+.platform-meta code {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--soft);
+  color: var(--ink);
+  border: 1px solid var(--line);
+}
+.platform-browser-capabilities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.capability-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--soft);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.capability-chip strong {
+  display: inline;
+  font-weight: 600;
   margin: 0;
+  color: var(--ink);
+}
+.capability-chip .chip-indicator {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+.capability-chip.unavailable {
+  color: var(--muted);
+  background: color-mix(in srgb, var(--surface) 60%, transparent);
+  border: 1px dashed var(--line);
+  opacity: 0.85;
+}
+.capability-chip.unavailable .chip-indicator {
+  background: var(--muted);
+}
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid var(--line);
+  background: var(--soft);
+  color: var(--ink);
+}
+.status-pill.active {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.status-pill.muted {
+  color: var(--muted);
+  background: var(--soft);
 }
 .preference-row {
   display: flex;
@@ -1473,10 +1585,6 @@
   color: var(--muted, #6b6b6b);
   font-size: 12px;
 }
-.platform-capability strong { display: block; color: var(--ink, #242424); font-size: 13px; }
-.platform-browser-capabilities { display: flex; flex-wrap: wrap; gap: 6px; }
-.capability-chip { padding: 3px 7px; border-radius: 999px; background: var(--surface-2, #f2f2f2); }
-.capability-chip.unavailable { color: var(--muted, #6b6b6b); opacity: .8; }
 /* The version doubles as the entry to version and updates. */
 button.app-version { border: 0; background: transparent; padding: 4px 7px; border-radius: 6px; cursor: pointer; font: inherit; color: var(--muted); }
 button.app-version:hover { background: var(--soft); color: var(--ink); }

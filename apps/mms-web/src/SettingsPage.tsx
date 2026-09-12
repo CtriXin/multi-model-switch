@@ -1,5 +1,5 @@
 import { type ReactNode, useState } from "react";
-import { Sun, Moon, Monitor, Minus, Plus, SlidersHorizontal, Palette, Settings2 } from "lucide-react";
+import { Sun, Moon, Monitor, Minus, Plus, SlidersHorizontal, Palette, Settings2, Cpu } from "lucide-react";
 import type { Bootstrap } from "./types";
 import { RemoteAccessSection } from "./RemoteAccess";
 import { Models } from "./Models";
@@ -104,22 +104,15 @@ export function SettingsPage({
           <Settings2 size={16} />
           使用
         </button>
+        <button
+          className={tab === "runtime" ? "active" : ""}
+          onClick={() => requestNavigation(() => setTab("runtime"))}
+        >
+          <Cpu size={16} />
+          运行环境
+        </button>
         <AppVersion version={data.appVersion} onClick={openUpdates} updateAvailable={updateAvailable} />
       </nav>
-      <section className="platform-capability" aria-label="运行环境能力">
-        <div>
-          <strong>{data.platform?.os === "win32" ? "Windows Native Preview" : "当前运行环境"}</strong>
-          <span>{data.platform?.pathStyle || "unknown"} · {data.platform?.processControl || "能力未知"}</span>
-        </div>
-        <div className="platform-browser-capabilities">
-          {(data.browser || []).map((capability) => (
-            <span className={capability.supported ? "capability-chip" : "capability-chip unavailable"} key={capability.backend}>
-              {capability.backend}: {capability.loggedIn === "unknown" ? "登录态未知" : capability.loggedIn ? "已登录" : "独立环境"}
-              {capability.reason ? ` · ${capability.reason}` : ""}
-            </span>
-          ))}
-        </div>
-      </section>
       {tab === "models" ? (
         <Models
           connectionCompleted={connectionCompleted}
@@ -133,8 +126,7 @@ export function SettingsPage({
           effortChanged={effortChanged}
           editStateChanged={editStateChanged}
         />
-      ) : (
-        tab === "appearance" ? (
+      ) : tab === "appearance" ? (
         <section className="general-settings">
           <div className="preference-row">
             <div>
@@ -285,7 +277,7 @@ export function SettingsPage({
             />
           </label>
         </section>
-        ) : (
+      ) : tab === "usage" ? (
         <section className="general-settings">
           <label className="preference-row">
             <div>
@@ -336,7 +328,115 @@ export function SettingsPage({
               : "当前读取已有 MMF 配置。收藏、通道备注与 Web 默认值保存于此浏览器。"}
           </p>
         </section>
-        )
+      ) : (
+        <section className="general-settings runtime-settings" aria-label="运行环境设置">
+          <div className="platform-capability" aria-label="运行环境能力">
+            <div className="platform-capability-header">
+              <div>
+                <strong>
+                  {data.platform?.os === "win32"
+                    ? "Windows Native Preview"
+                    : data.platform?.os === "darwin"
+                    ? "macOS 运行环境"
+                    : data.platform?.os === "linux"
+                    ? "Linux 运行环境"
+                    : "当前运行环境"}
+                </strong>
+                <span>
+                  {data.platform?.pathStyle || "unknown"} · {data.platform?.processControl || "能力未知"}
+                </span>
+              </div>
+              {data.platform?.shell && (
+                <div className="platform-meta">
+                  <span>Shell: <code>{data.platform.shell}</code></span>
+                </div>
+              )}
+            </div>
+            {data.browser && data.browser.length > 0 ? (
+              <div className="platform-browser-capabilities">
+                {data.browser.map((capability) => (
+                  <span
+                    className={capability.supported ? "capability-chip" : "capability-chip unavailable"}
+                    key={capability.backend}
+                    title={capability.reason || undefined}
+                  >
+                    <span className="chip-indicator" />
+                    <strong>{capability.backend}</strong>:{" "}
+                    {capability.loggedIn === "unknown"
+                      ? "登录态未知"
+                      : capability.loggedIn
+                      ? "已登录"
+                      : "独立环境"}
+                    {capability.reason ? ` · ${capability.reason}` : ""}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <div className="platform-browser-capabilities">
+                <span className="capability-chip unavailable">
+                  <span className="chip-indicator" />
+                  浏览器能力: 独立环境
+                </span>
+              </div>
+            )}
+          </div>
+          <div className="preference-row">
+            <div>
+              <h2>会话启动链路</h2>
+              <p>{data.capabilities.launch ? "本地执行链路正常，可正常创建与执行会话。" : "会话启动受限或不可用。"}</p>
+            </div>
+            <span className={`status-pill ${data.capabilities.launch ? "active" : "muted"}`}>
+              {data.capabilities.launch ? "就绪" : "受限"}
+            </span>
+          </div>
+          <div className="preference-row">
+            <div>
+              <h2>配置模式</h2>
+              <p>
+                {data.capabilities.configure
+                  ? "当前使用 Web 独立配置，可在模型与通道中直接管理服务。"
+                  : "当前读取外部只读配置，配置修改受保护。"}
+              </p>
+            </div>
+            <span className={`status-pill ${data.capabilities.configure ? "active" : "muted"}`}>
+              {data.capabilities.configure ? "独立可写" : "只读"}
+            </span>
+          </div>
+          <div className="preference-row">
+            <div>
+              <h2>模型自动发现</h2>
+              <p>
+                {data.capabilities.discoverModels
+                  ? "支持通过连接服务自动拉取与探活模型列表。"
+                  : "使用静态预设模型列表。"}
+              </p>
+            </div>
+            <span className={`status-pill ${data.capabilities.discoverModels ? "active" : "muted"}`}>
+              {data.capabilities.discoverModels ? "支持" : "静态"}
+            </span>
+          </div>
+          {data.platform?.configRoot && (
+            <div className="preference-row">
+              <div>
+                <h2>配置目录</h2>
+                <p><code>{data.platform.configRoot}</code></p>
+              </div>
+            </div>
+          )}
+          {data.platform?.stateRoot && (
+            <div className="preference-row">
+              <div>
+                <h2>状态目录</h2>
+                <p><code>{data.platform.stateRoot}</code></p>
+              </div>
+            </div>
+          )}
+          <p className="settings-footnote">
+            {data.capabilities.configure
+              ? "当前使用 Web 独立配置，可在模型与通道中连接服务。"
+              : "当前读取已有 MMF 配置。收藏、通道备注与 Web 默认值保存于此浏览器。"}
+          </p>
+        </section>
       )}
     </div>
     {tour}

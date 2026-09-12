@@ -6,6 +6,7 @@ import {
   ArrowRight,
   ArrowUp,
   ArrowUpRight,
+  Bot as BotIcon,
   Check,
   ChevronRight,
   ChevronsDownUp,
@@ -76,6 +77,7 @@ import { TaskSettings, SessionSettings } from "./TaskSettings";
 import { Popover } from "./Popover";
 import { useLaunchFacts, readRoutePreferences } from "./ModelExplorer";
 import { ModelPicker, WorkspaceDialog } from "./LaunchOptions";
+import { BotStudio } from "./BotStudio";
 
 const empty: Bootstrap = {
   version: "1",
@@ -211,7 +213,9 @@ export function App() {
   const [statusesStale, setStatusesStale] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [page, setPage] = useState<Page>("new");
+  const [page, setPage] = useState<Page>(() =>
+    new URLSearchParams(location.hash.slice(1)).get("page") === "bots" ? "bots" : "new",
+  );
   const [guideOpen, setGuideOpen] = useState(false);
   const [homeNode, setHomeNode] = useState<HTMLDivElement | null>(null);
   // A composer dragged tall pushes the recent list off the bottom. Past a
@@ -676,7 +680,7 @@ export function App() {
     if (next === "models") { setNavOpen(false); after?.(); return; }
     setPage(next);
     if (next !== "session")
-      history.replaceState(null, "", location.pathname + location.search);
+      history.replaceState(null, "", location.pathname + location.search + (next === "bots" ? "#page=bots" : ""));
     setNavOpen(false);
     if (next !== "session") {
       setSelectedId("");
@@ -1563,7 +1567,15 @@ export function App() {
             </p>
           )}
         </div>
-        <div className="sidebar-footer">
+        <div className="sidebar-footer has-bots-entry">
+          <button
+            className={"settings-entry bot-entry" + (page === "bots" ? " active" : "")}
+            title="Bot 工作台"
+            onClick={() => navigate("bots")}
+          >
+            <BotIcon size={17} />
+            <span>Bot 工作台</span>
+          </button>
           <button
             className={
               "settings-entry" + (updateStatus?.available ? " has-update" : "")
@@ -1599,6 +1611,8 @@ export function App() {
             <span>
               {page === "models"
                 ? "设置"
+                : page === "bots"
+                  ? "MMS Bot"
                 : detail
                   ? data.workspaces.find(
                       (w) => w.id === detail.session.workspaceId,
@@ -1616,6 +1630,8 @@ export function App() {
                 ? "新建任务"
                 : page === "models"
                   ? "设置"
+                  : page === "bots"
+                    ? "Bot 工作台"
                   : detail?.session.title || "加载会话"}
             </strong>
           </div>
@@ -1676,7 +1692,6 @@ export function App() {
               className={"home-content" + (homeSplit ? " home-split" : "")}
               ref={setHomeNode}
             >
-              <WhatsNew ready={!loading && connected} />
               <div className="home-intro">
                 <WorkspacePicker
                   workspaces={data.workspaces}
@@ -1913,6 +1928,7 @@ export function App() {
             refresh={() => void load()}
           />
         )}
+        {page === "bots" && !settingsOpen && <BotStudio data={data} enterToSend={enterToSend} onOpenSession={openSession} onExit={() => navigate("new")} />}
         {page === "session" && (
           <div className={"session-layout " + (panel ? "with-panel" : "")}>
             <div className="conversation">
