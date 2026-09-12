@@ -42,7 +42,6 @@ env:
   PYTHONIOENCODING: "utf-8"
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
   MMS_SKIP_VENV_REEXEC: "1"
-  MMS_WEB_WORKER_DEBUG: "1"
 
 jobs:
   windows-acceptance:
@@ -104,7 +103,7 @@ jobs:
 
       - name: Install Python test tools
         shell: pwsh
-        run: python -m pip install pytest httpx rich
+        run: python -m pip install pytest httpx rich tomli-w
 
       - name: Install Pi (positive discoverability cell)
         if: matrix.pi_present
