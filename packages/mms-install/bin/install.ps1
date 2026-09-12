@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$Ref = "",
   [string]$Channel = "",
   [string]$InstallRoot = "",
@@ -133,7 +133,7 @@ $versionRoot = Join-Path (Join-Path $InstallRoot "versions") $versionName
 if (Test-Path -LiteralPath $versionRoot) {
   $live = Get-LivePilotPorts
   if ($live.Count -gt 0) {
-    throw "Pilot 正在运行（端口 $($live -join '、')），已暂停安装：没有停止任何进程，也没有清理会话。请在页面的“更新”入口完成安全更新，或先执行 mms web stop，然后重新运行本命令。"
+    throw "Pilot 正在运行（端口 $($live -join '、')），已暂停安装：没有停止任何进程，也没有清理会话。请在页面的更新入口完成安全更新，或先执行 mms web stop，然后重新运行本命令。"
   }
 }
 

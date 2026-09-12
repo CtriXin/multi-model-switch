@@ -1,4 +1,4 @@
-# MMS Pilot T3 Windows acceptance driver.
+﻿# MMS Pilot T3 Windows acceptance driver.
 #
 # Runs on a real Windows host (GitHub Actions windows-* runner or a manual
 # machine) and checks the seams that cannot be proven on Linux/macOS:
