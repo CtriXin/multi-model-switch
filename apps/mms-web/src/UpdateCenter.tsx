@@ -3,6 +3,7 @@ import { Download, RefreshCw, X } from "lucide-react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { isPreview, request } from "./api";
+import { copyText } from "./clipboard";
 import "./updates.css";
 
 type UpdateStatus = {
@@ -10,6 +11,7 @@ type UpdateStatus = {
   latest: { tag?: string; notes?: string; url?: string; upgradeNotice?: string };
   updateAvailable: boolean; enabled: boolean; checking: boolean; checkedAt: number;
   error: string; canUpgrade: boolean; port?: number;
+  upgradeGuidance?: { required: boolean; title: string; reason: string; command: string; steps: string[] };
   /** Whether this update also replaces the `mms` command line, and why not. */
   installation?: { updatesCli?: boolean; root?: string; reason?: string };
   operation: { phase: string; message?: string; target?: string; cancellable?: boolean };
@@ -28,6 +30,7 @@ export function UpdateCenter({ ready, open, setOpen, onStatus }: {
   const [pending, setPending] = useState(false);
   const [allowIdleRestart, setAllowIdleRestart] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [copiedCommand, setCopiedCommand] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const initialVersion = useRef<string | undefined>(undefined);
@@ -88,6 +91,13 @@ export function UpdateCenter({ ready, open, setOpen, onStatus }: {
         {data?.latest.notes && <section className="update-notes" aria-label="更新内容"><h3>{data.latest.tag} 更新内容</h3>{/* Release notes are Markdown. Rendering them into a paragraph showed
             the asterisks, the list dashes and the code fence as literal text. */}
         <div className="update-notes-body"><Markdown remarkPlugins={[remarkGfm]} skipHtml>{data.latest.notes}</Markdown></div>{data.latest.url && <a href={data.latest.url} target="_blank" rel="noreferrer">查看完整发布说明</a>}</section>}
+        {data?.upgradeGuidance?.required && <section className="update-migration-warning" role="alert" aria-label="需要手动升级">
+          <h3>{data.upgradeGuidance.title}</h3>
+          <p>{data.upgradeGuidance.reason}</p>
+          <ol>{data.upgradeGuidance.steps.map(step => <li key={step}>{step}</li>)}</ol>
+          <div className="update-command"><pre><code>{data.upgradeGuidance.command}</code></pre><button type="button" className="text-button" onClick={() => { void copyText(data.upgradeGuidance!.command).then(done => { setCopiedCommand(done); if (done) setTimeout(() => setCopiedCommand(false), 1600); }); }}>{copiedCommand ? "已复制" : "复制命令"}</button></div>
+          <p className="update-muted">这次不会清空会话或运行记录；安装器会保留旧目录，确认无误后再手动备份或清理。</p>
+        </section>}
         {data?.operation.message && <p className="update-progress" role="status">{data.operation.message}</p>}
         {(error || data?.error) && <p className="update-error" role="alert">{error || data?.error}</p>}
         {isPreview && <p className="update-muted">预览模式不检查或安装更新。</p>}

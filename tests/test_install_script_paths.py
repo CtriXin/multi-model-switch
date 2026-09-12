@@ -41,6 +41,34 @@ def _run_install_check(*, home: Path, extra_env: dict[str, str] | None = None) -
     return completed.stdout
 
 
+def _run_install_dry_run(*, home: Path) -> str:
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+    env.update(_version_env_overrides(stable_ref="v4.19.1", latest_tag_ref="v4.19.1"))
+    completed = subprocess.run(
+        ["bash", str(INSTALL_SCRIPT), "--dry-run", "--ref", "v4.19.1"],
+        cwd=ROOT_DIR, env=env, capture_output=True, text=True, check=True,
+    )
+    return completed.stdout
+
+
+def test_installer_warns_about_legacy_config_without_touching_it(tmp_path):
+    legacy = tmp_path / ".config" / "mms"
+    legacy.mkdir(parents=True)
+    config = legacy / "config.toml"
+    config.write_text("legacy", encoding="utf-8")
+    output = _run_install_dry_run(home=tmp_path)
+    assert "旧版 MMS 配置" in output
+    assert "mms-next" in output
+    assert config.read_text(encoding="utf-8") == "legacy"
+
+
+def test_installer_does_not_warn_for_gateway_runtime_only(tmp_path):
+    (tmp_path / ".config" / "mms" / "codex-gateway" / "s").mkdir(parents=True)
+    output = _run_install_dry_run(home=tmp_path)
+    assert "旧版 MMS 配置" not in output
+
+
 def _extract_shell_function_body(script_text: str, function_name: str) -> str:
     marker = f"{function_name}() {{"
     start = script_text.find(marker)

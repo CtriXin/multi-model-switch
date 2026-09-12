@@ -1767,6 +1767,27 @@ PY
     sed -n 's/.*"installed_ref"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$meta_path" | head -n 1
 }
 
+# A legacy root may still contain gateway/session runtime data, so the
+# installer must never remove it wholesale. Warn only when it has recognizable
+# MMS configuration files and leave inspection/backup to the user.
+legacy_mms_root_has_config() {
+    [ -d "$LEGACY_CONFIG_ROOT" ] || return 1
+    local name
+    for name in config.toml credentials.sh model-routes.json model-routes.lineup.json model-policy.json provider-profiles.json version.json; do
+        [ -f "$LEGACY_CONFIG_ROOT/$name" ] && return 0
+    done
+    return 1
+}
+
+print_legacy_mms_root_notice() {
+    legacy_mms_root_has_config || return 0
+    echo "⚠ $(t "检测到旧版 MMS 配置：$LEGACY_CONFIG_ROOT" "Legacy MMS configuration detected: $LEGACY_CONFIG_ROOT")"
+    echo "  $(t "当前版本只使用 ~/.config/mms-next，不会自动读取、迁移或删除旧配置。" "The current version only uses ~/.config/mms-next. It will not read, migrate, or delete the legacy config automatically.")"
+    echo "  $(t "请先确认新 Pilot 已正常工作，再手动处理旧目录；其中可能还有旧 gateway/session 运行数据。" "Confirm the new Pilot works before handling the old directory; it may still contain gateway/session runtime data.")"
+    echo "  $(t "查看当前配置根：mms config root --json" "Inspect the active config root: mms config root --json")"
+    echo "  $(t "无需先卸载 mms；安装器会更新原命令。不要直接删除或移动整个旧目录，以免影响仍在使用它的会话。" "No need to uninstall mms first; the installer updates the existing command. Do not delete or move the whole legacy directory while sessions may still use it.")"
+}
+
 # An explicit --ref pins a version outright, so reporting a channel there would
 # contradict the pinned ref.
 install_channel_label() {
@@ -1850,6 +1871,7 @@ run_install_check() {
     local cli_path=""
 
     print_version_overview
+    print_legacy_mms_root_notice
 
     if find_supported_python >/dev/null 2>&1; then
         PYTHON_CMD="$(find_supported_python)"
@@ -2630,6 +2652,7 @@ echo "  $(t "MMS 一键安装" "MMS one-line installer")"
 echo "===================================="
 echo ""
 print_install_headline
+print_legacy_mms_root_notice
 echo ""
 
 if [ -n "$INSTALL_CLI_LIST" ]; then

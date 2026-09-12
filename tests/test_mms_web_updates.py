@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 
 from mms_web.runtime import private_json
 from mms_web.updates import CHECK_INTERVAL, UpdateService, version_tuple
+from mms_web.update_guidance import upgrade_guidance, release_policy, INSTALL_COMMAND
 from mms_web.server import WebApplication
 
 
@@ -17,6 +18,37 @@ def test_numeric_versions_and_stable_only():
     assert version_tuple('4.10.0') > version_tuple('v4.9.9')
     assert version_tuple('v4.9.0-rc1') is None
     assert version_tuple('../9.0.0') is None
+
+
+def test_upgrade_policy_is_explicit_and_never_accepts_a_command(tmp_path):
+    notes = '<!-- mms-upgrade-policy: {"manualBelow":"4.20.0","reason":"先运行安装器"} -->'
+    assert release_policy(notes) == {'manualBelow': '4.20.0', 'reason': '先运行安装器'}
+    guidance = upgrade_guidance('4.19.1', {'tag': 'v4.20.0', 'upgradePolicy': release_policy(notes)})
+    assert guidance['required'] is True
+    assert guidance['command'] == INSTALL_COMMAND
+    assert upgrade_guidance('4.20.0', {'tag': 'v4.21.0', 'upgradePolicy': release_policy(notes)}) is None
+
+
+def test_upgrade_guidance_uses_actual_legacy_root_and_staged_install(tmp_path, monkeypatch):
+    home = tmp_path / 'home'
+    monkeypatch.setenv('MMS_REAL_HOME', str(home))
+    legacy = home / '.config' / 'mms'
+    next_root = home / '.config' / 'mms-next'
+    latest = {'tag': 'v4.19.2'}
+    assert upgrade_guidance('4.19.1', latest, config_root=legacy)['required'] is True
+    assert upgrade_guidance('4.19.1', latest, config_root=next_root) is None
+    assert upgrade_guidance('4.19.1', latest, config_root=tmp_path / 'custom' / 'mms') is None
+    staged = {'manualInstallRequired': True, 'reason': '当前服务跑的是暂存副本。'}
+    assert upgrade_guidance('4.19.1', latest, installation=staged)['required'] is True
+
+
+def test_status_exposes_manual_policy_and_disables_one_click_update(tmp_path):
+    s = service(tmp_path, Mock(return_value={'tag': 'v99.0.0', 'notes': 'new',
+                                              'upgradePolicy': {'manualBelow': '4.20.0', 'reason': '迁移'}}))
+    with patch('mms_web.updates.VERSION', '4.19.1'):
+        result = s.check()
+    assert result['upgradeGuidance']['required'] is True
+    assert result['canUpgrade'] is False
 
 
 def test_due_manual_and_auto_checks_share_a_persistent_cache(tmp_path):

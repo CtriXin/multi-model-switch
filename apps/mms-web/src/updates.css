@@ -84,6 +84,21 @@
   margin: 0 0 6px;
   font-size: max(11px, 0.8571rem);
 }
+.update-migration-warning {
+  margin-top: 24px;
+  padding: 16px 18px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
+  border-left: 4px solid var(--accent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+}
+.update-migration-warning h3 { margin: 0 0 8px; }
+.update-migration-warning p { margin: 0 0 10px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.update-migration-warning ol { margin: 0 0 12px; padding-left: 22px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.update-command { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 10px; }
+.update-migration-warning pre { flex: 1; min-width: 0; margin: 0; padding: 11px 12px; border-radius: 7px; background: var(--soft); overflow-x: auto; }
+.update-command .text-button { flex: 0 0 auto; margin-top: 7px; }
+.update-migration-warning pre code { font-family: var(--font-mono); font-size: 12px; white-space: pre; }
 
 /* The post-update changelog on the home page. Same note styling as the update
    dialog, in a card that sits in the page rather than over it. */
