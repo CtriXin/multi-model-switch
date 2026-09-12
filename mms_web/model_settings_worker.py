@@ -256,6 +256,8 @@ def draft_for(rows, request, revision):
     if not isinstance(selected, list) or len(selected) > 5000 or not all(isinstance(m, str) and m.strip() == m and 0 < len(m) <= 200 and not any(ord(c) < 32 for c in m) for m in selected):
         raise WebError("INVALID_MODELS", "请填写有效的模型 ID。", 400)
     selected = list(dict.fromkeys(selected))
+    if not selected:
+        raise WebError("NO_MODELS", "每个通道至少保留一个模型；如需停用整个通道，请删除通道。", 409)
     original = {m["id"] for m in target["models"] if m.get("visible", True)}
     known = {m["id"]: m for m in public_rows([target])[0]["models"]}
     changes = []

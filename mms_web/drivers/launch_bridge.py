@@ -131,8 +131,14 @@ def build_pi_launch_plan(model_info, runtime, cwd, *, config_root=None, extra_ar
     if not root:
         raise LaunchSeamUnavailable("缺少独立 MMS 运行目录")
     root = require_private_root(Path(root))
-    if not (root / "config.toml").is_file():
-        raise LaunchSeamUnavailable("独立 MMS 运行配置不存在")
+    # Registry v2 snapshots are the source of truth for new Pilot installs.
+    # They intentionally may omit the legacy config.toml; catalog_worker has
+    # already resolved the runtime from latest-approved before reaching this
+    # seam. Keep rejecting a genuinely empty snapshot so a broken install does
+    # not turn into a misleading Pi failure.
+    has_registry = (root / "generated" / "model-registry.latest-approved.json").is_file()
+    if not has_registry and not (root / "config.toml").is_file():
+        raise LaunchSeamUnavailable("独立 MMS 运行配置或已批准模型目录不存在")
     executable, node = pi_runtime()
     if not executable or not node:
         raise LaunchSeamUnavailable("需要安装 Pi 和兼容的 Node.js 运行环境")

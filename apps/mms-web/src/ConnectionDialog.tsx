@@ -512,7 +512,7 @@ export function ConnectionDialog({
                 data-setup-next
                 disabled={!!busy}
                 onClick={() => {
-                  if (window.confirm("确认保存通道，并自动同步模型能力？")) void apply();
+                  void apply();
                 }}
               >
                 {busy === "apply" ? (
