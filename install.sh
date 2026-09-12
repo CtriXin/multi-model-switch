@@ -52,9 +52,10 @@ INSTALL_CLI_EXPLICIT=0
 CHECK_ONLY=0
 CLEANUP_ONLY=0
 LAUNCH_WEB_MODE="ask"
+# --keep-running-pilot is accepted for compatibility only; it changes nothing
+# (see guard_live_pilot_install / usage text below). Installation never stops
+# a running Pilot, so there is no stop-and-reopen path to configure here.
 KEEP_RUNNING_PILOT=0
-STOPPED_PILOT=0
-STOPPED_PILOT_PORT=""
 PRINT_ONLY_VERSION=0
 DRY_RUN=0
 
@@ -289,7 +290,9 @@ $(t "说明:" "Notes:")
   - $(t "--lang 可设置默认 UI 语言（zh / en）" "--lang sets the default UI language (zh / en)")
   - $(t "安装过程零交互：不询问可选包，也不询问 UI 语言；唯一的提问是装完之后要不要打开 MMS Web" "The install is non-interactive: no optional-pack questions and no UI language prompt; the only question comes after everything is installed and just offers to open MMS Web")
   - $(t "--launch-web 跳过提问直接打开，--no-launch-web 完全不打开；没有终端时不提问，只打印命令" "--launch-web opens it without asking, --no-launch-web never opens it; with no terminal available nothing is asked and the command is printed instead")
-  - $(t "检测到 Pilot 正在运行时默认暂停安装，不关闭 Pilot 或其会话；--keep-running-pilot 保持兼容" "When a Pilot is running, installation pauses by default without stopping Pilot or its sessions; --keep-running-pilot is retained for compatibility")
+  - $(t "检测到 Pilot 正在运行时会暂停安装，不关闭 Pilot 或其会话" "When a Pilot is running, installation pauses without stopping Pilot or its sessions")
+  - $(t "请在 Pilot 页面里用“更新”，或先运行 mms web stop（多实例用 --all）退出后再重新执行本命令" "Use Update inside Pilot, or run mms web stop (--all for multiple instances) to exit it, then re-run this command")
+  - $(t "--keep-running-pilot 仅为兼容旧脚本保留，不改变任何行为：安装始终不会关闭正在运行的 Pilot" "--keep-running-pilot is kept only for compatibility with older scripts; it changes nothing — installation never stops a running Pilot either way")
   - $(t "MMS Web 在后台运行，安装进程随即退出；PATH 默认写入 shell 配置，--no-shell-rc 可关闭" "MMS Web runs in the background and the installer exits right after; PATH is written to your shell config by default and --no-shell-rc turns that off")
   - $(t "pi 是必装项，pilot web 端依赖它；缺失的 claude/codex/opencode 会自动补装，已安装的不会被改动" "pi is mandatory because the pilot web app depends on it; missing claude/codex/opencode are installed automatically while existing ones are left untouched")
   - $(t "内建能力（weber 网页路由、grill-me、TOON、NSR）随 MMS 一起安装，只在 MMS 启动的会话里生效" "Built-in tools (weber web routing, grill-me, TOON, NSR) ship with MMS and only apply inside sessions MMS starts")
@@ -1967,7 +1970,7 @@ PY
 )" || return 1
     exec 9>"$lock_path"
 
-    local report="" status=0 servers=""
+    local report="" status=0
     set +e
     report="$(inspect_live_pilot)"
     status=$?
@@ -1980,19 +1983,16 @@ PY
         return 1
     fi
 
-    # Only Pilot servers are stoppable. Agent sessions Pilot spawned mention
-    # the same paths but stopping them would kill the user's conversation.
-    servers="$(printf '%s\n' "$report" | sed -n 's/^server //p')"
-    if [ "$KEEP_RUNNING_PILOT" -eq 1 ] || [ -z "$servers" ]; then
-        echo "⚠ $(t "Pilot 正在使用此安装目录，已暂停安装；没有关闭进程或清理会话。请在页面的‘更新’入口完成安全更新，或自行退出服务后再运行本命令。" "Pilot is using this installation. Nothing was stopped or removed. Use Update in Pilot, or exit the service yourself before rerunning this command.")"
-        printf '%s\n' "$report" | sed -n 's/^other /  /p'
-        return 1
-    fi
-
     # Installation must never terminate a running Pilot: doing so also kills
-    # conversations it owns. The user can exit it explicitly and retry.
-    echo "⚠ $(t "Pilot 正在运行，已暂停安装；没有关闭进程或清理会话。请先自行退出后重试。" "Pilot is running. Installation paused; no process or session was stopped. Exit Pilot yourself and retry.")"
-    printf '%s\n' "$report" | sed -n 's/^server /  /p'
+    # conversations it owns. This holds for every case status 3 reports,
+    # whether or not a stoppable server was found, and regardless of
+    # --keep-running-pilot (accepted for compatibility only; it never changes
+    # this outcome). The user must use Update inside Pilot, or stop it
+    # themselves and retry.
+    echo "⚠ $(t "Pilot 正在运行，已暂停安装；没有关闭进程或清理会话。" "Pilot is running. Installation paused; nothing was stopped or removed.")"
+    echo "  $(t "请在 Pilot 页面里用“更新”完成安全升级，或先执行 mms web stop 退出后再重新运行本命令。" "Use Update inside Pilot for a safe upgrade, or run mms web stop to exit it, then re-run this install command.")"
+    echo "  $(t "本机有多个实例时用 mms web stop --all" "Use mms web stop --all when several local instances are running")"
+    printf '%s\n' "$report" | sed -n 's/^server /  /p;s/^other /  /p'
     return 1
 }
 
@@ -2159,22 +2159,6 @@ for port in range(start, start + limit):
 PY
 }
 
-# True when nothing holds the port, so a restart can return to where the Pilot
-# the installer just stopped was answering.
-web_port_is_free() {
-    "$(_python_bin)" - "$1" <<'PY'
-import socket
-import sys
-
-with socket.socket() as probe:
-    try:
-        probe.bind(("127.0.0.1", int(sys.argv[1])))
-    except (OSError, ValueError):
-        raise SystemExit(1)
-raise SystemExit(0)
-PY
-}
-
 # mms-web binds a fixed port and fails hard when it is taken, so the installer
 # picks a free one instead of letting the last install step die on an OSError.
 find_free_web_port() {
@@ -2250,11 +2234,7 @@ start_mms_web_detached() {
         return 0
     fi
 
-    if [ -n "$STOPPED_PILOT_PORT" ] && web_port_is_free "$STOPPED_PILOT_PORT"; then
-        port="$STOPPED_PILOT_PORT"
-    else
-        port="$(find_free_web_port || true)"
-    fi
+    port="$(find_free_web_port || true)"
     if [ -z "$port" ]; then
         echo "⚠ $(t "找不到可用端口，跳过打开；稍后可手动运行" "No free port found, skipping launch; run it manually later"): mms-web --open"
         return 1
@@ -2519,6 +2499,8 @@ while [[ $# -gt 0 ]]; do
             LAUNCH_WEB_MODE="always"
             ;;
         --keep-running-pilot)
+            # Compatibility no-op: installation never stops a running Pilot
+            # regardless of this flag. Setting it changes nothing.
             KEEP_RUNNING_PILOT=1
             ;;
         --no-launch-web)
@@ -2869,13 +2851,6 @@ if [ -x "$BIN_DIR/mms" ]; then
         echo "$(t "检测到首次使用，启动配置向导..." "First-time setup detected, launching setup wizard...")"
         echo ""
         "$BIN_DIR/mms" || true
-        DID_LAUNCH=1
-    fi
-
-    # Pilot was running before this install, so put it back without asking.
-    if [ "$STOPPED_PILOT" -eq 1 ] && [ "$DID_LAUNCH" -eq 0 ] && [ "$LAUNCH_WEB_MODE" != "never" ]; then
-        echo "• $(t "安装前请 Pilot 退出过，现在重新打开" "Pilot was asked to exit before installing; reopening it now")"
-        start_mms_web_detached || true
         DID_LAUNCH=1
     fi
 
