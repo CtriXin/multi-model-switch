@@ -1,4 +1,3 @@
-import fcntl
 import os
 import subprocess
 import sys
