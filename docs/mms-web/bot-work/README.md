@@ -4,7 +4,8 @@ Date: 2026-09-12
 Manager: Claude（本会话负责进度、合并顺序、验收核对）
 Task: Stride 370e87ec37e741df
 Workspace: `/Users/xin/.local/share/stride/tasks/370e87ec37e741df/workspace`
-Branch: `codex/stride-370e87ec37e741df`（基线 a1348e3c = v4.16.0；origin/dev 已到 2614c6b6 = v4.19.4）
+Branch: `codex/stride-370e87ec37e741df`
+基线提交：`6a223c7c`（2026-09-12，已 push；分支起点 a1348e3c = v4.16.0，origin/dev 已到 2614c6b6 = v4.19.4）
 
 ## 这一阶段要做成什么
 
@@ -21,9 +22,21 @@ Bot 是长期存在的员工，用户用聊天交代事情。MMS 只做身份、
 
 建议只是建议，派发给谁由用户决定。每个包顶部都写了范围、不许碰的文件、验收和汇报格式。
 
+评审分工：T1 的验收里有截图比对，需要能识图的模型。glm5.3 不能识图，只做代码侧评审（hex 计数、token 使用、diff 里是否混入行为改动、build 与测试结果）；截图的视觉评审由 Claude 做。
+
+## 派发时给模型的开场话（直接复制）
+
+```
+你在 MMS 仓库的 Stride 任务 370e87ec37e741df 里承接一个工作包。
+先完整读 /Users/xin/.local/share/stride/tasks/370e87ec37e741df/workspace/docs/mms-web/bot-work/README.md，
+再读你的包 <T?-xxx.md>。严格遵守"只许改 / 不许改"、并行规则和验收项。
+从基线提交 6a223c7c 创建你自己的 worktree 和分支（README 第 2 条），不要在主 workspace 里改。
+做完不要提交，把 git diff --stat、测试命令与结果、实时验证截图路径、未完成项按 README 的格式写进你 worktree 的 walls.md，然后汇报。
+```
+
 ## 并行规则（必须遵守）
 
-1. **T4 的基线提交先行。** 当前 34 项改动全部未提交。基线落到分支之前，其他包不要开始改代码，否则四个模型在同一份未提交的工作树里互相覆盖。基线提交需要用户明确批准。
+1. **基线已落。** 提交 51e85fd1（后端）、b3d18c86（前端）、6a223c7c（文档）在分支上并已 push。所有包从 `6a223c7c` 或之后开分支。
 2. **每个包一个 worktree、一个分支**，从基线提交创建：
    ```bash
    cd /Users/xin/.local/share/stride/tasks/370e87ec37e741df/workspace
