@@ -459,9 +459,10 @@ def test_real_session_service_reports_btw_capabilities_honestly(tmp_path, seeded
     assert row["status"] == "completed" and row["source"] == "state"
     detail = service.get_session(session_id)
     assert [r["btwId"] for r in detail["sideQuestions"]] == [row["btwId"]]
-    # Session-level caps stay about the main turn (send/stop/approve);
-    # /btw is a service-level capability and is not re-claimed per session.
-    assert set(detail["session"]["capabilities"]) == {"send", "stop", "approve"}
+    # Session-level caps stay about the main turn; T2 may additionally expose
+    # the real steer and queue controls. /btw is a service-level capability.
+    assert {"send", "stop", "approve"}.issubset(detail["session"]["capabilities"])
+    assert {"steer", "queueControl"}.issubset(detail["session"]["capabilities"])
 
 
 def test_real_server_routes_side_questions_end_to_end(tmp_path, seeded_seam, monkeypatch):
