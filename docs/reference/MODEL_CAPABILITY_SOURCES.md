@@ -88,6 +88,8 @@ python3 scripts/openrouter_recent_models.py --missing   # 只看 profile 里还�
 
 **k3 的输出上限没有官方来源。** 2026-09-02 的标定记录里 `official_max_output_tokens` 是 `null`。profile 保留 131072，不要在没有来源的情况下把它抬到 context 那么大：上游会直接拒绝超限的 `max_tokens`。`tests/test_provider_profiles.py::test_profile_max_output_never_exceeds_its_context_window` 覆盖这条。
 
+**MiMo 的 `[1m]` 在 Anthropic 端点是真的 selector，不是别名。** 官方 Claude Code 接入文档写明：在 Anthropic 兼容端点上，支持 1M 的 MiMo 模型要把 `[1m]` 后缀加在 model id 上才启用扩展上下文，平名跑的是 256K 档。所以通用 `mimo` profile（它同时服务 Anthropic 端点和"没说是哪个端点"的通道）记平名 262144、`[1m]` 1048576；OpenAI 风格路由（`mimo-openai`、`openrouter-xiaomi-mimo`）平名就是 1M，各自记在自己的 profile 里。不要把这两种路由合并成一个数字：宁可早 compact，也不能告诉 harness 一个服务端不认的窗口。来源：https://mimo.mi.com/docs/en-US/tokenplan/integration/claudecode
+
 **OpenAI 已经下架的模型仍在 profile 里。** `gpt-5`、`gpt-5-pro`、`gpt-5.4`、`gpt-5.4-mini` 不在官方当前列表上了,但很多中转通道还在提供。它们的值保持原样,不要因为官方页面查不到就删。
 
 **Anthropic 的 4.6 系列已是 legacy。** 当前是 Opus 5 / Sonnet 5 / Fable 5.1 / Haiku 4.5。旧模型页仍在,规格照样能查。

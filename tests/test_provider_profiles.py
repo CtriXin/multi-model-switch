@@ -386,11 +386,13 @@ def test_openrouter_kimi_k3_profile_aliases_to_moonshot_wire_model(monkeypatch, 
 def test_profile_context_window_and_references(monkeypatch, tmp_path):
     profiles = _profiles(monkeypatch, tmp_path)
 
+    # MiMo documents the `[1m]` suffix as what enables extended context on the
+    # Anthropic endpoint, so the plain id there is the 256K mode.
     assert profiles.profile_context_window(
         "mimo-v2.5-pro",
         provider_id="mimo",
         base_url="https://api.xiaomimimo.com/anthropic",
-    ) == 1_048_576
+    ) == 262_144
     assert profiles.profile_context_window(
         "mimo-v2.5-pro[1m]",
         provider_id="mimo",

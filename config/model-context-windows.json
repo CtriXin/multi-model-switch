@@ -109,12 +109,12 @@
     },
     "mimo-v2.5": {
       "context_window_tokens": 1048576,
-      "source": "Xiaomi MiMo v2.5 is a 1M model; every MiMo provider profile agrees, and the [1m] selector is the same model under another name",
+      "source": "Xiaomi MiMo v2.5 on an OpenAI-style route, where the plain name is the 1M model; the Anthropic endpoint's 256K plain mode is provider-specific and lives in the mimo profile",
       "checked": "2026-09"
     },
     "mimo-v2.5-pro": {
       "context_window_tokens": 1048576,
-      "source": "Xiaomi MiMo v2.5 is a 1M model; every MiMo provider profile agrees, and the [1m] selector is the same model under another name",
+      "source": "Xiaomi MiMo v2.5 on an OpenAI-style route, where the plain name is the 1M model; the Anthropic endpoint's 256K plain mode is provider-specific and lives in the mimo profile",
       "checked": "2026-09"
     },
     "mimo-v2-pro": {
