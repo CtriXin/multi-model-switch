@@ -57,6 +57,9 @@ import type { GuideAction } from "./guide-content";
 import { ArtifactView } from "./ArtifactView";
 import { ProjectMaterials } from "./ProjectMaterials";
 import { Transcript } from "./Transcript";
+import { MessageQueue } from "./MessageQueue";
+import { SideQuestions, useSideQuestions } from "./SideQuestions";
+import { wireMode } from "./message-control";
 import { ConversationOutline } from "./ConversationOutline";
 import { CurrentActivity, sessionStatus } from "./SessionStatus";
 import { useSessionAttention } from "./SessionAttention";
@@ -1008,6 +1011,9 @@ export function App() {
       setWorkspaceNotice(error instanceof Error ? error.message : "移除失败");
     }
   }
+  // `/btw` is session-owned and independent of the main task's write lock, so
+  // it keeps its own state rather than travelling through `runAction`.
+  const sideQuestions = useSideQuestions(detail?.session.id, detail?.sideQuestions);
   const signals = useSessionAttention(
     data.sessions,
     detail,
@@ -1725,7 +1731,7 @@ export function App() {
                 }
                 busy={busy}
                 placeholder="想做什么？"
-                send={async (text, extras) => {
+                send={async (text, { mode: _mode, ...extras }) => {
                   if (!recipeReady) return false;
                   const revision = recipeContext.current.revision;
                   if (recipe) {
@@ -1999,6 +2005,7 @@ export function App() {
                           会话已建立。发送第一条消息开始工作。
                         </p>
                       )}
+                      <SideQuestions state={sideQuestions} />
                     </div>
                   )}
                 </div>
@@ -2108,6 +2115,38 @@ export function App() {
                   ) : (
                   <Composer
                     enterToSend={enterToSend}
+                    queue={
+                      <MessageQueue
+                        variant="dock"
+                        runtime={detail.runtime}
+                        capabilities={detail.session.capabilities}
+                        busy={busy}
+                        remove={(id) =>
+                          void runAction(
+                            `/sessions/${encodeURIComponent(detail.session.id)}/queue`,
+                            { action: "remove", id },
+                          )
+                        }
+                        move={(id, toIndex) =>
+                          void runAction(
+                            `/sessions/${encodeURIComponent(detail.session.id)}/queue`,
+                            { action: "move", id, toIndex },
+                          )
+                        }
+                        steer={(id) =>
+                          void runAction(
+                            `/sessions/${encodeURIComponent(detail.session.id)}/queue`,
+                            { action: "steer", id },
+                          )
+                        }
+                        clear={() =>
+                          void runAction(
+                            `/sessions/${encodeURIComponent(detail.session.id)}/control`,
+                            { action: "clearQueue" },
+                          )
+                        }
+                      />
+                    }
                     key={detail.session.id}
                     selectionRequest={selectionRequest?.sessionId === detail.session.id ? selectionRequest : undefined}
                     selectionHandled={() => setSelectionRequest(undefined)}
@@ -2115,6 +2154,13 @@ export function App() {
                     sessionId={detail.session.id}
                     sessionAlive={!!detail.runtime?.alive}
                     scroll={scroll}
+                    sideQuestion={{
+                      ask: sideQuestions.ask,
+                      limitation:
+                        data.capabilities.sidecarCompletion === false
+                          ? "这个版本不能发起需要模型判断的旁问。进度、耗时、最近工具、审批和队列这类状态问题仍然可以回答。"
+                          : undefined,
+                    }}
                     onCommand={async (command, args) => {
                       if (command === "export") {
                         exportConversation(detail);
@@ -2173,12 +2219,12 @@ export function App() {
                     }
                     busy={busy}
                     running={detail.session.state === "running"}
-                    send={(text, extras) =>
+                    send={(text, { mode, ...extras }) =>
                       runAction(
                         "/sessions/" +
                           encodeURIComponent(detail.session.id) +
                           "/messages",
-                        { text, ...extras },
+                        { text, ...extras, ...(wireMode(mode) ? { mode: wireMode(mode) } : {}) },
                       )
                     }
                     stop={

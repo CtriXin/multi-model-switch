@@ -2827,12 +2827,147 @@ dialog:has(.dialog-body.sheet) .dialog-body.sheet > header {
   padding: 10px;
   border-radius: 5px;
 }
-.queued-messages {
-  padding-left: 20px;
+/* Messages the session accepted but has not delivered yet. It sits above the
+   input in a live session and inside the runtime panel, so it stays quiet:
+   one rule, muted text, and amber only on the mode that changes the run. */
+.message-queue {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 9px 12px 10px;
+  background: var(--surface);
+}
+/* Rides on top of the input, inside the same frame, so acting on a queued
+   message is one glance from where it was typed. */
+.message-queue-dock {
+  background: var(--soft);
+  border-color: transparent;
+  margin: -4px 0 12px;
+}
+.composer.collapsed .message-queue-dock {
+  display: none;
+}
+/* One line each: this is an index of what is waiting, not a second copy of the
+   messages the transcript already shows in full. */
+.message-queue-dock .message-queue-items p {
+  -webkit-line-clamp: 1;
+}
+.queue-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  background: none;
+  padding: 3px 6px;
+  border-radius: 6px;
+  color: var(--muted);
+  font: inherit;
+  font-size: max(11px, 0.7857rem);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.queue-action:hover:not(:disabled) {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+/* Inside the runtime panel it is one section among many, so it drops the frame
+   and uses the same rule the other sections use. */
+.message-queue-panel {
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  padding: 12px 0 0;
+  margin: 14px 0 0;
+}
+.message-queue-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.message-queue-head h3 {
+  margin: 0;
+  font-size: max(11px, 0.8571rem);
+  font-weight: 600;
+  color: var(--ink);
+}
+.message-queue-head h3 span {
+  margin-left: 7px;
+  font-weight: 400;
+  color: var(--muted);
+  font-size: max(11px, 0.7857rem);
+}
+
+.message-queue-clear {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--muted);
+  font: inherit;
+  font-size: max(11px, 0.7857rem);
+  cursor: pointer;
+}
+.message-queue-clear:hover:not(:disabled) {
+  color: var(--danger);
+}
+.message-queue-items {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.message-queue-items li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 0;
+  min-width: 0;
+}
+.message-queue-items p {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
   color: var(--muted);
   font-size: max(11px, 0.8571rem);
   line-height: 1.7;
   overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.queue-mode {
+  flex-shrink: 0;
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: max(10px, 0.7143rem);
+  background: var(--soft);
+  color: var(--muted);
+}
+.queue-mode-steer {
+  background: var(--amber-bg);
+  color: var(--amber);
+}
+.queue-item-actions {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+  align-self: center;
+}
+/* Never block the text it sits beside once it has nothing left to offer. */
+.queue-item-actions .icon-button:disabled {
+  opacity: 0.35;
+}
+
+/* Says a steering message reached this turn. It never claims the answer
+   changed unless the service reported the link itself. */
+.steer-note {
+  margin: 6px 0 0;
+  color: var(--amber);
+  font-size: max(11px, 0.7857rem);
+  line-height: 1.6;
 }
 
 .mode-picker {

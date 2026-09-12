@@ -155,7 +155,7 @@ def test_full_chain_child_exit_error_state(service):
         message="error state",
     )
     view = service.get_session(session_id)["session"]
-    assert view["capabilities"] == {"send": False, "stop": False, "approve": False}
+    assert view["capabilities"] == {"send": False, "stop": False, "approve": False, "steer": False, "queueControl": False}
     events = service.get_session(session_id)["events"]
     exit_notices = [e["text"] for e in events if "Pi 进程已退出" in e.get("text", "")]
     assert exit_notices and "fake child stderr diagnostic" not in exit_notices[0]

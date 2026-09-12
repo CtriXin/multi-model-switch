@@ -156,8 +156,12 @@ def test_launch_disabled_without_real_launch(tmp_path, seeded_seam):
     service, _ = make_service(tmp_path, real_launch=False)
     # The blocker travels with the flag now: a page full of unavailable models
     # has to be able to say what is missing.
+    # sidecarCompletion is a build capability, not a launch one: an existing
+    # session can still be asked a question after new launches are blocked.
     assert service.capabilities() == {"launch": False,
-                                      "launchReason": "没有选定 MMS 配置根，无法启动会话。"}
+                                      "launchReason": "没有选定 MMS 配置根，无法启动会话。",
+                                      "sideQuestions": True,
+                                      "sidecarCompletion": True}
     with pytest.raises(WebError) as err:
         launch_ok(service)
     assert err.value.status == 409
@@ -173,7 +177,7 @@ def test_launch_success_shape(tmp_path, seeded_seam):
     assert session["modelName"] == "fake-sonnet"
     assert session["providerName"] == "Fake Provider"
     assert session["state"] == "running"
-    assert session["capabilities"] == {"send": True, "stop": True, "approve": False}
+    assert session["capabilities"] == {"send": True, "stop": True, "approve": False, "steer": True, "queueControl": True}
     assert session["title"] == "帮我看一下这个问题"
     kinds = [event["kind"] for event in detail["events"]]
     assert kinds.count("user") == 1
@@ -377,7 +381,7 @@ def test_persistence_and_restart_snapshot(tmp_path, seeded_seam):
     listed = service2.list_sessions()
     assert len(listed) == 1
     assert listed[0]["state"] == "stopped", "restart must not pretend the child runs"
-    assert listed[0]["capabilities"] == {"send": False, "stop": False, "approve": False}
+    assert listed[0]["capabilities"] == {"send": False, "stop": False, "approve": False, "steer": False, "queueControl": False}
     detail2 = service2.get_session(session_id)
     texts = [e["text"] for e in detail2["events"] if e["kind"] == "user"]
     assert texts == ["第一轮", "第二轮"]

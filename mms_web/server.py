@@ -297,6 +297,10 @@ class WebApplication:
                 return self._sessions().runtime_view(parts[1])
             if parts[2] == "commands":
                 return self._sessions().command_catalog(parts[1])
+            if parts[2] == "side-questions":
+                return {"sideQuestions": self._sessions().list_side_questions(parts[1])}
+        if len(parts) == 4 and parts[0] == "sessions" and parts[2] == "side-questions":
+            return self._sessions().get_side_question(parts[1], parts[3])
         if parts == ["bootstrap"]:
             return self.bootstrap(include_cli)
         if len(parts) == 2 and parts[0] == "sessions":
@@ -417,8 +421,13 @@ class WebApplication:
             return service.launch(payload)
         if len(parts) == 3 and parts[0] == "sessions" and parts[2] == "adopt":
             return self.adopt_cli_session(parts[1], payload)
+        if len(parts) == 3 and parts[0] == "sessions" and parts[2] == "side-questions":
+            return self._sessions().ask_side_question(parts[1], payload)
+        if (len(parts) == 5 and parts[0] == "sessions" and parts[2] == "side-questions"
+                and parts[4] == "cancel"):
+            return self._sessions().cancel_side_question(parts[1], parts[3])
         if len(parts) == 3 and parts[0] == "sessions":
-            methods = {"messages": "send", "stop": "stop", "control": "control", "manage": "manage", "fork": "fork", "model": "switch_model", "artifacts": "artifact"}
+            methods = {"messages": "send", "stop": "stop", "control": "control", "manage": "manage", "fork": "fork", "model": "switch_model", "artifacts": "artifact", "queue": "queue"}
             if parts[2] in methods:
                 return getattr(self._sessions(), methods[parts[2]])(parts[1], payload)
         if len(parts) == 4 and parts[0] == "sessions" and parts[2] == "approvals":

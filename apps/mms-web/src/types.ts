@@ -1,4 +1,17 @@
+import type { SideQuestion } from "./side-questions";
+
 export type Harness = "pi" | "codex" | "claude" | "opencode" | "gemini" | "agy";
+/** How a message reaches the session. `direct` starts a turn, `followUp` waits
+ *  for the current one to settle, `steer` lands in it. See message-control.ts
+ *  for the service contract behind these. */
+export type SendMode = "direct" | "followUp" | "steer";
+/** One message the session has accepted but not yet delivered. */
+export interface PendingMessage {
+  id: string;
+  text: string;
+  mode: "followUp" | "steer";
+  createdAt?: string;
+}
 export type SessionState =
   | "running"
   | "waiting"
@@ -73,7 +86,17 @@ export interface Session {
   } | null;
   updatedAt: string;
   owner: "web" | "cli" | "glint" | "external";
-  capabilities: { send: boolean; stop: boolean; approve: boolean };
+  capabilities: {
+    send: boolean;
+    stop: boolean;
+    approve: boolean;
+    /** The service accepts `mode: "steer"` on a message. Absent means every
+     *  message queues as a follow-up, so the page offers no steer. */
+    steer?: boolean;
+    /** The service serves `/sessions/{id}/queue`, so single queued messages can
+     *  be removed or reordered. Absent leaves only clearing the whole queue. */
+    queueControl?: boolean;
+  };
   summary?: string;
   archived?: boolean;
   cwd?: string;
@@ -81,12 +104,30 @@ export interface Session {
 }
 export interface SessionEvent {
   modelName?: string;
+  /** How this user message was sent. Absent on messages recorded before the
+   *  service reported delivery modes. */
+  mode?: SendMode;
+  /** On an assistant event: the user messages the service says steered it. */
+  steeredBy?: string[];
   id: string;
   sequence: number;
   kind: "user" | "assistant" | "tool" | "approval" | "notice";
   text: string;
   title?: string;
-  status?: "running" | "done" | "error" | "queued" | "cancelled";
+  status?:
+    | "running"
+    | "done"
+    | "queued"
+    /** Pi consumed the queued message. */
+    | "delivered"
+    /** The send was rejected; the message never ran. */
+    | "failed"
+    /** Stop removed it from the queue mid-turn. */
+    | "interrupted"
+    /** The user cleared the queue, or a resume invalidated it. */
+    | "cancelled"
+    /** What a failed send was called before the states were split apart. */
+    | "error";
   approvalId?: string;
   decision?: "allow" | "deny";
   method?: "confirm" | "select" | "input" | "editor";
@@ -134,6 +175,8 @@ export interface SessionDetail {
   artifacts: Artifact[];
   artifactNotice?: string;
   runtime?: Runtime;
+  /** `/btw` records. They live beside the transcript, never inside `events`. */
+  sideQuestions?: SideQuestion[];
 }
 export interface Attachment {
   id: string;
@@ -155,7 +198,14 @@ export interface Runtime {
   autoRetryEnabled?: boolean;
   isCompacting?: boolean;
   pendingMessageCount?: number;
+  /** Queue text only, in delivery order, with no ids: readable, not editable. */
   queue?: string[];
+  /** The same queue split by lane. Steering is delivered first. */
+  queueSteering?: string[];
+  queueFollowUp?: string[];
+  /** The same queue with stable ids and per-message mode, when the service
+   *  reports it. Preferred over `queue` whenever present. */
+  pending?: PendingMessage[];
   model?: {
     id?: string;
     provider?: string;
@@ -193,6 +243,11 @@ export interface Bootstrap {
     modelSettings?: boolean;
     launch: boolean;
     discoverModels?: boolean;
+    /** `/btw` is answerable at all. State answers need no model. */
+    sideQuestions?: boolean;
+    /** A read-only sidecar model is available, so questions that need
+     *  judgement can be answered too. Without it those fail closed. */
+    sidecarCompletion?: boolean;
   };
   workspaces: Workspace[];
   models: Model[];

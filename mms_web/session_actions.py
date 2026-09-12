@@ -78,8 +78,14 @@ class SessionActions:
 
     def _runtime_view_locked(self, session):
         cached = {**session.meta.get("runtimeView", {}), "contextEvidence": session.meta.get("contextEvidence")}
+        queue_view = {"queue": session.meta.get("queue", []),
+                      "queueSteering": session.meta.get("queueSteering", []),
+                      "queueFollowUp": session.meta.get("queueFollowUp", []),
+                      # The same queue keyed by the event id that addresses it,
+                      # which is what /queue acts on.
+                      "pending": session.pending_view()}
         if not session.alive() or time.monotonic() - getattr(session, "runtime_checked", 0) < 4:
-            return {**cached, "alive": session.alive(), "cwd": session.meta.get("cwd"), "cached": not session.alive(), "planning": session.meta.get("planning", False)}
+            return {**cached, **queue_view, "alive": session.alive(), "cwd": session.meta.get("cwd"), "cached": not session.alive(), "planning": session.meta.get("planning", False)}
         session.runtime_checked = time.monotonic()
         try:
             state = self._rpc(session, {"type": "get_state"}, 2)
@@ -93,6 +99,9 @@ class SessionActions:
             view["contextEvidence"] = session.meta.get("contextEvidence")
             view["planning"] = session.meta.get("planning", False)
             view["queue"] = session.meta.get("queue", [])
+            view["queueSteering"] = session.meta.get("queueSteering", [])
+            view["queueFollowUp"] = session.meta.get("queueFollowUp", [])
+            view["pending"] = session.pending_view()
             view.update({"model": {key: model[key] for key in ("id", "name", "provider", "api", "reasoning", "input", "contextWindow", "maxTokens") if key in model},
                          "stats": {key: stats[key] for key in ("tokens", "cost", "contextUsage", "toolCalls", "totalMessages") if key in stats},
                          "cwd": session.meta.get("cwd"), "alive": True, "cached": False})
@@ -100,7 +109,7 @@ class SessionActions:
             session.persist(self._state_dir)
             return session.meta["runtimeView"]
         except WebError:
-            return {**cached, "alive": session.alive(), "cwd": session.meta.get("cwd"), "stale": True}
+            return {**cached, **queue_view, "alive": session.alive(), "cwd": session.meta.get("cwd"), "stale": True}
 
     def diagnostics(self, session_id):
         session = self._get(session_id)
@@ -215,6 +224,13 @@ class SessionActions:
             meta.update(id="s-" + uuid.uuid4().hex[:12], title=session.meta["title"] + " · 分支", runtimeRoot=str(new_root), archived=False, updatedAt=self._now(), forkedFrom=session_id)
             branch = type(session)(meta)
             branch.state = "stopped"
+            # Settled side questions belong to the visible history and travel
+            # with the branch; in-flight ones and idempotency keys do not.
+            from .side_questions import BTW_FINAL_STATES
+            branch.side_questions = copy.deepcopy({
+                key: row for key, row in session.side_questions.items()
+                if row.get("status") in BTW_FINAL_STATES
+            })
             end_index = session.events.index(selected) + 1 if selected else len(session.events)
             branch.events = copy.deepcopy(session.events[:end_index])
             branch.event_index = {e["id"]: e for e in branch.events}
