@@ -67,6 +67,19 @@ python3 scripts/openrouter_recent_models.py --limit 50
 python3 scripts/openrouter_recent_models.py --missing   # 只看 profile 里还没有的
 ```
 
+## 一个新模型的窗口写在哪里
+
+代码里已经没有按模型名的 context 表了（#230）。查到数字之后按这个顺序落地：
+
+1. **能对上某个 provider profile**：写进 `config/provider-profiles.json` 对应 profile 的 `context_windows`。这是常规位置。
+2. **没有任何 profile 覆盖**（典型是同时转售多家的中转通道）：写进 `config/model-context-windows.json`，每行必须带 `source` 和 `checked`。
+3. **provider 的 `/models` 已经自己上报了窗口**：什么都不用写。探测结果会缓存到 `<config root>/cache/models_<provider>.json` 的 `model_details`，resolver 直接读。
+4. **用户想临时改自己那台机器上的值**：`~/.config/mms-next/model-context-overrides.json`，它在链的最上面，agent 不代写。
+
+`[1m]` 不需要单独一行。非 Claude 模型的后缀只是输入归一化，`k3[1m]` 和 `k3` 解析到同一个数；只有某个来源显式写了带后缀的名字，那一行才会生效。
+
+完整链路和禁止事项见 `docs/AGENT_GUARDRAILS.md` 的 “Context Window Single Truth”，不变量测试是 `tests/test_context_window_single_truth.py`。
+
 ## 已知的坑
 
 **Kimi Code 的 k3 原生支持 1M。** `k3` 是新的默认入口；`k3[1m]` 仅为历史 MMS compatibility selector，不能直接发给 provider，也不再作为新的产品入口。OpenRouter 仍然只是 catalog evidence，不能单独证明当前 route/account 的实际能力。
@@ -74,6 +87,8 @@ python3 scripts/openrouter_recent_models.py --missing   # 只看 profile 里还�
 **k3 的 context 不要再改回 262144。** 这个值在 profile 里被来回改过三轮，每轮都漏掉一个 alias，导致同一个模型在 terminal 和 Pilot 上读出不同的窗口。`k3` / `k3[1m]` / `kimi-k3` 现在由 `tests/test_provider_profiles.py::test_kimi_k3_aliases_agree_on_one_million_context` 一起锁住。`k3-256k` 是官方另一个 256K 变体，不是被降级的 k3，它有自己的 profile 条目。
 
 **k3 的输出上限没有官方来源。** 2026-09-02 的标定记录里 `official_max_output_tokens` 是 `null`。profile 保留 131072，不要在没有来源的情况下把它抬到 context 那么大：上游会直接拒绝超限的 `max_tokens`。`tests/test_provider_profiles.py::test_profile_max_output_never_exceeds_its_context_window` 覆盖这条。
+
+**MiMo 的 `[1m]` 在 Anthropic 端点是真的 selector，不是别名。** 官方 Claude Code 接入文档写明：在 Anthropic 兼容端点上，支持 1M 的 MiMo 模型要把 `[1m]` 后缀加在 model id 上才启用扩展上下文，平名跑的是 256K 档。所以通用 `mimo` profile（它同时服务 Anthropic 端点和"没说是哪个端点"的通道）记平名 262144、`[1m]` 1048576；OpenAI 风格路由（`mimo-openai`、`openrouter-xiaomi-mimo`）平名就是 1M，各自记在自己的 profile 里。不要把这两种路由合并成一个数字：宁可早 compact，也不能告诉 harness 一个服务端不认的窗口。来源：https://mimo.mi.com/docs/en-US/tokenplan/integration/claudecode
 
 **OpenAI 已经下架的模型仍在 profile 里。** `gpt-5`、`gpt-5-pro`、`gpt-5.4`、`gpt-5.4-mini` 不在官方当前列表上了,但很多中转通道还在提供。它们的值保持原样,不要因为官方页面查不到就删。
 

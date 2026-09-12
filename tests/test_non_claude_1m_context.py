@@ -2,8 +2,9 @@
 
 覆盖两个修复:
 - A: TUI 未展示 1M 开关时返回 None,mms_core 不覆盖 provider 的 claude_1m_mode
-- C: 非 Claude 桥接模型 + window>=1M 时,shell slots 不依赖 enable_claude_1m 开关,
-  且 CLAUDE_CODE_MAX_CONTEXT_TOKENS 泛化写入(不再枚举 glm-5.2)
+- C: 非 Claude 桥接模型 shell slots 不依赖 enable_claude_1m 开关,
+  且 CLAUDE_CODE_MAX_CONTEXT_TOKENS 对任何已知 window 泛化写入
+  (不再枚举模型名,也不再要求 window>=1M —— #230)
 """
 
 import os
@@ -71,10 +72,19 @@ class TestExplicitContextCapGeneralization(unittest.TestCase):
         _apply_claude_context_env_overrides(env, context_window=1_000_000, model_names=["claude-sonnet-4-6[1m]"])
         self.assertNotIn("CLAUDE_CODE_MAX_CONTEXT_TOKENS", env)
 
-    def test_non_claude_model_below_1m_window_no_cap(self):
+    def test_non_claude_model_below_1m_window_still_states_its_window(self):
+        # #230: the cap is no longer gated on >=1M. Claude Code's own default
+        # says nothing about someone else's model, so whenever the window is
+        # known it gets stated, whatever its size.
         env = {}
         _apply_claude_context_env_overrides(env, context_window=200_000, model_names=["glm-5.3"])
+        self.assertEqual(env.get("CLAUDE_CODE_MAX_CONTEXT_TOKENS"), "200000")
+
+    def test_unknown_window_sets_nothing(self):
+        env = {}
+        _apply_claude_context_env_overrides(env, context_window=None, model_names=["glm-5.3"])
         self.assertNotIn("CLAUDE_CODE_MAX_CONTEXT_TOKENS", env)
+        self.assertNotIn("CLAUDE_CODE_AUTO_COMPACT_WINDOW", env)
 
 
 class TestTuiNoneDoesNotOverrideProviderMode(unittest.TestCase):

@@ -93,20 +93,19 @@ _MIGRATION_CREDENTIAL_BOX_AESGCM_SCHEMA = "mms.config_migration_credentials.aesg
 _MIGRATION_CREDENTIAL_BOX_OPENSSL_SCHEMA = "mms.config_migration_credentials.openssl-cbc-hmac.v1"
 _MIGRATION_CREDENTIAL_BOX_SCHEMA = _MIGRATION_CREDENTIAL_BOX_AESGCM_SCHEMA
 
+# Keys are `[1m]`-free: a selector is the same model as its base name, so it
+# never needs a duplicate row (issue #230).
 _KNOWN_VISION_MODELS = {
     "gpt-5.3-codex",
     "gpt-5.4",
     "gpt-5.5",
     "k3",
-    "k3[1m]",
     "kimi-k3",
     "k2.6",
     "k2.6-code-preview",
     "kimi-k2.5",
     "kimi-k2.6",
     "mimo-v2.5",
-    # A `[1m]` selector is the same model as its base name.
-    "mimo-v2.5[1m]",
     "mimo-v2-omni",
     "minimax-m2.7",
     "minimax-m3",

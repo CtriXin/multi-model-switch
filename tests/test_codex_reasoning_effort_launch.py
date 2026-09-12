@@ -27,18 +27,24 @@ def test_claude_kimi_k3_context_env_follows_user_policy(monkeypatch):
     """K3 has no MMS-specific ``[1m]`` selector: user policy wins for every alias."""
     import mms_launchers
 
+    import mms_capability_resolver
+    import mms_context_window
+
     monkeypatch.setattr(
-        mms_launchers,
-        "_load_model_context_overrides",
+        mms_context_window,
+        "load_model_context_overrides",
         lambda: {"models": {}, "provider_overrides": {}},
     )
 
-    def fake_capability_context_window(model_name, *, provider_id=None, accepted_sources=None):
-        if str(model_name).lower() == "k3" and accepted_sources == {"model_policy", "manual_override"}:
-            return 1_000_000
-        return None
+    def fake_capabilities(model_name, *, provider_id="", **_kwargs):
+        if str(model_name).lower() == "k3":
+            return {
+                "context_window_tokens": 1_000_000,
+                "sources": {"context_window_tokens": "model_policy"},
+            }
+        return {"context_window_tokens": 0, "sources": {"context_window_tokens": "conservative_fallback"}}
 
-    monkeypatch.setattr(mms_launchers, "_capability_context_window", fake_capability_context_window)
+    monkeypatch.setattr(mms_capability_resolver, "resolve_model_capabilities", fake_capabilities)
 
     assert mms_launchers._lookup_context_window("k3", provider_id="kimi") == 1_000_000
     assert mms_launchers._lookup_context_window("k3[1m]", provider_id="kimi") == 1_000_000
@@ -48,12 +54,16 @@ def test_claude_kimi_k3_without_policy_uses_profile_one_million_window(monkeypat
     """Without a policy the provider profile decides, and it records K3 as native 1M."""
     import mms_launchers
 
+    import mms_capability_resolver
+    import mms_context_window
+
     monkeypatch.setattr(
-        mms_launchers,
-        "_load_model_context_overrides",
+        mms_context_window,
+        "load_model_context_overrides",
         lambda: {"models": {}, "provider_overrides": {}},
     )
-    monkeypatch.setattr(mms_launchers, "_capability_context_window", lambda *_a, **_k: None)
+    monkeypatch.setattr(mms_capability_resolver, "_load_default_approved_facts_shared", lambda: {})
+    monkeypatch.setattr(mms_capability_resolver, "load_default_model_policy", lambda: {})
 
     assert mms_launchers._lookup_context_window("k3", provider_id="kimi") == 1_048_576
     assert mms_launchers._lookup_context_window("k3[1m]", provider_id="kimi") == 1_048_576
@@ -96,7 +106,13 @@ def test_claude_glm_1m_context_sets_client_cap_without_selector():
     assert all("[1m]" not in value for value in env.values())
 
 
-def test_claude_glm_below_1m_does_not_override_client_cap():
+def test_claude_glm_below_1m_still_states_its_own_window():
+    """#230: a known window is stated whatever its size, not only at 1M.
+
+    Claude Code's built-in cap describes Anthropic's models, so leaving it in
+    place for a routed GLM meant compacting at the client's number rather than
+    the model's.
+    """
     import mms_launchers
 
     env = {}
@@ -106,7 +122,7 @@ def test_claude_glm_below_1m_does_not_override_client_cap():
         model_names=("glm-5.2",),
     )
 
-    assert "CLAUDE_CODE_MAX_CONTEXT_TOKENS" not in env
+    assert env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] == "200000"
 
 
 def test_default_gpt_reasoning_effort_uses_xhigh_for_source_checkout(monkeypatch):
