@@ -75,7 +75,7 @@ launch `{requestId,workspaceId,presetId,title,prompt}`；send `{requestId,text}`
 
 ## HTTP（主导所有）
 
-- `GET /api/v1/bootstrap`：`{version:'1',mode:'live',capabilities:{catalogRead,configure,launch},models,services,presets,workspaces,diagnostics,sessions,csrfToken}`。
+- `GET /api/v1/bootstrap`：`{version:'1',mode:'live',capabilities:{catalogRead,configure,launch},platform:{os,shell,home,configRoot,stateRoot,tempRoot,pathStyle,processControl,filePicker},browser:[{backend,supported,loggedIn,reason?,requires?}],models,services,presets,workspaces,diagnostics,sessions,csrfToken}`。`platform` 与 `browser` 是描述性 capability，不代表登录态已建立；未知登录态返回 `"unknown"`。
 - `GET /api/v1/sessions/:id`：SessionDetail。
 - `POST /api/v1/sessions`：launch。
 - `POST /api/v1/sessions/:id/messages`、`/stop`、`/approvals/:approvalId`：上述方法。

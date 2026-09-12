@@ -31,6 +31,17 @@ _NOTICE_TEXT_LIMIT = 1000
 _STDERR_TAIL_BYTES = 2048
 
 
+# Windows has no SIGKILL. Naming the force step once keeps every call site from
+# touching an attribute that platform lacks; the sentinel never reaches a signal
+# API there, because the Windows branch maps it to Popen.kill() first.
+FORCE_SIGNAL = getattr(signal, "SIGKILL", "force")
+
+
+def _is_windows() -> bool:
+    """One seam for the Windows branch, so it can be tested on any host."""
+    return os.name == "nt"
+
+
 def _clip(text: str, limit: int) -> str:
     text = str(text or "")
     if len(text) <= limit:
@@ -129,7 +140,14 @@ class PiRpcDriver:
 
     def _terminate_group(self, sig) -> None:
         try:
-            if os.getpgid(self._proc.pid) == self._proc.pid:
+            if _is_windows():
+                # Windows has no POSIX process groups, and Popen.terminate is
+                # TerminateProcess with kill as its alias: there is no graceful
+                # signal to deliver, only force. Map force to force and treat a
+                # graceful request as "nothing to send".
+                if sig is FORCE_SIGNAL:
+                    self._proc.kill()
+            elif os.getpgid(self._proc.pid) == self._proc.pid:
                 os.killpg(self._proc.pid, sig)
             else:
                 self._proc.send_signal(sig)
@@ -141,8 +159,14 @@ class PiRpcDriver:
 
         Keep stdin open if the child ignores termination, so a failed update
         does not itself break the original RPC transport.
+
+        On Windows there is no graceful request to send, so this reports False
+        instead of force-killing an idle Pi. The caller then aborts the update
+        with its own "no force kill attempted" error, which is the contract.
         """
         if self.alive():
+            if _is_windows():
+                return False
             self._terminate_group(signal.SIGTERM)
         if not self.wait(timeout=timeout):
             return False
@@ -170,7 +194,7 @@ class PiRpcDriver:
                 pass
             if not self.wait(timeout=3.0):
                 try:
-                    self._terminate_group(signal.SIGKILL)
+                    self._terminate_group(FORCE_SIGNAL)
                 except OSError:
                     pass
                 self.wait(timeout=5.0)

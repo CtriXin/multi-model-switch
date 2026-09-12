@@ -13,6 +13,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit, parse_qs
 
 from mms_version import VERSION
+from mms_platform import capability_snapshot
 
 from . import remote_access as access
 from .errors import WebError
@@ -113,6 +114,7 @@ class WebApplication:
         return {
             **snapshot, "version": "1", "appVersion": VERSION, "mode": "live",
             "capabilities": capabilities, "csrfToken": self.csrf_token,
+            **capability_snapshot(),
             "sessions": self.all_sessions(include_cli),
         }
 
@@ -458,6 +460,11 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
     from mms_version import VERSION
     identity = hashlib.sha256((str(Path(__file__).resolve().parent.parent) + "|" +
                                str(app.config_root.resolve()) + "|" + VERSION).encode()).hexdigest()
+    # `mms web status|url|stop|restart` decides "is this one mine" from this
+    # fingerprint instead of re-parsing the server's command line, which is not
+    # recoverable on Windows. It is a hash, so no local path is published.
+    from .service import state_identity
+    state_fingerprint = state_identity(app.state_root)
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "MMSWeb/1"
@@ -502,6 +509,7 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-MMS-Web-Identity", identity)
             self.send_header("X-MMS-Web-Version", VERSION)
+            self.send_header("X-MMS-Web-State", state_fingerprint)
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
             self.send_header("X-Frame-Options", "SAMEORIGIN" if preview else "DENY")

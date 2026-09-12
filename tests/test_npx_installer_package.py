@@ -11,6 +11,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 PACKAGE_DIR = ROOT_DIR / "packages" / "mms-install"
 MANIFEST = PACKAGE_DIR / "package.json"
 ENTRY = PACKAGE_DIR / "bin" / "mms-install.mjs"
+WINDOWS_BOOTSTRAP = PACKAGE_DIR / "bin" / "install.ps1"
 
 
 def _manifest() -> dict:
@@ -34,7 +35,7 @@ def test_package_declares_the_platforms_it_can_actually_run_on():
 
     # global fetch and the node: prefix both need a modern runtime
     assert manifest["engines"]["node"] == ">=18.17"
-    assert manifest["os"] == ["darwin", "linux"]
+    assert manifest["os"] == ["darwin", "linux", "win32"]
 
 
 def test_entrypoint_is_executable_and_parses():
@@ -77,11 +78,32 @@ def test_wrapper_keeps_the_script_and_the_installed_sources_on_one_ref():
     assert "function parseArgs" in text
 
 
-def test_wrapper_refuses_windows_with_a_readable_message():
+def test_wrapper_routes_windows_to_a_readable_preview_bootstrap():
     text = ENTRY.read_text(encoding="utf-8")
 
     assert 'process.platform === "win32"' in text
-    assert "WSL" in text
+    assert "runWindowsBootstrap" in text
+    assert "MMS Windows Native Preview bootstrap" in text
+
+
+def test_windows_bootstrap_is_packaged_and_has_no_unbounded_shell_fallback():
+    text = WINDOWS_BOOTSTRAP.read_text(encoding="utf-8")
+    assert "MMS Windows Native Preview bootstrap" in text
+    assert "Invoke-WebRequest" in text and "Expand-Archive" in text
+    assert "MMS_CONFIG_ROOT" in text and "MMS_STATE_ROOT" in text
+    assert "taskkill" not in text.lower()
+
+
+def test_windows_wrapper_translates_ref_and_dry_run_to_powershell_flags():
+    _node('''
+      import assert from 'node:assert/strict';
+      import {runWindowsBootstrap} from %s;
+      const calls=[];
+      const root=await import('node:os').then(m=>m.tmpdir());
+      const code=runWindowsBootstrap('MMS Windows Native Preview bootstrap', ['--ref','main','--dry-run'], (cmd,args)=>{calls.push([cmd,args]);return {status:0};}, root);
+      assert.equal(code,0); assert.equal(calls[0][0],'powershell.exe');
+      assert.ok(calls[0][1].includes('-Ref') && calls[0][1].includes('main') && calls[0][1].includes('-DryRun'));
+    ''' % json.dumps(ENTRY.as_uri()))
 
 
 def test_package_is_part_of_the_repo_workspaces():

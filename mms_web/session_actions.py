@@ -8,6 +8,7 @@ from pathlib import Path
 from .errors import WebError
 from .drivers.base import DriverClosedError, RpcTimeoutError
 from .runtime import private_json, snapshot_config
+from mms_platform import capability_snapshot
 
 
 def redact(value, secrets):
@@ -114,7 +115,8 @@ class SessionActions:
     def diagnostics(self, session_id):
         session = self._get(session_id)
         driver = session.driver
-        return redact({"state": session.state, "alive": session.alive(), "pid": getattr(getattr(driver, "_proc", None), "pid", None), "exitCode": getattr(driver, "exit_code", None), "mode": "Pi RPC (--mode rpc)", "cwd": session.meta.get("cwd"), "stderr": str(getattr(driver, "_stderr_tail", ""))[-8000:], "notices": [e["text"] for e in session.events if e["kind"] == "notice"][-12:]}, session.secrets)
+        capabilities = capability_snapshot()
+        return redact({"state": session.state, "alive": session.alive(), "pid": getattr(getattr(driver, "_proc", None), "pid", None), "exitCode": getattr(driver, "exit_code", None), "mode": "Pi RPC (--mode rpc)", "cwd": session.meta.get("cwd"), "stderr": str(getattr(driver, "_stderr_tail", ""))[-8000:], "notices": [e["text"] for e in session.events if e["kind"] == "notice"][-12:], "platform": capabilities.get("platform"), "browser": capabilities.get("browser", [])}, session.secrets)
 
     def command_catalog(self, session_id):
         session = self._get(session_id)

@@ -9,6 +9,7 @@ import mimetypes
 import os
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -17,6 +18,27 @@ from .errors import WebError
 from .runtime import private_json
 
 MAX_FILE = 8 * 1024 * 1024
+
+
+def _windows_filesystem() -> bool:
+    """Separate predicate so tests can exercise the Windows branch anywhere."""
+    return os.name == "nt"
+
+
+def _is_link_or_reparse(path: Path) -> bool:
+    """True for symlinks and, on Windows, junctions / other reparse points.
+
+    ``Path.is_symlink()`` does not detect junctions on Windows; the raw stat
+    ``st_reparse_point`` field covers every reparse-point tag. Fail-closed on
+    stat errors is the caller's job; an unreadable entry here returns False so
+    normal ``not folder.is_dir()`` checks still fire.
+    """
+    try:
+        if os.path.islink(path):
+            return True
+        return bool(getattr(os.stat(path, follow_symlinks=False), "st_reparse_point", 0))
+    except OSError:
+        return False
 ATTACHMENT_KEEP_DAYS = 30  # imported copies unreferenced by any session are pruned after this
 TEXT_LIMIT = 1024 * 1024
 EXCLUDED = {"node_modules", "__pycache__", "vendor", "dist", "build"}
@@ -111,26 +133,56 @@ class FileService:
         name = Path(str(payload.get("name") or "file").replace("\\", "/")).name
         name = "".join(c for c in name if ord(c) >= 32).encode()[:180].decode(errors="ignore").strip(". ") or "file"
         filename = uuid.uuid4().hex[:12] + "-" + name
-        # O_NOFOLLOW keeps a project symlink from redirecting this write elsewhere.
-        fd = None
         try:
-            fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
-            for part in (".pilot", "attachments"):
+            if _windows_filesystem():
+                # Windows lacks O_DIRECTORY/dir_fd. Reject symlink/junction
+                # redirection on each directory, then import atomically:
+                # write a private temp file and rename it into place, so a
+                # crash never leaves a partial attachment at the final path.
+                pilot = root / ".pilot"
+                attachments = pilot / "attachments"
+                for folder in (pilot, attachments):
+                    if folder.exists() and (_is_link_or_reparse(folder) or not folder.is_dir()):
+                        raise OSError("attachment directory is redirected")
+                    folder.mkdir(mode=0o700, exist_ok=True)
+                output_path = attachments / filename
+                if _is_link_or_reparse(output_path):
+                    raise OSError("attachment path is redirected")
+                descriptor, temporary = tempfile.mkstemp(dir=str(attachments), prefix=".import-", suffix=".tmp")
                 try:
-                    os.mkdir(part, 0o700, dir_fd=fd)
-                except FileExistsError:
+                    with os.fdopen(descriptor, "wb") as stream:
+                        stream.write(data)
+                    os.replace(temporary, output_path)
+                finally:
+                    try:
+                        os.unlink(temporary)
+                    except OSError:
+                        pass
+                try:
+                    output_path.chmod(0o600)
+                except OSError:
                     pass
-                child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
-                os.close(fd)
-                fd = child
-            output = os.open(filename, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=fd)
-            with os.fdopen(output, "wb") as stream:
-                stream.write(data)
+            else:
+                # O_NOFOLLOW keeps a project symlink from redirecting this write.
+                fd = None
+                try:
+                    fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+                    for part in (".pilot", "attachments"):
+                        try:
+                            os.mkdir(part, 0o700, dir_fd=fd)
+                        except FileExistsError:
+                            pass
+                        child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                        os.close(fd)
+                        fd = child
+                    output = os.open(filename, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=fd)
+                    with os.fdopen(output, "wb") as stream:
+                        stream.write(data)
+                finally:
+                    if fd is not None:
+                        os.close(fd)
         except OSError as exc:
             raise WebError("FILE_IMPORT_FAILED", "这个工作文件夹不能保存附件，请换一个可写的文件夹后重试。", 400) from exc
-        finally:
-            if fd is not None:
-                os.close(fd)
         target = root / ".pilot" / "attachments" / filename
         return self.reference_local({"paths": [str(target)]})["attachments"][0]
 

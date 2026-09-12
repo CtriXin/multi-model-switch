@@ -1,0 +1,168 @@
+name: Windows Acceptance (T3)
+
+# Reproducible Windows acceptance for the T3 Native Preview. This workflow is
+# Windows-only by construction: every job runs on a windows-* runner and the
+# first step fails if RUNNER_OS is not Windows. Linux/macOS results from other
+# workflows are never a substitute for a pass here.
+
+on:
+  workflow_dispatch:
+    inputs:
+      pytest_extra:
+        description: "Extra arguments appended to the pytest command"
+        required: false
+        default: ""
+  pull_request:
+    paths:
+      - ".github/workflows/windows-acceptance.yml"
+      - "scripts/ci/windows_acceptance.ps1"
+      - "mms_platform.py"
+      - "mms_web/**"
+      - "packages/mms-install/**"
+      - "apps/mms-web/src/local-file-paths.ts"
+      - "tests/test_mms_platform.py"
+      - "tests/test_mms_web_browser_capability.py"
+      - "tests/test_mms_web_file_lock.py"
+      - "tests/test_mms_web_install_lock.py"
+      - "tests/test_mms_web_local_files.py"
+      - "tests/test_mms_web_service.py"
+      - "tests/test_mms_web_status.py"
+      - "tests/test_mms_web_sessions_pi_driver.py"
+      - "tests/test_npx_installer_package.py"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-acceptance-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: "utf-8"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  MMS_SKIP_VENV_REEXEC: "1"
+
+jobs:
+  windows-acceptance:
+    name: ${{ matrix.os }} / ${{ matrix.powershell }} / py${{ matrix.python }} / node${{ matrix.node }}${{ matrix.pi_present && ' / pi' || '' }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        # Four explicit cells; no `include` merge ambiguity. Every cell keeps
+        # one shell edition at the version floors somewhere in the matrix, and
+        # the ceiling cell adds Python 3.13 + Node 22 + a real Pi install.
+        # GitHub-hosted runners offer Windows Server images only; windows-2022
+        # and windows-2025 are the closest supported stand-ins for the
+        # Windows 10 / Windows 11 kernel families (documented limitation).
+        include:
+          - os: windows-2022
+            powershell: powershell-5.1
+            python: "3.11"
+            node: "18.17.0"
+            pi_present: false
+          - os: windows-2022
+            powershell: pwsh-7
+            python: "3.11"
+            node: "18.17.0"
+            pi_present: false
+          - os: windows-2025
+            powershell: powershell-5.1
+            python: "3.12"
+            node: "20"
+            pi_present: false
+          - os: windows-2025
+            powershell: pwsh-7
+            python: "3.13"
+            node: "22"
+            pi_present: true
+    env:
+      MMS_CONFIG_ROOT: ${{ runner.temp }}\mms-ci-config
+      MMS_STATE_ROOT: ${{ runner.temp }}\mms-ci-state
+    steps:
+      - name: Windows-only guard
+        shell: pwsh
+        run: |
+          if ($env:RUNNER_OS -ne 'Windows') {
+            Write-Error "Windows acceptance ran on $($env:RUNNER_OS); this is a routing bug, not a pass."
+            exit 1
+          }
+          Write-Host "runner os: $([System.Environment]::OSVersion.VersionString)"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Setup Node ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Install Python test tools
+        shell: pwsh
+        run: python -m pip install pytest httpx rich
+
+      - name: Install Pi (positive discoverability cell)
+        if: matrix.pi_present
+        shell: pwsh
+        run: |
+          npm install --global @earendil-works/pi-coding-agent
+          node --version
+          pi --version
+
+      - name: Windows acceptance driver (${{ matrix.powershell }})
+        shell: ${{ matrix.powershell == 'powershell-5.1' && 'powershell' || 'pwsh' }}
+        run: |
+          & .\scripts\ci\windows_acceptance.ps1 `
+            -RepoRoot $PWD.Path `
+            -PythonExe ((Get-Command python).Source) `
+            -TempRoot (Join-Path $env:RUNNER_TEMP 'mms-win-acceptance') `
+            -ShellEdition '${{ matrix.powershell == 'powershell-5.1' && '5.1' || '7' }}' `
+            -PiPresent:${{ matrix.pi_present }}
+
+      - name: Windows pytest suite
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = $PWD.Path
+          python -m pytest -q `
+            tests/test_mms_platform.py `
+            tests/test_mms_web_browser_capability.py `
+            tests/test_mms_web_file_lock.py `
+            tests/test_mms_web_install_lock.py `
+            tests/test_mms_web_local_files.py `
+            tests/test_mms_web_service.py `
+            tests/test_mms_web_status.py `
+            tests/test_mms_web_sessions_pi_driver.py `
+            tests/test_npx_installer_package.py `
+            ${{ github.event.inputs.pytest_extra }}
+
+      - name: Acceptance boundary summary
+        if: always()
+        shell: pwsh
+        run: |
+          $summary = @"
+          ## Windows Acceptance (T3)
+
+          - os image: ``${{ matrix.os }}`` — Windows Server; the closest GitHub-hosted stand-in for the Windows 10/11 kernel family. Not a Windows 10/11 desktop OS.
+          - powershell: ``${{ matrix.powershell }}`` (``$($PSVersionTable.PSVersion)`` in this step's default shell)
+          - python: ``${{ matrix.python }}`` / node: ``${{ matrix.node }}`` / pi installed: ``${{ matrix.pi_present }}``
+          - Result of this job is Windows evidence only. **Linux/macOS passes in other workflows are not Windows acceptance**, and this job never runs there.
+          "@
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $summary
+
+      - name: Upload acceptance artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-acceptance-${{ matrix.os }}-${{ matrix.powershell }}
+          path: |
+            ${{ runner.temp }}\mms-win-acceptance
+            ${{ runner.temp }}\mms-ci-state\logs
+          if-no-files-found: ignore
+          retention-days: 14

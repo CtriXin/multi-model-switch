@@ -1,6 +1,6 @@
 """Persist the active managed release while leaving installed/git sources intact."""
 from __future__ import annotations
-import fcntl
+from .file_lock import LOCK_EX, LOCK_NB, LOCK_SH, LOCK_UN, flock
 import os
 import sys
 from pathlib import Path
@@ -47,7 +47,7 @@ def acquire_state_lock(state):
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     descriptor = os.open(root/'service.lock', os.O_WRONLY | os.O_CREAT, 0o600)
     try:
-        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        flock(descriptor, LOCK_EX | LOCK_NB)
     except OSError:
         os.close(descriptor)
         raise RuntimeError('这个会话目录已有 Pilot 服务运行。请使用已有服务。') from None

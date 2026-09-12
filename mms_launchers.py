@@ -8545,6 +8545,33 @@ def _write_real_home_script(path, lines):
 
 
 def _install_chrome_host_wrapper(wrapper_dir, env, wrapper_path_env):
+    if os.name == "nt":
+        chrome_host_path = os.path.join(wrapper_dir, "mms-chrome-host.cmd")
+        real_home = _real_user_home()
+        wrapper = [
+            "@echo off",
+            f'set "HOME={real_home}"',
+            f'set "MMS_REAL_HOME={real_home}"',
+            f'set "REAL_HOME={real_home}"',
+            f'set "ORIGINAL_HOME={real_home}"',
+            f'set "PATH={wrapper_path_env}"',
+            "for %%B in (msedge.exe chrome.exe chromium.exe) do (",
+            "  where %%B >nul 2>&1",
+            "  if not errorlevel 1 (",
+            "    start \"\" %%B %*",
+            "    exit /b 0",
+            "  )",
+            ")",
+            'echo mms: Chrome host launcher could not find Microsoft Edge, Google Chrome, or Chromium 1>&2',
+            "exit /b 127",
+            "",
+        ]
+        _write_real_home_script(chrome_host_path, wrapper)
+        if isinstance(env, dict):
+            env["MMS_CHROME_HOST_BIN"] = chrome_host_path
+            env["BROWSER"] = chrome_host_path
+        return chrome_host_path
+
     chrome_host_path = os.path.join(wrapper_dir, "mms-chrome-host")
     real_home = _real_user_home()
     wrapper = [

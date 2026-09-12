@@ -140,3 +140,63 @@ def test_imported_attachments_are_pruned_after_30_days_unless_a_session_mentions
     assert old_used.exists() and fresh.exists()
     # Without any attachments folder the call is a no-op.
     assert files.prune_workspace_attachments(tmp_path / 'empty') == []
+
+
+def test_link_or_reparse_detects_symlinks_and_ignores_plain_entries(tmp_path):
+    from mms_web.files import _is_link_or_reparse
+
+    plain = tmp_path / 'plain.txt'; plain.write_text('x')
+    target = tmp_path / 'target'; target.mkdir()
+    link = tmp_path / 'link'; link.symlink_to(target, target_is_directory=True)
+    assert _is_link_or_reparse(plain) is False
+    assert _is_link_or_reparse(target) is False
+    assert _is_link_or_reparse(link) is True
+    assert _is_link_or_reparse(tmp_path / 'missing') is False
+
+
+@pytest.mark.parametrize('part', ['.pilot', 'attachments'])
+def test_windows_import_branch_rejects_redirected_directories(tmp_path, monkeypatch, part):
+    """The Windows branch must refuse symlink/junction redirection like the dir_fd path."""
+    monkeypatch.setattr('mms_web.files._windows_filesystem', lambda: True)
+    project = tmp_path / 'project'; project.mkdir()
+    outside = tmp_path / 'outside'; outside.mkdir()
+    if part == '.pilot':
+        (project / part).symlink_to(outside, target_is_directory=True)
+    else:
+        (project / '.pilot').mkdir()
+        (project / '.pilot' / part).symlink_to(outside, target_is_directory=True)
+    files = FileService(SimpleNamespace(_workspaces=lambda: [{'id': 'p', 'path': str(project)}]), tmp_path / 'state')
+    with pytest.raises(WebError, match='不能保存附件'):
+        files.import_to_workspace({'workspaceId': 'p', 'name': 'test.txt', 'data': 'aGk='})
+    assert not list(outside.iterdir())
+
+
+def test_windows_import_branch_is_atomic_and_leaves_no_partial_files(tmp_path, monkeypatch):
+    monkeypatch.setattr('mms_web.files._windows_filesystem', lambda: True)
+    project = tmp_path / 'project'; project.mkdir()
+    catalog = SimpleNamespace(_workspaces=lambda: [{'id': 'p', 'path': str(project)}])
+    files = FileService(catalog, tmp_path / 'state')
+    data = b'{"ok": true}'
+    item = files.import_to_workspace({'workspaceId': 'p', 'name': '报告 最终.txt', 'data': base64.b64encode(data).decode()})
+    target = Path(item['localPath'])
+    assert target.read_bytes() == data
+    assert target.parent == project / '.pilot' / 'attachments'
+    assert not list(target.parent.glob('.import-*'))  # temp file renamed away
+    assert target.stat().st_mode & 0o777 == 0o600
+
+
+def test_windows_import_branch_removes_temp_file_when_rename_fails(tmp_path, monkeypatch):
+    monkeypatch.setattr('mms_web.files._windows_filesystem', lambda: True)
+    project = tmp_path / 'project'; project.mkdir()
+    catalog = SimpleNamespace(_workspaces=lambda: [{'id': 'p', 'path': str(project)}])
+    files = FileService(catalog, tmp_path / 'state')
+    import mms_web.files as files_module
+
+    def failing_replace(src, dst):
+        raise OSError('rename failed')
+
+    monkeypatch.setattr(files_module.os, 'replace', failing_replace)
+    with pytest.raises(WebError, match='不能保存附件'):
+        files.import_to_workspace({'workspaceId': 'p', 'name': 'x.txt', 'data': 'aGk='})
+    attachments = project / '.pilot' / 'attachments'
+    assert list(attachments.iterdir()) == []  # no partial import, no temp leak

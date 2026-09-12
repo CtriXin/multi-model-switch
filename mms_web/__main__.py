@@ -2,6 +2,8 @@ import argparse
 import signal
 import os
 import sys
+import threading
+import time
 import webbrowser
 from pathlib import Path
 
@@ -30,8 +32,9 @@ def main(argv=None):
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--config-root", type=Path,
                         help="Explicit MMS root; omitted means no config discovery")
+    from mms_platform import describe_platform
     parser.add_argument("--state-root", type=Path,
-                        default=Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local/share"))) / "mms-web",
+                        default=Path(describe_platform().state_root),
                         help="Directory for Web-owned config, sessions and runtime snapshots")
     parser.add_argument("--open", action="store_true", help="Open the local Web client in your browser")
     parser.add_argument("--listen", choices=("loopback", "lan", "all"), default=None,
@@ -96,6 +99,29 @@ def main(argv=None):
     def terminate(_signum, _frame):
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, terminate)
+    if os.name == "nt":
+        # Windows cannot deliver SIGTERM to another process, so `mms web stop`
+        # writes a request file here. A request left over from a Pilot that
+        # never read it must not stop the one starting now.
+        from .service import STOP_REQUEST
+
+        stop_request = root / STOP_REQUEST
+        stop_request.unlink(missing_ok=True)
+
+        def watch_for_stop_request():
+            while True:
+                if stop_request.exists():
+                    try:
+                        stop_request.unlink()
+                    except OSError:
+                        pass
+                    # shutdown() must not run in serve_forever's own thread.
+                    server.shutdown()
+                    return
+                time.sleep(0.4)
+
+        threading.Thread(target=watch_for_stop_request, name="mms-web-stop-request",
+                         daemon=True).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
