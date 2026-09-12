@@ -190,6 +190,7 @@ export function ChannelModels({
     Object.keys(visions).length > 0 ||
     Object.keys(contextWindows).length > 0 ||
     Object.keys(connection).length > 0;
+  const selectionInvalid = !!provider && chosen.length === 0;
   useEffect(() => {
     editStateChanged({dirty, busy: busy === "apply"});
     return () => editStateChanged({dirty: false, busy: false});
@@ -371,6 +372,10 @@ export function ChannelModels({
     );
   }
   async function review() {
+    if (selectionInvalid) {
+      setError("每个通道至少保留一个模型；如需停用整个通道，请删除通道。");
+      return;
+    }
     setBusy("preview");
     setError("");
     try {
@@ -493,6 +498,24 @@ export function ChannelModels({
           <Check size={16} />
           {notice}
         </p>
+      )}
+      {snapshot && (
+        <div className="channel-save" role="region" aria-label="保存模型设置">
+          <span>
+            {selectionInvalid
+              ? "至少保留一个模型后才能保存"
+              : dirty
+                ? "有未保存的修改"
+                : "与已保存的配置一致"}
+          </span>
+          <button
+            className="button primary"
+            disabled={!dirty || !!busy || selectionInvalid}
+            onClick={() => void review()}
+          >
+            {busy === "preview" ? "正在检查变更…" : "检查并保存"}
+          </button>
+        </div>
       )}
       {busy === "load" && (
         <p role="status" className="muted">
@@ -748,7 +771,7 @@ export function ChannelModels({
                             : !model
                               ? "手工添加，保存后可配置默认值"
                               : remote && !remote.includes(id)
-                                ? "本次拉取未返回，已保留原选择"
+                                ? "本次拉取未返回，已按远端列表取消勾选"
                                 : capabilityOrigin(model)}
                         </small>
                       </span>
@@ -928,16 +951,6 @@ export function ChannelModels({
             保存，会影响其他通道的同名模型；下拉框按当前 Pi
             通道的可用档位展示；其他 harness 按各自能力处理。
           </p>
-          <footer className="channel-save">
-            <span>{dirty ? "有未保存的修改" : "与已保存的配置一致"}</span>
-            <button
-              className="button primary"
-              disabled={!dirty || !!busy}
-              onClick={() => void review()}
-            >
-              {busy === "preview" ? "正在检查变更…" : "检查并保存"}
-            </button>
-          </footer>
         </>
       )}
       {refresh && (
@@ -1163,7 +1176,7 @@ export function ChannelModels({
                 className="button primary"
                 disabled={!!busy}
                 onClick={() => {
-                  if (window.confirm("确认写入当前配置并刷新已发布模型目录？")) void apply();
+                  void apply();
                 }}
               >
                 {busy === "apply" ? "正在保存并校验…" : snapshot?.configScope === "standalone" ? "保存设置" : "保存到 MMF"}

@@ -53,6 +53,14 @@ let connectedBrowser = null; // { id, label, source }
 // pin 首次成功连接的浏览器 id。重连时只接受同一 id，避免悄悄降级到别的浏览器。
 let pinnedBrowserId = null;
 
+function browserIdFromProduct(product) {
+  const value = String(product || '').toLowerCase();
+  if (value.startsWith('edg/')) return 'edge';
+  if (value.startsWith('chromium/')) return 'chromium';
+  if (value.startsWith('chrome/')) return 'chrome';
+  return null;
+}
+
 // --- 自动发现浏览器调试端口 ---
 // 决策完全委派给 browser-discovery.selectBrowser；此处只做日志和返回结构包装。
 async function discoverChromePort() {
@@ -149,7 +157,13 @@ async function connect() {
         ) {
           throw new Error(`固定端口返回 ${product}，与请求的 ${connectedBrowser.id} 不一致`);
         }
-        connectedBrowser = { ...connectedBrowser, product };
+        if (connectedBrowser?.source === 'fallback' && connectedBrowser.id === 'unknown') {
+          const detectedId = browserIdFromProduct(product);
+          if (!detectedId) throw new Error(`固定端口返回未识别的浏览器产品 ${product}`);
+          connectedBrowser = { ...connectedBrowser, id: detectedId, label: detectedId, product };
+        } else {
+          connectedBrowser = { ...connectedBrowser, product };
+        }
         connectingPromise = null;
         console.log(`[CDP Proxy] 已连接浏览器 (端口 ${chromePort}, ${product})`);
         resolve();

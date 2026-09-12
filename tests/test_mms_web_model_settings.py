@@ -77,6 +77,19 @@ def test_route_changes_preserve_other_channel(settings):
     assert by_id["channel-b"] == {"gpt-5", "gpt-4.1"}
 
 
+def test_deselect_and_save_without_legacy_config(settings):
+    """A first Pilot setup publishes Registry truth without config.toml."""
+    (settings.root / "config.toml").unlink()
+    draft = payload(settings)
+    draft.update(models=["gpt-5"], efforts={})
+    preview = settings.preview(draft)
+    result = settings.apply({"previewId": preview["previewId"], "confirmed": True})
+    assert result["applied"] and result["runtimeReady"]
+    rows = settings.read()["providers"]
+    visible = {p["id"]: {m["id"] for m in p["models"] if m["visible"]} for p in rows}
+    assert visible == {"channel-a": {"gpt-5"}, "channel-b": {"gpt-5", "gpt-4.1"}}
+
+
 def test_stale_and_invalid_input(settings):
     draft = payload(settings)
     preview = settings.preview(draft)

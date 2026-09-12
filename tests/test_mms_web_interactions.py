@@ -197,6 +197,6 @@ def test_native_queued_prompt_begins_after_previous_answer(native):
     assert len(records) == 2
     events = detail["events"]
     index = next(i for i,e in enumerate(events) if e.get("text") == "second-execution-marker")
-    assert not events[index].get("status")
+    assert events[index].get("status") == "delivered"
     assert any(e["kind"] == "assistant" and e["text"] for e in events[:index])
     assert any(e["kind"] == "assistant" and e["text"] for e in events[index+1:])

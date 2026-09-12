@@ -21,6 +21,12 @@ Prompt keywords (checked in order):
   approval-select  normal reply plus a select dialog that blocks until answer
   approval-notify  normal reply plus a fire-and-forget notify request
   stream-forever   agent_start then endless deltas; abort ends it
+  steer-tool-flow  agent_start + long tool call; a steer command is answered
+                   and queued, the tool call finishes first, then the steering
+                   message is delivered (user message_start) before the reply
+
+Steer commands outside a flow: "steer-fail" responds success=false, anything
+else responds success.
 
 Stdin EOF exits 0.
 """
@@ -190,6 +196,13 @@ class ChildRuntime:
             self.handle_prompt(req_id, str(command.get("message") or ""))
             return
 
+        if ctype == "steer":
+            if str(command.get("message") or "") == "steer-fail":
+                _respond(req_id, "steer", success=False, error="simulated steer rejection")
+            else:
+                _respond(req_id, "steer")
+            return
+
         if ctype == "abort":
             self.handle_abort(command)
             return
@@ -283,7 +296,46 @@ class ChildRuntime:
         if message == "stream-forever":
             self.run_stream_forever(req_id, message)
             return
+        if message == "steer-tool-flow":
+            self.run_steer_tool_flow(req_id, message)
+            return
         _run_agent(message)
+
+    def run_steer_tool_flow(self, req_id, message: str) -> None:
+        """A tool call is in flight; steer waits for it, then is delivered."""
+        _out({"type": "agent_start"})
+        _out({"type": "turn_start"})
+        call_id = "call_steer_tool_1"
+        _out({"type": "tool_execution_start", "toolCallId": call_id, "toolName": "read", "args": {"path": "/tmp/steer.txt"}})
+        deadline = time.monotonic() + 15.0
+        steered: str | None = None
+        while time.monotonic() < deadline and steered is None:
+            try:
+                item = self.queue.get(timeout=0.05)
+            except queue.Empty:
+                continue
+            if item is None:
+                return
+            if item.get("type") == "abort":
+                self.handle_abort(item)
+                return
+            if item.get("type") == "steer":
+                steered = str(item.get("message") or "")
+                _respond(item.get("id"), "steer")
+                _out({"type": "queue_update", "steering": [steered], "followUp": []})
+                continue
+            self.process(item)
+        # The in-flight tool call finishes first; only then does the queued
+        # steering message reach the conversation, before the next LLM call.
+        _out({"type": "tool_execution_end", "toolCallId": call_id, "toolName": "read",
+              "result": {"content": [{"type": "text", "text": "steer tool output"}]}, "isError": False})
+        if steered is not None:
+            _out({"type": "queue_update", "steering": [], "followUp": []})
+            _out({"type": "message_start", "message": {"role": "user", "content": [{"type": "text", "text": steered}]}})
+        for event in _assistant_text_events("steered reply: " + (steered or "none")):
+            _out(event)
+        _out({"type": "agent_end", "messages": [], "willRetry": False})
+        _out({"type": "agent_settled"})
 
     def run_dialog(self, req_id, message: str, *, method: str) -> None:
         _out({"type": "agent_start"})

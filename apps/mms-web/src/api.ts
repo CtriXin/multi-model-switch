@@ -1,4 +1,5 @@
 import type { Bootstrap, Session, SessionDetail } from "./types";
+import type { AskSideQuestion, SideQuestion } from "./side-questions";
 import { previewBootstrap, previewDetails } from "./preview";
 import { newRequestId } from "./request-id";
 
@@ -105,6 +106,60 @@ export async function getSession(
     return request(`/sessions/${encodeURIComponent(id)}`, undefined, signal);
   if (!samples[id]) throw new Error("找不到这条预览会话。");
   return structuredClone(samples[id]);
+}
+/** `/btw` side questions.
+ *
+ *  These deliberately do not go through `mutate`: that helper is the main
+ *  task's single-flight write path, and it returns a whole `SessionDetail`.
+ *  A side question must be askable while the main task is mid-write, carries
+ *  its own `idempotencyKey`, and answers with one row.
+ */
+const sideQuestionPath = (sessionId: string) =>
+  `/sessions/${encodeURIComponent(sessionId)}/side-questions`;
+const previewUnavailable = () =>
+  new Error("预览不会调用本地服务。连接 MMS Pilot 后才能发起旁问。");
+
+export async function askSideQuestion(
+  sessionId: string,
+  body: AskSideQuestion,
+): Promise<SideQuestion> {
+  if (isPreview) throw previewUnavailable();
+  return request<SideQuestion>(sideQuestionPath(sessionId), { ...body });
+}
+export async function listSideQuestions(
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<SideQuestion[]> {
+  if (isPreview) return [];
+  return (
+    await request<{ sideQuestions: SideQuestion[] }>(
+      sideQuestionPath(sessionId),
+      undefined,
+      signal,
+    )
+  ).sideQuestions;
+}
+export async function getSideQuestion(
+  sessionId: string,
+  btwId: string,
+  signal?: AbortSignal,
+): Promise<SideQuestion> {
+  if (isPreview) throw previewUnavailable();
+  return request<SideQuestion>(
+    `${sideQuestionPath(sessionId)}/${encodeURIComponent(btwId)}`,
+    undefined,
+    signal,
+  );
+}
+export async function cancelSideQuestion(
+  sessionId: string,
+  btwId: string,
+): Promise<SideQuestion> {
+  if (isPreview) throw previewUnavailable();
+  return request<SideQuestion>(
+    `${sideQuestionPath(sessionId)}/${encodeURIComponent(btwId)}/cancel`,
+    {},
+  );
 }
 export async function mutate<T>(
   path: string,

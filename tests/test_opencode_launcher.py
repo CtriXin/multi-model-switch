@@ -401,7 +401,9 @@ def test_opencode_kimi_k3_uses_profile_effort_not_stale_generic_thinking(monkeyp
     )
     model_config = payload["provider"]["mms"]["models"]["k3"]
 
-    assert model_config["limit"]["context"] == 262_144
+    # kimi-code 的 profile calibration 是 1_048_576（PR #209），
+    # 仍然压过上面 stub 出来的 1_000_000 generic policy。
+    assert model_config["limit"]["context"] == 1_048_576
     assert model_config["options"] == {"reasoningEffort": "max"}
     assert "thinking" not in json.dumps(model_config)
 
@@ -5589,3 +5591,22 @@ def test_core_opencode_profile_menu_includes_lite_pro_health_summary(monkeypatch
     assert "health: 1/18 healthy" in agent["summary"]
     assert "1 degraded" in agent["summary"]
     assert "16 untested" in agent["summary"]
+
+
+def test_opencode_export_config_lands_in_the_selected_config_root(monkeypatch, tmp_path):
+    """The export config used to be pinned to the retired ~/.config/mms.
+
+    Every OpenCode launch wrote its generated config into a directory no other
+    entry point reads any more, which is how ~/.config/mms kept getting touched
+    long after it stopped being a config root.
+    """
+    import mms_launchers
+
+    root = tmp_path / "mms-next"
+    root.mkdir()
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(root))
+
+    path = mms_launchers._opencode_export_config_path({"id": "kimi", "name": "kimi"}, "k3")
+
+    assert path == str(root / "opencode-gateway" / "exports" / "kimi-k3.json")
+    assert "/.config/mms/" not in path

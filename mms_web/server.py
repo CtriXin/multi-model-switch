@@ -13,6 +13,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit, parse_qs
 
 from mms_version import VERSION
+from mms_platform import capability_snapshot
 
 from . import remote_access as access
 from .errors import WebError
@@ -120,6 +121,7 @@ class WebApplication:
         return {
             **snapshot, "version": "1", "appVersion": VERSION, "mode": "live",
             "capabilities": capabilities, "csrfToken": self.csrf_token,
+            **capability_snapshot(),
             "sessions": self.all_sessions(include_cli),
         }
 
@@ -314,7 +316,7 @@ class WebApplication:
             return self._sessions().skills.preferences()
         if parts == ["ui-preferences"]:
             from .ui_preferences import UiPreferences
-            return UiPreferences(self.state_root).read()
+            return UiPreferences(self.state_root).read(seed_version=VERSION)
         if parts == ["sessions"]:
             return {"sessions": self.all_sessions(include_cli)}
         if len(parts) == 2 and parts[0] == "attachments":
@@ -326,6 +328,10 @@ class WebApplication:
                 return self._sessions().runtime_view(parts[1])
             if parts[2] == "commands":
                 return self._sessions().command_catalog(parts[1])
+            if parts[2] == "side-questions":
+                return {"sideQuestions": self._sessions().list_side_questions(parts[1])}
+        if len(parts) == 4 and parts[0] == "sessions" and parts[2] == "side-questions":
+            return self._sessions().get_side_question(parts[1], parts[3])
         if parts == ["bootstrap"]:
             return self.bootstrap(include_cli)
         if len(parts) == 2 and parts[0] == "sessions":
@@ -334,7 +340,33 @@ class WebApplication:
             return self._sessions().get_session(parts[1])
         raise WebError("NOT_FOUND", "找不到这个接口。", 404)
 
+    # POSTs that change nothing and can take seconds: a native folder dialog the
+    # user may leave open, and two filesystem sweeps. Holding the mutation lock
+    # through those would stop every other POST — sending a message, stopping a
+    # session, confirming an update — for as long as they run. They only read
+    # state that is written by atomic replace, so a concurrent write is seen
+    # whole or not at all.
+    _UNLOCKED_POSTS = (["workspaces", "choose"], ["workspaces", "search"], ["workspaces", "locate"])
+
+    def _post_readonly(self, parts: list[str], payload: dict) -> dict:
+        if parts == ["workspaces", "choose"]:
+            import subprocess
+            import sys
+            if sys.platform != "darwin":
+                raise WebError("FOLDER_PICKER_UNAVAILABLE", "请直接填写电脑上的文件夹路径。", 409)
+            result = subprocess.run(["osascript", "-e", 'POSIX path of (choose folder with prompt "选择 MMS 的工作文件夹")'], capture_output=True, text=True, timeout=120)
+            return {"path": result.stdout.strip() if result.returncode == 0 else ""}
+        if not self.catalog:
+            raise WebError("CAPABILITY_UNAVAILABLE", "本地服务尚未连接。", 409)
+        if parts == ["workspaces", "search"]:
+            from .workspace_search import search_workspaces
+            return search_workspaces(self.catalog, payload)
+        from .workspace_search import locate_folder
+        return locate_folder(self.catalog, payload)
+
     def post(self, parts: list[str], payload: dict) -> dict:
+        if parts in self._UNLOCKED_POSTS:
+            return self._post_readonly(parts, payload)
         with self.mutation_lock:
             if parts == ["update", "commit"]:
                 if not self.probation_token or not secrets.compare_digest(str(payload.get("token") or ""), self.probation_token):
@@ -424,18 +456,6 @@ class WebApplication:
             return self._sessions().files.choose_local(payload)
         if parts in (["files", "tree"], ["files", "read"], ["files", "git"]):
             return getattr(self._sessions().files, parts[1])(payload)
-        if parts == ["workspaces", "choose"]:
-            import subprocess
-            import sys
-            if sys.platform != "darwin":
-                raise WebError("FOLDER_PICKER_UNAVAILABLE", "请直接填写电脑上的文件夹路径。", 409)
-            result = subprocess.run(["osascript", "-e", 'POSIX path of (choose folder with prompt "选择 MMS 的工作文件夹")'], capture_output=True, text=True, timeout=120)
-            return {"path": result.stdout.strip() if result.returncode == 0 else ""}
-        if parts == ["workspaces", "search"]:
-            if not self.catalog:
-                raise WebError("CAPABILITY_UNAVAILABLE", "本地服务尚未连接。", 409)
-            from .workspace_search import search_workspaces
-            return search_workspaces(self.catalog, payload)
         if parts == ["workspaces"]:
             if not self.catalog:
                 raise WebError("CAPABILITY_UNAVAILABLE", "本地服务尚未连接。", 409)
@@ -461,8 +481,13 @@ class WebApplication:
             return service.launch(payload)
         if len(parts) == 3 and parts[0] == "sessions" and parts[2] == "adopt":
             return self.adopt_cli_session(parts[1], payload)
+        if len(parts) == 3 and parts[0] == "sessions" and parts[2] == "side-questions":
+            return self._sessions().ask_side_question(parts[1], payload)
+        if (len(parts) == 5 and parts[0] == "sessions" and parts[2] == "side-questions"
+                and parts[4] == "cancel"):
+            return self._sessions().cancel_side_question(parts[1], parts[3])
         if len(parts) == 3 and parts[0] == "sessions":
-            methods = {"messages": "send", "stop": "stop", "control": "control", "manage": "manage", "fork": "fork", "model": "switch_model", "artifacts": "artifact"}
+            methods = {"messages": "send", "stop": "stop", "control": "control", "manage": "manage", "fork": "fork", "model": "switch_model", "artifacts": "artifact", "queue": "queue"}
             if parts[2] in methods:
                 return getattr(self._sessions(), methods[parts[2]])(parts[1], payload)
         if len(parts) == 4 and parts[0] == "sessions" and parts[2] == "approvals":
@@ -494,6 +519,11 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
     from mms_version import VERSION
     identity = hashlib.sha256((str(Path(__file__).resolve().parent.parent) + "|" +
                                str(app.config_root.resolve()) + "|" + VERSION).encode()).hexdigest()
+    # `mms web status|url|stop|restart` decides "is this one mine" from this
+    # fingerprint instead of re-parsing the server's command line, which is not
+    # recoverable on Windows. It is a hash, so no local path is published.
+    from .service import state_identity
+    state_fingerprint = state_identity(app.state_root)
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "MMSWeb/1"
@@ -538,6 +568,7 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-MMS-Web-Identity", identity)
             self.send_header("X-MMS-Web-Version", VERSION)
+            self.send_header("X-MMS-Web-State", state_fingerprint)
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
             self.send_header("X-Frame-Options", "SAMEORIGIN" if preview else "DENY")

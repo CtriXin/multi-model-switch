@@ -41,6 +41,34 @@ def _run_install_check(*, home: Path, extra_env: dict[str, str] | None = None) -
     return completed.stdout
 
 
+def _run_install_dry_run(*, home: Path) -> str:
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+    env.update(_version_env_overrides(stable_ref="v4.19.1", latest_tag_ref="v4.19.1"))
+    completed = subprocess.run(
+        ["bash", str(INSTALL_SCRIPT), "--dry-run", "--ref", "v4.19.1"],
+        cwd=ROOT_DIR, env=env, capture_output=True, text=True, check=True,
+    )
+    return completed.stdout
+
+
+def test_installer_warns_about_legacy_config_without_touching_it(tmp_path):
+    legacy = tmp_path / ".config" / "mms"
+    legacy.mkdir(parents=True)
+    config = legacy / "config.toml"
+    config.write_text("legacy", encoding="utf-8")
+    output = _run_install_dry_run(home=tmp_path)
+    assert "旧版 MMS 配置" in output
+    assert "mms-next" in output
+    assert config.read_text(encoding="utf-8") == "legacy"
+
+
+def test_installer_does_not_warn_for_gateway_runtime_only(tmp_path):
+    (tmp_path / ".config" / "mms" / "codex-gateway" / "s").mkdir(parents=True)
+    output = _run_install_dry_run(home=tmp_path)
+    assert "旧版 MMS 配置" not in output
+
+
 def _extract_shell_function_body(script_text: str, function_name: str) -> str:
     marker = f"{function_name}() {{"
     start = script_text.find(marker)
@@ -482,12 +510,13 @@ def test_install_script_retires_mmc_entrypoint():
     assert '已移除 retired mmc 命令链接' in text
 
 
-def test_install_script_copies_mmslogs_entrypoint_before_linking():
+def test_install_script_copies_mmslogs_entrypoint_without_public_mmf_link():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
 
     assert '[ -f "$SOURCE_DIR/mmf" ] && cp "$SOURCE_DIR"/mmf "$MMS_HOME/"' in text
     assert '[ -f "$MMS_HOME/mmf" ] && chmod +x "$MMS_HOME/mmf"' in text
     assert '[ -f "$MMS_HOME/mmf" ] && rewrite_shebang "$MMS_HOME/mmf" "$PYTHON_PATH"' in text
+    assert 'if [ "$INSTALL_CHANNEL" = "dev" ] || [ "$INSTALL_CHANNEL" = "canary" ]; then' in text
     assert '[ -f "$MMS_HOME/mmf" ] && ln -sf "$MMS_HOME/mmf" "$BIN_DIR/mmf"' in text
     assert '[ -f "$SOURCE_DIR/mmslogs" ] && cp "$SOURCE_DIR"/mmslogs "$MMS_HOME/"' in text
     assert '[ -f "$MMS_HOME/mmslogs" ] && chmod +x "$MMS_HOME/mmslogs"' in text
@@ -921,6 +950,14 @@ def test_install_completion_points_at_the_web_app_and_v2_preview_gate():
     assert "legacy_config_has_route_candidates" not in text
     assert "$NEXT_MMF_CMD config web" in text
     assert "$NEXT_MMF_CMD config doctor" in text
+
+
+def test_stable_install_does_not_overwrite_local_mmf_entrypoint():
+    text = INSTALL_SCRIPT.read_text(encoding="utf-8")
+    stable_block = text[text.index('if [ "$INSTALL_CHANNEL" = "dev" ] || [ "$INSTALL_CHANNEL" = "canary" ]; then'):text.index('# Remove stale MMS-owned legacy ccs/mmc artifacts')]
+    assert 'ln -sf "$MMS_HOME/mmf" "$BIN_DIR/mmf"' in stable_block
+    assert 'elif [ -L "$BIN_DIR/mmf" ]; then' in stable_block
+    assert '"$MMS_HOME/mmf")' in stable_block
 
 def test_install_script_dry_run_does_not_create_home_dirs(tmp_path):
     """--dry-run does not create .claude/, .codex/, or .config/opencode under temp HOME."""

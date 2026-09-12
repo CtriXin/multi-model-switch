@@ -10,7 +10,7 @@
 
 关键词来源（优先级：用户配置 > 自动学习 > 内置默认）：
 - 内置：代码中硬编码
-- 用户配置：~/.config/mms/route_keywords.json（手动编辑）
+- 用户配置：<配置根>/route_keywords.json（手动编辑，配置根默认 ~/.config/mms-next）
 - 自动学习：LLM 连续 N 次对相似 pattern 给出相同高置信分类 → 自动 promote 为关键词
 """
 
@@ -598,7 +598,7 @@ def _submit_async_llm_classify(text, api_url, api_key, light_model, provider_id=
 
 
 def log_route(level: str, reason: str, model_used: str, text_preview: str):
-    """写路由日志。tail -f ~/.config/mms/lb_route.log 查看。"""
+    """写路由日志。tail -f ~/.config/mms-next/lb_route.log 查看。"""
     try:
         os.makedirs(os.path.dirname(_LOG_PATH), exist_ok=True)
         ts = datetime.now().strftime("%H:%M:%S")

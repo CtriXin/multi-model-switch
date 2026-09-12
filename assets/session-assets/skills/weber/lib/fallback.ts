@@ -98,11 +98,17 @@ export async function selectAdapters(
     const adapter = createAdapter(preferred, config)
     const available = await adapter.isAvailable()
     if (available) {
+      // web-access is the login-bearing route. Once selected explicitly, never
+      // cross the login boundary into an isolated backend after a CDP failure.
+      if (preferred === 'web-access') return [adapter]
       // 指定后端可用，但仍附加降级链
       const fallbacks = fallbackOrder
         .filter((b) => b !== preferred)
         .map((b) => createAdapter(b, config))
       return [adapter, ...fallbacks]
+    }
+    if (preferred === 'web-access') {
+      throw new Error('web-access is unavailable; refusing to fall back to an isolated browser')
     }
     // 指定后端不可用，走 auto
   }

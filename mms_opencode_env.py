@@ -780,17 +780,15 @@ def opencode_set_soft_home(env, session_home, *, real_user_path, set_session_hom
     return env
 
 
-def opencode_export_config_path(runtime, model, *, real_user_path):
+def opencode_export_config_path(runtime, model, *, real_user_path, selected_config_root=None):
     runtime = runtime if isinstance(runtime, dict) else {}
     provider = opencode_config_slug(runtime.get("id") or runtime.get("name"), "provider")
     model_slug = opencode_config_slug(model or runtime.get("model"), "model")
-    return real_user_path(
-        ".config",
-        "mms",
-        "opencode-gateway",
-        "exports",
-        f"{provider}-{model_slug}.json",
-    )
+    # Same root the gateway itself uses; this used to be pinned to the retired
+    # ~/.config/mms, so every OpenCode launch wrote into a directory nothing
+    # else reads any more.
+    gateway_base = selected_config_root() if selected_config_root else real_user_path(".config", "mms-next")
+    return os.path.join(str(gateway_base), "opencode-gateway", "exports", f"{provider}-{model_slug}.json")
 
 
 def opencode_gateway_env(

@@ -1,8 +1,8 @@
 """Human-reviewed model configuration, backed by MMF's existing audited writer."""
 from __future__ import annotations
+from .file_lock import LOCK_EX, LOCK_NB, LOCK_SH, LOCK_UN, flock
 import hashlib
 from contextlib import contextmanager
-import fcntl
 import json
 import os
 from pathlib import Path
@@ -45,11 +45,11 @@ class ModelSettings:
         # Share the connection editor's lock, including across server processes.
         with self.lock:
             with (self.catalog._state_root / "apply.lock").open("a+") as handle:
-                fcntl.flock(handle, fcntl.LOCK_EX)
+                flock(handle, LOCK_EX)
                 try:
                     yield
                 finally:
-                    fcntl.flock(handle, fcntl.LOCK_UN)
+                    flock(handle, LOCK_UN)
 
     def confirmation(self):
         return "保存设置" if self.catalog._local_setup() else "写入预览DB"

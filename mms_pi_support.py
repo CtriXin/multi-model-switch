@@ -11,18 +11,18 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from mms_capability_resolver import resolve_model_capabilities
+from mms_context_window import (
+    ONE_M_SELECTOR_SUFFIX as _ONE_M_CONTEXT_SUFFIX,
+    normalize_model_selector,
+    resolve_context_window,
+    user_context_window_override,
+)
 from mms_core import _model_supports_vision, _probe_models
 from mms_opencode_config import opencode_config_slug as _opencode_config_slug
 from mms_pi_capture import apply_capture_proxy as apply_pi_capture_proxy
 from mms_provider_profiles import resolve_provider_profile
 from mms_provider_profiles import profile_thinking_capabilities
 from mms_state_io import atomic_write_text
-
-_ONE_M_CONTEXT_SUFFIX = "[1m]"
-_ONE_M_SUFFIX_BASE_SAFE_CONTEXT_WINDOWS = {
-    "mimo-v2.5-pro": 262_144,
-    "mimo-v2.5": 262_144,
-}
 
 
 def _launchers_module():
@@ -404,7 +404,6 @@ _PI_MODEL_MAX_TOKENS_HINTS = {
     "gpt-5.3-codex": 128000,
     "gpt-5.3-codex-spark": 32000,
     "k3": 1048576,
-    "k3[1m]": 1048576,
     "kimi-k3": 1048576,
     "k2.6": 32768,
     "k2.6-code-preview": 32768,
@@ -418,23 +417,10 @@ _PI_MODEL_MAX_TOKENS_HINTS = {
     "mimo-v2-pro": 131072,
     "mimo-v2.5": 131072,
     "mimo-v2.5-pro": 131072,
-    "mimo-v2.5-pro[1m]": 131072,
-    "mimo-v2.5[1m]": 131072,
     "qwen3.5-plus": 65536,
     "qwen3.6-flash": 65536,
     "qwen3.6-plus": 65536,
     "qwen3.7-max": 65536,
-}
-
-_PI_MODEL_CONTEXT_WINDOW_HINTS = {
-    "gpt-5.3-codex": 400000,
-    "gpt-5.3-codex-spark": 128000,
-    # Kimi K3 is natively 1M; the selector is kept only for old config input.
-    "k3": 1048576,
-    "k3[1m]": 1048576,
-    "kimi-k3": 1048576,
-    "qwen3.6-flash": 1000000,
-    "qwen3.7-max": 1000000,
 }
 
 _PI_MODEL_INPUT_HINTS = {
@@ -443,7 +429,6 @@ _PI_MODEL_INPUT_HINTS = {
     "gpt-5.3-codex": ["text", "image"],
     "gpt-5.3-codex-spark": ["text", "image"],
     "k3": ["text", "image"],
-    "k3[1m]": ["text", "image"],
     "kimi-k3": ["text", "image"],
     "kimi-for-coding": ["text", "image"],
     "kimi-for-coding-highspeed": ["text", "image"],
@@ -523,6 +508,17 @@ def _pi_normalize_model_key(value):
     return model_key
 
 
+def _pi_hint_key(value):
+    """Key for the capability hint tables: leaf name, lower case, no `[1m]`.
+
+    A `[1m]` selector is the same model as its base name and must not need a
+    duplicate row of its own (issue #230). Only the hint tables use this;
+    wire-name and replacement lookups keep the exact selector, because there the
+    suffix can be part of a real upstream name.
+    """
+    return normalize_model_selector(value)
+
+
 def _pi_reference_payload():
     global _PI_CAPABILITY_REFERENCE_CACHE
     if _PI_CAPABILITY_REFERENCE_CACHE is not None:
@@ -574,7 +570,7 @@ def _pi_first_positive_int(payload, *keys):
 
 
 def _pi_hint_max_tokens(model_name):
-    normalized = _pi_normalize_model_key(model_name)
+    normalized = _pi_hint_key(model_name)
     direct = _PI_MODEL_MAX_TOKENS_HINTS.get(normalized)
     if direct:
         return direct
@@ -584,15 +580,14 @@ def _pi_hint_max_tokens(model_name):
     return None
 
 
-def _pi_hint_context_window(model_name):
-    normalized = _pi_normalize_model_key(model_name)
-    direct = _PI_MODEL_CONTEXT_WINDOW_HINTS.get(normalized)
-    if direct:
-        return direct
-    for key, value in _PI_MODEL_CONTEXT_WINDOW_HINTS.items():
-        if normalized.startswith(key):
-            return value
-    return None
+def _pi_hint_context_window(model_name, provider_id=""):
+    """Fall back to the shared resolver, never to a Pi-only model-name table.
+
+    Pi used to keep its own map of model to window, which is how the same model
+    could be 1M here and 256K in Claude Code. Everything Pi cannot resolve from
+    the capability facts now asks the one resolver (issue #230).
+    """
+    return resolve_context_window(model_name, provider_id=provider_id)
 
 
 def _pi_reference_supports_vision(model_name):
@@ -707,7 +702,7 @@ def _pi_model_input_types(model_name, caps=None):
     user_vision = _pi_caps_vision_state(caps, _USER_CAPABILITY_SOURCES)
     if user_vision is not None:
         return ["text", "image"] if user_vision else ["text"]
-    normalized = _pi_normalize_model_key(model_name)
+    normalized = _pi_hint_key(model_name)
     hint = _PI_MODEL_INPUT_HINTS.get(normalized)
     if isinstance(hint, list) and hint:
         return list(hint)
@@ -914,10 +909,10 @@ def _pi_model_capabilities(runtime, model_name):
             caps["sources"]["context_window_tokens"] = "pi_reference_fallback"
 
     if caps.get("sources", {}).get("context_window_tokens") == "conservative_fallback":
-        hinted_context = _pi_hint_context_window(model_name)
+        hinted_context = _pi_hint_context_window(model_name, provider_id=provider_id)
         if hinted_context:
             caps["context_window_tokens"] = hinted_context
-            caps["sources"]["context_window_tokens"] = "pi_builtin_hint"
+            caps["sources"]["context_window_tokens"] = "shared_context_resolver"
 
     if caps.get("sources", {}).get("max_output_tokens") == "conservative_fallback":
         reference_max = _pi_first_positive_int(
@@ -934,6 +929,13 @@ def _pi_model_capabilities(runtime, model_name):
         if hinted_max:
             caps["max_output_tokens"] = hinted_max
             caps["sources"]["max_output_tokens"] = "pi_builtin_hint"
+
+    # The user's own `model-context-overrides.json` is the top of the shared
+    # chain, so it has to reach Pi too, not just the launcher.
+    override = user_context_window_override(model_name, provider_id=provider_id)
+    if override:
+        caps["context_window_tokens"] = override
+        caps.setdefault("sources", {})["context_window_tokens"] = "user_override"
     return caps
 
 
@@ -1224,7 +1226,10 @@ def _pi_wire_model_name(runtime, model_name, protocol):
     if original_model.lower().endswith(_ONE_M_CONTEXT_SUFFIX):
         base_model = original_model[: -len(_ONE_M_CONTEXT_SUFFIX)].strip()
         normalized_base = _pi_normalize_model_key(base_model)
-        if normalized_base in _ONE_M_SUFFIX_BASE_SAFE_CONTEXT_WINDOWS:
+        # MiMo's `[1m]` is an MMS-side selector: the channel exposes the base
+        # name, so that is what goes on the wire. The same judgement the Claude
+        # shell slots use, not a second list.
+        if launchers._is_mimo_one_m_context_selector(original_model):
             available = {}
             for candidate in launchers._pi_runtime_model_names(runtime, selected_model=model_name):
                 normalized_candidate = _pi_normalize_model_key(candidate)

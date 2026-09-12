@@ -50,7 +50,10 @@ def _capabilities(*, real_launch=True, seam=None, catalog=True):
 
 
 def test_capabilities_carry_the_blocker_for_each_cause():
-    assert _capabilities() == {"launch": True, "launchReason": ""}
+    caps = _capabilities()
+    assert caps["launch"] is True and caps["launchReason"] == ""
+    assert caps["sideQuestions"] is True
+    assert isinstance(caps["sidecarCompletion"], bool)
     assert _capabilities(real_launch=False)["launchReason"] == "没有选定 MMS 配置根，无法启动会话。"
     seam = {"available": False, "reason": "没有找到符合要求的 Node.js：需要 22.15 以上的版本。升级 Node 后重启 Pilot。"}
     assert _capabilities(seam=seam)["launchReason"] == seam["reason"]

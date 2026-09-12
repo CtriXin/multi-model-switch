@@ -58,11 +58,19 @@ def test_core_never_imports_the_legacy_root():
 
 
 def test_config_root_fallbacks_do_not_point_at_the_legacy_root():
-    launchers = (ROOT / "mms_launchers.py").read_text(encoding="utf-8")
-    for name in ("_model_context_overrides_path", "_selected_mms_config_root"):
-        start = launchers.index(f"def {name}(")
-        body = launchers[start: launchers.index("\ndef ", start + 1)]
-        assert '_real_user_path(".config", "mms")' not in body, name
+    # `_model_context_overrides_path` moved to the shared context resolver
+    # (#230); its fallback is still on this contract.
+    sources = {
+        "mms_launchers.py": ("_selected_mms_config_root",),
+        "mms_context_window.py": ("model_context_overrides_path",),
+    }
+    for filename, names in sources.items():
+        text = (ROOT / filename).read_text(encoding="utf-8")
+        for name in names:
+            start = text.index(f"def {name}(")
+            body = text[start: text.index("\ndef ", start + 1)]
+            assert '_real_user_path(".config", "mms")' not in body, name
+            assert '".config", "mms")' not in body, name
     bridge = (ROOT / "mms_bridge.py").read_text(encoding="utf-8")
     start = bridge.index("def _incident_log_path(")
     body = bridge[start: bridge.index("\ndef ", start + 1)]
@@ -119,3 +127,97 @@ def test_retired_legacy_directory_is_still_refused_as_a_v2_root(tmp_path):
     assert mms_state_io.is_retired_legacy_root(tmp_path / ".config" / "mms-next") is False
     status = mms_state_io.mms_config_root_status(config_dir=str(tmp_path / ".config" / "mms"), env={})
     assert status["legacy_root"] is True and status["mode"] == "preview"
+
+
+# Every place in the runtime that still spells the retired ~/.config/mms, with
+# the reason it is allowed to. Anything not listed here is a new legacy-root
+# read or write, which is what this contract forbids.
+#
+# Adding an entry is a deliberate act: say why the retired root belongs there.
+_LEGACY_ROOT_ALLOWED = {
+    # Detects a dirty legacy install so it can be cleaned up.
+    ("mmc_core.py", '"/.config/mms/",'),
+    ("mms_launchers.py", 'forbidden_parts = ("/.mms/", "/.config/mms/", "/ccswitch", "/hive")'),
+    # Prose describing the retirement.
+    ("mms_consumer_bundle.py", "``~/.config/mms`` is opt-in so preview consumers do not silently cross root"),
+    ("mms_core.py", "Collects one channel interactively. The legacy ~/.config/mms root is never"),
+    ("mms_state_io.py", '"""True for the retired ~/.config/mms directory (or any root named like it).'),
+    ("mms_state_io.py", "The legacy stable root (~/.config/mms) is retired as a config source; the"),
+    ("mms_web/catalog.py", "real ``~/.config/mms*`` roots stay untouched."),
+    ("scripts/local_channel_update.py", "real MMS config tree under ~/.config/mms."),
+    # The descriptor that names the retired root so callers can report on it.
+    ("mms_state_io.py", '"stable_root": os.path.join(real_home, ".config", "mms"),'),
+    # Refuses to write either root, so it has to know both names.
+    ("mms_web/catalog.py", '_PROTECTED_ROOT_NAMES = (".config/mms", ".config/mms-next")'),
+    ("mms_web/catalog_worker.py", '_PROTECTED_ROOT_NAMES = (".config/mms", ".config/mms-next")'),
+    ("scripts/local_channel_update.py", 'for marker in ("/.config/mms-next", "/.config/mms"):'),
+    # A version.json an install from before the move left behind.
+    ("scripts/local_channel_update.py", 'legacy = real_home() / ".config" / "mms" / "version.json"'),
+    # One-time manual import of an old config into the DB. Human-run, never automatic.
+    ("mms_registry_cli.py", '"It does not write the retired ~/.config/mms tree, config roots, DB, generated bundles, secret backends, or Claude config.",'),
+    ("mms_registry_cli.py", '"command": "./mmf preview import-legacy --from ~/.config/mms --apply --include-secrets --json && ./mmf preview publish --json",'),
+    ("mms_registry_cli.py", '"human must approve any stable ~/.config/mms write",'),
+    ("mms_registry_cli.py", '"legacy `~/.config/mms`",'),
+    ("mms_registry_cli.py", 'command = "./mmf preview prepare --from ~/.config/mms --include-secrets --json"'),
+    ("mms_registry_cli.py", 'command = "./mmf preview prepare --from ~/.config/mms --include-secrets --json" if missing_keys > 0 else "./mmf preview prepare --from ~/.config/mms --json"'),
+    ("mms_registry_cli.py", 'command = "./mmf preview prepare --from ~/.config/mms --json"'),
+    ("mms_registry_cli.py", 'next_action = {"label": "Import legacy config into preview DB", "command": "./mmf preview import-legacy --from ~/.config/mms --apply --json"}'),
+    ("mms_registry_cli.py", 'next_actions.append({"label": "Import legacy config into preview DB", "command": "./mmf preview import-legacy --from ~/.config/mms --apply --json"})'),
+    ("mms_registry_cli.py", 'next_actions.append({"label": "Optional: import keys into preview secret backend", "command": "./mmf preview import-legacy --from ~/.config/mms --apply --include-secrets --json && ./mmf preview publish --json"})'),
+}
+
+
+def _legacy_root_mentions():
+    """Every non-comment line in the runtime that names the retired root."""
+    import re
+
+    join = re.compile(r'["\']\.config["\']\s*[,/]\s*(?:\n\s*)?["\']mms["\']')
+    literal = re.compile(r"\.config/mms(?![\w-])")
+    targets = sorted(
+        set(
+            list(ROOT.glob("mms_*.py"))
+            + list(ROOT.glob("mms_web/**/*.py"))
+            + [
+                ROOT / "mmc_core.py",
+                ROOT / "statusline-command.sh",
+                ROOT / "scripts/mms_health_watchdog.py",
+                ROOT / "scripts/local_channel_update.py",
+            ]
+        )
+    )
+    found = []
+    seen = set()
+    for path in targets:
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        lines = text.splitlines()
+        for pattern in (join, literal):
+            for match in pattern.finditer(text):
+                number = text[: match.start()].count("\n") + 1
+                if (path, number) in seen:
+                    continue
+                seen.add((path, number))
+                line = lines[number - 1].strip()
+                # A comment cannot read a directory.
+                if line.startswith("#"):
+                    continue
+                found.append((path.relative_to(ROOT).as_posix(), line, number))
+    return found
+
+
+def test_no_new_code_path_reads_or_writes_the_retired_legacy_root():
+    """~/.config/mms is not a config root any more, in any entry point.
+
+    Four places kept using it long after #177 said they should not: the
+    OpenCode export config, the health watchdog's whole config directory, the
+    public-copy update check, and two opt-in bundle fallbacks. None of them was
+    covered, because the old contract only inspected three named functions.
+    """
+    unexpected = [
+        f"{path}:{number}: {line}"
+        for path, line, number in _legacy_root_mentions()
+        if (path, line) not in _LEGACY_ROOT_ALLOWED
+    ]
+
+    assert not unexpected, "new reference(s) to the retired config root:\n  " + "\n  ".join(unexpected)

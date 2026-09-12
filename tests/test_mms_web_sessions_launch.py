@@ -155,7 +155,7 @@ def test_full_chain_child_exit_error_state(service):
         message="error state",
     )
     view = service.get_session(session_id)["session"]
-    assert view["capabilities"] == {"send": False, "stop": False, "approve": False}
+    assert view["capabilities"] == {"send": False, "stop": False, "approve": False, "steer": False, "queueControl": False}
     events = service.get_session(session_id)["events"]
     exit_notices = [e["text"] for e in events if "Pi 进程已退出" in e.get("text", "")]
     assert exit_notices and "fake child stderr diagnostic" not in exit_notices[0]
@@ -224,6 +224,24 @@ def test_seam_probe_does_not_import_mms_core(monkeypatch):
 def test_plan_builder_requires_private_snapshot(tmp_path):
     with pytest.raises(LaunchSeamUnavailable):
         launch_bridge.build_pi_launch_plan({"model": "m"}, {"auth_mode": "api_key"}, str(tmp_path))
+
+
+def test_plan_accepts_registry_snapshot_without_legacy_config(tmp_path, monkeypatch):
+    bundle = tmp_path / "generated/model-registry.latest-approved.json"
+    bundle.parent.mkdir()
+    bundle.write_text('{}')
+    monkeypatch.setattr(launch_bridge, "pi_runtime", lambda: ("/bin/pi", "/bin/node"))
+    plan = launch_bridge.build_pi_launch_plan({"model": "m"},
+        {"auth_mode": "api_key", "_webConfigRoot": str(tmp_path)}, str(tmp_path))
+    assert plan.env["MMS_CONFIG_ROOT"] == str(tmp_path.resolve())
+    assert not (tmp_path / "config.toml").exists()
+
+
+def test_plan_rejects_snapshot_without_any_config(tmp_path, monkeypatch):
+    monkeypatch.setattr(launch_bridge, "pi_runtime", lambda: ("/bin/pi", "/bin/node"))
+    with pytest.raises(LaunchSeamUnavailable, match="配置"):
+        launch_bridge.build_pi_launch_plan({},
+            {"auth_mode": "api_key", "_webConfigRoot": str(tmp_path)}, str(tmp_path))
 
 
 def test_plan_keeps_secrets_out_of_argv_and_parent_env(tmp_path, monkeypatch):

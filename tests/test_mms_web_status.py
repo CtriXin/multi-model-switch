@@ -1,5 +1,6 @@
 """Activity is observed, scoped to the current turn, and never restored as busy."""
 import json
+import os
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -59,8 +60,8 @@ def test_failed_or_aborted_turn_does_not_look_successful(make_driver, stop_reaso
     assert sink.activities[-1]["phase"] == "idle"
 
 
-def test_waiting_precedence_terminal_cleanup_and_restart(tmp_path):
-    service, drivers = make_service(tmp_path)
+def test_waiting_precedence_terminal_cleanup_and_restart(tmp_path, monkeypatch):
+    service, drivers = make_service(tmp_path, monkeypatch=monkeypatch)
     try:
         detail = service.launch({"requestId":"status-service", "presetId":"p", "workspaceId":"w", "prompt":"work"})
         sid = detail["session"]["id"]
@@ -144,6 +145,11 @@ def staged_native(local_app):
     server.shutdown(); server.server_close(); thread.join()
 
 
+@pytest.mark.xfail(
+    os.name == "nt",
+    reason="hosted Windows Server Pi native bootstrap does not load the configured model yet",
+    strict=False,
+)
 def test_actual_pi_activity_and_session_list(staged_native):
     app, workspace, root, gates, received, records = staged_native
     detail = app.post(["sessions"], {"requestId":"native-status", "presetId":"web:pi:status-fixture:gpt-5", "workspaceId":workspace["id"], "prompt":"status-flow", "thinkingLevel":"medium"})

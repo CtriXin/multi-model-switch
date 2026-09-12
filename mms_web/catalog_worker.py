@@ -27,19 +27,24 @@ They must never be serialized to HTTP responses by the server owner.
 """
 
 from __future__ import annotations
-
-import fcntl
-import hashlib
-import json
-import os
 import sys
-import tempfile
-import tomllib
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
+
+try:
+    from .file_lock import LOCK_EX, LOCK_NB, LOCK_SH, LOCK_UN, flock
+except ImportError:  # direct ``python mms_web/catalog_worker.py`` worker entry
+    from mms_web.file_lock import LOCK_EX, LOCK_NB, LOCK_SH, LOCK_UN, flock
+
+
+import hashlib
+import json
+import os
+import tempfile
+import tomllib
 
 _PROVIDER_LAUNCHABLE_CLIS = ("claude", "codex", "opencode", "pi")
 _PROTECTED_ROOT_NAMES = (".config/mms", ".config/mms-next")
@@ -242,7 +247,7 @@ def _cmd_apply_config(stream, payload):
     config_root.mkdir(parents=True, exist_ok=True)
 
     with open(lock_path, "a+", encoding="utf-8") as lock_file:
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        flock(lock_file.fileno(), LOCK_EX)
         try:
             # CAS re-verified inside the writer critical section.
             if expected_revision and _revision_of(config_root) != expected_revision:
@@ -372,7 +377,7 @@ def _cmd_apply_config(stream, payload):
                         except OSError:
                             pass
         finally:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            flock(lock_file.fileno(), LOCK_UN)
 
     _emit(
         stream,

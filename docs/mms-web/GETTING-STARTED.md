@@ -4,7 +4,7 @@ MMS Pilot 把 MMF 日常使用的模型、通道、effort、工作文件夹和 P
 
 ## 安装
 
-支持 macOS、Linux。Windows 暂建议在 WSL2 内运行服务；Windows 原生安装与系统文件选择尚未验收。
+支持 macOS、Linux；Windows Native 当前为 Preview。Windows 请从 GitHub Release 的固定 tag 下载并运行 `packages/mms-install/bin/install.ps1`（PowerShell 5.1/7、Python 3.11+、Node 18.17+）；当前公开 npm installer 仍只声明 macOS/Linux，不能把 `npx @ctrixin/mms` 当作 Windows 入口。新 PowerShell 窗口需重新加载 PATH；WSL2 仍是 fallback。Windows Native 尚未达到 Stable，Edge/Chrome CDP、Pi 生命周期和升级保护需按平台 acceptance matrix 验证。
 
 安装程序会准备 Python 3.11+、兼容的 Node.js 和 Pi，已有 CLI 保留，缺失的 Claude/Codex/OpenCode 会自动补装。发布包自带编译好的页面，使用者不需要构建 Web。
 
@@ -175,7 +175,7 @@ v4.7.0 起，点输入框旁的 Skills，默认显示五个内置用途：把想
 
 ### 拖入文件夹
 
-文件夹原路径可用时，Pilot 验证目录存在并把路径插入正文。浏览器只提供目录名时，自动打开“引用文件夹”，用这个名字搜索常用项目；选择对应路径或浏览其他文件夹即可。取消选择保留原草稿。目录内容不会上传或复制，引用也不会改变当前会话的工作目录。普通文件仍按原有规则处理，文件和目录可一起拖入。
+文件夹原路径可用时，Pilot 验证目录存在并把路径插入正文。浏览器只提供目录名时，Pilot 用这个名字加目录内的条目名在本机找回它：先看已添加的工作文件夹及其子目录，再看 zoxide 常用记录、系统索引，最后在这些目录和主目录浅层查找。只有一个明确匹配时直接插入路径，不再打断。多个同名目录或没找到时才打开“引用文件夹”，列出找到的候选，也可以换关键词、粘贴完整路径或浏览文件夹。取消选择保留原草稿。查找只读取目录名，不读文件内容；目录内容不会上传或复制，引用也不会改变当前会话的工作目录。普通文件仍按原有规则处理，文件和目录可一起拖入。
 
 
 ### 用任务模板快速开始

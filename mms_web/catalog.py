@@ -21,8 +21,9 @@ Design boundaries:
 """
 
 from __future__ import annotations
+from .file_lock import LOCK_EX, LOCK_NB, LOCK_SH, LOCK_UN, flock
 
-import fcntl
+
 import hashlib
 import json
 import os
@@ -1080,7 +1081,7 @@ class CatalogService:
         self._state_root.mkdir(parents=True, exist_ok=True)
         lock_path = self._state_root / "apply.lock"
         with open(lock_path, "a+", encoding="utf-8") as lock_file:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            flock(lock_file.fileno(), LOCK_EX)
             try:
                 # Re-read and re-validate the preview inside the apply lock.
                 record = _load_record()
@@ -1122,7 +1123,7 @@ class CatalogService:
                 consumed_record["resultRevision"] = self._config_revision()
                 self._secure_write_json(record_path, consumed_record)
             finally:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                flock(lock_file.fileno(), LOCK_UN)
 
         provider_id = record.get("providerId")
         try:
@@ -1158,7 +1159,7 @@ class CatalogService:
             raise WebError("PREVIEW_NOT_FOUND", "预览标识无效。", status=404)
         self._state_root.mkdir(parents=True, exist_ok=True)
         with open(self._state_root / "apply.lock", "a+", encoding="utf-8") as handle:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            flock(handle.fileno(), LOCK_EX)
             try:
                 path = self._previews_dir / f"{preview_id}.json"
                 if path.exists():
@@ -1167,7 +1168,7 @@ class CatalogService:
                     if not record.get("consumed"):
                         path.unlink()
             finally:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                flock(handle.fileno(), LOCK_UN)
         return {"discarded": True}
 
     # ── launch resolution (INTERNAL ONLY) ─────────────────────────────────
@@ -1271,7 +1272,7 @@ class CatalogService:
         registry = self._state_root / "workspaces.json"
         self._state_root.mkdir(parents=True, exist_ok=True)
         with open(self._state_root / "workspaces.lock", "a+") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
+            flock(lock, LOCK_EX)
             items = self._workspaces()
             items = [w for w in items if w["id"] not in ("default", workspace["id"])]
             private_json(registry, [*items, workspace])
@@ -1302,7 +1303,7 @@ class CatalogService:
         registry = self._state_root / "workspaces.json"
         self._state_root.mkdir(parents=True, exist_ok=True)
         with open(self._state_root / "workspaces.lock", "a+") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
+            flock(lock, LOCK_EX)
             items = self._workspaces()
             if not any(item["id"] == workspace_id for item in items):
                 raise WebError("WORKSPACE_NOT_FOUND", "这个工作空间已不存在，请刷新。", 404)

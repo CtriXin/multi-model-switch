@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { selectBrowser, knownBrowsers, findFallbackPort, browserEnvironment } from './browser-discovery.mjs';
+import { selectBrowser, knownBrowsers, findFallbackPort, browserEnvironment, productMatchesBrowser } from './browser-discovery.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PROXY_SCRIPT = path.join(ROOT, 'scripts', 'cdp-proxy.mjs');
@@ -98,7 +98,11 @@ async function ensureProxy(expectedBrowserId, browserOverride) {
   if (health) {
     const runningId = health.browser?.id;
     const runningLabel = health.browser?.label || runningId || 'unknown';
-    if (expectedBrowserId && runningId && runningId !== 'unknown' && runningId !== expectedBrowserId) {
+    const runningProduct = health.browser?.product;
+    const runningMatches = expectedBrowserId && runningProduct
+      ? productMatchesBrowser(runningProduct, expectedBrowserId)
+      : runningId === expectedBrowserId;
+    if (expectedBrowserId && !runningMatches) {
       console.log(`proxy: 浏览器不一致 — 当前已连着 ${runningLabel}，但本次需要 ${expectedBrowserId}`);
       console.log('  请先核对并停止当前 web-access proxy 的精确 PID，再重试');
       return false;

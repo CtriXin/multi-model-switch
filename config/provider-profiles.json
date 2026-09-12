@@ -889,8 +889,8 @@
       "context_windows": {
         "mimo-v2.5-pro[1m]": 1048576,
         "mimo-v2.5[1m]": 1048576,
-        "mimo-v2.5-pro": 1048576,
-        "mimo-v2.5": 1048576,
+        "mimo-v2.5-pro": 262144,
+        "mimo-v2.5": 262144,
         "mimo-v2-pro": 262144,
         "mimo-v2-omni": 262144,
         "mimo-v2-flash": 262144
@@ -956,7 +956,8 @@
           "audio",
           "video"
         ]
-      }
+      },
+      "note": "MiMo documents the [1m] suffix as what enables extended context on the Anthropic-compatible endpoint Claude Code uses, so the plain model id there runs in 256K mode: https://mimo.mi.com/docs/en-US/tokenplan/integration/claudecode . This profile answers for that endpoint and for any MiMo channel that does not say which endpoint it is, so its plain entries stay at 256K — a channel that turns out to be the Anthropic one must never be told a window the server will not honour. The OpenAI-style routes serve 1M under the plain name and record it in their own profiles (mimo-openai, openrouter-xiaomi-mimo)."
     },
     "minimax": {
       "label": "MiniMax",

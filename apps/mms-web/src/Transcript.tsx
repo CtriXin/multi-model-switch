@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { EventView } from "./components";
 import { ToolGroup } from "./ToolEvent";
 import type { SessionEvent } from "./types";
+import { deliveryLabel, steerBadge, steerLinks } from "./message-control";
 
 type Props = Omit<ComponentProps<typeof EventView>, "event" | "continuation" | "intermediate"> & {autoCollapseProcess: boolean};
 
@@ -18,9 +19,10 @@ function ProcessEvents({events, ...props}: Props & {events: SessionEvent[]}) {
     : <EventView key={event.id} {...props} event={event} continuation intermediate />)}</>;
 }
 
-function Turn({events, completed, forced, report, ...props}: Props & {
+function Turn({events, completed, forced, report, steered, ...props}: Props & {
   events: SessionEvent[]; completed: boolean; forced: {collapsed: boolean; revision: number} | null;
   report: (id: string, collapsed: boolean) => void;
+  steered: Map<string, string>;
 }) {
   const [choice, setChoice] = useState<{collapsed: boolean; revision: number} | null>(null);
   const revision = forced?.revision || 0;
@@ -56,6 +58,12 @@ function Turn({events, completed, forced, report, ...props}: Props & {
       <ProcessEvents {...props} events={collapsed ? pinned : process} />
     </div>}
     {answer && <EventView {...props} event={{...answer, thinking: undefined}} turnStartedAt={user?.createdAt} />}
+    {(() => {
+      // The steer may have landed in an intermediate answer that the collapsed
+      // process hides, so the note belongs to the turn the reader is looking at.
+      const note = events.map(event => steered.get(event.id)).find(Boolean);
+      return note ? <p className="steer-note" role="note">{note}</p> : null;
+    })()}
     {after.map(event => <EventView key={event.id} {...props} event={event} />)}
     {answer && !!process.length && !collapsed && <div className="turn-process-footer">{controls}</div>}
   </section>;
@@ -68,18 +76,22 @@ export function Transcript({forced, report, ...props}: Props & {
   const events = props.detail.events.filter(e => e.id !== "n-web-mode" &&
     !(e.kind === "notice" && e.text === "会话已通过 MMS 启动路径创建") &&
     !(e.kind === "assistant" && !e.text.trim() && !e.thinking?.trim()));
-  const pending = events.filter(e => e.kind === "user" && ["queued", "cancelled", "error"].includes(e.status || ""));
+  const pending = events.filter(e => e.kind === "user" && ["queued", "cancelled", "error", "failed", "interrupted"].includes(e.status || ""));
   const turns: SessionEvent[][] = [];
   for (const event of events.filter(e => !pending.includes(e))) {
     if (!turns.length || event.kind === "user") turns.push([]);
     turns[turns.length - 1].push(event);
   }
   const active = ["running", "waiting"].includes(props.detail.session.state);
+  const steered = new Map(steerLinks(events).flatMap(link => {
+    const badge = steerBadge(link);
+    return badge ? [[link.assistantId, badge] as const] : [];
+  }));
   return <>
     {turns.map((turn, index) => <Turn key={turn[0].id} {...props} events={turn} report={report}
-      forced={forced} completed={index < turns.length - 1 || !active} />)}
+      steered={steered} forced={forced} completed={index < turns.length - 1 || !active} />)}
     {!!pending.length && <section className="pending-messages" aria-label="未执行的消息">
-      {pending.map(event => <div key={event.id}><small>{event.status === "queued" ? "排队中，尚未执行" : event.status === "cancelled" ? "已取消，未执行" : "发送失败，未执行"}</small><EventView {...props} event={event} /></div>)}
+      {pending.map(event => <div key={event.id}><small>{deliveryLabel(event)}</small><EventView {...props} event={event} /></div>)}
     </section>}
   </>;
 }

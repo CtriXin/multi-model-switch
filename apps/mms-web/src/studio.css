@@ -1465,6 +1465,20 @@
 .brand > .app-version { margin-left: 2px; font-size: max(11px, 0.7857rem); }
 /* Settings is a sheet now; the version rides the tab row it replaced. */
 .settings-tabs > .app-version { margin-left: auto; align-self: center; }
+.platform-capability {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--line, #d9d9d9);
+  border-radius: 10px;
+  color: var(--muted, #6b6b6b);
+  font-size: 12px;
+}
+.platform-capability strong { display: block; color: var(--ink, #242424); font-size: 13px; }
+.platform-browser-capabilities { display: flex; flex-wrap: wrap; gap: 6px; }
+.capability-chip { padding: 3px 7px; border-radius: 999px; background: var(--surface-2, #f2f2f2); }
+.capability-chip.unavailable { color: var(--muted, #6b6b6b); opacity: .8; }
 /* The version doubles as the entry to version and updates. */
 button.app-version { border: 0; background: transparent; padding: 4px 7px; border-radius: 6px; cursor: pointer; font: inherit; color: var(--muted); }
 button.app-version:hover { background: var(--soft); color: var(--ink); }

@@ -16,6 +16,11 @@ from mms_web.server import WebApplication
 
 def test_first_run_is_configurable_without_touching_real_mms(tmp_path, monkeypatch):
     monkeypatch.setenv("MMS_REAL_HOME", str(tmp_path / "home"))
+    # A machine that used the retired stable MMS may still have this root.
+    # Pilot's first-run setup must ignore it and create its own configuration.
+    legacy = tmp_path / "home" / ".config" / "mms"
+    legacy.mkdir(parents=True)
+    (legacy / "config.toml").write_text("[legacy]\nignored = true\n")
     app = WebApplication(state_root=tmp_path / "state")
     assert app.bootstrap()["capabilities"]["configure"]
     preview = app.post(["configuration", "preview"], {"service": {
@@ -28,7 +33,7 @@ def test_first_run_is_configurable_without_touching_real_mms(tmp_path, monkeypat
     result = app.catalog.resolve_launch("web:pi:my-service:test-model", "default")
     assert result["runtime"]["api_key"] == "test-owned-key"
     assert result["runtime"]["protocols"] == ["openai_chat_completions"]
-    assert not (tmp_path / "home/.config/mms").exists()
+    assert (tmp_path / "home/.config/mms/config.toml").read_text() == "[legacy]\nignored = true\n"
     assert not (tmp_path / "home/.config/mms-next").exists()
     app.close()
 

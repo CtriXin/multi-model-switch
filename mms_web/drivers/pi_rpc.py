@@ -31,6 +31,17 @@ _NOTICE_TEXT_LIMIT = 1000
 _STDERR_TAIL_BYTES = 2048
 
 
+# Windows has no SIGKILL. Naming the force step once keeps every call site from
+# touching an attribute that platform lacks; the sentinel never reaches a signal
+# API there, because the Windows branch maps it to Popen.kill() first.
+FORCE_SIGNAL = getattr(signal, "SIGKILL", "force")
+
+
+def _is_windows() -> bool:
+    """One seam for the Windows branch, so it can be tested on any host."""
+    return os.name == "nt"
+
+
 def _clip(text: str, limit: int) -> str:
     text = str(text or "")
     if len(text) <= limit:
@@ -129,7 +140,14 @@ class PiRpcDriver:
 
     def _terminate_group(self, sig) -> None:
         try:
-            if os.getpgid(self._proc.pid) == self._proc.pid:
+            if _is_windows():
+                # Windows has no POSIX process groups, and Popen.terminate is
+                # TerminateProcess with kill as its alias: there is no graceful
+                # signal to deliver, only force. Map force to force and treat a
+                # graceful request as "nothing to send".
+                if sig is FORCE_SIGNAL:
+                    self._proc.kill()
+            elif os.getpgid(self._proc.pid) == self._proc.pid:
                 os.killpg(self._proc.pid, sig)
             else:
                 self._proc.send_signal(sig)
@@ -141,8 +159,14 @@ class PiRpcDriver:
 
         Keep stdin open if the child ignores termination, so a failed update
         does not itself break the original RPC transport.
+
+        On Windows there is no graceful request to send, so this reports False
+        instead of force-killing an idle Pi. The caller then aborts the update
+        with its own "no force kill attempted" error, which is the contract.
         """
         if self.alive():
+            if _is_windows():
+                return False
             self._terminate_group(signal.SIGTERM)
         if not self.wait(timeout=timeout):
             return False
@@ -170,7 +194,7 @@ class PiRpcDriver:
                 pass
             if not self.wait(timeout=3.0):
                 try:
-                    self._terminate_group(signal.SIGKILL)
+                    self._terminate_group(FORCE_SIGNAL)
                 except OSError:
                     pass
                 self.wait(timeout=5.0)
@@ -210,6 +234,47 @@ class PiRpcDriver:
         if self._streaming:
             command["streamingBehavior"] = "followUp"
         return self.request(command, timeout=timeout)
+
+    def steer(self, text: str, *, images=None, timeout: float | None = None) -> dict:
+        """Queue a steering message while the agent is running.
+
+        Pi native semantics (rpc.md): the message is delivered only after the
+        current assistant turn finishes executing its tool calls, before the
+        next LLM call. Steering never interrupts in-flight tool calls and
+        never ends the current turn; only ``abort`` does. A ``success: false``
+        response means Pi rejected the steer; callers must not silently retry
+        it as a follow-up, which would delay the correction past the next
+        LLM call.
+        """
+        command: dict = {"type": "steer", "message": str(text)}
+        if images:
+            command["images"] = images
+        return self.request(command, timeout=timeout)
+
+    def follow_up(self, text: str, *, images=None, timeout: float | None = None) -> dict:
+        """Queue a message to be delivered once the run settles.
+
+        The explicit command, rather than ``prompt`` with a streaming hint: a
+        rewritten queue is put back while the agent may be between turns, and
+        ``prompt`` would start a new one instead of queueing.
+        """
+        command: dict = {"type": "follow_up", "message": str(text)}
+        if images:
+            command["images"] = images
+        return self.request(command, timeout=timeout)
+
+    def clear_queue(self, *, timeout: float | None = None) -> dict:
+        """Empty the queue and return what was in it, by lane.
+
+        Pi has no per-message delete or reorder. Rewriting the queue means
+        clearing it and putting back what should stay, in order, so the caller
+        needs to know what was actually still waiting.
+        """
+        response = self.request({"type": "clear_queue"},
+                                timeout=self._abort_timeout if timeout is None else timeout)
+        data = response.get("data") if isinstance(response.get("data"), dict) else {}
+        return {"steering": [str(t) for t in (data.get("steering") or [])],
+                "followUp": [str(t) for t in (data.get("followUp") or [])]}
 
     def abort(self, *, timeout: float | None = None) -> dict:
         for approval_id in self.pending_approvals():
@@ -458,8 +523,10 @@ class PiRpcDriver:
             self._activity("retrying" if etype in {"auto_retry_start", "summarization_retry_scheduled"} else "running" if self._streaming else "idle")
             self._notice(f"自动重试事件: {etype}", title="retry")
         elif etype == "queue_update":
-            queue = [str(text) for text in [*(message.get("steering") or []), *(message.get("followUp") or [])]]
-            self._upsert({"id": "n-queue", "kind": "notice", "title": "待发送消息", "text": f"还有 {len(queue)} 条补充消息等待执行" if queue else "待发送队列已清空", "queue": queue})
+            steering = [str(text) for text in (message.get("steering") or [])]
+            follow_up = [str(text) for text in (message.get("followUp") or [])]
+            queue = [*steering, *follow_up]
+            self._upsert({"id": "n-queue", "kind": "notice", "title": "待发送消息", "text": f"还有 {len(queue)} 条补充消息等待执行" if queue else "待发送队列已清空", "queue": queue, "queueSteering": steering, "queueFollowUp": follow_up})
         elif etype == "extension_error":
             self._notice(_clip(str(message.get("error") or "extension error"), 400), title="扩展错误")
         # turn_start / turn_end / agent_end / bash_execution_update and

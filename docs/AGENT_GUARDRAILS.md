@@ -143,8 +143,8 @@
 
 - `mms` / `mmf` / `mmg` / Pilot 都读写同一个根；Pilot 保存通道后 terminal 读到的是同一份 approved bundle。
 - legacy `~/.config/mms` 已退出配置来源：不做自动导入，不做回退，`MMS_CONFIG_ROOT_MODE=stable` 被忽略；`mmd` / `mmm` 包装器已退休。
-- `~/.config/mms/*-gateway/`、`accounts/`、`fake-upstream/` 仍是运行时 / 会话状态目录，不是配置；Codex gateway `CODEX_HOME` 契约不变。
-- 安装脚本会请任何占用默认端口的 Pilot 退出（不按安装目录区分），并用 `source|config_root|version` 判断已有实例，避免第二个 8766 实例和跨进程 403。
+- 同一个根下的 `~/.config/mms-next/*-gateway/`、`accounts/`、`fake-upstream/` 是运行时 / 会话状态目录，不是配置；gateway 根由 `mms_launchers._selected_mms_config_root()` 解析，Codex gateway `CODEX_HOME` 契约不变。
+- 检测到 Pilot 在运行时，安装脚本暂停安装并退出，不关闭进程、不清理会话（#199）；用户从 Pilot 页面的「更新」入口升级，或先 `mms web stop`（多实例用 `--all`）再重跑安装器；`--keep-running-pilot` 仅为兼容保留，不改变这个结果，脚本也不再有“装完重开 Pilot”的流程。
 - 新增一处读取 `~/.config/mms` 作为配置来源属于回归；`tests/test_single_config_root.py` 与 fresh-user gate 覆盖这条契约。
 
 ## Global OAuth Hard Cut
@@ -167,7 +167,7 @@
 
 MMS-managed Codex launch must not repeatedly stop on `Hooks need review` in isolated sessions.
 
-- Gateway Codex `CODEX_HOME` must stay stable at `~/.config/mms/codex-gateway/.codex`; per-PID `MMS_SESSION_HOME` is allowed only for wrappers/tmp/session packet state.
+- Gateway Codex `CODEX_HOME` must stay stable at `<selected config root>/codex-gateway/.codex`, which is `~/.config/mms-next/codex-gateway/.codex` (`mms_launchers._codex_gateway_root()`); per-PID `MMS_SESSION_HOME` is allowed only for wrappers/tmp/session packet state, and the session `.codex` is a symlink to that stable directory.
 - Do not revert Codex gateway back to `CODEX_HOME=$MMS_SESSION_HOME/.codex`.
 - Runtime `bypass` mode must pass both `--dangerously-bypass-approvals-and-sandbox` and `--dangerously-bypass-hook-trust`.
 - Real `~/.codex/hooks.json` trust wins over stale sibling sessions. Sibling `codex-gateway/s/<pid>/.codex/config.toml` trust can backfill missing entries, but cannot overwrite matching real-home trust.
@@ -195,7 +195,32 @@ MMS-managed Codex launch must not repeatedly stop on `Hooks need review` in isol
 - 把 `conservative_fallback` 当成「这个模型不支持图片」。它的含义是没有任何来源声明过。
 - 新增第五份硬编码 vision 名单。要补数据就写 provider profile。
 
-## Pi Vision Relay Contract
+## Context Window Single Truth
+
+一个模型在某个 provider 下的 context window 只有一条链，四个 harness 都调同一个 resolver。改这条链之前先读这段。
+
+`mms_context_window.resolve_context_window(model, provider_id=..., runtime=...)` 的优先级，从高到低：
+
+1. `~/.config/mms-next/model-context-overrides.json`：用户自己写的文件，最高。
+2. `manual_override` / `model_policy`：Pilot 模型页写的那层。
+3. `approved_facts`：已发布的 capability bundle。
+4. `provider_profile`：`config/provider-profiles.json` 的 `context_windows`。
+5. provider 自己 `/models` 上报并被缓存的窗口（`<config root>/cache/models_<provider>.json` 的 `model_details`）。
+6. `config/model-context-windows.json`：没有任何 profile 覆盖时的兜底数据，每行写明来源。
+7. Claude 家族规则：Anthropic 自家模型 opus/sonnet 记 1M、haiku 记 200K。查不到就返回 `None`，由调用方套自己的默认值（launcher 是 200K）。
+
+用户在 Pilot 模型页给某个模型设了 context，就当他确认过（2026-09-12 owner 决定）：不校准、不封顶、不给 wire 名加 `[1m]`，四个 harness 原样带过去；Pilot 的自动刷新（`ModelSettings.auto_refresh`）跳过 `userSet` 字段。以后不要再为 `[1m]` 开讨论：非 Claude 模型它只是输入归一化。
+
+不允许的做法：
+
+- 在代码里新增按模型名映射 context 的 dict 或特判（Claude 家族规则和默认常量除外）。要补数据就写 provider profile；profile 覆盖不到再写 `config/model-context-windows.json`，并填上 `source`。
+- 让某个 harness 绕过 resolver 自己算窗口。Claude Code 的 `_effective_context_window` / `_apply_claude_context_env_overrides`、Codex 的 `_codex_gateway_context_window`、Pi 的 `_pi_model_capabilities`、OpenCode 的 `limit.context` 都必须落到同一个数。
+- 为 `[1m]` 维护重复条目。非 Claude 模型的 `[1m]` 只是输入归一化：`k3[1m]` 等价 `k3`，除非某个来源显式声明了带后缀的名字（先按原名查，查不到再剥后缀）。Claude 家族的 `[1m]` 语义不变，`_with_1m_suffix` / `_apply_claude_shell_context_slots` 不要动。
+- 改 `_runtime_supports_claude_1m` 或让敏感 Claude provider 默认开 1M。
+
+改这条链路要跑 `tests/test_context_window_single_truth.py`（含一条禁止代码内 context 表的扫描断言）和 `tests/test_provider_profiles.py`。
+
+## Vision Relay Contract
 
 Pi 用 `--model` 启动，扩展看不到这个参数，所以主模型能力由 mmf 在启动前算好注入：
 
@@ -206,17 +231,28 @@ Pi 用 `--model` 启动，扩展看不到这个参数，所以主模型能力由
 
 唯一的开关是 `config.toml` 的 `[vision_sidecar] enabled`。池子只从当前通道已暴露的模型里取，不往 Pi 的模型列表里加条目。池子为空时 launcher 必须打印可见提示，不允许静默降级。
 
-改这条链路要跑 `tests/test_pi_vision_relay.py`，其中包含一条禁止硬编码模型名的断言。
+### Claude Code 和 OpenCode 走 MCP
+
+这两个 harness 没有扩展位，但都说 MCP，所以同一个池子通过 `scripts/mms-vision-mcp.mjs` 这个 stdio server 暴露成同名的 `describe_image` 工具。
+
+- 池子规则和 Pi 完全一致：来自 `mms_vision_relay.relay_plan()`，它直接复用 `_pi_vision_plan`。不允许在这里另起一套判定。
+- mmf 把 Pi 同款 models.json 写进当前 session 目录的 `vision-relay/models.json`，`0600`，通过 `MMS_VISION_RELAY_CONFIG` 传给 server。凭据只出现在请求头，不进工具返回、不进日志。
+- 主模型自己能读图、或本通道没有能读图的模型时，不注册这个 server；切到能读图的模型时要把已有条目**删掉**，不能留着过期的。
+- `session_surfaces.disabled` 里的 `mcp:vision` 可以关掉它。
+- Codex 不接入：按 owner 2026-09-11 的决定，Codex 不做 vision 特殊处理。
+
+改这条链路要跑 `tests/test_pi_vision_relay.py` 和 `tests/test_vision_relay_harnesses.py`。前者含一条禁止硬编码模型名的断言，后者含一条断言 MCP server 与 Pi 扩展的 endpoint 规则没有各改各的。
 
 ## User Preferences And Human Gate
 
-`~/.config/mms/preferences.toml` 是用户偏好 allowlist 覆盖层，不是 agent 可随手写的配置文件。
+`~/.config/mms-next/preferences.toml` 是用户偏好 allowlist 覆盖层，不是 agent 可随手写的配置文件。
 
 - 日常偏好优先建议写 `preferences.toml`，例如 `thinking_mode`、`reasoning_effort`、`bypass`、`caveman_mode`、`nsr_mode`、`agent_pack`、`session_surfaces.disabled`、`assets.roots`
 - LLM / agent 需要先看 `docs/MMS_USER_PREFERENCES.md`，或让用户执行 `mms config preferences.help`
-- agents 可以读取、解释、生成 TOML snippet / manual diff，但不能自动写入真实 `~/.config/mms/**`
+- agents 可以读取、解释、生成 TOML snippet / manual diff，但不能自动写入真实 `~/.config/mms-next/**`
 - `preferences.toml` 会忽略 credentials、provider routes、account identity、proxy、OAuth、real HOME/XDG、Claude config 等非 allowlist 字段
 - 如必须写真实配置，仍走 human gate：`plan -> backup -> human double check -> audited write -> post-write human double check`
+- Pilot 模型设置的 apply 步骤自 #199 起用 `confirmed: true` 加浏览器 confirm 弹窗完成人工确认，不再要求用户手打确认短语；后端 `mms_web/model_settings.py` 与 `mms_web/model_settings_worker.py` 仍同时接受 `confirmed: true` 和旧的 `confirmPhrase`。
 
 ## Hook / Skill Priority
 

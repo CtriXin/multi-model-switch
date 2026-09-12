@@ -1197,6 +1197,8 @@ _REASONING_MODEL_HINTS = (
     "minimax-m2", "deepseek-reasoner", "doubao-thinking",
 )
 _TOOL_USE_FAMILIES = {"Claude", "GPT", "Gemini", "Qwen", "Kimi", "GLM", "MiniMax"}
+# Keys are `[1m]`-free: a selector is the same model as its base name, and
+# `_model_supports_vision` normalizes the suffix off before looking here.
 _VISION_CAPABLE_MODEL_NAMES = {
     "mimo-v2.5",
     "mimo-v2-omni",
@@ -2246,31 +2248,10 @@ def _provider_map(cfg):
 
 
 def _model_context_window(model_name):
-    clean = str(model_name or "").replace("[1m]", "").strip()
-    if not clean:
-        return None
-    try:
-        from mms_capability_resolver import resolve_model_capabilities
+    """The model's context window, from the one resolver every harness uses."""
+    from mms_context_window import resolve_context_window
 
-        caps = resolve_model_capabilities(clean)
-        if caps.get("sources", {}).get("context_window_tokens") in {"approved_facts", "model_policy", "manual_override"}:
-            window = int(caps.get("context_window_tokens"))
-            if window > 0:
-                return window
-    except Exception:
-        pass
-    try:
-        from mms_launchers import _MODEL_CONTEXT_WINDOWS
-    except Exception:
-        return None
-    window = _MODEL_CONTEXT_WINDOWS.get(clean)
-    if window is not None:
-        return window
-    lower = clean.lower()
-    for key, value in _MODEL_CONTEXT_WINDOWS.items():
-        if key.lower() == lower:
-            return value
-    return None
+    return resolve_context_window(model_name)
 
 
 def _native_clis_for_model(model_name):
@@ -2406,10 +2387,11 @@ def _model_capability_tags(model_name):
 
 
 def _model_supports_vision(model_name):
-    normalized = str(model_name or "").strip().lower()
-    if not normalized:
+    from mms_context_window import normalize_model_selector
+
+    model_id = normalize_model_selector(model_name)
+    if not model_id:
         return False
-    model_id = normalized.rsplit("/", 1)[-1]
     if model_id in _VISION_CAPABLE_MODEL_NAMES:
         return True
     return any(hint in model_id for hint in _VISION_CAPABLE_MODEL_HINTS)
@@ -7446,6 +7428,45 @@ def _probe_async_min_interval(cfg=None):
     return _PROBE_ASYNC_MIN_INTERVAL
 
 
+def _listing_model_details(payload):
+    """Per-model facts an upstream /models listing reported, worth keeping.
+
+    Only the context-window fields, so a provider that publishes a window for a
+    model MMS has never heard of still sizes it correctly (issue #230). Nothing
+    here is interpreted; `mms_context_window` decides what to do with it.
+    """
+    from mms_context_window import REMOTE_LISTING_CONTEXT_KEYS
+
+    items = payload.get("data") if isinstance(payload, dict) else None
+    details = {}
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        model_id = str(item.get("id") or "").strip()
+        if not model_id:
+            continue
+        row = {}
+        for field in REMOTE_LISTING_CONTEXT_KEYS:
+            try:
+                value = int(item.get(field))
+            except (TypeError, ValueError):
+                continue
+            if value > 0:
+                row[field] = value
+        top_provider = item.get("top_provider")
+        if isinstance(top_provider, dict):
+            for field in REMOTE_LISTING_CONTEXT_KEYS:
+                try:
+                    value = int(top_provider.get(field))
+                except (TypeError, ValueError):
+                    continue
+                if value > 0:
+                    row.setdefault("top_provider", {})[field] = value
+        if row:
+            details[model_id] = row
+    return details
+
+
 def _probe_file_cache_path(provider_id):
     return os.path.join(_PROBE_FILE_CACHE_DIR, f"models_{provider_id}.json")
 
@@ -7517,17 +7538,18 @@ def _save_probe_file_cache(provider_id, result):
     try:
         os.makedirs(_PROBE_FILE_CACHE_DIR, exist_ok=True)
         path = _probe_file_cache_path(provider_id)
+        payload = {
+            "raw_models": result.get("raw_models") or [],
+            "working_url": result.get("working_url"),
+            "base_source": base_source or "remote",
+            "error": result.get("error"),
+            "error_kind": result.get("error_kind"),
+        }
+        model_details = result.get("model_details")
+        if isinstance(model_details, dict) and model_details:
+            payload["model_details"] = model_details
         with open(path, "w") as f:
-            json.dump(
-                {
-                    "raw_models": result.get("raw_models") or [],
-                    "working_url": result.get("working_url"),
-                    "base_source": base_source or "remote",
-                    "error": result.get("error"),
-                    "error_kind": result.get("error_kind"),
-                },
-                f,
-            )
+            json.dump(payload, f)
     except Exception:
         pass
 
@@ -7807,6 +7829,7 @@ def _probe_models(provider, emit_output=True, force_refresh=False, skip_cache=Fa
                     models.sort()
                     result["raw_models"] = models
                     result["models"] = models
+                    result["model_details"] = _listing_model_details(data)
                     result["working_url"] = try_url
                     attempts.append({"url": f"{try_url}{models_endpoint}", "status": f"ok ({len(models)} models)"})
                     if try_url != base_url and emit_output:
@@ -15917,7 +15940,9 @@ def _handle_session_info(session_id, cli_name):
 
 
 def _session_gateway_roots(cli_name):
-    real_home = resolve_real_user_home()
+    # Sessions are created under the selected config root (MMS_CONFIG_ROOT honoured),
+    # so prune must look at that same root instead of always at the real HOME one.
+    config_root = resolve_mms_config_dir()
     gateway_names = []
     if cli_name in {"all", "claude"}:
         gateway_names.append(("claude", "claude-gateway"))
@@ -15926,7 +15951,7 @@ def _session_gateway_roots(cli_name):
     if cli_name in {"all", "opencode"}:
         gateway_names.append(("opencode", "opencode-gateway"))
     return [
-        (cli, os.path.join(real_home, ".config", "mms-next", gateway_name, "s"))
+        (cli, os.path.join(config_root, gateway_name, "s"))
         for cli, gateway_name in gateway_names
     ]
 
@@ -16124,9 +16149,9 @@ def _codex_resume_roots():
 
     for env_name in ("MMS_CODEX_RESUME_WRITEBACK_ROOT", "CODEX_HOME"):
         add(os.environ.get(env_name))
-    real_home = resolve_real_user_home()
-    add(os.path.join(real_home, ".config", "mms-next", "codex-gateway", ".codex"))
-    add(os.path.join(real_home, ".codex"))
+    # Same root the gateway session was created under, not a hard-coded real-HOME one.
+    add(os.path.join(resolve_mms_config_dir(), "codex-gateway", ".codex"))
+    add(os.path.join(resolve_real_user_home(), ".codex"))
     return roots
 
 

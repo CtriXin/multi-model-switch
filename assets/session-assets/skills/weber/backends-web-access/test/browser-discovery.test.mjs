@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { productMatchesBrowser } from '../scripts/browser-discovery.mjs';
+import { isIsolatedHome, productMatchesBrowser } from '../scripts/browser-discovery.mjs';
+
+test('isolated HOME detection handles Windows and pi-gateway layouts', () => {
+  assert.equal(isIsolatedHome(String.raw`C:\Users\xin\.config\mms-next\pi-gateway\s\56386\home`), true);
+  assert.equal(isIsolatedHome('/Users/xin/.config/mms/session/home'), true);
+  assert.equal(isIsolatedHome('/Users/xin'), false);
+});
 
 test('fixed-port fallback only accepts the configured browser product', () => {
   assert.equal(productMatchesBrowser('Chrome/150.0.0.0', 'chrome'), true);

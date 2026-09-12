@@ -93,6 +93,8 @@ _MIGRATION_CREDENTIAL_BOX_AESGCM_SCHEMA = "mms.config_migration_credentials.aesg
 _MIGRATION_CREDENTIAL_BOX_OPENSSL_SCHEMA = "mms.config_migration_credentials.openssl-cbc-hmac.v1"
 _MIGRATION_CREDENTIAL_BOX_SCHEMA = _MIGRATION_CREDENTIAL_BOX_AESGCM_SCHEMA
 
+# Keys are `[1m]`-free: a selector is the same model as its base name, so it
+# never needs a duplicate row (issue #230).
 _KNOWN_VISION_MODELS = {
     "gpt-5.3-codex",
     "gpt-5.4",

@@ -19,8 +19,9 @@ const SKILL_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '.
 const CONFIG_PATH = path.join(SKILL_ROOT, 'config.env');
 const FALLBACK_PORTS = [9222, 9229, 9333];
 
-function isIsolatedHome(home) {
-  return /\/(?:\.mmf|\.config\/mms|\.config\/mmf|gateway\/s|sessions)\//.test(home || '');
+export function isIsolatedHome(home) {
+  const normalized = String(home || '').replaceAll('\\', '/');
+  return /(?:^|\/)(?:\.mmf|\.config\/mms(?:-next)?|\.config\/mmf|(?:gateway|pi-gateway)\/s|sessions)(?:\/|$)/.test(normalized);
 }
 
 // Return a host-home decision that agents can inspect. An isolated HOME is never used as a

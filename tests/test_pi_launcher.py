@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import textwrap
 
@@ -165,7 +166,37 @@ def test_pi_skill_overlay_keeps_project_skill_over_global_duplicate(monkeypatch,
     assert (overlay / "global-only").resolve() == global_only_skill
 
 
-def test_pi_wrapper_prefers_a_cached_pi_binary(tmp_path):
+def _pi_wrapper_env(tmp_path, cache_dir, *, bin_dir=None, **extra):
+    """A PATH with node/npm/npx but no installed pi anywhere.
+
+    The wrapper prefers an installed Pi over its npx cache (#205), and on a
+    developer machine both `command -v pi` and `npm prefix -g` find the real
+    one. Inheriting os.environ therefore made these cache tests exec the real
+    pi instead. npm_config_prefix points at an empty prefix so `npm prefix -g`
+    answers honestly that pi is not installed there.
+    """
+    bin_dir = Path(bin_dir) if bin_dir else (tmp_path / "bin")
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    for name in ("node", "npm", "npx"):
+        target = bin_dir / name
+        real = shutil.which(name)
+        if real and not target.exists():
+            target.symlink_to(real)
+    npm_prefix = tmp_path / "npm-prefix"
+    (npm_prefix / "bin").mkdir(parents=True, exist_ok=True)
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    env = {
+        "PATH": os.pathsep.join([str(bin_dir), "/usr/bin", "/bin"]),
+        "HOME": str(home),
+        "npm_config_prefix": str(npm_prefix),
+        "MMS_PI_NPX_CACHE": str(cache_dir),
+    }
+    env.update(extra)
+    assert shutil.which("pi", path=env["PATH"]) is None
+    return env
+
+def test_pi_wrapper_uses_the_cache_when_no_pi_is_installed(tmp_path):
     wrapper = Path(__file__).resolve().parents[1] / "scripts" / "pi-cli-wrapper.sh"
     cache_dir = tmp_path / "pi-npx"
     cached_pi = cache_dir / "_npx" / "cached" / "node_modules" / ".bin" / "pi"
@@ -182,7 +213,7 @@ def test_pi_wrapper_prefers_a_cached_pi_binary(tmp_path):
         check=True,
         capture_output=True,
         text=True,
-        env={**os.environ, "MMS_PI_NPX_CACHE": str(cache_dir)},
+        env=_pi_wrapper_env(tmp_path, cache_dir),
     )
 
     assert result.stdout == "cached-pi:--version\n"
@@ -215,11 +246,7 @@ def test_pi_wrapper_warms_a_missing_cache_before_running(tmp_path):
         check=True,
         capture_output=True,
         text=True,
-        env={
-            **os.environ,
-            "MMS_PI_NPX_CACHE": str(cache_dir),
-            "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
-        },
+        env=_pi_wrapper_env(tmp_path, cache_dir, bin_dir=fake_bin),
     )
 
     assert result.stdout == "warmed-pi:--version\n"
@@ -307,15 +334,13 @@ def test_pi_wrapper_serializes_cold_npx_prewarm(tmp_path):
         encoding="utf-8",
     )
     fake_npx.chmod(0o755)
-    env = os.environ.copy()
-    env.update(
-        {
-            "PATH": f"{bin_dir}{os.pathsep}{env.get('PATH', '')}",
-            "MMS_PI_NPX_CACHE": str(cache_dir),
-            "MMS_PI_NPX_INSTALL_LOCK_TIMEOUT": "10",
-            "FAKE_NPX_LOG": str(log_path),
-            "FAKE_PI_CACHE": str(cache_dir),
-        }
+    env = _pi_wrapper_env(
+        tmp_path,
+        cache_dir,
+        bin_dir=bin_dir,
+        MMS_PI_NPX_INSTALL_LOCK_TIMEOUT="10",
+        FAKE_NPX_LOG=str(log_path),
+        FAKE_PI_CACHE=str(cache_dir),
     )
 
     processes = [
