@@ -40,6 +40,18 @@ def cached_pi() -> str:
             else:
                 manifest = candidate.parents[1] / "package.json"
             if os.access(candidate, os.X_OK) and manifest.is_file():
+                if os.name == "nt":
+                    if candidate.name != "pi":
+                        # A bare cli.js is not CreateProcess-startable either.
+                        continue
+                    # The npx cache .bin holds the same extensionless POSIX
+                    # shim; only the .cmd/.exe sibling is Popen-startable.
+                    from mms_runtime import windows_executable_candidate
+
+                    resolved = windows_executable_candidate(str(candidate))
+                    if not resolved:
+                        continue
+                    return resolved
                 return str(candidate)
     return ""
 

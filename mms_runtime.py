@@ -92,6 +92,37 @@ def cli_search_dirs(env=None, real_home=None):
     return _dedupe([*path_dirs, *nvm_dirs, *preferred, "/usr/bin", "/bin"])
 
 
+# Extensions CreateProcess can start directly. npm also installs an
+# extensionless shell shim (Git Bash/WSL) and a .ps1 next to the real
+# ``pi.cmd``; neither is a valid subprocess.Popen target on Windows.
+_WINDOWS_EXECUTABLE_EXTS = (".exe", ".cmd", ".bat", ".com")
+
+
+def windows_executable_candidate(candidate):
+    """Return a Popen-startable Windows executable for ``candidate`` or "".
+
+    ``where.exe pi`` lists the extensionless npm shim before ``pi.cmd``, and a
+    misconfigured PATHEXT can make even ``shutil.which`` return it. The bare
+    shim is a POSIX shell script: handing it to CreateProcess fails or, worse,
+    starts something that never speaks the expected protocol. An extensionless
+    candidate is replaced by its sibling ``.exe``/``.cmd`` when one exists;
+    anything else without an executable extension is rejected outright.
+    """
+    if not candidate:
+        return ""
+    text = str(candidate)
+    if text.lower().endswith(_WINDOWS_EXECUTABLE_EXTS):
+        return text
+    _, ext = os.path.splitext(text)
+    if ext:
+        return ""
+    for suffix in _WINDOWS_EXECUTABLE_EXTS:
+        sibling = text + suffix
+        if os.path.isfile(sibling):
+            return sibling
+    return ""
+
+
 def resolve_cli_binary(command_name, env=None, real_home=None):
     name = str(command_name or "").strip()
     if not name:
@@ -110,11 +141,13 @@ def resolve_cli_binary(command_name, env=None, real_home=None):
         if not candidate:
             continue
         path_value = candidate if os.path.isabs(candidate) else shutil.which(candidate, path=search_path)
-        # The repository Pi wrapper is a POSIX shell script. Windows can
-        # discover a real ``pi.cmd`` on PATH, but CreateProcess cannot execute
-        # the ``.sh`` wrapper directly.
-        if os.name == "nt" and str(path_value or "").lower().endswith(".sh"):
-            continue
+        if os.name == "nt":
+            # The repository Pi wrapper is a POSIX shell script and the npm
+            # extensionless shim is not CreateProcess-startable; Windows must
+            # land on the sibling pi.cmd / pi.exe instead.
+            path_value = windows_executable_candidate(path_value)
+            if not path_value:
+                continue
         if path_value and os.path.isfile(path_value) and os.access(path_value, os.X_OK):
             return os.path.abspath(path_value)
     return ""

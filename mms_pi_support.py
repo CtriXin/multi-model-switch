@@ -236,7 +236,24 @@ def _pi_global_executable():
     A session started from Finder or by the installer does not inherit the
     shell PATH that nvm/fnm/npm-global rely on, so `which` alone reported no
     Pi on machines that run it fine from a terminal.
+
+    Windows npm-global puts the shims directly in the prefix (no ``bin/``),
+    and the extensionless ``pi`` there is a POSIX shell script that
+    CreateProcess cannot start; only the ``.cmd``/``.exe`` sibling is a valid
+    subprocess.Popen target.
     """
+    if os.name == "nt":
+        from mms_runtime import windows_executable_candidate
+
+        candidate = windows_executable_candidate(shutil.which("pi"))
+        if candidate and os.path.isfile(candidate):
+            return candidate
+        prefix = _npm_global_prefix()
+        if prefix:
+            candidate = windows_executable_candidate(os.path.join(prefix, "pi"))
+            if candidate and os.path.isfile(candidate):
+                return candidate
+        return ""
     candidate = shutil.which("pi")
     if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
         return candidate
