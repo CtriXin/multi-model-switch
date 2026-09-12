@@ -67,6 +67,19 @@ python3 scripts/openrouter_recent_models.py --limit 50
 python3 scripts/openrouter_recent_models.py --missing   # 只看 profile 里还没有的
 ```
 
+## 一个新模型的窗口写在哪里
+
+代码里已经没有按模型名的 context 表了（#230）。查到数字之后按这个顺序落地：
+
+1. **能对上某个 provider profile**：写进 `config/provider-profiles.json` 对应 profile 的 `context_windows`。这是常规位置。
+2. **没有任何 profile 覆盖**（典型是同时转售多家的中转通道）：写进 `config/model-context-windows.json`，每行必须带 `source` 和 `checked`。
+3. **provider 的 `/models` 已经自己上报了窗口**：什么都不用写。探测结果会缓存到 `<config root>/cache/models_<provider>.json` 的 `model_details`，resolver 直接读。
+4. **用户想临时改自己那台机器上的值**：`~/.config/mms-next/model-context-overrides.json`，它在链的最上面，agent 不代写。
+
+`[1m]` 不需要单独一行。非 Claude 模型的后缀只是输入归一化，`k3[1m]` 和 `k3` 解析到同一个数；只有某个来源显式写了带后缀的名字，那一行才会生效。
+
+完整链路和禁止事项见 `docs/AGENT_GUARDRAILS.md` 的 “Context Window Single Truth”，不变量测试是 `tests/test_context_window_single_truth.py`。
+
 ## 已知的坑
 
 **Kimi Code 的 k3 原生支持 1M。** `k3` 是新的默认入口；`k3[1m]` 仅为历史 MMS compatibility selector，不能直接发给 provider，也不再作为新的产品入口。OpenRouter 仍然只是 catalog evidence，不能单独证明当前 route/account 的实际能力。

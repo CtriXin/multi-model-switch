@@ -195,6 +195,29 @@ MMS-managed Codex launch must not repeatedly stop on `Hooks need review` in isol
 - 把 `conservative_fallback` 当成「这个模型不支持图片」。它的含义是没有任何来源声明过。
 - 新增第五份硬编码 vision 名单。要补数据就写 provider profile。
 
+## Context Window Single Truth
+
+一个模型在某个 provider 下的 context window 只有一条链，四个 harness 都调同一个 resolver。改这条链之前先读这段。
+
+`mms_context_window.resolve_context_window(model, provider_id=..., runtime=...)` 的优先级，从高到低：
+
+1. `~/.config/mms-next/model-context-overrides.json`：用户自己写的文件，最高。
+2. `manual_override` / `model_policy`：Pilot 模型页写的那层。
+3. `approved_facts`：已发布的 capability bundle。
+4. `provider_profile`：`config/provider-profiles.json` 的 `context_windows`。
+5. provider 自己 `/models` 上报并被缓存的窗口（`<config root>/cache/models_<provider>.json` 的 `model_details`）。
+6. `config/model-context-windows.json`：没有任何 profile 覆盖时的兜底数据，每行写明来源。
+7. Claude 家族规则：Anthropic 自家模型 opus/sonnet 记 1M、haiku 记 200K。查不到就返回 `None`，由调用方套自己的默认值（launcher 是 200K）。
+
+不允许的做法：
+
+- 在代码里新增按模型名映射 context 的 dict 或特判（Claude 家族规则和默认常量除外）。要补数据就写 provider profile；profile 覆盖不到再写 `config/model-context-windows.json`，并填上 `source`。
+- 让某个 harness 绕过 resolver 自己算窗口。Claude Code 的 `_effective_context_window` / `_apply_claude_context_env_overrides`、Codex 的 `_codex_gateway_context_window`、Pi 的 `_pi_model_capabilities`、OpenCode 的 `limit.context` 都必须落到同一个数。
+- 为 `[1m]` 维护重复条目。非 Claude 模型的 `[1m]` 只是输入归一化：`k3[1m]` 等价 `k3`，除非某个来源显式声明了带后缀的名字（先按原名查，查不到再剥后缀）。Claude 家族的 `[1m]` 语义不变，`_with_1m_suffix` / `_apply_claude_shell_context_slots` 不要动。
+- 改 `_runtime_supports_claude_1m` 或让敏感 Claude provider 默认开 1M。
+
+改这条链路要跑 `tests/test_context_window_single_truth.py`（含一条禁止代码内 context 表的扫描断言）和 `tests/test_provider_profiles.py`。
+
 ## Vision Relay Contract
 
 Pi 用 `--model` 启动，扩展看不到这个参数，所以主模型能力由 mmf 在启动前算好注入：
