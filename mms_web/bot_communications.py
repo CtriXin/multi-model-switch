@@ -32,16 +32,19 @@ class BotCommunications:
                     continue
                 for event in events:
                     child = self._tasks.get(event.get("childTaskId"))
-                    if event["type"] != "result" or not child or child.get("parentTaskId") != task_id:
+                    if event["type"] not in {"result", "system"} or not child or child.get("parentTaskId") != task_id:
                         continue
                     text = event["content"]
                     if text.startswith("子任务 " + child["id"]):
                         text = text.split("：", 1)[-1]
-                    rows.append({"id": "return-" + event["id"], "kind": "result", "senderBotId": child["botId"],
+                    # A runtime status is a system event, not a result row.
+                    kind = "system" if event["type"] == "system" else "result"
+                    rows.append({"id": "return-" + event["id"], "kind": kind, "senderBotId": child["botId"],
                                  "recipientBotId": parent["botId"], "content": text, "createdAt": event["createdAt"],
                                  "taskId": child["id"], "deliveryTaskId": parent["id"],
                                  "deliveryStatus": "processed" if parent["status"] == "completed" else "delivered",
-                                 "replyTo": "dispatch-" + child["id"]})
+                                 "replyTo": "dispatch-" + child["id"],
+                                 "artifacts": deepcopy(event.get("artifacts") or []) if kind == "result" else []})
             rows = [r for r in rows if bot_id in {r["senderBotId"], r["recipientBotId"]}
                     and (not peer_bot_id or peer_bot_id in {r["senderBotId"], r["recipientBotId"]})]
             for row in rows:

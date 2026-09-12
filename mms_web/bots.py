@@ -98,6 +98,23 @@ def parse_outcome(text: str) -> dict[str, str | None]:
             "next": sections.get("next"), "raw": raw}
 
 
+PEER_SYSTEM_STATES = {"interrupted", "cancelled"}
+
+
+def peer_report(*, state, message, bot_name, outcome, system_failure=False):
+    """What the other Bot sees when a dispatched task ends.
+
+    A result is the Bot's one-line conclusion (``outcome.summary``, else the
+    first 200 characters) plus an artifact index supplied by the caller. A
+    runtime state — interrupted, cancelled, or Pi stopping before a result —
+    is delivered as a system event, never dressed up as a deliverable.
+    """
+    if state in PEER_SYSTEM_STATES or (state == "failed" and system_failure):
+        return "system", f"{bot_name} 的任务已中断，未产生结果"
+    summary = (outcome or {}).get("summary") if isinstance(outcome, dict) else None
+    return "result", str(summary or message or "")[:200]
+
+
 class BotRuntime(BotCommunications):
     def __init__(self, *, state_root: Path, executor, computer=None, max_concurrent=3):
         self.root = Path(state_root) / "bots"
@@ -676,7 +693,7 @@ class BotRuntime(BotCommunications):
                     self._message(task["id"], "error", "停止请求尚未确认，请查看对应会话。")
         return self.get_task(task_id)
 
-    def _finish(self, task, state, message, *, error_code="", error_detail="", error_status=None):
+    def _finish(self, task, state, message, *, error_code="", error_detail="", error_status=None, system_failure=False):
         # Only a task that never reached execution may be replayed. Anything
         # after that is reported to the user, because the first attempt may
         # already have changed something a silent retry would duplicate.
@@ -694,6 +711,7 @@ class BotRuntime(BotCommunications):
                 # an uncertain launch, and the message lists every attempt.
                 message = bot_retry.exhausted_message(task, message)
                 state = "failed"
+                system_failure = True
         task.pop("retry", None)
         task.update(status=state, updatedAt=now(), completedAt=now(), token="", waitReason=None)
         self._mailbox_receipt(task, "processed" if state == "completed" else "failed")
@@ -715,7 +733,13 @@ class BotRuntime(BotCommunications):
                 pass
         if task.get("parentTaskId"):
             parent = self._task(task["parentTaskId"])
-            self._message(parent["id"], "result", f"子任务 {task['id']} ({state})：{message}", task["botId"], childTaskId=task["id"])
+            # The peer gets a structured conclusion plus an artifact index; the
+            # model's raw report and runtime status text stay in the task log.
+            report_type, report_text = peer_report(
+                state=state, message=message, bot_name=self._bot(task["botId"])["name"],
+                outcome=task.get("outcome"), system_failure=system_failure)
+            self._message(parent["id"], report_type, report_text, task["botId"], childTaskId=task["id"],
+                          artifacts=self._peer_artifacts(task) if state == "completed" else [])
             parent["childrenChanged"] = True
         if state in {"completed", "failed"}:
             self._notify(task, "task.completed" if state == "completed" else "task.failed")
@@ -726,6 +750,11 @@ class BotRuntime(BotCommunications):
             self.notifier.emit_task(self._bot(task["botId"]), task, event_type, wait_reason, note)
         except Exception:
             pass
+
+    def _peer_artifacts(self, task):
+        """Artifact index for a peer report; local paths and hashes stay out."""
+        return [{"id": item["id"], "name": item.get("name", ""), "kind": item.get("kind", "file"),
+                 "taskId": task["id"]} for item in self._artifacts.get(task["id"], [])]
 
     def _resume_children(self, task):
         if not task.get("childrenChanged") or not task.get("children"):
@@ -1172,7 +1201,9 @@ class BotRuntime(BotCommunications):
             if task.get("cancelRequested"):
                 self._finish(task, "cancelled", "Pi 已停止本任务。")
             elif state in {"error", "stopped"}:
-                self._finish(task, "failed" if state == "error" else "interrupted", "Pi 执行失败。" if state == "error" else "Pi 已停止，任务尚未完成。")
+                self._finish(task, "failed" if state == "error" else "interrupted",
+                             "Pi 执行失败。" if state == "error" else "Pi 已停止，任务尚未完成。",
+                             system_failure=True)
             elif task.get("declaredError"):
                 self._finish(task, "failed", task["declaredError"])
             elif task.get("inbox"):
@@ -1192,13 +1223,13 @@ class BotRuntime(BotCommunications):
             else:
                 bad = any(e.get("status") == "error" for e in snapshot.get("events", []) if e.get("kind") == "user")
                 if bad:
-                    self._finish(task, "failed", "Pi 未确认接收任务，请查看会话。")
+                    self._finish(task, "failed", "Pi 未确认接收任务，请查看会话。", system_failure=True)
                 else:
                     answers = [e["text"] for e in snapshot.get("events", []) if e.get("kind") == "assistant" and e.get("text")]
                     if task.get("declaredResult") or answers:
                         self._finish(task, "completed", task.get("declaredResult") or answers[-1])
                     else:
-                        self._finish(task, "failed", "本轮结束但没有收到结果。")
+                        self._finish(task, "failed", "本轮结束但没有收到结果。", system_failure=True)
             changed = True
         if changed:
             task["updatedAt"] = now()

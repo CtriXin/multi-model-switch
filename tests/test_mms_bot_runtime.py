@@ -662,3 +662,112 @@ def test_plan_replace_validates_against_real_roster(tmp_path):
         assert runtime.get_task(decided["children"][0])["prompt"] == "改写 c.txt"
     finally:
         runtime.close()
+
+
+def dispatch_child(runtime, parent, worker, prompt="写文件"):
+    """A child task dispatched by the parent, already launched and running."""
+    child = runtime.create_task({"botId": worker["id"], "prompt": prompt, "parentTaskId": parent["id"]})
+    runtime.tick(); drain_launch(runtime)
+    assert runtime.get_task(child["id"])["status"] == "running"
+    return child
+
+
+def peer_rows(runtime, parent_bot, worker_bot, child):
+    """The report rows for one dispatched child, excluding the dispatch itself."""
+    return [row for row in runtime.list_communications(parent_bot["id"], worker_bot["id"])
+            if row.get("taskId") == child["id"] and row["kind"] != "dispatch"]
+
+
+def test_peer_result_uses_one_line_summary_and_artifact_index(tmp_path):
+    runtime, executor = make_runtime(tmp_path)
+    try:
+        owner = make_bot(runtime, "owner", "workspace-a")
+        worker = make_bot(runtime, "worker", "workspace-b")
+        parent = runtime.create_task({"botId": owner["id"], "prompt": "让 worker 写 b.txt", "wake": False})
+        child = dispatch_child(runtime, parent, worker)
+        runtime._observe(runtime._tasks[child["id"]], {
+            "state": "completed", "alive": False,
+            "events": [{"id": "ans", "kind": "assistant", "status": "done",
+                        "text": "# 结论\n已在工作目录写好 b.txt。\n# 证据\n/Users/xin/secret/b.txt sha256=deadbeef"}],
+            "artifacts": [{"id": "sess-artifact", "name": "b.txt", "kind": "file",
+                           "sha256": "deadbeef", "revision": 1}]})
+        artifact_id = runtime.list_artifacts(child["id"])[0]["id"]
+        message = next(m for m in runtime.list_messages(parent["id"])
+              if m.get("childTaskId") == child["id"] and m["type"] in {"result", "system"})
+        assert message["type"] == "result"
+        assert message["content"] == "已在工作目录写好 b.txt。"
+        assert message["artifacts"] == [{"id": artifact_id, "name": "b.txt", "kind": "file", "taskId": child["id"]}]
+
+        rows = peer_rows(runtime, owner, worker, child)
+        assert len(rows) == 1
+        assert rows[0]["kind"] == "result"
+        assert rows[0]["content"] == "已在工作目录写好 b.txt。"
+        assert rows[0]["artifacts"] == [{"id": artifact_id, "name": "b.txt", "kind": "file", "taskId": child["id"]}]
+        serialized = json.dumps(rows[0], ensure_ascii=False)
+        assert "/Users/xin/secret" not in serialized and "deadbeef" not in serialized
+    finally:
+        runtime.close()
+
+
+def test_peer_result_falls_back_to_the_first_200_characters(tmp_path):
+    runtime, executor = make_runtime(tmp_path)
+    try:
+        owner = make_bot(runtime, "owner", "workspace-a")
+        worker = make_bot(runtime, "worker", "workspace-b")
+        parent = runtime.create_task({"botId": owner["id"], "prompt": "让 worker 核对", "wake": False})
+        child = dispatch_child(runtime, parent, worker, prompt="核对")
+        raw = "已核对完 " + "x" * 400
+        runtime._observe(runtime._tasks[child["id"]], {
+            "state": "completed", "alive": False,
+            "events": [{"id": "ans", "kind": "assistant", "status": "done", "text": raw}],
+            "artifacts": []})
+        message = next(m for m in runtime.list_messages(parent["id"])
+              if m.get("childTaskId") == child["id"] and m["type"] in {"result", "system"})
+        assert message["content"] == raw[:200]
+        row = peer_rows(runtime, owner, worker, child)[0]
+        assert row["content"] == raw[:200] and row["artifacts"] == []
+    finally:
+        runtime.close()
+
+
+@pytest.mark.parametrize("snapshot", [
+    {"state": "stopped", "alive": False, "events": [], "artifacts": []},
+    {"state": "error", "alive": False, "events": [], "artifacts": []},
+    {"state": "idle", "alive": False, "events": [], "artifacts": []},
+])
+def test_runtime_system_states_never_reach_the_peer_as_results(tmp_path, snapshot):
+    runtime, executor = make_runtime(tmp_path)
+    try:
+        owner = make_bot(runtime, "owner", "workspace-a")
+        worker = make_bot(runtime, "worker", "workspace-b")
+        parent = runtime.create_task({"botId": owner["id"], "prompt": "让 worker 写 b.txt", "wake": False})
+        child = dispatch_child(runtime, parent, worker)
+        runtime._observe(runtime._tasks[child["id"]], snapshot)
+        message = next(m for m in runtime.list_messages(parent["id"])
+              if m.get("childTaskId") == child["id"] and m["type"] in {"result", "system"})
+        assert message["type"] == "system"
+        assert message["content"] == "worker 的任务已中断，未产生结果"
+        rows = peer_rows(runtime, owner, worker, child)
+        assert rows and all(row["kind"] == "system" for row in rows)
+        assert not [row for row in rows if row["kind"] == "result"]
+    finally:
+        runtime.close()
+
+
+def test_bot_declared_failure_still_reports_as_a_result(tmp_path):
+    runtime, executor = make_runtime(tmp_path)
+    try:
+        owner = make_bot(runtime, "owner", "workspace-a")
+        worker = make_bot(runtime, "worker", "workspace-b")
+        parent = runtime.create_task({"botId": owner["id"], "prompt": "让 worker 抓取", "wake": False})
+        child = dispatch_child(runtime, parent, worker, prompt="抓取")
+        runtime.worker(child["id"], {"action": "fail", "error": "目标站点无法访问，未取得结果"})
+        runtime._observe(runtime._tasks[child["id"]], {"state": "idle", "alive": False, "events": [], "artifacts": []})
+        message = next(m for m in runtime.list_messages(parent["id"])
+              if m.get("childTaskId") == child["id"] and m["type"] in {"result", "system"})
+        assert message["type"] == "result"
+        assert message["content"] == "目标站点无法访问，未取得结果"
+        row = peer_rows(runtime, owner, worker, child)[0]
+        assert row["kind"] == "result" and row["artifacts"] == []
+    finally:
+        runtime.close()
