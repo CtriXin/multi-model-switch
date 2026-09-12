@@ -918,6 +918,12 @@ def opencode_model_config(
         except (TypeError, ValueError):
             context_window = None
     if not context_window:
+        # The user's own `model-context-overrides.json` is the top of the shared
+        # context chain and must hold here too, not only in the launcher.
+        from mms_context_window import user_context_window_override
+
+        context_window = user_context_window_override(model, runtime=runtime)
+    if not context_window:
         context_window = opencode_capability_int(runtime, model, "context_window_tokens", "max_context_tokens")
     if not context_window and callable(context_window_resolver):
         context_window = context_window_resolver(
