@@ -17,7 +17,7 @@ def guard(home, command='guard_live_pilot_install', keep_running=0, port=0):
     body=_extract_shell_function_body(text,'guard_live_pilot_install')
     inspect=_extract_shell_function_body(text,'inspect_live_pilot')
     script=('_python_bin() { command -v python3; }\nt() { printf "%s" "$1"; }\n'
-            f'KEEP_RUNNING_PILOT={keep_running}\nSTOPPED_PILOT=0\nMMS_WEB_DEFAULT_PORT={port}\n'
+            f'KEEP_RUNNING_PILOT={keep_running}\nMMS_WEB_DEFAULT_PORT={port}\n'
             'guard_live_pilot_install() {'+body+'\n}\n'
             'inspect_live_pilot() {'+inspect+'\n}\n'+command)
     return subprocess.run(['bash','-ec',script],env={**os.environ,'MMS_HOME':str(home)},capture_output=True,text=True)
@@ -49,7 +49,7 @@ def test_installer_pauses_for_a_live_pilot_without_stopping_it(tmp_path):
     (home/'mms_web/__main__.py').write_text('fixture')
     process=_fake_pilot_server(home)
     try:
-        result=guard(home,command='guard_live_pilot_install\necho "STOPPED=$STOPPED_PILOT"')
+        result=guard(home,command='guard_live_pilot_install')
         assert result.returncode != 0,result.stderr
         assert '没有关闭进程或清理会话' in result.stdout
         assert process.poll() is None
@@ -65,9 +65,42 @@ def test_keep_running_pilot_refuses_and_leaves_the_server_alone(tmp_path):
     try:
         result=guard(home,keep_running=1)
         assert result.returncode!=0 and '没有关闭进程或清理会话' in result.stdout
+        # #223: the flag is a compatibility no-op, so it must not change the
+        # refusal outcome or wording versus the default (keep_running=0) run.
+        assert 'mms web stop' in result.stdout
+        default_result=guard(home,keep_running=0)
+        assert default_result.returncode!=0
+        assert result.stdout==default_result.stdout
         assert process.poll()is None
     finally:
         process.kill();process.wait(timeout=10)
+
+
+def test_refusal_message_names_mms_web_stop(tmp_path):
+    """#223: the refusal must tell the user the real commands to run instead
+    of a vague 'exit the service yourself', since the installer itself never
+    stops a running Pilot."""
+    home=tmp_path/'installation';(home/'mms_web').mkdir(parents=True)
+    (home/'mms_web/__main__.py').write_text('fixture')
+    process=_fake_pilot_server(home)
+    try:
+        result=guard(home)
+        assert result.returncode!=0
+        assert 'mms web stop' in result.stdout
+        assert 'mms web stop --all' in result.stdout
+        assert '更新' in result.stdout
+    finally:
+        process.kill();process.wait(timeout=10)
+
+
+def test_no_stop_and_reopen_debris_remains():
+    """#223: PR #199 stopped the installer from ever stopping a running Pilot,
+    but left the STOPPED_PILOT plumbing and the reopen message behind as dead
+    code. Neither should still be present."""
+    text=(ROOT/'install.sh').read_text()
+    assert 'STOPPED_PILOT' not in text
+    assert '重新打开' not in text
+    assert 'reopening it now' not in text
 
 
 def test_install_lease_outlives_python_and_prevents_concurrent_runtime(tmp_path):
@@ -88,7 +121,7 @@ def test_installer_pauses_for_a_pilot_started_with_the_mms_web_subcommand(tmp_pa
                              stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     time.sleep(1)
     try:
-        result=guard(home,command='guard_live_pilot_install\necho "STOPPED=$STOPPED_PILOT"')
+        result=guard(home,command='guard_live_pilot_install')
         assert result.returncode != 0,result.stdout+result.stderr
         assert '没有关闭进程或清理会话' in result.stdout
         assert process.poll() is None
@@ -126,7 +159,7 @@ def test_installer_pauses_for_a_pilot_from_another_install_holding_the_port(tmp_
                              stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     time.sleep(1)
     try:
-        result=guard(home,command='guard_live_pilot_install\necho "STOPPED=$STOPPED_PILOT"',port=port)
+        result=guard(home,command='guard_live_pilot_install',port=port)
         assert result.returncode != 0,result.stdout+result.stderr
         assert '没有关闭进程或清理会话' in result.stdout
         assert process.poll() is None
