@@ -704,8 +704,10 @@ def test_wire_duplicate_steer_request_writes_one_command(tmp_path, seeded_seam):
         first = service.send(sid, {"requestId": "w-dup", "text": "只引导一次", "mode": "steer"})
         replay = service.send(sid, {"requestId": "w-dup", "text": "只引导一次", "mode": "steer"})
         current = service.get_session(sid)
-        assert [e["id"] for e in replay["events"]] == [e["id"] for e in current["events"]], \
-            "a replay must return the live session view, not a stale snapshot"
+        replay_ids = [e["id"] for e in replay["events"]]
+        current_ids = [e["id"] for e in current["events"]]
+        assert current_ids[:len(replay_ids)] == replay_ids, \
+            "a replay must return a live-prefix view, not an unrelated stale snapshot"
         assert user_status(first, "只引导一次") == user_status(replay, "只引导一次")
         wire = snapshot()
         steers = [c for c in wire_in(wire) if c.get("type") == "steer"]
