@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import {
   AlertCircle,
+  Bell,
   Brain,
   Check,
+  KeyRound,
+  Link2,
   LoaderCircle,
   Plus,
   RefreshCw,
@@ -14,6 +17,7 @@ import {
 import { isPreview, mutate, request } from "./api";
 import { RichText } from "./components";
 import type { BotDefinition } from "./Bot";
+import type { BotNotificationType, BotNotifyConfig, BotNotifyWebhook } from "./types";
 import "./bot-memory.css";
 
 type MemoryKind = "fact" | "task";
@@ -71,6 +75,47 @@ const emptySettings: MemorySettings = {
   compactAtPercent: 70,
 };
 
+// 通知（T3）：桌面通知是本地偏好，webhook 列表存在 state_root/bots/notify.json。
+const DESKTOP_NOTIFY_KEY = "mms.bot.desktopNotify";
+const NOTIFY_EVENTS: BotNotificationType[] = [
+  "task.completed",
+  "task.failed",
+  "task.waiting",
+  "task.retrying",
+];
+
+function notifyEventLabel(type: BotNotificationType) {
+  return type === "task.completed"
+    ? "完成"
+    : type === "task.failed"
+      ? "失败"
+      : type === "task.waiting"
+        ? "等待"
+        : "重试";
+}
+function readDesktopPreference() {
+  try {
+    return window.localStorage.getItem(DESKTOP_NOTIFY_KEY) !== '"off"';
+  } catch {
+    return true;
+  }
+}
+function writeDesktopPreference(enabled: boolean) {
+  try {
+    window.localStorage.setItem(
+      DESKTOP_NOTIFY_KEY,
+      JSON.stringify(enabled ? "on" : "off"),
+    );
+  } catch {
+    // 本地存储不可用时只影响本次会话。
+  }
+}
+function currentPermission(): NotificationPermission {
+  return typeof Notification === "undefined"
+    ? "denied"
+    : Notification.permission;
+}
+
 function sourceLabel(source: MemorySource) {
   return source === "user" ? "用户" : source === "bot" ? "Bot" : "任务摘要";
 }
@@ -100,6 +145,12 @@ export function BotMemoryPanel({
   const [error, setError] = useState("");
   const [saved, setSaved] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
+  const [notifyConfig, setNotifyConfig] = useState<BotNotifyConfig | null>(null);
+  const [desktopNotify, setDesktopNotify] = useState(readDesktopPreference);
+  const [notifyPermission, setNotifyPermission] = useState<NotificationPermission>(currentPermission);
+  const [notifyBusy, setNotifyBusy] = useState(false);
+  const [notifyError, setNotifyError] = useState("");
+  const [notifySaved, setNotifySaved] = useState("");
   const requestVersion = useRef(0);
 
   useEffect(() => {
@@ -233,6 +284,124 @@ export function BotMemoryPanel({
       );
     } finally {
       setBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    if (preview) return;
+    const controller = new AbortController();
+    void request<BotNotifyConfig>(
+      "/bots/notifications/config",
+      undefined,
+      controller.signal,
+    )
+      .then((next) => setNotifyConfig(next))
+      .catch((cause) => {
+        if (controller.signal.aborted) return;
+        setNotifyError(
+          cause instanceof Error ? cause.message : "通知配置暂时无法读取。",
+        );
+      });
+    return () => controller.abort();
+  }, [preview]);
+
+  async function enableDesktopNotifications() {
+    if (preview) {
+      setNotifyError("当前是预览模式，桌面通知已禁用。");
+      return;
+    }
+    if (typeof Notification === "undefined") {
+      setNotifyError("当前浏览器不支持桌面通知。");
+      return;
+    }
+    const granted = await Notification.requestPermission();
+    setNotifyPermission(granted);
+    if (granted === "granted") {
+      writeDesktopPreference(true);
+      setDesktopNotify(true);
+      setNotifySaved("桌面通知已开启");
+      setNotifyError("");
+    } else {
+      setNotifyError("浏览器没有授予通知权限，未读仍会显示在 Bot 侧栏。");
+    }
+  }
+
+  function updateHook(index: number, patch: Partial<BotNotifyWebhook>) {
+    setNotifyConfig((current) =>
+      current
+        ? {
+            ...current,
+            webhooks: current.webhooks.map((hook, position) =>
+              position === index ? { ...hook, ...patch } : hook,
+            ),
+          }
+        : current,
+    );
+  }
+
+  function toggleHookEvent(index: number, type: BotNotificationType, checked: boolean) {
+    setNotifyConfig((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        webhooks: current.webhooks.map((hook, position) => {
+          if (position !== index) return hook;
+          const events = checked
+            ? [...new Set([...hook.events, type])]
+            : hook.events.filter((item) => item !== type);
+          // 至少保留一个事件，避免空列表被服务端读成“全部”。
+          return events.length ? { ...hook, events } : hook;
+        }),
+      };
+    });
+  }
+
+  function removeHook(index: number) {
+    setNotifyConfig((current) =>
+      current
+        ? {
+            ...current,
+            webhooks: current.webhooks.filter((_, position) => position !== index),
+          }
+        : current,
+    );
+  }
+
+  function addHook() {
+    setNotifyConfig((current) =>
+      current
+        ? {
+            ...current,
+            webhooks: [
+              ...current.webhooks,
+              { url: "", events: [...NOTIFY_EVENTS], secret: "" },
+            ],
+          }
+        : current,
+    );
+  }
+
+  async function saveNotifyConfig() {
+    if (preview || notifyBusy || !notifyConfig) {
+      if (preview) setNotifyError("当前是预览模式，通知设置保存已禁用。");
+      return;
+    }
+    setNotifyBusy(true);
+    setNotifyError("");
+    setNotifySaved("");
+    try {
+      const saved = await mutate<BotNotifyConfig>(
+        "/bots/notifications/config",
+        { webhooks: notifyConfig.webhooks },
+      );
+      setNotifyConfig(saved);
+      setNotifySaved("通知设置已保存并读回");
+    } catch (cause) {
+      setNotifyError(
+        cause instanceof Error ? cause.message : "通知设置保存失败。",
+      );
+    } finally {
+      setNotifyBusy(false);
     }
   }
 
@@ -489,6 +658,133 @@ export function BotMemoryPanel({
             <Save size={14} />
             {busy ? "保存中…" : "保存设置"}
           </button>
+        </section>
+
+        <section className="bot-memory-section bot-memory-notify">
+          <div className="bot-memory-section-heading">
+            <h3>通知</h3>
+            <span>
+              {notifyPermission === "granted"
+                ? "桌面已授权"
+                : notifyPermission === "denied"
+                  ? "桌面未授权"
+                  : "桌面待授权"}
+            </span>
+          </div>
+          <button
+            className="bot-memory-primary"
+            type="button"
+            onClick={() => void enableDesktopNotifications()}
+            disabled={preview || notifyPermission === "granted"}
+          >
+            <Bell size={14} />
+            开启桌面通知
+          </button>
+          <label className="bot-memory-switch">
+            <input
+              type="checkbox"
+              checked={desktopNotify}
+              disabled={preview}
+              onChange={(event) => {
+                writeDesktopPreference(event.target.checked);
+                setDesktopNotify(event.target.checked);
+              }}
+            />
+            <span>页面不在前台时弹一次系统通知</span>
+          </label>
+          <p className="bot-memory-muted">
+            没授权或关闭时，未读仍显示在 Bot 侧栏；点开该 Bot 对话即清未读。
+          </p>
+
+          <div className="bot-memory-section-heading">
+            <h3>Webhook</h3>
+            <span>
+              {notifyConfig ? `${notifyConfig.webhooks.length} 个` : "读取中"}
+            </span>
+          </div>
+          {(notifyConfig?.webhooks || []).map((hook, index) => (
+            <article className="bot-memory-note" key={`hook-${index}`}>
+              <label className="bot-memory-search">
+                <Link2 size={14} aria-hidden="true" />
+                <span className="sr-only">Webhook 地址</span>
+                <input
+                  value={hook.url}
+                  placeholder="https://example.com/mms-hook"
+                  disabled={preview}
+                  onChange={(event) =>
+                    updateHook(index, { url: event.target.value })
+                  }
+                />
+              </label>
+              <div>
+                {NOTIFY_EVENTS.map((type) => (
+                  <label className="bot-memory-switch" key={type}>
+                    <input
+                      type="checkbox"
+                      checked={hook.events.includes(type)}
+                      disabled={preview}
+                      onChange={(event) =>
+                        toggleHookEvent(index, type, event.target.checked)
+                      }
+                    />
+                    <span>{notifyEventLabel(type)}</span>
+                  </label>
+                ))}
+              </div>
+              <label className="bot-memory-search">
+                <KeyRound size={14} aria-hidden="true" />
+                <span className="sr-only">Webhook 签名密钥</span>
+                <input
+                  value={hook.secret}
+                  placeholder="签名密钥（可选）"
+                  disabled={preview}
+                  onChange={(event) =>
+                    updateHook(index, { secret: event.target.value })
+                  }
+                />
+              </label>
+              <div className="bot-memory-note-actions">
+                <button
+                  type="button"
+                  onClick={() => removeHook(index)}
+                  disabled={preview || notifyBusy}
+                >
+                  <Trash2 size={13} />
+                  删除
+                </button>
+              </div>
+            </article>
+          ))}
+          <button
+            className="bot-memory-refresh"
+            type="button"
+            onClick={addHook}
+            disabled={preview || !notifyConfig || notifyConfig.webhooks.length >= 10}
+          >
+            <Plus size={13} />
+            添加 webhook
+          </button>
+          <button
+            className="bot-memory-save-settings"
+            type="button"
+            onClick={() => void saveNotifyConfig()}
+            disabled={preview || notifyBusy || !notifyConfig}
+          >
+            <Save size={14} />
+            {notifyBusy ? "保存中…" : "保存通知设置"}
+          </button>
+          {notifyError && (
+            <p className="bot-memory-error" role="alert">
+              <AlertCircle size={15} />
+              {notifyError}
+            </p>
+          )}
+          {notifySaved && (
+            <p className="bot-memory-saved" role="status">
+              <Check size={15} />
+              {notifySaved}
+            </p>
+          )}
         </section>
 
         {error && (

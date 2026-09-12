@@ -208,3 +208,32 @@ export interface ConfigPreview {
   warnings: string[];
 }
 export type Page = "new" | "models" | "bots" | "session";
+
+// Bot 结果送达（T3）：页面通知与 webhook 共用同一事件形状。
+export type BotNotificationType =
+  | "task.completed"
+  | "task.failed"
+  | "task.waiting"
+  | "task.retrying";
+export interface BotNotification {
+  id: string;
+  at: string;
+  type: BotNotificationType;
+  botId: string;
+  botName: string;
+  taskId: string;
+  title: string;
+  summary: string;
+  waitReason?: "approval" | "input" | null;
+  link: string;
+}
+export interface BotNotifyWebhook {
+  url: string;
+  events: BotNotificationType[];
+  secret: string;
+}
+export interface BotNotifyConfig {
+  webhooks: BotNotifyWebhook[];
+  events: BotNotificationType[];
+  timeoutSeconds?: number;
+}

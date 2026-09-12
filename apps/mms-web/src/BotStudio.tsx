@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { ArrowLeft, CircleAlert, LoaderCircle, RefreshCw, X } from "lucide-react";
 import { isPreview, mutate, request } from "./api";
-import type { Bootstrap, Preset } from "./types";
+import type { BotNotification, BotNotificationType, Bootstrap, Preset } from "./types";
 import { AutoWakeControl, BotList, BotWorkspace, BotChat, PIXEL_AVATARS, PIXEL_AVATAR_COLORS } from "./Bot";
 import { ModelPicker } from "./LaunchOptions";
 import { BotMemoryPanel } from "./BotMemoryPanel";
@@ -81,6 +81,38 @@ function previewMutationError() {
 }
 function randomItem<T>(items: readonly T[]): T {
   return items[Math.floor(Math.random() * items.length)];
+}
+
+// 结果送达（T3）：未读游标按 Bot 存在本地，服务端只保存事件日志。
+const NOTIFY_CURSOR_KEY = "mms.bot.notify.cursor";
+const NOTIFY_READ_KEY = "mms.bot.notify.read";
+const NOTIFY_PUSHED_KEY = "mms.bot.notify.pushed";
+const NOTIFY_EVENTS_KEY = "mms.bot.notify.events";
+const DESKTOP_NOTIFY_KEY = "mms.bot.desktopNotify";
+
+function readStore<T>(key: string, fallback: T): T {
+  try {
+    const raw = window.localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+function writeStore(key: string, value: unknown) {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // 本地存储不可用时，未读状态退回内存。
+  }
+}
+function notificationLabel(type: BotNotificationType) {
+  return type === "task.completed"
+    ? "任务完成"
+    : type === "task.failed"
+      ? "任务失败"
+      : type === "task.waiting"
+        ? "等待处理"
+        : "自动重试";
 }
 
 function BotEditor({
@@ -316,6 +348,24 @@ export function BotStudio({
   const [communications, setCommunications] = useState<BotCommunication[]>([]);
   const [communicationsError, setCommunicationsError] = useState("");
   const [communicationsRefreshKey, setCommunicationsRefreshKey] = useState(0);
+  const [notifications, setNotifications] = useState<BotNotification[]>(() =>
+    readStore<BotNotification[]>(NOTIFY_EVENTS_KEY, []),
+  );
+  const [notifyError, setNotifyError] = useState("");
+  const [readCursors, setReadCursors] = useState<Record<string, string>>(() =>
+    readStore(NOTIFY_READ_KEY, {}),
+  );
+  const notifyCursor = useRef<string>(readStore(NOTIFY_CURSOR_KEY, ""));
+  const firstPoll = useRef(true);
+  const pushedNotifications = useRef<Set<string>>(
+    new Set(readStore<string[]>(NOTIFY_PUSHED_KEY, [])),
+  );
+  const deepLink = useRef(
+    (() => {
+      const params = new URLSearchParams(location.hash.slice(1));
+      return { bot: params.get("bot") || "", task: params.get("task") || "" };
+    })(),
+  );
   const selectedTask = tasks.find((task) => task.id === selectedTaskId);
   const selectedBot = bots.find(
     (bot) => bot.id === selectedTask?.botId || bot.id === selectedBotId,
@@ -332,6 +382,14 @@ export function BotStudio({
     const latest = tasks.find((item) => item.botId === selectedBotId);
     if (latest) setSelectedTaskId(latest.id);
   }, [selectedBotId, selectedTaskId, tasks]);
+  useEffect(() => {
+    // 通知链接 #page=bots&bot=<id>&task=<id> 要在 Bot 列表读回后生效。
+    if (!deepLink.current.bot || !bots.length) return;
+    if (bots.some((bot) => bot.id === deepLink.current.bot))
+      setSelectedBotId(deepLink.current.bot);
+    if (deepLink.current.task) setSelectedTaskId(deepLink.current.task);
+    deepLink.current = { bot: "", task: "" };
+  }, [bots]);
   useEffect(() => {
     setMemoryOpen(false);
     setCommunicationsOpen(false);
@@ -380,6 +438,124 @@ export function BotStudio({
       window.clearTimeout(timer);
     };
   }, [sync]);
+  const applyNotifications = useCallback((incoming: BotNotification[]) => {
+    if (!incoming.length) return;
+    notifyCursor.current = incoming[incoming.length - 1].at;
+    writeStore(NOTIFY_CURSOR_KEY, notifyCursor.current);
+    setNotifications((current) => {
+      // 未读事件跨刷新保留；刷新后只拉游标之后的新事件。
+      const merged = [...current, ...incoming]
+        .filter((event, index, rows) =>
+          rows.findIndex((item) => item.id === event.id) === index,
+        )
+        .slice(-100);
+      writeStore(NOTIFY_EVENTS_KEY, merged);
+      return merged;
+    });
+    const desktopEnabled = readStore<string>(DESKTOP_NOTIFY_KEY, "on") !== "off";
+    // 首次拉取只补历史未读，不为旧事件弹桌面通知。
+    const fresh = !firstPoll.current;
+    firstPoll.current = false;
+    if (
+      !fresh ||
+      typeof Notification === "undefined" ||
+      Notification.permission !== "granted" ||
+      !document.hidden ||
+      !desktopEnabled
+    )
+      return;
+    for (const event of incoming) {
+      if (pushedNotifications.current.has(event.id)) continue;
+      pushedNotifications.current.add(event.id);
+      try {
+        const notice = new Notification(
+          `${event.botName || "Bot"} · ${notificationLabel(event.type)}`,
+          {
+            body: [event.title, event.summary].filter(Boolean).join("\n"),
+            tag: event.id,
+          },
+        );
+        notice.onclick = () => {
+          window.focus();
+          setSelectedBotId(event.botId);
+          if (event.taskId) setSelectedTaskId(event.taskId);
+          notice.close();
+        };
+      } catch {
+        // 桌面通知失败不影响未读记录。
+      }
+    }
+    writeStore(NOTIFY_PUSHED_KEY, [...pushedNotifications.current].slice(-200));
+  }, []);
+  useEffect(() => {
+    if (isPreview) return;
+    let disposed = false;
+    let active: AbortController | null = null;
+    let timer = 0;
+    const poll = async () => {
+      if (disposed) return;
+      active = new AbortController();
+      try {
+        const cursor = notifyCursor.current;
+        const response = await request<{ events: BotNotification[] }>(
+          `/bots/notifications${cursor ? `?since=${encodeURIComponent(cursor)}` : ""}`,
+          undefined,
+          active.signal,
+        );
+        if (!disposed) {
+          applyNotifications(response.events || []);
+          setNotifyError("");
+        }
+      } catch (cause) {
+        if (
+          !disposed &&
+          !(cause instanceof DOMException && cause.name === "AbortError")
+        )
+          setNotifyError(
+            cause instanceof Error ? cause.message : "通知暂时无法读取。",
+          );
+      } finally {
+        active = null;
+        if (!disposed) timer = window.setTimeout(poll, 4000);
+      }
+    };
+    void poll();
+    return () => {
+      disposed = true;
+      active?.abort();
+      window.clearTimeout(timer);
+    };
+  }, [applyNotifications]);
+  useEffect(() => {
+    // 打开某个 Bot 的对话即清空它的未读。
+    if (!selectedBotId || isPreview) return;
+    const latest = notifications
+      .filter((event) => event.botId === selectedBotId)
+      .reduce((value, event) => (event.at > value ? event.at : value), "");
+    if (!latest) return;
+    setReadCursors((current) => {
+      if (current[selectedBotId] && current[selectedBotId] >= latest)
+        return current;
+      const next = { ...current, [selectedBotId]: latest };
+      writeStore(NOTIFY_READ_KEY, next);
+      return next;
+    });
+  }, [selectedBotId, notifications]);
+  const unreadNotifications = useMemo(() => {
+    const groups = new Map<string, BotNotification[]>();
+    for (const event of notifications) {
+      const cursor = readCursors[event.botId] || "";
+      if (cursor && event.at <= cursor) continue;
+      const rows = groups.get(event.botId);
+      if (rows) rows.push(event);
+      else groups.set(event.botId, [event]);
+    }
+    return [...groups.entries()].map(([botId, rows]) => ({ botId, rows }));
+  }, [notifications, readCursors]);
+  const unreadTotal = unreadNotifications.reduce(
+    (sum, group) => sum + group.rows.length,
+    0,
+  );
   useEffect(() => {
     const botTasks = selectedBotId
       ? tasks.filter((item) => item.botId === selectedBotId)
@@ -700,6 +876,45 @@ export function BotStudio({
           }}
           onCreate={() => void createDraftBot()}
         />
+        {!isPreview && unreadTotal > 0 && (
+          <section className="bot-notify-inbox" aria-label="未读通知">
+            <div className="bot-section-heading">
+              <h2>通知</h2>
+              <span>{unreadTotal} 条未读</span>
+            </div>
+            {unreadNotifications.slice(0, 3).map((group) => {
+              const bot = bots.find((item) => item.id === group.botId);
+              const latest = group.rows[group.rows.length - 1];
+              return (
+                <div className="bot-card" key={group.botId}>
+                  <button
+                    className="bot-card-main"
+                    type="button"
+                    onClick={() => {
+                      setSelectedBotId(group.botId);
+                      setSelectedTaskId(latest.taskId || undefined);
+                    }}
+                  >
+                    <span className="bot-card-copy">
+                      <span className="bot-card-title">
+                        <strong>{bot?.name || latest.botName || "Bot"}</strong>
+                      </span>
+                      <span className="bot-card-description">
+                        {group.rows.length} 条未读 ·{" "}
+                        {latest.summary || notificationLabel(latest.type)}
+                      </span>
+                    </span>
+                  </button>
+                </div>
+              );
+            })}
+          </section>
+        )}
+        {!isPreview && notifyError && (
+          <p className="bot-inline-error" role="alert">
+            {notifyError}
+          </p>
+        )}
         <AutoWakeControl
           enabled={Boolean(activeBot?.wakeEnabled)}
           onChange={(enabled) => {

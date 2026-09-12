@@ -282,6 +282,10 @@ class WebApplication:
             return {"bots": self.bots.list_bots(), "capabilities": self.bots.capabilities()}
         if parts == ["bots", "status"]:
             return self.bots.capabilities()
+        if parts == ["bots", "notifications"]:
+            return self.bots.list_notifications((query or {}).get("since", [None])[0])
+        if parts == ["bots", "notifications", "config"]:
+            return self.bots.notify_config()
         if len(parts) == 3 and parts[0] == "bots" and parts[2] == "communications":
             return {"messages": self.bots.list_communications(parts[1], (query or {}).get("peerBotId", [None])[0])}
         if parts == ["tasks"]:
@@ -352,6 +356,8 @@ class WebApplication:
             return self.bots.create_bot(payload)
         if parts == ["bots", "auto", "tasks"]:
             return self.bots.auto_task(payload)
+        if parts == ["bots", "notifications", "config"]:
+            return self.bots.update_notify_config(payload)
         if len(parts) == 5 and parts[0] == "bots" and parts[2] == "communications" and parts[4] == "wake":
             return self.bots.wake_communication(parts[1], parts[3])
         if len(parts) == 2 and parts[0] == "bots":
