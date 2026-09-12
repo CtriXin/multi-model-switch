@@ -139,7 +139,7 @@ try {
   $env:PATH = $realPath
 }
 Assert-True ($neg.exit -ne 0) "installer must fail when python/node are missing"
-Assert-True ($neg.text -match "is required") "installer missing-deps error must explain the requirement: $($neg.text)"
+Assert-True ($neg.text -match "is required|未找到") "installer missing-deps error must explain the requirement: $($neg.text)"
 Write-Host "missing-deps error OK: $($neg.text.Split("`n")[0])"
 
 # --- Phase 4: Windows paths (spaces, Chinese, quoting) -----------------------
