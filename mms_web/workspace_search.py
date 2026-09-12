@@ -18,6 +18,9 @@ _SKIP_SCAN = {"node_modules", "Library", "Applications", ".Trash", "__pycache__"
 _SCAN_DEPTH_KNOWN = 6
 _SCAN_DEPTH_HOME = 3
 _SCAN_BUDGET = 8000
+_SPOTLIGHT_LIMIT = 400
+_ZOXIDE_LIMIT = 100
+_MATCH_LIMIT = 40
 _SCAN_SECONDS = 2.0
 
 
@@ -57,7 +60,7 @@ def search_workspaces(catalog, payload):
             break
     if not rows and terms and not query.startswith(("/", "~/")):
         # Nothing familiar matched, so fall back to the folders the system already indexes.
-        for path in _spotlight_directories(query, real_home()):
+        for path in _spotlight_directories(query, real_home())[0]:
             try:
                 resolved = path.resolve(strict=True)
             except (OSError, ValueError):
@@ -70,32 +73,44 @@ def search_workspaces(catalog, payload):
     return {"workspaces": rows}
 
 
-def _spotlight_directories(name: str, home: Path) -> list[Path]:
-    """Ask the macOS index for folders with this name; it is already built."""
+def _spotlight_directories(name: str, home: Path) -> tuple[list[Path], bool]:
+    """Ask the macOS index for folders with this name; it is already built.
+
+    Returns the hits and whether the answer is complete. An index that was not
+    consulted at all, timed out, or returned more rows than we read cannot rule
+    out a folder elsewhere, and the caller must not claim certainty on it.
+    """
     if sys.platform != "darwin" or name.startswith("-"):
-        return []
+        return [], True
     binary = shutil.which("mdfind") or ("/usr/bin/mdfind" if os.access("/usr/bin/mdfind", os.X_OK) else None)
     if not binary:
-        return []
+        return [], True
     try:
         result = subprocess.run([binary, "-onlyin", str(home), "-name", name],
                                 capture_output=True, text=True, timeout=3)
     except (OSError, subprocess.TimeoutExpired, UnicodeError):
-        return []
+        return [], False
     if result.returncode != 0:
-        return []
-    return [Path(line) for line in result.stdout.splitlines()[:400] if line]
+        return [], False
+    lines = [line for line in result.stdout.splitlines() if line]
+    return [Path(line) for line in lines[:_SPOTLIGHT_LIMIT]], len(lines) <= _SPOTLIGHT_LIMIT
 
 
-def _scan_directories(name: str, plans: list[tuple[Path, int]]) -> list[Path]:
-    """Sweep likely roots within one budget, retaining same-name alternatives."""
+def _scan_directories(name: str, plans: list[tuple[Path, int]]) -> tuple[list[Path], bool]:
+    """Sweep likely roots within one budget, retaining same-name alternatives.
+
+    Returns the hits and whether the sweep finished. Running out of budget or
+    time means somewhere was never looked at, so a single hit is not proof that
+    it is the only one.
+    """
     deadline = time.monotonic() + _SCAN_SECONDS
     found: list[Path] = []
     seen: set[str] = set()
     visited = 0
     for root, depth_limit in plans:
         if visited >= _SCAN_BUDGET or time.monotonic() > deadline:
-            break
+            # Plans left unswept.
+            return found, False
         frontier = [(root, 0)]
         while frontier and visited < _SCAN_BUDGET and time.monotonic() < deadline:
             current, depth = frontier.pop(0)
@@ -118,14 +133,23 @@ def _scan_directories(name: str, plans: list[tuple[Path, int]]) -> list[Path]:
                     found.append(Path(entry.path))
                 if depth + 1 < depth_limit and entry.name not in _SKIP_SCAN:
                     frontier.append((Path(entry.path), depth + 1))
-    return found
+        if frontier:
+            # This root still had directories queued when the budget ran out.
+            return found, False
+    return found, True
 
 
-def _named_directories(catalog, name: str, *, deep: bool) -> list[Path]:
-    """Collect folders called `name`, nearest-to-the-user first."""
+def _named_directories(catalog, name: str, *, deep: bool) -> tuple[list[Path], bool]:
+    """Collect folders called `name`, nearest-to-the-user first.
+
+    Also reports whether every source answered in full. A partial answer can
+    hide the folder that was actually dropped, which is the one case where a
+    single candidate must not be treated as the only one.
+    """
     home = real_home()
     found: list[Path] = []
     roots: list[Path] = []
+    complete = True
     for workspace in catalog._workspaces():
         if workspace.get("hidden"):
             continue
@@ -145,15 +169,21 @@ def _named_directories(catalog, name: str, *, deep: bool) -> list[Path]:
             result = subprocess.run([binary, "query", "--list", "--", name],
                                     capture_output=True, text=True, timeout=2)
             if result.returncode == 0:
-                found.extend(Path(line) for line in result.stdout.splitlines()[:100] if Path(line).name == name)
+                lines = result.stdout.splitlines()
+                found.extend(Path(line) for line in lines[:_ZOXIDE_LIMIT] if Path(line).name == name)
+                complete = complete and len(lines) <= _ZOXIDE_LIMIT
         except (OSError, subprocess.TimeoutExpired, UnicodeError):
-            pass
-    found.extend(path for path in _spotlight_directories(name, home) if path.name == name)
+            complete = False
+    indexed, indexed_complete = _spotlight_directories(name, home)
+    found.extend(path for path in indexed if path.name == name)
+    complete = complete and indexed_complete
     if deep:
         plans = [(root, _SCAN_DEPTH_KNOWN) for root in roots if root != home]
         plans += [(root.parent, _SCAN_DEPTH_HOME) for root in roots if root.parent not in (home, root)]
         plans.append((home, _SCAN_DEPTH_HOME))
-        found.extend(_scan_directories(name, plans))
+        swept, swept_complete = _scan_directories(name, plans)
+        found.extend(swept)
+        complete = complete and swept_complete
     rows, seen = [], set()
     for path in found:
         try:
@@ -164,9 +194,10 @@ def _named_directories(catalog, name: str, *, deep: bool) -> list[Path]:
             continue
         seen.add(str(resolved))
         rows.append(resolved)
-        if len(rows) == 40:
+        if len(rows) == _MATCH_LIMIT:
+            complete = False
             break
-    return rows
+    return rows, complete
 
 
 def locate_folder(catalog, payload):
@@ -184,7 +215,8 @@ def locate_folder(catalog, payload):
         except (OSError, ValueError, KeyError):
             continue
     matches = []
-    for path in _named_directories(catalog, name, deep=True):
+    candidates, complete = _named_directories(catalog, name, deep=True)
+    for path in candidates:
         try:
             present = {entry.name for entry in os.scandir(path)}
         except OSError:
@@ -194,12 +226,17 @@ def locate_folder(catalog, payload):
                         "path": str(path), "score": len(children & present)})
     matches.sort(key=lambda row: (-row["score"], len(row["path"])))
     return {"matches": [{k: v for k, v in row.items() if k != "score"} for row in matches[:20]],
-            "sure": _confident(matches, children)}
+            "sure": _confident(matches, children, complete=complete)}
 
 
-def _confident(matches: list[dict], children: set) -> bool:
+def _confident(matches: list[dict], children: set, *, complete: bool) -> bool:
     """Only skip the picker when one folder plainly is the one that was dropped."""
     if not matches:
+        return False
+    # A search that ran out of budget may simply not have reached the folder
+    # that was dropped, so "the only match" is not something it can establish.
+    # Adopting the wrong directory silently rewrites where the session works.
+    if not complete:
         return False
     # A shared README/src entry is not enough to identify a directory. A
     # missing fingerprint (including a timed-out browser read) needs a choice.
