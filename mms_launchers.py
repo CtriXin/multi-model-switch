@@ -825,6 +825,8 @@ def _real_user_home():
     markers = (
         f"{os.sep}.config{os.sep}mms{os.sep}codex-gateway{os.sep}",
         f"{os.sep}.config{os.sep}mms{os.sep}claude-gateway{os.sep}",
+        f"{os.sep}.config{os.sep}mms-next{os.sep}codex-gateway{os.sep}",
+        f"{os.sep}.config{os.sep}mms-next{os.sep}claude-gateway{os.sep}",
     )
     for marker in markers:
         if marker in home:
