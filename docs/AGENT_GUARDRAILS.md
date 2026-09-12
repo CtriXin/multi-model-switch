@@ -143,8 +143,8 @@
 
 - `mms` / `mmf` / `mmg` / Pilot 都读写同一个根；Pilot 保存通道后 terminal 读到的是同一份 approved bundle。
 - legacy `~/.config/mms` 已退出配置来源：不做自动导入，不做回退，`MMS_CONFIG_ROOT_MODE=stable` 被忽略；`mmd` / `mmm` 包装器已退休。
-- `~/.config/mms/*-gateway/`、`accounts/`、`fake-upstream/` 仍是运行时 / 会话状态目录，不是配置；Codex gateway `CODEX_HOME` 契约不变。
-- 安装脚本会请任何占用默认端口的 Pilot 退出（不按安装目录区分），并用 `source|config_root|version` 判断已有实例，避免第二个 8766 实例和跨进程 403。
+- 同一个根下的 `~/.config/mms-next/*-gateway/`、`accounts/`、`fake-upstream/` 是运行时 / 会话状态目录，不是配置；gateway 根由 `mms_launchers._selected_mms_config_root()` 解析，Codex gateway `CODEX_HOME` 契约不变。
+- 检测到 Pilot 在运行时，安装脚本暂停安装并退出，不关闭进程、不清理会话（#199）；用户从 Pilot 页面的「更新」入口升级，或先 `mms web stop` 再重跑安装器。安装前被请求退出过的 Pilot，安装结束后由脚本重新打开。
 - 新增一处读取 `~/.config/mms` 作为配置来源属于回归；`tests/test_single_config_root.py` 与 fresh-user gate 覆盖这条契约。
 
 ## Global OAuth Hard Cut
@@ -167,7 +167,7 @@
 
 MMS-managed Codex launch must not repeatedly stop on `Hooks need review` in isolated sessions.
 
-- Gateway Codex `CODEX_HOME` must stay stable at `~/.config/mms/codex-gateway/.codex`; per-PID `MMS_SESSION_HOME` is allowed only for wrappers/tmp/session packet state.
+- Gateway Codex `CODEX_HOME` must stay stable at `<selected config root>/codex-gateway/.codex`, which is `~/.config/mms-next/codex-gateway/.codex` (`mms_launchers._codex_gateway_root()`); per-PID `MMS_SESSION_HOME` is allowed only for wrappers/tmp/session packet state, and the session `.codex` is a symlink to that stable directory.
 - Do not revert Codex gateway back to `CODEX_HOME=$MMS_SESSION_HOME/.codex`.
 - Runtime `bypass` mode must pass both `--dangerously-bypass-approvals-and-sandbox` and `--dangerously-bypass-hook-trust`.
 - Real `~/.codex/hooks.json` trust wins over stale sibling sessions. Sibling `codex-gateway/s/<pid>/.codex/config.toml` trust can backfill missing entries, but cannot overwrite matching real-home trust.
@@ -220,13 +220,14 @@ Pi 用 `--model` 启动，扩展看不到这个参数，所以主模型能力由
 
 ## User Preferences And Human Gate
 
-`~/.config/mms/preferences.toml` 是用户偏好 allowlist 覆盖层，不是 agent 可随手写的配置文件。
+`~/.config/mms-next/preferences.toml` 是用户偏好 allowlist 覆盖层，不是 agent 可随手写的配置文件。
 
 - 日常偏好优先建议写 `preferences.toml`，例如 `thinking_mode`、`reasoning_effort`、`bypass`、`caveman_mode`、`nsr_mode`、`agent_pack`、`session_surfaces.disabled`、`assets.roots`
 - LLM / agent 需要先看 `docs/MMS_USER_PREFERENCES.md`，或让用户执行 `mms config preferences.help`
-- agents 可以读取、解释、生成 TOML snippet / manual diff，但不能自动写入真实 `~/.config/mms/**`
+- agents 可以读取、解释、生成 TOML snippet / manual diff，但不能自动写入真实 `~/.config/mms-next/**`
 - `preferences.toml` 会忽略 credentials、provider routes、account identity、proxy、OAuth、real HOME/XDG、Claude config 等非 allowlist 字段
 - 如必须写真实配置，仍走 human gate：`plan -> backup -> human double check -> audited write -> post-write human double check`
+- Pilot 模型设置的 apply 步骤自 #199 起用 `confirmed: true` 加浏览器 confirm 弹窗完成人工确认，不再要求用户手打确认短语；后端 `mms_web/model_settings.py` 与 `mms_web/model_settings_worker.py` 仍同时接受 `confirmed: true` 和旧的 `confirmPhrase`。
 
 ## Hook / Skill Priority
 
