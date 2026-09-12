@@ -180,10 +180,14 @@
   position: relative;
   display: flex;
   align-items: center;
-  border: 1px solid transparent;
+  border: 0;
   border-radius: 10px;
   background: transparent;
   transition: all 150ms ease-out;
+  height: 56px;
+  min-height: 56px;
+  max-height: 56px;
+  box-sizing: border-box;
 }
 
 .bot-card:hover {
@@ -191,8 +195,8 @@
 }
 
 .bot-card.is-selected {
-  background: var(--selected);
-  border-color: color-mix(in srgb, var(--accent) 24%, var(--line));
+  background: var(--soft);
+  border: 0;
 }
 
 .bot-card-main {
@@ -200,14 +204,76 @@
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
+  gap: 12px;
+  padding: 10px;
   border: 0;
   background: transparent;
   text-align: left;
   cursor: pointer;
   font-family: inherit;
   color: inherit;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.bot-card-avatar-wrap {
+  position: relative;
+  display: inline-flex;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+}
+
+.bot-card-avatar-wrap .pixel-avatar {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+}
+
+.bot-card-status-dot {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  box-sizing: border-box;
+  border: 1.5px solid var(--surface);
+}
+
+.bot-card-status-dot.is-running {
+  background: var(--accent);
+  animation: bot-status-breathe 2s ease-in-out infinite;
+}
+
+@keyframes bot-status-breathe {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.85);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bot-card-status-dot.is-running {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+.bot-card-status-dot.is-waiting {
+  background: var(--amber);
+}
+
+.bot-card-status-dot.is-failed {
+  background: var(--danger);
+}
+
+.bot-card-status-dot.is-idle {
+  display: none;
 }
 
 .bot-card-copy {
@@ -215,46 +281,38 @@
   flex: 1;
   display: flex;
   flex-direction: column;
+  justify-content: center;
   gap: 2px;
 }
 
 .bot-card-title {
   display: flex;
   align-items: center;
-  gap: 6px;
   min-width: 0;
+  width: 100%;
 }
 
 .bot-card-title strong {
-  font-size: 13px;
+  display: block;
+  width: 100%;
+  font-size: 14px;
   font-weight: 600;
   color: var(--ink);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.bot-card-wake-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  color: var(--muted);
-  font-size: 11px;
-  white-space: nowrap;
-}
-
-.bot-card-wake-tag svg {
-  color: var(--bot-success);
+  line-height: 1.25;
 }
 
 .bot-card-description {
   display: block;
+  width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--muted);
   font-size: 12px;
-  line-height: 1.4;
+  line-height: 1.35;
 }
 
 /* Bot card actions & more dropdown */
@@ -520,10 +578,23 @@
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 28px max(24px, calc((100% - 880px) / 2)) 20px;
+  padding: 28px max(clamp(24px, 7vw, 140px), calc((100% - 1000px) / 2)) 20px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 0;
+}
+
+.bot-chat-stream > * + * {
+  margin-top: 30px;
+}
+
+.bot-chat-stream > .bot-chat-user + .bot-chat-user,
+.bot-chat-stream > .bot-chat-event + .bot-chat-event,
+.bot-chat-stream > .bot-chat-event + .bot-chat-notice,
+.bot-chat-stream > .bot-chat-event + .bot-chat-error,
+.bot-chat-stream > .bot-chat-event + .bot-chat-artifacts,
+.bot-chat-stream > .bot-chat-event + .bot-communications-marker {
+  margin-top: 12px;
 }
 
 .bot-chat-empty {
@@ -557,7 +628,7 @@
 /* Chat messages: User bubble & Bot event stream */
 .bot-chat-message {
   font-size: 15px;
-  line-height: 1.6;
+  line-height: 1.7;
 }
 
 .bot-chat-message-label {
@@ -581,6 +652,8 @@
 .bot-chat-user p {
   margin: 0;
   white-space: pre-wrap;
+  font-size: 15px;
+  line-height: 1.7;
 }
 
 /* Bot message / event row */
@@ -604,6 +677,8 @@
   color: var(--ink);
   overflow-wrap: anywhere;
   word-break: break-word;
+  font-size: 15px;
+  line-height: 1.7;
 }
 
 .bot-chat-event-body .markdown > :first-child {
@@ -616,7 +691,8 @@
 
 .bot-chat-event-body .markdown p {
   margin: 0 0 10px;
-  line-height: 1.6;
+  font-size: 15px;
+  line-height: 1.7;
 }
 
 .bot-chat-event-body .markdown p:last-child {
@@ -833,14 +909,14 @@
 .bot-onboarding-greeting p {
   margin: 0;
   font-size: 15px;
-  line-height: 1.5;
+  line-height: 1.7;
   color: var(--ink);
 }
 
 .bot-onboarding-questions {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 20px;
 }
 
 .bot-onboarding-question-block {
@@ -858,7 +934,7 @@
 .bot-onboarding-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 7px;
+  gap: 8px;
 }
 
 .bot-onboarding-chip {
@@ -898,7 +974,7 @@
 
 /* Composer */
 .bot-chat-composer-container {
-  padding: 0 max(24px, calc((100% - 880px) / 2)) 20px;
+  padding: 0 max(clamp(24px, 7vw, 140px), calc((100% - 1000px) / 2)) 20px;
   width: 100%;
   box-sizing: border-box;
 }
@@ -918,17 +994,20 @@
 }
 
 .bot-chat-composer:focus-within {
-  border-color: color-mix(in srgb, var(--accent) 60%, var(--line));
-  box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 8%, transparent);
+  border-color: var(--accent);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
-.bot-chat-composer textarea {
+.bot-chat-composer textarea,
+.bot-chat-composer textarea:focus,
+.bot-chat-composer textarea:focus-visible {
   width: 100%;
   min-height: 38px;
   max-height: 140px;
   padding: 0;
-  border: 0;
-  outline: 0;
+  border: 0 !important;
+  outline: none !important;
+  box-shadow: none !important;
   background: transparent;
   color: var(--ink);
   font-family: inherit;
@@ -949,74 +1028,59 @@
   gap: 12px;
   padding-top: 4px;
   border-top: 1px solid color-mix(in srgb, var(--line) 50%, transparent);
+  position: relative;
 }
 
-.bot-chat-schedule {
+.bot-chat-composer-meta {
   display: flex;
   align-items: center;
+  gap: 8px;
+  min-height: 24px;
 }
 
-.bot-chat-schedule-trigger,
-.bot-chat-schedule-set {
+.bot-schedule-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 9px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: transparent;
-  color: var(--muted);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-  transition: all 150ms ease-out;
-}
-
-.bot-chat-schedule-trigger:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.bot-chat-schedule-set {
-  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
-  color: var(--ink);
-  background: var(--soft);
-}
-
-.bot-chat-schedule-picker {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.bot-chat-schedule-picker input {
-  padding: 4px 6px;
-  border: 1px solid var(--accent);
+  padding: 3px 8px;
   border-radius: 6px;
-  background: var(--surface);
-  color: var(--ink);
-  font: inherit;
   font-size: 12px;
-  outline: 0;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--accent);
+  background: var(--soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
-.bot-chat-schedule-clear {
+.bot-schedule-chip svg {
+  flex-shrink: 0;
+}
+
+.bot-schedule-chip-clear {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   padding: 0;
+  margin-left: 2px;
   border: 0;
   border-radius: 50%;
-  color: var(--muted);
   background: transparent;
+  color: var(--muted);
   cursor: pointer;
-  transition: color 120ms ease-out;
+  transition: color 120ms ease, background 120ms ease;
 }
 
-.bot-chat-schedule-clear:hover {
-  color: var(--bot-danger);
+.bot-schedule-chip-clear:hover {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 15%, transparent);
+}
+
+.bot-chat-send-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
 }
 
 /* 32x32 Send button */
@@ -1048,6 +1112,177 @@
 .bot-chat-send:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+.bot-chat-schedule-trigger {
+  width: 22px;
+  height: 32px;
+  flex: 0 0 22px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 150ms ease-out;
+}
+
+.bot-chat-schedule-trigger:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--soft);
+}
+
+.bot-chat-schedule-trigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.bot-chat-schedule-trigger:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Native Popover for schedule presets */
+.bot-schedule-popover {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 10px 28px color-mix(in srgb, var(--ink) 14%, transparent), 0 2px 6px color-mix(in srgb, var(--ink) 6%, transparent);
+  padding: 6px;
+  min-width: 170px;
+  z-index: 1000;
+}
+
+.bot-schedule-popover::backdrop {
+  background: transparent;
+}
+
+.bot-schedule-presets {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.bot-schedule-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.bot-schedule-option:hover {
+  background: var(--soft);
+  color: var(--accent);
+}
+
+.bot-schedule-option svg {
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.bot-schedule-option:hover svg {
+  color: var(--accent);
+}
+
+.bot-schedule-custom-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 6px 4px;
+  min-width: 250px;
+}
+
+.bot-schedule-custom-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.bot-schedule-select {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+
+.bot-schedule-select:focus {
+  border-color: var(--accent);
+}
+
+.bot-schedule-time-input {
+  width: 58px;
+  padding: 5px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  text-align: center;
+  outline: none;
+}
+
+.bot-schedule-time-input:focus {
+  border-color: var(--accent);
+}
+
+.bot-schedule-custom-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.bot-schedule-back-btn,
+.bot-schedule-confirm-btn {
+  padding: 4px 10px;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+
+.bot-schedule-back-btn {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+}
+
+.bot-schedule-back-btn:hover {
+  background: var(--soft);
+  color: var(--ink);
+}
+
+.bot-schedule-confirm-btn {
+  border: 0;
+  background: var(--accent);
+  color: var(--inverse);
+}
+
+.bot-schedule-confirm-btn:hover {
+  background: var(--accent-hover);
 }
 
 .bot-chat-input-error {
@@ -1166,9 +1401,9 @@
 
 /* Pixel avatar sizing by context */
 .bot-card .pixel-avatar {
-  width: 30px;
-  height: 30px;
-  flex: 0 0 30px;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
 }
 
 .bot-chat-header .pixel-avatar {
@@ -1234,7 +1469,7 @@
   font-size: 12px;
 }
 
-.bot-create-dialog input,
+.bot-create-dialog input:not([type="checkbox"]),
 .bot-create-dialog select,
 .bot-create-dialog textarea {
   width: 100%;
@@ -1252,7 +1487,7 @@
 .bot-create-dialog select:focus,
 .bot-create-dialog textarea:focus {
   border-color: var(--accent);
-  outline: 2px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  outline: none;
 }
 
 .bot-dialog-actions {
@@ -1314,19 +1549,56 @@
 }
 
 .bot-check {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 8px;
   color: var(--ink);
   font-size: 13px;
   cursor: pointer;
+  user-select: none;
+  margin-top: 4px;
+  justify-self: start;
+  width: fit-content;
+  white-space: nowrap;
 }
 
+.bot-check input[type="checkbox"],
 .bot-check input {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  min-height: 16px;
+  margin: 0;
+  padding: 0;
   accent-color: var(--accent);
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.bot-check span {
+  white-space: nowrap;
 }
 
 /* Avatar picker in editor dialog */
+.pixel-avatar-mini {
+  position: relative;
+  display: inline-flex;
+  width: 31px;
+  height: 31px;
+  flex: 0 0 31px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--pixel-color) 16%, var(--surface));
+  image-rendering: pixelated;
+}
+
+.pixel-avatar-mini .pixel-avatar-grid {
+  width: 75%;
+  height: 75%;
+}
+
 .bot-avatar-picker {
   display: grid;
   gap: 8px;
@@ -1338,26 +1610,48 @@
 }
 
 .bot-avatar-options {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(32px, 1fr));
-  gap: 6px;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
 }
 
 .bot-avatar-option {
-  display: grid;
-  place-items: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 3px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: transparent;
+  border: 2px solid transparent;
+  border-radius: 12px;
+  background: var(--soft);
   cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease, transform 120ms ease;
 }
 
-.bot-avatar-option:hover,
+.bot-avatar-option:hover {
+  border-color: var(--line);
+  transform: translateY(-1px);
+}
+
 .bot-avatar-option.is-selected {
   border-color: var(--accent);
-  background: var(--soft);
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.bot-avatar-option .pixel-avatar,
+.bot-avatar-picker-preview {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+}
+
+.bot-avatar-option .pixel-avatar-mini {
+  width: 31px;
+  height: 31px;
+  flex: 0 0 31px;
 }
 
 .bot-color-options {
@@ -1447,6 +1741,31 @@
 
 .bot-preview-download:hover {
   color: var(--accent);
+}
+
+.bot-preview-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 150ms ease-out;
+}
+
+.bot-preview-copy:hover {
+  background: var(--soft);
+  border-color: var(--accent);
+}
+
+.bot-preview-copy.is-copied {
+  color: var(--success);
+  border-color: var(--success);
 }
 
 .bot-artifact-preview-body {
@@ -1585,6 +1904,13 @@
 .bot-field textarea {
   min-height: 80px;
   resize: vertical;
+}
+
+.bot-field input:focus,
+.bot-field select:focus,
+.bot-field textarea:focus {
+  border-color: var(--accent);
+  outline: none;
 }
 
 .bot-banner {

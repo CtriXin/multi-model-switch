@@ -1,11 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertCircle, ArrowRight, LoaderCircle, MessageSquare, RefreshCw, X, Zap } from "lucide-react";
+import { AlertCircle, ArrowRight, FileText, LoaderCircle, MessageSquare, X, Zap } from "lucide-react";
 import { RichText } from "./components";
 import type { BotDefinition } from "./Bot";
 import "./bot-communications.css";
 
 export type CommunicationKind = "message" | "dispatch" | "result";
 export type CommunicationDeliveryStatus = "queued" | "delivered" | "processed" | "waiting" | "failed";
+
+export interface BotCommunicationArtifact {
+  id: string;
+  name: string;
+  kind?: string;
+  url?: string;
+}
 
 export interface BotCommunication {
   id: string;
@@ -19,6 +26,7 @@ export interface BotCommunication {
   deliveryTaskId?: string | null;
   deliveryStatus: CommunicationDeliveryStatus;
   waitReason?: string | null;
+  artifacts?: BotCommunicationArtifact[];
 }
 
 interface BotCommunicationsProps {
@@ -141,15 +149,67 @@ export function BotCommunications({
               const fromCurrent = message.senderBotId === bot.id;
               const sender = bots.find((item) => item.id === message.senderBotId);
               const canWake = !fromCurrent && message.deliveryStatus === "waiting" && message.recipientBotId === bot.id;
-              return <article className={`bot-communication-message ${fromCurrent ? "from-current" : "from-peer"}`} key={message.id}>
-                <div className="bot-communication-meta"><strong>{fromCurrent ? bot.name : sender?.name || "Bot"}</strong><span>{kindLabel(message.kind)}</span><time dateTime={message.createdAt}>{formatDate(message.createdAt)}</time></div>
-                <div className="bot-communication-content"><RichText text={message.content} repair /></div>
-                <div className="bot-communication-status"><span className={`bot-communication-delivery is-${message.deliveryStatus}`}>{deliveryLabel(message.deliveryStatus)}</span>{message.waitReason && <span>{message.waitReason}</span>}{canWake && <button type="button" onClick={() => void wake(message)} disabled={wakingId === message.id || preview}><Zap size={12} />{wakingId === message.id ? "唤醒中…" : "继续投递"}</button>}</div>
-              </article>;
+              return (
+                <article className={`bot-communication-message ${fromCurrent ? "from-current" : "from-peer"}`} key={message.id}>
+                  <div className="bot-communication-meta">
+                    <strong>{fromCurrent ? bot.name : sender?.name || "Bot"}</strong>
+                    <span className="bot-communication-meta-sep">·</span>
+                    <span>{kindLabel(message.kind)}</span>
+                    <span className="bot-communication-meta-sep">·</span>
+                    <time dateTime={message.createdAt}>{formatDate(message.createdAt)}</time>
+                  </div>
+                  <div className="bot-communication-content">
+                    <RichText text={message.content} repair />
+                  </div>
+                  {message.artifacts && message.artifacts.length > 0 && (
+                    <div className="bot-communication-artifacts">
+                      {message.artifacts.map((artifact) =>
+                        artifact.url ? (
+                          <a
+                            className="bot-file-preview-trigger"
+                            key={artifact.id}
+                            href={artifact.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            title={artifact.name}
+                          >
+                            <FileText size={15} />
+                            <span>{artifact.name}</span>
+                          </a>
+                        ) : (
+                          <div
+                            className="bot-file-preview-trigger"
+                            key={artifact.id}
+                            title={artifact.name}
+                          >
+                            <FileText size={15} />
+                            <span>{artifact.name}</span>
+                          </div>
+                        ),
+                      )}
+                    </div>
+                  )}
+                  <div className="bot-communication-status">
+                    <span className={`bot-communication-delivery is-${message.deliveryStatus}`}>
+                      {deliveryLabel(message.deliveryStatus)}
+                    </span>
+                    {message.waitReason && <span>{message.waitReason}</span>}
+                    {canWake && (
+                      <button
+                        type="button"
+                        onClick={() => void wake(message)}
+                        disabled={wakingId === message.id || preview}
+                      >
+                        <Zap size={12} />
+                        {wakingId === message.id ? "唤醒中…" : "继续投递"}
+                      </button>
+                    )}
+                  </div>
+                </article>
+              );
             })}
           </section>
         )}
-        {!preview && onRefresh && <button className="bot-communications-refresh" type="button" onClick={onRefresh} aria-label="刷新协作记录"><RefreshCw size={13} />刷新</button>}
       </div>
     </aside>
   );

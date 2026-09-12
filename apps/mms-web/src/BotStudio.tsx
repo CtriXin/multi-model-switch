@@ -3,7 +3,7 @@ import type { CSSProperties } from "react";
 import { ArrowLeft, CircleAlert, LoaderCircle, RefreshCw, X } from "lucide-react";
 import { isPreview, mutate, request } from "./api";
 import type { BotNotification, BotNotificationType, Bootstrap, Preset } from "./types";
-import { AutoWakeControl, BotList, BotWorkspace, BotChat, PIXEL_AVATARS, PIXEL_AVATAR_COLORS } from "./Bot";
+import { AutoWakeControl, BotList, BotWorkspace, BotChat, PixelAvatar, PIXEL_AVATARS, PIXEL_AVATAR_COLORS } from "./Bot";
 import { ModelPicker } from "./LaunchOptions";
 import { BotMemoryPanel } from "./BotMemoryPanel";
 import { BotCommunications } from "./BotCommunications";
@@ -43,6 +43,7 @@ type BotStudioProps = {
   data?: Bootstrap;
   onOpenSession?: (id: string) => void;
   onExit?: () => void;
+  enterToSend?: boolean;
 };
 const emptyBootstrap: Bootstrap = {
   version: "1",
@@ -232,13 +233,11 @@ function BotEditor({
                 aria-label={avatar.label}
                 aria-pressed={avatarId === avatar.id}
               >
-                <span className="pixel-avatar-mini" style={{ "--pixel-color": avatarColor } as CSSProperties}>
-                  <span className="pixel-avatar-grid">
-                    {avatar.rows.flatMap((row, rowIndex) => [...row].map((cell, cellIndex) => (
-                      <i className={`pixel-cell pixel-${cell}`} key={`${rowIndex}-${cellIndex}`} />
-                    )))}
-                  </span>
-                </span>
+                <PixelAvatar
+                  avatarId={avatar.id}
+                  color={avatarColor}
+                  className="pixel-avatar-mini"
+                />
               </button>
             ))}
           </div>
@@ -324,6 +323,7 @@ export function BotStudio({
   data = emptyBootstrap,
   onOpenSession,
   onExit,
+  enterToSend,
 }: BotStudioProps) {
   const initial = data as BotBootstrap;
   const [bots, setBots] = useState<BotDefinition[]>(initial.bots || []);
@@ -1050,6 +1050,7 @@ export function BotStudio({
             setCommunicationsOpen(true);
           }}
           disabled={isPreview || capability?.available === false}
+          enterToSend={enterToSend}
         />
         {memoryOpen && activeBot && (
           <BotMemoryPanel
