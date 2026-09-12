@@ -78,9 +78,6 @@ jobs:
             python: "3.13"
             node: "22"
             pi_present: true
-    env:
-      MMS_CONFIG_ROOT: ${{ runner.temp }}\mms-ci-config
-      MMS_STATE_ROOT: ${{ runner.temp }}\mms-ci-state
     steps:
       - name: Windows-only guard
         shell: pwsh
@@ -116,18 +113,39 @@ jobs:
           node --version
           pi --version
 
-      - name: Windows acceptance driver (${{ matrix.powershell }})
-        shell: ${{ matrix.powershell == 'powershell-5.1' && 'powershell' || 'pwsh' }}
+      - name: Windows acceptance driver (PowerShell 5.1)
+        if: matrix.powershell == 'powershell-5.1'
+        shell: powershell
+        env:
+          MMS_CONFIG_ROOT: ${{ runner.temp }}\mms-ci-config
+          MMS_STATE_ROOT: ${{ runner.temp }}\mms-ci-state
         run: |
           & .\scripts\ci\windows_acceptance.ps1 `
             -RepoRoot $PWD.Path `
             -PythonExe ((Get-Command python).Source) `
             -TempRoot (Join-Path $env:RUNNER_TEMP 'mms-win-acceptance') `
-            -ShellEdition '${{ matrix.powershell == 'powershell-5.1' && '5.1' || '7' }}' `
+            -ShellEdition '5.1' `
+            -PiPresent:${{ matrix.pi_present }}
+
+      - name: Windows acceptance driver (PowerShell 7)
+        if: matrix.powershell == 'pwsh-7'
+        shell: pwsh
+        env:
+          MMS_CONFIG_ROOT: ${{ runner.temp }}\mms-ci-config
+          MMS_STATE_ROOT: ${{ runner.temp }}\mms-ci-state
+        run: |
+          & .\scripts\ci\windows_acceptance.ps1 `
+            -RepoRoot $PWD.Path `
+            -PythonExe ((Get-Command python).Source) `
+            -TempRoot (Join-Path $env:RUNNER_TEMP 'mms-win-acceptance') `
+            -ShellEdition '7' `
             -PiPresent:${{ matrix.pi_present }}
 
       - name: Windows pytest suite
         shell: pwsh
+        env:
+          MMS_CONFIG_ROOT: ${{ runner.temp }}\mms-ci-config
+          MMS_STATE_ROOT: ${{ runner.temp }}\mms-ci-state
         run: |
           $env:PYTHONPATH = $PWD.Path
           python -m pytest -q `
