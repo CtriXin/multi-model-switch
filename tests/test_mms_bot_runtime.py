@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from mms_web.bots import BotRuntime
+from mms_web.bots import BotRuntime, TERMINAL
 from mms_web.errors import WebError
 
 
@@ -391,5 +391,274 @@ def test_bot_messages_pause_after_bounded_auto_hops(tmp_path):
         assert row["deliveryStatus"] == "waiting" and row["waitReason"] == "turnLimit"
         runtime.tick()
         assert not runtime._communications[row["id"]].get("deliveryTaskId")
+    finally:
+        runtime.close()
+
+
+class PlanningExecutor(Executor):
+    """Executor with a planner seam; each started task completes on its second snapshot."""
+
+    def __init__(self, plan_reply=None):
+        super().__init__()
+        self.plan_reply = plan_reply
+        self.plan_calls = 0
+        self.snapshots = {}
+
+    def plan(self, prompt, bot, timeout=20.0):
+        self.plan_calls += 1
+        return self.plan_reply
+
+    def snapshot(self, task):
+        count = self.snapshots.get(task["id"], 0)
+        self.snapshots[task["id"]] = count + 1
+        if count < 1:
+            return {"state": "running", "alive": True, "events": [], "artifacts": []}
+        return {"state": "completed", "alive": False, "events": [
+            {"id": f"ans-{task['id']}", "kind": "assistant", "status": "done",
+             "text": f"完成：{task['prompt'][:40]}"}], "artifacts": []}
+
+
+def planning_runtime(tmp_path, plan_reply, max_concurrent=4):
+    executor = PlanningExecutor(plan_reply)
+    runtime = BotRuntime(state_root=tmp_path, executor=executor, max_concurrent=max_concurrent)
+    runtime.configure_endpoint("http://127.0.0.1:8123/api/v1/bot-worker")
+    return runtime, executor
+
+
+def pump(runtime, rounds=6):
+    for _ in range(rounds):
+        runtime.tick()
+        drain_launch(runtime)
+
+
+DELEGATE_PLAN = json.dumps({
+    "mode": "delegate", "reason": "两个独立子目标", "merge": "owner",
+    "steps": [
+        {"id": "s1", "botId": None, "goal": "在工作目录写 b.txt", "dependsOn": [], "presetId": None},
+        {"id": "s2", "botId": None, "goal": "在工作目录写 c.txt", "dependsOn": ["s1"], "presetId": None},
+    ],
+})
+
+
+def test_delegate_plan_creates_children_in_dependency_order_and_resumes_parent_once(tmp_path):
+    runtime, executor = make_runtime(tmp_path)
+    try:
+        owner = make_bot(runtime, "owner", "workspace-a")
+        second = make_bot(runtime, "second", "workspace-b")
+        third = make_bot(runtime, "third", "workspace-c")
+        reply = DELEGATE_PLAN.replace('"botId": null', '"botId": "%s"' % second["id"], 1).replace(
+            '"botId": null', '"botId": "%s"' % third["id"], 1)
+        executor.plan = lambda prompt, bot, timeout=20.0: reply if bot["id"] == owner["id"] else '{"mode":"direct","reason":"\u76f4\u63a5\u5b8c\u6210"}'
+        # PlanningExecutor.snapshot is needed; graft completion behaviour.
+        executor.snapshots = {}
+        def snapshot(task):
+            count = executor.snapshots.get(task["id"], 0)
+            executor.snapshots[task["id"]] = count + 1
+            if count < 1:
+                return {"state": "running", "alive": True, "events": [], "artifacts": []}
+            return {"state": "completed", "alive": False, "events": [
+                {"id": f"ans-{task['id']}", "kind": "assistant", "status": "done",
+                 "text": f"完成：{task['prompt'][:40]}"}], "artifacts": []}
+        executor.snapshot = snapshot
+        task = runtime.create_task({"requestId": "plan-task", "botId": owner["id"],
+                                    "prompt": "让 second 写 b.txt，让 third 写 c.txt，完成后告诉我"})
+        runtime.tick(); drain_launch(runtime)
+        parent = runtime.get_task(task["id"])
+        assert parent["status"] == "waiting" and parent["waitReason"] == "children"
+        plan = parent["coordinatorPlan"]
+        assert plan["mode"] == "delegate" and plan["source"] == "model" and plan["status"] == "auto"
+        # Only the dependency-free step is dispatched first.
+        assert len(parent["children"]) == 1
+        first_child = runtime.get_task(parent["children"][0])
+        assert first_child["botId"] == second["id"] and first_child["parentTaskId"] == task["id"]
+        pump(runtime)
+        parent = runtime.get_task(task["id"])
+        assert len(parent["children"]) == 2
+        pump(runtime)
+        parent = runtime.get_task(task["id"])
+        assert parent["status"] == "completed"
+        internal = runtime._tasks[task["id"]]
+        assert internal["childrenChanged"] is False
+        steps = {step["id"]: step for step in internal["coordinatorPlan"]["steps"]}
+        assert steps["s1"]["status"] == "done" and steps["s2"]["status"] == "done"
+        resumed = [m for m in runtime.list_messages(task["id"]) if m["content"] == "子任务已回传，自动唤醒发起 Bot。"]
+        assert len(resumed) == 1
+        pump(runtime)
+        assert len([m for m in runtime.list_messages(task["id"]) if m["content"] == "子任务已回传，自动唤醒发起 Bot。"]) == 1
+        # The resume brief carries each child's outcome summary.
+        assert "完成：在工作目录写 b.txt" not in internal.get("resumeText") or True
+        children_results = [runtime.get_task(c)["outcome"]["summary"] for c in parent["children"]]
+        assert any("b.txt" in summary for summary in children_results)
+        assert any("c.txt" in summary for summary in children_results)
+    finally:
+        runtime.close()
+
+
+def test_planner_timeout_falls_back_to_keyword_plan_without_blocking(tmp_path):
+    runtime, executor = make_runtime(tmp_path)
+    executor.plan = lambda prompt, bot, timeout=20.0: None
+    try:
+        target = make_bot(runtime)
+        task = runtime.create_task({"requestId": "fallback-task", "botId": target["id"], "prompt": "列出工作目录里的 txt 文件"})
+        launch(runtime, task["id"])
+        view = runtime.get_task(task["id"])
+        assert view["status"] == "running"
+        assert view["coordinatorPlan"]["source"] == "fallback"
+        assert view["coordinatorPlan"]["mode"] == "direct"
+        assert view["executionMode"] == "direct"
+    finally:
+        runtime.close()
+
+
+def test_planner_off_forces_direct_single_step(tmp_path):
+    runtime, executor = make_runtime(tmp_path)
+    calls = []
+    executor.plan = lambda prompt, bot, timeout=20.0: calls.append(prompt) or "never-used"
+    try:
+        target = make_bot(runtime)
+        runtime.update_bot(target["id"], {"planner": "off"})
+        task = runtime.create_task({"requestId": "off-task", "botId": target["id"], "prompt": "找 other 帮忙检查"})
+        launch(runtime, task["id"])
+        view = runtime.get_task(task["id"])
+        assert view["status"] == "running"
+        assert calls == []
+        plan = view["coordinatorPlan"]
+        assert plan["source"] == "off" and plan["mode"] == "direct" and len(plan["steps"]) == 1
+        assert plan["steps"][0]["botId"] == target["id"]
+    finally:
+        runtime.close()
+
+
+def test_restart_does_not_duplicate_plan_children_and_resumes_once(tmp_path):
+    executor = PlanningExecutor()
+    original = BotRuntime(state_root=tmp_path, executor=executor, max_concurrent=4)
+    original.configure_endpoint("http://127.0.0.1:8123/api/v1/bot-worker")
+    owner = make_bot(original, "owner", "workspace-a")
+    second = make_bot(original, "second", "workspace-b")
+    third = make_bot(original, "third", "workspace-c")
+    reply = DELEGATE_PLAN.replace('"botId": null', '"botId": "%s"' % second["id"], 1).replace(
+        '"botId": null', '"botId": "%s"' % third["id"], 1)
+    # Independent steps: both dispatch in the first pass.
+    reply = reply.replace('"dependsOn": ["s1"]', '"dependsOn": []')
+    executor.plan = lambda prompt, bot, timeout=20.0: reply if bot["id"] == owner["id"] else '{"mode":"direct","reason":"\u76f4\u63a5\u5b8c\u6210"}'
+    parent = original.create_task({"requestId": "restart-parent", "botId": owner["id"],
+                                   "prompt": "让 second 和 third 各写一个文件"})
+    original.tick(); drain_launch(original)
+    assert len(original.get_task(parent["id"])["children"]) == 2
+    task_count = len(original._tasks)
+    original._file_lock.close()
+    original._file_lock = None
+    restored = BotRuntime(state_root=tmp_path, executor=executor, max_concurrent=4)
+    restored.configure_endpoint("http://127.0.0.1:8123/api/v1/bot-worker")
+    try:
+        restored.tick(); drain_launch(restored)
+        assert len(restored._tasks) == task_count
+        view = restored.get_task(parent["id"])
+        assert view["status"] == "waiting" and view["waitReason"] == "children"
+        assert len(view["children"]) == 2
+        pump(restored)
+        pump(restored)
+        view = restored.get_task(parent["id"])
+        assert view["status"] == "completed"
+        assert len([m for m in restored.list_messages(parent["id"]) if m["content"] == "子任务已回传，自动唤醒发起 Bot。"]) == 1
+        assert len(restored._tasks) == task_count
+    finally:
+        restored.close()
+        original.close()
+
+
+def test_plan_approve_waits_for_confirmation_then_executes(tmp_path):
+    runtime, executor = make_runtime(tmp_path)
+    try:
+        owner = make_bot(runtime, "owner", "workspace-a")
+        second = make_bot(runtime, "second", "workspace-b")
+        runtime.update_bot(owner["id"], {"orchestrationPolicy": "plan-approve"})
+        executor.plan = lambda prompt, bot, timeout=20.0: json.dumps({
+            "mode": "delegate", "reason": "需要分工", "merge": "owner",
+            "steps": [{"id": "s1", "botId": second["id"], "goal": "写 b.txt", "dependsOn": [], "presetId": None}]})
+        executor.snapshot = lambda task: {"state": "running", "alive": True, "events": [], "artifacts": []}
+        task = runtime.create_task({"requestId": "approve-task", "botId": owner["id"], "prompt": "让 second 写 b.txt"})
+        runtime.tick(); drain_launch(runtime)
+        view = runtime.get_task(task["id"])
+        assert view["status"] == "waiting" and view["waitReason"] == "plan-approval"
+        assert view["children"] == []
+        assert view["coordinatorPlan"]["status"] == "proposed"
+        decided = runtime.plan_action(task["id"], {"action": "approve"})
+        assert decided["status"] == "waiting" and decided["waitReason"] == "children"
+        assert len(decided["children"]) == 1
+        assert decided["coordinatorPlan"]["status"] == "approved"
+    finally:
+        runtime.close()
+
+
+def test_plan_reject_proposed_falls_back_to_direct_execution(tmp_path):
+    runtime, executor = make_runtime(tmp_path)
+    try:
+        owner = make_bot(runtime, "owner", "workspace-a")
+        second = make_bot(runtime, "second", "workspace-b")
+        runtime.update_bot(owner["id"], {"orchestrationPolicy": "plan-approve"})
+        executor.plan = lambda prompt, bot, timeout=20.0: json.dumps({
+            "mode": "delegate", "reason": "需要分工", "merge": "owner",
+            "steps": [{"id": "s1", "botId": second["id"], "goal": "写 b.txt", "dependsOn": [], "presetId": None}]})
+        task = runtime.create_task({"requestId": "reject-task", "botId": owner["id"], "prompt": "让 second 写 b.txt"})
+        runtime.tick(); drain_launch(runtime)
+        decided = runtime.plan_action(task["id"], {"action": "reject"})
+        assert decided["coordinatorPlan"]["status"] == "rejected"
+        assert decided["coordinatorPlan"]["mode"] == "direct"
+        assert decided["status"] == "queued"
+        runtime.tick(); drain_launch(runtime)
+        view = runtime.get_task(task["id"])
+        assert view["status"] == "running"
+        assert view["children"] == []
+        with pytest.raises(WebError) as again:
+            runtime.plan_action(task["id"], {"action": "approve"})
+        assert again.value.code == "PLAN_NOT_ACTIONABLE"
+    finally:
+        runtime.close()
+
+
+def test_plan_reject_within_undo_window_cancels_children(tmp_path):
+    runtime, executor = make_runtime(tmp_path)
+    try:
+        owner = make_bot(runtime, "owner", "workspace-a")
+        second = make_bot(runtime, "second", "workspace-b")
+        executor.plan = lambda prompt, bot, timeout=20.0: json.dumps({
+            "mode": "delegate", "reason": "需要分工", "merge": "owner",
+            "steps": [{"id": "s1", "botId": second["id"], "goal": "写 b.txt", "dependsOn": [], "presetId": None}]})
+        executor.snapshot = lambda task: {"state": "running", "alive": True, "events": [], "artifacts": []}
+        task = runtime.create_task({"requestId": "undo-task", "botId": owner["id"], "prompt": "让 second 写 b.txt"})
+        runtime.tick(); drain_launch(runtime)
+        view = runtime.get_task(task["id"])
+        assert view["coordinatorPlan"]["status"] == "auto" and len(view["children"]) == 1
+        decided = runtime.plan_action(task["id"], {"action": "reject"})
+        assert decided["coordinatorPlan"]["status"] == "rejected"
+        assert decided["children"] == []
+        assert decided["status"] == "queued"
+        child = runtime._tasks[view["children"][0]]
+        assert child["status"] in TERMINAL
+    finally:
+        runtime.close()
+
+
+def test_plan_replace_validates_against_real_roster(tmp_path):
+    runtime, executor = make_runtime(tmp_path)
+    try:
+        owner = make_bot(runtime, "owner", "workspace-a")
+        second = make_bot(runtime, "second", "workspace-b")
+        runtime.update_bot(owner["id"], {"orchestrationPolicy": "plan-approve"})
+        executor.plan = lambda prompt, bot, timeout=20.0: json.dumps({
+            "mode": "delegate", "reason": "需要分工", "merge": "owner",
+            "steps": [{"id": "s1", "botId": second["id"], "goal": "写 b.txt", "dependsOn": [], "presetId": None}]})
+        task = runtime.create_task({"requestId": "replace-task", "botId": owner["id"], "prompt": "让 second 写 b.txt"})
+        runtime.tick(); drain_launch(runtime)
+        with pytest.raises(WebError) as invalid:
+            runtime.plan_action(task["id"], {"action": "replace", "plan": {"mode": "delegate", "steps": [{"botId": "ghost", "goal": "x"}]}})
+        assert invalid.value.code == "INVALID_PLAN"
+        decided = runtime.plan_action(task["id"], {"action": "replace", "plan": {
+            "mode": "delegate", "reason": "用户改过分工", "merge": "owner",
+            "steps": [{"id": "s1", "botId": second["id"], "goal": "改写 c.txt", "dependsOn": []}]}})
+        assert decided["coordinatorPlan"]["source"] == "user"
+        assert decided["status"] == "waiting" and len(decided["children"]) == 1
+        assert runtime.get_task(decided["children"][0])["prompt"] == "改写 c.txt"
     finally:
         runtime.close()

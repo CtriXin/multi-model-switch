@@ -22,9 +22,12 @@ from .errors import WebError
 from .runtime import private_json
 from .bot_memory import BotMemoryStore, BotMemoryError
 from .bot_communications import BotCommunications
-from .bot_coordinator import plan_for
+from .bot_coordinator import plan_for, direct_plan, build_planner_prompt, parse_model_plan, sanitize_plan
 
 TERMINAL = {"completed", "failed", "cancelled", "interrupted"}
+PLAN_UNDO_SECONDS = 30
+PLANNER_MODES = {"model", "keywords", "off"}
+ORCHESTRATION_POLICIES = {"direct-first", "plan-approve", "off"}
 MAX_TASKS = 2000
 MAX_MESSAGES = 500
 PIXEL_AVATAR_IDS = ("round", "cat", "puff", "cube", "leaf", "ghost", "rocket", "star", "bean", "bot")
@@ -141,6 +144,7 @@ class BotRuntime(BotCommunications):
                 bot.setdefault("autoCompact", True)
                 bot.setdefault("compactAtPercent", 70)
                 bot.setdefault("orchestrationPolicy", "direct-first")
+                bot.setdefault("planner", "model")
         except (OSError, ValueError, KeyError, TypeError):
             self._load_error = "Bot 记录无法读取，原文件已保留；请检查记录后再写入。"
 
@@ -264,7 +268,12 @@ class BotRuntime(BotCommunications):
                    "createdAt": now(), "updatedAt": now()}
             bot.update({"memoryEnabled": True, "memoryBudgetTokens": 2000,
                         "autoCompact": True, "compactAtPercent": 70,
-                        "orchestrationPolicy": "direct-first"})
+                        "orchestrationPolicy": payload.get("orchestrationPolicy", "direct-first"),
+                        "planner": payload.get("planner", "model")})
+            if bot["orchestrationPolicy"] not in ORCHESTRATION_POLICIES:
+                raise WebError("INVALID_REQUEST", "orchestrationPolicy 必须是 direct-first、plan-approve 或 off。", 400)
+            if bot["planner"] not in PLANNER_MODES:
+                raise WebError("INVALID_REQUEST", "planner 必须是 model、keywords 或 off。", 400)
             if type(bot["wakeEnabled"]) is not bool:
                 raise WebError("INVALID_REQUEST", "wakeEnabled 必须是布尔值。", 400)
             bot.update(self.executor.validate(bot))
@@ -316,6 +325,14 @@ class BotRuntime(BotCommunications):
                         if type(payload[key]) is not bool:
                             raise WebError("INVALID_REQUEST", f"{key} 必须是布尔值。", 400)
                         updated[key] = payload[key]
+            if "planner" in payload:
+                if payload["planner"] not in PLANNER_MODES:
+                    raise WebError("INVALID_REQUEST", "planner 必须是 model、keywords 或 off。", 400)
+                updated["planner"] = payload["planner"]
+            if "orchestrationPolicy" in payload:
+                if payload["orchestrationPolicy"] not in ORCHESTRATION_POLICIES:
+                    raise WebError("INVALID_REQUEST", "orchestrationPolicy 必须是 direct-first、plan-approve 或 off。", 400)
+                updated["orchestrationPolicy"] = payload["orchestrationPolicy"]
             updated.update(self.executor.validate(updated))
             if updated["workspaceId"] != bot["workspaceId"] or updated["presetId"] != bot["presetId"]:
                 updated["sessionId"] = None
@@ -557,7 +574,7 @@ class BotRuntime(BotCommunications):
             task = self._task(task_id)
             if task.get("orphanAlive"):
                 raise WebError("BOT_PREVIOUS_PROCESS_ALIVE", "上次执行进程仍存在，先检查该会话；不会重复启动或终止不明进程。", 409)
-            if task["status"] in {"scheduled", "interrupted", "failed", "waiting"} and task.get("waitReason") not in {"approval", "connection", "stopping"}:
+            if task["status"] in {"scheduled", "interrupted", "failed", "waiting"} and task.get("waitReason") not in {"approval", "connection", "stopping", "plan-approval"}:
                 if task.get("waitReason") == "children" and any(self._task(c)["status"] not in TERMINAL for c in task["children"]):
                     return self._view(task)
                 task.update(status="queued", waitReason=None, runAt=None, error=None, acceptedAt=None,
@@ -662,10 +679,174 @@ class BotRuntime(BotCommunications):
         children = [self._task(t) for t in task["children"]]
         if any(c["status"] not in TERMINAL for c in children):
             return False
-        replies = "\n\n".join(f"{c['id']} [{c['status']}] {c.get('result') or c.get('error') or ''}" for c in children)
+        plan = task.get("coordinatorPlan") or {}
+        if task.get("planResolved") and plan.get("mode") == "delegate":
+            # A pending step is still waiting on a sibling dependency; the
+            # parent resumes only when the plan has nothing left to dispatch.
+            if any(step.get("status") == "pending" for step in plan.get("steps", [])):
+                return False
+        replies = "\n\n".join(
+            f"{c['id']} [{c['status']}] " + str((c.get("outcome") or {}).get("summary") or c.get("result") or c.get("error") or "")
+            for c in children)
         task.update(status="queued", waitReason=None, childrenChanged=False, resumeText="子任务均已回传，请检查成果并总结。\n" + replies)
         self._message(task["id"], "system", "子任务已回传，自动唤醒发起 Bot。")
         return True
+
+    def plan_task(self, task, bot):
+        """Decide and persist the durable plan before a task's session starts.
+
+        planner=model (default) makes one short throwaway call on the task
+        Bot's own preset with a hard 20s budget; parse failure, unavailability
+        or timeout falls back to the deterministic keyword plan. The decision
+        is persisted exactly once (planResolved) and never replanned.
+        """
+        with self._lock:
+            live = self._task(task["id"])
+            if live.get("planResolved"):
+                return deepcopy(live.get("coordinatorPlan"))
+            prompt = live["prompt"]
+            planner = bot.get("planner", "model")
+            policy = bot.get("orchestrationPolicy", "direct-first")
+            bots_snapshot = deepcopy(list(self._bots.values()))
+        memory_summary = ""
+        if planner == "model" and policy != "off" and bot.get("memoryEnabled", True):
+            try:
+                notes = self.memory.get(bot["id"], query=prompt).get("notes", [])
+                memory_summary = "\n".join(str(note.get("content") or "") for note in notes[:5])[:2000]
+            except Exception:
+                memory_summary = ""
+        if planner == "off" or policy == "off":
+            plan = direct_plan(bot, "已按设置关闭自动分工，由当前 Bot 直接完成。", "off")
+        elif planner == "keywords" or not hasattr(self.executor, "plan"):
+            plan = plan_for(prompt, bot, bots_snapshot)
+            plan["source"] = "keywords"
+        else:
+            plan = None
+            try:
+                reply = self.executor.plan(build_planner_prompt(prompt, bot, bots_snapshot, memory_summary), bot)
+                if reply:
+                    plan = parse_model_plan(reply, bot, bots_snapshot)
+            except Exception:
+                plan = None
+            if plan is None:
+                plan = plan_for(prompt, bot, bots_snapshot)
+                plan["source"] = "fallback"
+        plan["status"] = "proposed" if plan["mode"] == "delegate" and policy == "plan-approve" else "auto"
+        with self._lock:
+            live = self._task(task["id"])
+            if live.get("planResolved"):
+                return deepcopy(live.get("coordinatorPlan"))
+            live.update(coordinatorPlan=plan, executionMode=plan["mode"], planResolved=True,
+                        planDecidedAt=now(), orchestrationPolicy=policy, updatedAt=now())
+            self._persist()
+            return deepcopy(plan)
+
+    def _advance_plan(self, task):
+        """Dispatch plan steps whose dependencies are done. Never recreates a
+        step that already has a taskId; reconciles with existing children so a
+        restart cannot duplicate a dispatched step. Returns changed."""
+        plan = task.get("coordinatorPlan") or {}
+        if plan.get("mode") != "delegate" or not task.get("planResolved"):
+            return False
+        steps = plan.get("steps") or []
+        by_id = {step.get("id"): step for step in steps}
+        changed = False
+        children = [self._tasks[c] for c in task.get("children", []) if c in self._tasks]
+        for step in steps:
+            if step.get("taskId"):
+                child = self._tasks.get(step["taskId"])
+                if child and child["status"] in TERMINAL:
+                    state = "done" if child["status"] == "completed" else "failed"
+                    if step.get("status") != state:
+                        step["status"] = state
+                        changed = True
+                continue
+            match = next((c for c in children if c["botId"] == step.get("botId") and c.get("prompt") == step.get("goal")), None)
+            if match:
+                step["taskId"] = match["id"]
+                step["status"] = "dispatched" if match["status"] not in TERMINAL else ("done" if match["status"] == "completed" else "failed")
+                changed = True
+        for step in steps:
+            if step.get("status") == "pending" and any(
+                    by_id.get(dep, {}).get("status") in {"failed", "blocked"} for dep in step.get("dependsOn", [])):
+                step["status"] = "blocked"
+                changed = True
+        for step in steps:
+            if step.get("status") != "pending":
+                continue
+            if any(by_id.get(dep, {}).get("status") != "done" for dep in step.get("dependsOn", [])):
+                continue
+            try:
+                child = self.create_task({"botId": step["botId"], "prompt": step["goal"], "parentTaskId": task["id"],
+                                          "requestId": f"plan:{task['id']}:{step['id']}"})
+            except WebError as exc:
+                step["status"] = "failed"
+                step["error"] = exc.message
+                changed = True
+                continue
+            step["taskId"] = child["id"]
+            step["status"] = "dispatched"
+            if step.get("presetId"):
+                self._tasks[child["id"]]["presetIdOverride"] = step["presetId"]
+            changed = True
+        if changed:
+            task["updatedAt"] = now()
+        return changed
+
+    def plan_action(self, task_id, payload):
+        """User decision on a visible plan: approve, reject or replace."""
+        action = payload.get("action")
+        if action not in {"approve", "reject", "replace"}:
+            raise WebError("INVALID_REQUEST", "计划操作必须是 approve、reject 或 replace。", 400)
+        with self._lock:
+            task = self._task(task_id)
+            plan = task.get("coordinatorPlan") or {}
+            if not task.get("planResolved") or plan.get("mode") != "delegate":
+                raise WebError("PLAN_NOT_ACTIONABLE", "这个任务没有可操作的协作计划。", 409)
+            status = plan.get("status")
+            if status in {"rejected"}:
+                raise WebError("PLAN_NOT_ACTIONABLE", "计划已处理，不能重复操作。", 409)
+            if action == "replace":
+                candidate = sanitize_plan(payload.get("plan"), self._bot(task["botId"]), list(self._bots.values()), "user")
+                if not candidate:
+                    raise WebError("INVALID_PLAN", "替换计划无效：子任务必须指向其它已存在的 Bot 并带有明确目标。", 400)
+                if status != "proposed":
+                    raise WebError("PLAN_NOT_ACTIONABLE", "计划已开始执行，请先撤回再替换。", 409)
+                task["coordinatorPlan"] = candidate
+                plan = candidate
+            if action == "reject":
+                if status == "proposed":
+                    pass
+                elif status in {"auto", "approved"}:
+                    decided = parse_time(task.get("planExecutedAt") or task.get("planDecidedAt"))
+                    elapsed = (datetime.now(timezone.utc) - datetime.fromisoformat(decided)).total_seconds() if decided else PLAN_UNDO_SECONDS + 1
+                    if elapsed > PLAN_UNDO_SECONDS:
+                        raise WebError("PLAN_UNDO_EXPIRED", "计划已开始执行超过 30 秒，不能再撤回；可在任务里取消子任务。", 409)
+                    for child_id in list(task.get("children", [])):
+                        if self._tasks.get(child_id) and self._tasks[child_id]["status"] not in TERMINAL:
+                            self.cancel_task(child_id)
+                    task.update(children=[], childrenChanged=False)
+                plan.update(mode="direct", status="rejected")
+                task.update(coordinatorPlan=plan, executionMode="direct", status="queued", waitReason=None,
+                            acceptedAt=None, updatedAt=now(),
+                            resumeText="用户拒绝了分工计划，请由你自己直接完成任务；不要重复创建已取消的子任务。")
+                self._message(task_id, "system", "已拒绝分工计划，由当前 Bot 直接执行。")
+                self._persist()
+                return self._view(task)
+            plan["status"] = "approved"
+            task["coordinatorPlan"] = plan
+            self._advance_plan(task)
+            task["planExecutedAt"] = now()
+            if task.get("children"):
+                task.update(status="waiting", waitReason="children", updatedAt=now())
+                self._bot(task["botId"])["status"] = "idle"
+                self._message(task_id, "system", "分工计划已确认，子任务开始执行。")
+            else:
+                task.update(coordinatorPlan={**plan, "mode": "direct"}, executionMode="direct",
+                            status="queued", waitReason=None, updatedAt=now(),
+                            resumeText="计划中没有可执行的子任务，请由你自己直接完成任务。")
+            self._persist()
+            return self._view(task)
 
     def _loop(self):
         while not self._stop.is_set():
@@ -708,7 +889,8 @@ class BotRuntime(BotCommunications):
             if not self.can_dispatch():
                 return
             changed = self._deliver_mailbox()
-            for task in self._tasks.values():
+            # _advance_plan may create child tasks; iterate over a snapshot.
+            for task in list(self._tasks.values()):
                 if task.get("orphanAlive") and not self.executor.orphan_alive(task):
                     task["orphanAlive"] = False
                     changed = True
@@ -718,8 +900,9 @@ class BotRuntime(BotCommunications):
                         self._message(task["id"], "system", "到达计划时间，自动唤醒。")
                         changed = True
                 if task["status"] == "waiting" and task.get("waitReason") == "children":
+                    changed = self._advance_plan(task) or changed
                     changed = self._resume_children(task) or changed
-            busy = [t for t in self._tasks.values() if t.get("orphanAlive") or t["status"] in {"starting", "running"} or (t["status"] == "waiting" and t.get("waitReason") not in {"children", "manual", "user"})]
+            busy = [t for t in self._tasks.values() if t.get("orphanAlive") or t["status"] in {"starting", "running"} or (t["status"] == "waiting" and t.get("waitReason") not in {"children", "manual", "user", "plan-approval"})]
             busy_bots = {t["botId"] for t in busy}
             busy_workspaces = {self._bot(t["botId"])["workspaceId"] for t in busy}
             queued = sorted(
@@ -761,6 +944,47 @@ class BotRuntime(BotCommunications):
         try:
             if not self._endpoint:
                 raise WebError("BOT_ENDPOINT_UNAVAILABLE", "Bot 服务尚未开始监听。", 409)
+            # The plan gate runs in this worker thread (never inside the
+            # scheduler lock) and is bounded by the planner timeout; a
+            # planning failure must never block the task itself.
+            if not task.get("planResolved"):
+                try:
+                    self.plan_task(task, bot)
+                except Exception:
+                    with self._lock:
+                        live = self._task(task["id"])
+                        if not live.get("planResolved"):
+                            plan = direct_plan(bot, "计划判定失败，由当前 Bot 直接完成。", "fallback")
+                            plan["status"] = "auto"
+                            live.update(coordinatorPlan=plan, executionMode="direct",
+                                        planResolved=True, planDecidedAt=now())
+                            self._persist()
+            with self._lock:
+                live = self._task(task["id"])
+                if live["status"] != "starting":
+                    return
+                plan = deepcopy(live.get("coordinatorPlan") or {})
+                if (plan.get("mode") == "delegate" and not live.get("planExecutedAt")
+                        and live.get("orchestrationPolicy", "direct-first") != "off"):
+                    if plan.get("status") == "proposed":
+                        live.update(status="waiting", waitReason="plan-approval", updatedAt=now())
+                        self._bot(bot["id"])["status"] = "idle"
+                        self._message(live["id"], "system", "分工计划已生成，等待你确认后开始。")
+                        self._persist()
+                        return
+                    self._advance_plan(live)
+                    live["planExecutedAt"] = now()
+                    if live.get("children"):
+                        live.update(status="waiting", waitReason="children", updatedAt=now())
+                        self._bot(bot["id"])["status"] = "idle"
+                        self._persist()
+                        return
+                    # No step could be dispatched: the owner carries on directly.
+                    live["executionMode"] = "direct"
+                    self._persist()
+                task = deepcopy(live)
+                if task.get("presetIdOverride"):
+                    bot = {**bot, "presetId": task["presetIdOverride"]}
             context = self.root / "contexts" / f"{task['id']}.json"
             private_json(context, {"url": self._endpoint, "token": task["token"], "taskId": task["id"], "botId": bot["id"]})
             with self._lock:

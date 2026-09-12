@@ -1,0 +1,165 @@
+/* Bot 分工计划块（T2）。跟随 Pilot token；T1 合并后对齐 --bot-gutter。 */
+.bot-plan {
+  margin: 4px 0 4px var(--bot-gutter, 40px);
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 0.9375rem;
+}
+.bot-plan-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.bot-plan-title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.bot-plan-reason {
+  color: var(--ink);
+}
+.bot-plan-tag {
+  font-size: 0.6875rem;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+.bot-plan-steps {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.bot-plan-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.bot-plan-step-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex: none;
+}
+.bot-plan-step-dispatched .bot-plan-step-dot {
+  background: var(--accent);
+}
+.bot-plan-step-done .bot-plan-step-dot {
+  background: var(--success);
+}
+.bot-plan-step-failed .bot-plan-step-dot,
+.bot-plan-step-blocked .bot-plan-step-dot {
+  background: var(--danger);
+}
+.bot-plan-step-avatar {
+  width: 20px;
+  height: 20px;
+  flex: none;
+}
+.bot-plan-step-goal {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+.bot-plan-step-goal span {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bot-plan-step-status {
+  font-size: 0.75rem;
+  color: var(--muted);
+  flex: none;
+}
+.bot-plan-detail {
+  margin-top: 8px;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+.bot-plan-detail summary {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.bot-plan-detail[open] .bot-plan-chevron {
+  transform: rotate(90deg);
+}
+.bot-plan-detail ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+.bot-plan-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.bot-plan-approve,
+.bot-plan-reject {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.8125rem;
+  border-radius: 10px;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: background 160ms ease-out, border-color 160ms ease-out;
+}
+.bot-plan-approve {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--inverse);
+}
+.bot-plan-approve:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+.bot-plan-reject {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+}
+.bot-plan-reject:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.bot-plan-approve:focus-visible,
+.bot-plan-reject:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.bot-plan-approve:disabled,
+.bot-plan-reject:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.bot-plan-error {
+  margin: 8px 0 0;
+  font-size: 0.8125rem;
+  color: var(--danger);
+}
+.bot-spin {
+  animation: bot-plan-spin 0.9s linear infinite;
+}
+@keyframes bot-plan-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bot-spin {
+    animation: none;
+  }
+}
