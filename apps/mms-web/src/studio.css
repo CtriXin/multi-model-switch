@@ -431,6 +431,8 @@
   gap: 14px;
   border-top-color: var(--line);
 }
+.sidebar-footer.has-bots-entry { flex-wrap: wrap; row-gap: 2px; }
+.sidebar-footer.has-bots-entry .bot-entry { flex: 0 0 100%; white-space: nowrap; }
 .settings-entry {
   display: flex;
   align-items: center;

@@ -207,4 +207,4 @@ export interface ConfigPreview {
   changes: { label: string; before: string; after: string }[];
   warnings: string[];
 }
-export type Page = "new" | "models" | "session";
+export type Page = "new" | "models" | "bots" | "session";
