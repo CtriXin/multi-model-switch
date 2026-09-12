@@ -20,13 +20,13 @@ import { SkillPicker } from "./SkillPicker";
 import type { Skill } from "./SkillPicker";
 import { request } from "./api";
 import { SKILL_PREFERENCES_EVENT } from "./SkillSources";
-import type { Attachment, FileSelection } from "./types";
+import type { Attachment, FileSelection, Workspace } from "./types";
 import { FilesPanel } from "./FilesPanel";
 import { localFilePaths } from "./local-file-paths";
 import { requiredSkillMatches } from "./recipe-core";
 import { sendsOnEnter } from "./composer-keys";
 const noRequiredSkills: string[] = [];
-import { droppedItems } from "./dropped-items";
+import { droppedItems, folderChildren } from "./dropped-items";
 import { WorkspaceDialog } from "./LaunchOptions";
 
 export interface MessageExtras {
@@ -112,7 +112,7 @@ export function Composer({
   const [skillsReady, setSkillsReady] = useState(false);
   const requiredSkillKey = requiredSkillNames.join("|");
   const [skillsOpen, setSkillsOpen] = useState(false);
-  const [folderDrops, setFolderDrops] = useState<string[]>([]);
+  const [folderDrops, setFolderDrops] = useState<{ name: string; matches: Workspace[] }[]>([]);
   function toggleSkill(id: string) {
     if (lock.current) return;
     setSelectedSkills((old) =>
@@ -437,6 +437,28 @@ export function Composer({
       element?.setSelectionRange(before.length + inserted.length, before.length + inserted.length);
     });
   }
+  /**
+   * A dropped folder carries no path, so ask the local service to find it by
+   * name and contents. Only when that is ambiguous does the picker open.
+   */
+  async function referenceFolders(entries: FileSystemDirectoryEntry[]) {
+    const unresolved: { name: string; matches: Workspace[] }[] = [];
+    for (const entry of entries) {
+      let found: { matches: Workspace[]; sure: boolean } | undefined;
+      try {
+        found = await request<{ matches: Workspace[]; sure: boolean }>("/workspaces/locate", {
+          name: entry.name,
+          children: await folderChildren(entry),
+        });
+      } catch {
+        found = undefined;
+      }
+      if (found?.sure && found.matches[0]) await addLocalFiles([found.matches[0].path]);
+      else unresolved.push({ name: entry.name, matches: found?.matches || [] });
+    }
+    setFolderDrops(unresolved);
+  }
+
   async function addLocalFiles(paths?: string[]) {
     if (uploadLock.current) return;
     uploadLock.current = true;
@@ -590,7 +612,8 @@ export function Composer({
   return (
     <>
       {!!folderDrops.length && <WorkspaceDialog key={folderDrops.length}
-        initialQuery={folderDrops[0]} reference={async path => { await addLocalFiles([path]); }}
+        initialQuery={folderDrops[0].name} suggestions={folderDrops[0].matches}
+        reference={async path => { await addLocalFiles([path]); }}
         close={() => setFolderDrops(old => old.slice(1))} />}
       {skillsOpen && (
         <SkillPicker
@@ -655,7 +678,7 @@ export function Composer({
             const dropped = droppedItems(e.dataTransfer);
             // Finish ordinary imports before opening a directory picker, so its
             // input cannot race an upload or overwrite the current draft.
-            void upload(dropped.files).then(() => setFolderDrops(dropped.folders.slice(0, 8)));
+            void upload(dropped.files).then(() => referenceFolders(dropped.folders.slice(0, 8)));
           }
         }}
       >

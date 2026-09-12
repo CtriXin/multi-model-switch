@@ -305,7 +305,33 @@ class WebApplication:
             return self._sessions().get_session(parts[1])
         raise WebError("NOT_FOUND", "找不到这个接口。", 404)
 
+    # POSTs that change nothing and can take seconds: a native folder dialog the
+    # user may leave open, and two filesystem sweeps. Holding the mutation lock
+    # through those would stop every other POST — sending a message, stopping a
+    # session, confirming an update — for as long as they run. They only read
+    # state that is written by atomic replace, so a concurrent write is seen
+    # whole or not at all.
+    _UNLOCKED_POSTS = (["workspaces", "choose"], ["workspaces", "search"], ["workspaces", "locate"])
+
+    def _post_readonly(self, parts: list[str], payload: dict) -> dict:
+        if parts == ["workspaces", "choose"]:
+            import subprocess
+            import sys
+            if sys.platform != "darwin":
+                raise WebError("FOLDER_PICKER_UNAVAILABLE", "请直接填写电脑上的文件夹路径。", 409)
+            result = subprocess.run(["osascript", "-e", 'POSIX path of (choose folder with prompt "选择 MMS 的工作文件夹")'], capture_output=True, text=True, timeout=120)
+            return {"path": result.stdout.strip() if result.returncode == 0 else ""}
+        if not self.catalog:
+            raise WebError("CAPABILITY_UNAVAILABLE", "本地服务尚未连接。", 409)
+        if parts == ["workspaces", "search"]:
+            from .workspace_search import search_workspaces
+            return search_workspaces(self.catalog, payload)
+        from .workspace_search import locate_folder
+        return locate_folder(self.catalog, payload)
+
     def post(self, parts: list[str], payload: dict) -> dict:
+        if parts in self._UNLOCKED_POSTS:
+            return self._post_readonly(parts, payload)
         with self.mutation_lock:
             if parts == ["update", "commit"]:
                 if not self.probation_token or not secrets.compare_digest(str(payload.get("token") or ""), self.probation_token):
@@ -366,18 +392,6 @@ class WebApplication:
             return self._sessions().files.choose_local(payload)
         if parts in (["files", "tree"], ["files", "read"], ["files", "git"]):
             return getattr(self._sessions().files, parts[1])(payload)
-        if parts == ["workspaces", "choose"]:
-            import subprocess
-            import sys
-            if sys.platform != "darwin":
-                raise WebError("FOLDER_PICKER_UNAVAILABLE", "请直接填写电脑上的文件夹路径。", 409)
-            result = subprocess.run(["osascript", "-e", 'POSIX path of (choose folder with prompt "选择 MMS 的工作文件夹")'], capture_output=True, text=True, timeout=120)
-            return {"path": result.stdout.strip() if result.returncode == 0 else ""}
-        if parts == ["workspaces", "search"]:
-            if not self.catalog:
-                raise WebError("CAPABILITY_UNAVAILABLE", "本地服务尚未连接。", 409)
-            from .workspace_search import search_workspaces
-            return search_workspaces(self.catalog, payload)
         if parts == ["workspaces"]:
             if not self.catalog:
                 raise WebError("CAPABILITY_UNAVAILABLE", "本地服务尚未连接。", 409)
