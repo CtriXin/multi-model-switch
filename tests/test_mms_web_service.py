@@ -91,6 +91,7 @@ def test_start_status_url_stop_cycle(home):
         _stop_everything(home, port)
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows binds one Pilot per selected port range")
 def test_stop_only_touches_its_own_state_root_unless_all(home):
     port = _free_port_base()
     a, b = home / "a", home / "b"

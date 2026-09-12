@@ -59,8 +59,8 @@ def test_failed_or_aborted_turn_does_not_look_successful(make_driver, stop_reaso
     assert sink.activities[-1]["phase"] == "idle"
 
 
-def test_waiting_precedence_terminal_cleanup_and_restart(tmp_path):
-    service, drivers = make_service(tmp_path)
+def test_waiting_precedence_terminal_cleanup_and_restart(tmp_path, monkeypatch):
+    service, drivers = make_service(tmp_path, monkeypatch=monkeypatch)
     try:
         detail = service.launch({"requestId":"status-service", "presetId":"p", "workspaceId":"w", "prompt":"work"})
         sid = detail["session"]["id"]

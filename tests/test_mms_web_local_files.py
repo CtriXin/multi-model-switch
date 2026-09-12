@@ -1,5 +1,6 @@
 import base64
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -21,7 +22,7 @@ def test_large_original_is_referenced_not_copied_or_inlined(tmp_path):
     assert {p.name for p in (files.root / item['id']).iterdir()} == {'meta.json'}
     images, items, prompt = files.prepare([item['id']], '', [])
     assert images == [] and items == [item] and len(prompt) < 1000
-    assert str(path) in prompt
+    assert json.dumps(str(path))[1:-1] in prompt
     path.write_text('{"updated":true}')
     assert files.preview_attachment(item['id'])['content'] == '{"updated":true}'
     assert files.prepare([item['id']], '', [])[1][0]['size'] == path.stat().st_size
@@ -68,9 +69,10 @@ def test_dropped_file_becomes_reusable_project_path_without_inlining(tmp_path):
     path = Path(first['localPath'])
     assert path.is_relative_to(project / '.pilot/attachments')
     assert path.read_bytes() == data and path != Path(second['localPath'])
-    assert path.stat().st_mode & 0o777 == 0o600
+    if os.name != "nt":
+        assert path.stat().st_mode & 0o777 == 0o600
     images, _, prompt = files.prepare([first['id']], 'project', [])
-    assert not images and str(path) in prompt and len(prompt) < 1000
+    assert not images and json.dumps(str(path))[1:-1] in prompt and len(prompt) < 1000
     # A later session can refer to the same ordinary file after state is reopened.
     reopened = FileService(catalog, tmp_path / 'later-state')
     later = reopened.reference_local({'paths': [str(path)]})['attachments'][0]
@@ -201,7 +203,8 @@ def test_windows_import_branch_is_atomic_and_leaves_no_partial_files(tmp_path, m
     assert target.read_bytes() == data
     assert target.parent == project / '.pilot' / 'attachments'
     assert not list(target.parent.glob('.import-*'))  # temp file renamed away
-    assert target.stat().st_mode & 0o777 == 0o600
+    if os.name != "nt":
+        assert target.stat().st_mode & 0o777 == 0o600
 
 
 def test_windows_import_branch_removes_temp_file_when_rename_fails(tmp_path, monkeypatch):
