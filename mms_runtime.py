@@ -110,6 +110,11 @@ def resolve_cli_binary(command_name, env=None, real_home=None):
         if not candidate:
             continue
         path_value = candidate if os.path.isabs(candidate) else shutil.which(candidate, path=search_path)
+        # The repository Pi wrapper is a POSIX shell script. Windows can
+        # discover a real ``pi.cmd`` on PATH, but CreateProcess cannot execute
+        # the ``.sh`` wrapper directly.
+        if os.name == "nt" and str(path_value or "").lower().endswith(".sh"):
+            continue
         if path_value and os.path.isfile(path_value) and os.access(path_value, os.X_OK):
             return os.path.abspath(path_value)
     return ""
