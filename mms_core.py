@@ -1199,8 +1199,12 @@ _REASONING_MODEL_HINTS = (
 _TOOL_USE_FAMILIES = {"Claude", "GPT", "Gemini", "Qwen", "Kimi", "GLM", "MiniMax"}
 _VISION_CAPABLE_MODEL_NAMES = {
     "mimo-v2.5",
+    # A `[1m]` selector is the same model as its base name, so it must not
+    # disagree about reading images.
+    "mimo-v2.5[1m]",
     "mimo-v2-omni",
     "k3",
+    "k3[1m]",
     "kimi-k3",
     "k2.6",
     "k2.6-code-preview",

@@ -3568,6 +3568,29 @@ def _extract_user_text(content):
     return ""
 
 
+def _lb_debug_user_log_path(gateway_home):
+    """Map a claude-gateway HOME back to the real user's ``lb_debug.log``.
+
+    A gateway session HOME is ``<home>/.config/<root>/claude-gateway/s/<pid>``.
+    Only the legacy ``mms`` spelling was recognised, so a HOME under the current
+    ``mms-next`` root produced ``<home>/.config/mms-next/.config/mms-next``.
+    The log always belongs next to the single current config root.
+    """
+    marker = f"{os.sep}claude-gateway{os.sep}"
+    home = str(gateway_home or "")
+    if marker not in home:
+        return ""
+    user_home = home.split(marker, 1)[0]
+    for root_name in ("mms-next", "mms"):
+        suffix = os.sep + ".config" + os.sep + root_name
+        if user_home.endswith(suffix):
+            user_home = user_home[: -len(suffix)]
+            break
+    if not user_home:
+        return ""
+    return os.path.join(user_home, ".config", "mms-next", "lb_debug.log")
+
+
 class _GatewayBridgeHandler(BaseHTTPRequestHandler):
     """Proxy bridge: accepts /v1/messages and /v1/responses from Claude Code,
     translates /v1/responses → /v1/messages, then forwards to the real gateway."""
@@ -3649,18 +3672,9 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
 
         # ── debug: 记录每次 bridge 收到的请求 ──
         _lb_debug_paths = [os.path.join(resolve_mms_config_dir(), "lb_debug.log")]
-        _real_home = os.environ.get("HOME", "")
-        _gateway_marker = f"{os.sep}.config{os.sep}mms{os.sep}claude-gateway{os.sep}"
-        if _gateway_marker in _real_home:
-            _user_home = _real_home.split(_gateway_marker, 1)[0]
-            if _user_home:
-                _lb_debug_paths.append(os.path.join(_user_home, ".config", "mms-next", "lb_debug.log"))
-        elif f"{os.sep}claude-gateway{os.sep}" in _real_home:
-            _user_home = _real_home.split(f"{os.sep}claude-gateway{os.sep}", 1)[0]
-            if _user_home.endswith(f"{os.sep}.config{os.sep}mms"):
-                _user_home = os.path.dirname(os.path.dirname(_user_home))
-            if _user_home:
-                _lb_debug_paths.append(os.path.join(_user_home, ".config", "mms-next", "lb_debug.log"))
+        _user_lb_debug = _lb_debug_user_log_path(os.environ.get("HOME", ""))
+        if _user_lb_debug:
+            _lb_debug_paths.append(_user_lb_debug)
         try:
             light_model = getattr(self.server, "light_model", None)
             medium_model = getattr(self.server, "medium_model", None)
