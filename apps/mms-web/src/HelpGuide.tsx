@@ -7,6 +7,7 @@ import type { GuideAction } from "./guide-content";
 import "./guide.css";
 import "./updates.css";
 import { isPreview, request } from "./api";
+import { withoutUpgradeSection } from "./release-notes";
 import { previewUpdateHistory } from "./preview";
 import type { UpdateHistoryItem } from "./types";
 import { parseSemver, compareSemverDesc } from "./semver-sort";
@@ -197,7 +198,7 @@ export function HelpGuide({ ready, modelReady, open, setOpen, hasSession, naviga
                             )}
                             <div className="update-notes-body">
                               <Markdown remarkPlugins={[remarkGfm]} skipHtml>
-                                {item.notes}
+                                {item.upgradeNotice ? withoutUpgradeSection(item.notes) : item.notes}
                               </Markdown>
                             </div>
                           </div>
