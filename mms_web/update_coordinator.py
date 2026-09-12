@@ -50,6 +50,12 @@ class UpdateCoordinator:
                 return self.app.updates.status()
             latest = self.app.updates.status()
             target = payload.get('target')
+            if (latest.get('upgradeGuidance') or {}).get('required'):
+                raise WebError(
+                    'UPDATE_REQUIRES_MANUAL_STEP',
+                    latest['upgradeGuidance'].get('reason') or '请先按页面提示运行安装命令。',
+                    409,
+                )
             if not self.available() or not latest['updateAvailable'] or target != latest['latest'].get('tag'):
                 raise WebError('UPDATE_UNAVAILABLE', '请先检查更新，并选择可用的稳定版本。', 409)
             self._cancel.clear()

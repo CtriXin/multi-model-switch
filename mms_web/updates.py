@@ -97,7 +97,9 @@ def fetch_release():
     if not isinstance(tag, str) or not TAG.fullmatch(tag) or value.get('draft') or value.get('prerelease'):
         raise ValueError('invalid stable release')
     body = str(value.get('body') or '')
+    from .update_guidance import release_policy
     return {'tag': tag, 'notes': body[:16000], 'upgradeNotice': upgrade_notice(body),
+            'upgradePolicy': release_policy(body),
             'publishedAt': str(value.get('published_at') or '')[:80],
             'url': f'https://github.com/{REPO}/releases/tag/{tag}'}
 
@@ -127,6 +129,9 @@ class UpdateService:
         # afterwards, and whether the command line moves with it.
         from .update_install import describe
         installation = describe(self.coordinator.source) if self.coordinator else {}
+        from .update_guidance import upgrade_guidance
+        guidance = upgrade_guidance(VERSION, latest if available else {}, installation=installation,
+                                    config_root=getattr(self.app, 'config_root', None))
         return {'currentVersion': VERSION, 'latest': latest, 'updateAvailable': available,
                 'whatsNew': self.whats_new(),
                 'enabled': self.enabled(), 'checking': self._checking,
@@ -134,7 +139,8 @@ class UpdateService:
                 'error': str(cache.get('error') or ''), 'operation': operation,
                 'port': self.coordinator.port() if self.coordinator else 0,
                 'installation': installation,
-                'canUpgrade': bool(available and self.coordinator and self.coordinator.available())}
+                'upgradeGuidance': guidance,
+                'canUpgrade': bool(available and not guidance and self.coordinator and self.coordinator.available())}
 
     def whats_new(self):
         """What this version changed, for the release the user is now running."""

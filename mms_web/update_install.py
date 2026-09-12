@@ -90,7 +90,7 @@ def describe(source: Path | str) -> dict:
         return {"updatesCli": False, "root": str(root),
                 "reason": "这是源码检出，更新不会改工作树；命令行请用 git 更新。"}
     if _is_staged_copy(root):
-        return {"updatesCli": False, "root": str(root),
+        return {"updatesCli": False, "root": str(root), "manualInstallRequired": True,
                 "reason": "当前服务跑的是上一次更新的暂存副本，不是安装目录；请重新安装一次，之后更新就会同时换掉命令行。"}
     if not _writable(root):
         return {"updatesCli": False, "root": str(root),
