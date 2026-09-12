@@ -306,6 +306,9 @@ class WebApplication:
         if parts == ["update", "identity"]:
             from .update_handoff import path_identity, session_inventory
             return {"version": VERSION, "processId": os.getpid(), "instance": self.instance, "identity": path_identity(Path(__file__).resolve().parent.parent, self.state_root, self.config_root, Path.cwd()), "sessions": session_inventory(self.sessions)}
+        if parts == ["update", "history"]:
+            from .updates import release_history
+            return {"releases": release_history()}
         if parts == ["update"]:
             return self.updates.status()
         if parts == ["remote-access"]:
