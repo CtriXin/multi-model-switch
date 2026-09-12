@@ -2779,10 +2779,21 @@ fi
 echo ""
 mkdir -p "$BIN_DIR"
 
-# 创建 primary symlink；legacy ccs / mmc 已下线，仅保留 mms / mmf / mmslogs 入口。
+# 创建公开 primary symlink。普通 stable 安装只提供 mms；mmf 是维护者的
+# 本地 dev 入口，只有用户明确安装 dev/canary 时才由安装器创建。
 ln -sf "$MMS_HOME/mms" "$BIN_DIR/mms"
 [ -f "$MMS_HOME/mms-web" ] && ln -sf "$MMS_HOME/mms-web" "$BIN_DIR/mms-web"
-[ -f "$MMS_HOME/mmf" ] && ln -sf "$MMS_HOME/mmf" "$BIN_DIR/mmf"
+if [ "$INSTALL_CHANNEL" = "dev" ] || [ "$INSTALL_CHANNEL" = "canary" ]; then
+    [ -f "$MMS_HOME/mmf" ] && ln -sf "$MMS_HOME/mmf" "$BIN_DIR/mmf"
+elif [ -L "$BIN_DIR/mmf" ]; then
+    mmf_target="$(readlink "$BIN_DIR/mmf" 2>/dev/null || true)"
+    case "$mmf_target" in
+        "$MMS_HOME/mmf")
+            rm -f "$BIN_DIR/mmf"
+            echo "• $(t "已移除旧的 MMS 公共 mmf 链接；本地 mmf 保持不变" "Removed the old MMS-owned public mmf link; local mmf entries are untouched"): $BIN_DIR/mmf"
+            ;;
+    esac
+fi
 # Remove stale MMS-owned legacy ccs/mmc artifacts from previous installs without touching unrelated user commands.
 rm -f "$MMS_HOME/mmc"
 if [ -L "$BIN_DIR/mmc" ]; then
@@ -2813,7 +2824,7 @@ fi
 if [ -e "$MMS_HOME/mmslogs" ]; then
     ln -sf "$MMS_HOME/mmslogs" "$BIN_DIR/mmslogs"
 fi
-if [ -f "$MMS_HOME/mmf" ]; then
+if [ "$INSTALL_CHANNEL" = "dev" ] || [ "$INSTALL_CHANNEL" = "canary" ]; then
     echo "✓ $(t "命令已链接到" "Commands linked to") $BIN_DIR/mms, $BIN_DIR/mmf"
 else
     echo "✓ $(t "命令已链接到" "Command linked to") $BIN_DIR/mms"
