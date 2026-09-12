@@ -402,6 +402,15 @@ def main() -> int:
         else:
             _fail(stream, "WORKER_UNKNOWN_COMMAND", f"未知 worker 命令：{command}")
     except Exception:
+        if os.environ.get("MMS_WEB_WORKER_DEBUG") == "1":
+            try:
+                import traceback
+
+                debug_root = Path(os.environ.get("MMS_STATE_ROOT") or _REPO_ROOT)
+                debug_root.mkdir(parents=True, exist_ok=True)
+                (debug_root / "worker-error.log").write_text(traceback.format_exc(), encoding="utf-8")
+            except Exception:
+                pass
         # Controlled message only: exception text could echo secrets/paths.
         _fail(stream, "WORKER_ERROR", "worker 内部错误（详情见服务端日志）")
     finally:

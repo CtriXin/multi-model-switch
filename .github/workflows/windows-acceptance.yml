@@ -42,6 +42,7 @@ env:
   PYTHONIOENCODING: "utf-8"
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
   MMS_SKIP_VENV_REEXEC: "1"
+  MMS_WEB_WORKER_DEBUG: "1"
 
 jobs:
   windows-acceptance:
