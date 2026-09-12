@@ -777,3 +777,83 @@ def test_profile_max_output_never_exceeds_its_context_window():
                 offenders.append(f"{profile_id}:{model} output={max_output} > context={window}")
 
     assert not offenders, "max_output_tokens exceeds context_window: " + "; ".join(offenders)
+
+
+def _profile_declared_vision_models():
+    """Every (profile, model) the profile data itself calls image-capable."""
+    import json
+    from pathlib import Path
+
+    profiles = json.loads(
+        (Path(__file__).resolve().parent.parent / "config" / "provider-profiles.json").read_text(
+            encoding="utf-8"
+        )
+    )["profiles"]
+
+    declared = []
+    for profile_id, profile in profiles.items():
+        names = set()
+        for model, flag in (profile.get("supports_vision") or {}).items():
+            if flag is True:
+                names.add(model)
+        for model, modalities in (profile.get("input_modalities") or {}).items():
+            if isinstance(modalities, list) and "image" in modalities:
+                names.add(model)
+        for model in sorted(names):
+            declared.append((profile_id, model))
+    return declared
+
+
+def test_vision_name_fallback_agrees_across_1m_aliases(monkeypatch, tmp_path):
+    """`k3` and `k3[1m]` are one model, so the name fallback cannot split them.
+
+    #204 dropped `k3[1m]` from `mms_core._VISION_CAPABLE_MODEL_NAMES` while the
+    provider profile and Pi's hints kept calling it image-capable, so the
+    last-resort name check answered False for one selector and True for the
+    other one. The fallback only runs when nothing else declared the model, and
+    that is exactly when a split answer becomes a wrong verdict.
+    """
+    _profiles(monkeypatch, tmp_path)
+    import mms_core
+
+    split = []
+    for _profile_id, model in _profile_declared_vision_models():
+        if not model.endswith("[1m]"):
+            continue
+        base = model[: -len("[1m]")]
+        if mms_core._model_supports_vision(base) != mms_core._model_supports_vision(model):
+            split.append(f"{base}={mms_core._model_supports_vision(base)} "
+                         f"{model}={mms_core._model_supports_vision(model)}")
+
+    assert not split, "a [1m] selector disagrees with its base model: " + "; ".join(split)
+
+    for alias in ("k3", "k3[1m]", "kimi-k3"):
+        assert mms_core._model_supports_vision(alias) is True, alias
+
+
+def test_profile_vision_models_resolve_to_image_in_the_pi_chain(monkeypatch, tmp_path):
+    """A profile that declares vision must survive the whole resolver chain.
+
+    The single truth chain is resolver -> Pi input types; a model the curated
+    data calls image-capable must not come out of `_pi_model_input_types` as
+    text-only, whichever selector the user picked.
+    """
+    _profiles(monkeypatch, tmp_path)
+    from mms_capability_resolver import resolve_model_capabilities
+    import mms_pi_support
+
+    disagreements = []
+    for profile_id, model in _profile_declared_vision_models():
+        caps = resolve_model_capabilities(
+            model,
+            profile_id=profile_id,
+            approved_facts={},
+            model_policy={},
+        )
+        types = mms_pi_support._pi_model_input_types(model, caps=caps)
+        if caps.get("supports_vision") is not True or "image" not in types:
+            disagreements.append(
+                f"{profile_id}:{model} supports_vision={caps.get('supports_vision')} input={types}"
+            )
+
+    assert not disagreements, "profile says vision but the chain disagrees: " + "; ".join(disagreements)
