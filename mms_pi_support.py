@@ -24,6 +24,7 @@ from mms_provider_profiles import resolve_provider_profile
 from mms_provider_profiles import profile_thinking_capabilities
 from mms_state_io import atomic_write_text
 
+
 def _launchers_module():
     import mms_launchers
     return mms_launchers
