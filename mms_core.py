@@ -15917,7 +15917,9 @@ def _handle_session_info(session_id, cli_name):
 
 
 def _session_gateway_roots(cli_name):
-    real_home = resolve_real_user_home()
+    # Sessions are created under the selected config root (MMS_CONFIG_ROOT honoured),
+    # so prune must look at that same root instead of always at the real HOME one.
+    config_root = resolve_mms_config_dir()
     gateway_names = []
     if cli_name in {"all", "claude"}:
         gateway_names.append(("claude", "claude-gateway"))
@@ -15926,7 +15928,7 @@ def _session_gateway_roots(cli_name):
     if cli_name in {"all", "opencode"}:
         gateway_names.append(("opencode", "opencode-gateway"))
     return [
-        (cli, os.path.join(real_home, ".config", "mms-next", gateway_name, "s"))
+        (cli, os.path.join(config_root, gateway_name, "s"))
         for cli, gateway_name in gateway_names
     ]
 
@@ -16124,9 +16126,9 @@ def _codex_resume_roots():
 
     for env_name in ("MMS_CODEX_RESUME_WRITEBACK_ROOT", "CODEX_HOME"):
         add(os.environ.get(env_name))
-    real_home = resolve_real_user_home()
-    add(os.path.join(real_home, ".config", "mms-next", "codex-gateway", ".codex"))
-    add(os.path.join(real_home, ".codex"))
+    # Same root the gateway session was created under, not a hard-coded real-HOME one.
+    add(os.path.join(resolve_mms_config_dir(), "codex-gateway", ".codex"))
+    add(os.path.join(resolve_real_user_home(), ".codex"))
     return roots
 
 

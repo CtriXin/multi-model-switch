@@ -47,6 +47,14 @@ def _dedupe_paths(paths: Iterable[Path | str]) -> list[Path]:
     return result
 
 
+def _config_root() -> Path:
+    """The single MMS config root for this process (honours MMS_CONFIG_ROOT)."""
+    try:
+        return Path(resolve_mms_config_dir())
+    except Exception:
+        return _real_user_home() / ".config" / "mms-next"
+
+
 def claude_project_roots() -> list[Path]:
     home = _real_user_home()
     roots: list[Path] = []
@@ -73,32 +81,22 @@ def codex_roots() -> list[Path]:
         value = str(os.environ.get(env_name) or "").strip()
         if value:
             roots.append(Path(value))
+    config_root = _config_root()
     roots.extend(
         [
-            home / ".config" / "mms-next" / "codex-gateway" / ".codex",
+            config_root / "codex-gateway" / ".codex",
             home / ".codex",
         ]
     )
-    roots.extend((home / ".config" / "mms-next" / "codex-gateway" / "s").glob("*/.codex"))
-    roots.extend((home / ".config" / "mms-next" / "accounts").glob("*/.codex"))
-    roots.extend((home / ".config" / "mms-next" / "accounts").glob("*/s/*/.codex"))
+    roots.extend((config_root / "codex-gateway" / "s").glob("*/.codex"))
+    roots.extend((config_root / "accounts").glob("*/.codex"))
+    roots.extend((config_root / "accounts").glob("*/s/*/.codex"))
     return [path for path in _dedupe_paths(roots) if path.exists()]
 
 
 def pi_roots() -> list[Path]:
     """Return current Pi history roots without reading auth state."""
-    home = _real_user_home()
-    roots: list[Path] = []
-    try:
-        roots.append(Path(resolve_mms_config_dir()) / "pi-gateway")
-    except Exception:
-        pass
-    roots.extend(
-        [
-            home / ".config" / "mms-next" / "pi-gateway",
-            home / ".config" / "mms-next" / "pi-gateway",
-        ]
-    )
+    roots: list[Path] = [_config_root() / "pi-gateway"]
     return [path for path in _dedupe_paths(roots) if path.exists()]
 
 
