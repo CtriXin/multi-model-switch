@@ -94,8 +94,9 @@ def test_handle_session_command_initializes_rich_before_listing(monkeypatch):
 def test_handle_session_prune_dry_run_lists_stale_gateway_sessions(monkeypatch, tmp_path):
     import mms_core
 
-    real_home = tmp_path / "home"
-    stale = real_home / ".config" / "mms" / "claude-gateway" / "s" / "999999"
+    # Gateway sessions live under the single config root, so prune scans that root.
+    config_root = tmp_path / "home" / ".config" / "mms-next"
+    stale = config_root / "claude-gateway" / "s" / "999999"
     stale.mkdir(parents=True)
     (stale / "payload.txt").write_text("stale session\n", encoding="utf-8")
     console = _CollectingConsole()
@@ -108,7 +109,7 @@ def test_handle_session_prune_dry_run_lists_stale_gateway_sessions(monkeypatch, 
     monkeypatch.setattr(mms_core, "Text", None)
     monkeypatch.setattr(mms_core, "_ensure_rich", _fake_ensure_rich)
     monkeypatch.setattr(mms_core, "console", console)
-    monkeypatch.setattr(mms_core, "resolve_real_user_home", lambda: str(real_home))
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(config_root))
 
     mms_core.handle_session_command(["prune", "--cli", "claude"])
 
@@ -117,6 +118,33 @@ def test_handle_session_prune_dry_run_lists_stale_gateway_sessions(monkeypatch, 
     assert tables[0].rows[0][0][0] == "claude"
     assert tables[0].rows[0][0][1] == "999999"
     assert stale.exists()
+
+
+def test_session_gateway_roots_follow_explicit_config_root(monkeypatch, tmp_path):
+    """Pilot 用 --config-root 起来时，prune/backfill 必须跟着同一个 root 走。"""
+    import mms_core
+
+    pilot_root = tmp_path / "pilot-root"
+    real_home = tmp_path / "home"
+    (real_home / ".config" / "mms-next" / "claude-gateway" / "s").mkdir(parents=True)
+    (pilot_root / "claude-gateway" / "s").mkdir(parents=True)
+    monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(pilot_root))
+
+    roots = dict(mms_core._session_gateway_roots("all"))
+    resume_roots = mms_core._codex_resume_roots()
+
+    assert roots["claude"] == str(pilot_root / "claude-gateway" / "s")
+    assert roots["codex"] == str(pilot_root / "codex-gateway" / "s")
+    assert str(pilot_root / "codex-gateway" / ".codex") in resume_roots
+    assert all(str(real_home / ".config" / "mms-next") not in item for item in resume_roots)
+
+    monkeypatch.delenv("MMS_CONFIG_ROOT")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+
+    fallback_roots = dict(mms_core._session_gateway_roots("all"))
+
+    assert fallback_roots["claude"] == str(real_home / ".config" / "mms-next" / "claude-gateway" / "s")
 
 
 def test_select_provider_for_models_initializes_rich_before_render(monkeypatch):

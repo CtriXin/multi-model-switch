@@ -86,7 +86,9 @@ def test_mms_context_gain_discovers_recent_session_store_when_cwd_store_empty(mo
     home = tmp_path / "home"
     repo_dir = tmp_path / "repo"
     repo_dir.mkdir()
-    session_store = home / ".config" / "mms" / "codex-gateway" / "s" / "123" / ".mms" / "context-store"
+    # Session stores live under the single config root (~/.config/mms-next), which is
+    # also the only place `mms context gain` auto-discovery scans.
+    session_store = home / ".config" / "mms-next" / "codex-gateway" / "s" / "123" / ".mms" / "context-store"
     for key in ("MMS_CONTEXT_DIR", "MMS_SESSION_HOME", "MMS_REAL_HOME", "REAL_HOME", "ORIGINAL_HOME"):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("HOME", str(home))
@@ -386,7 +388,8 @@ def test_overlay_auto_github_contributor_session_entries_respects_disabled_skill
     assert not (parent_dir / "commands" / "auto-contribute.md").is_symlink()
 
 
-def test_resolve_token_saver_root_prefers_bundled_vendor(monkeypatch, tmp_path):
+def test_resolve_token_saver_root_is_retired(monkeypatch, tmp_path):
+    """token-saver 已从产品退休：即便 bundled/shared 资产都在，也不再被发现。"""
     home = tmp_path / "home"
     install_root = tmp_path / "mms-install"
     bundled_root = install_root / "vendor" / "token-saver"
@@ -401,7 +404,7 @@ def test_resolve_token_saver_root_prefers_bundled_vendor(monkeypatch, tmp_path):
     mms_launchers = _import_mms_launchers(monkeypatch, tmp_path)
     monkeypatch.setattr(mms_launchers, "__file__", str(install_root / "mms_launchers.py"))
 
-    assert Path(mms_launchers._resolve_token_saver_root()) == bundled_root
+    assert mms_launchers._resolve_token_saver_root() == ""
 
 
 def test_resolve_codegraph_root_prefers_bundled_vendor(monkeypatch, tmp_path):

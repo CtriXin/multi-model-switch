@@ -22,6 +22,26 @@ def _write_executable(path: Path, text: str = "#!/bin/sh\nexit 0\n") -> Path:
     return path
 
 
+def _use_real_home_config_root(monkeypatch, real_home):
+    """Make the single config root derive from this test's real HOME.
+
+    Precedence in mms_state_io.resolve_mms_config_dir, which every launcher path
+    goes through: MMS_CONFIG_ROOT > MMS_CONFIG_DIR > XDG_CONFIG_HOME > one of
+    MMS_REAL_HOME / REAL_HOME / ORIGINAL_HOME / HOME. tests/conftest.py parks
+    XDG_CONFIG_HOME in one shared temp dir, so without dropping it every gateway
+    test would share (and pollute) the same codex-gateway.
+    """
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
+    # Pointing the real HOME at a fixture also makes the gateway dir look like it
+    # lives under the real HOME, which is what gates the app-server hook-hash
+    # refresh. A unit test must not shell out to the installed Codex binary.
+    monkeypatch.setenv("MMS_CODEX_HOOK_TRUST_REFRESH", "0")
+    return Path(real_home) / ".config" / "mms-next"
+
+
 def test_build_claude_session_settings_only_inherits_allowlisted_keys(monkeypatch):
     import mms_launchers
 
@@ -1106,11 +1126,12 @@ def test_build_codex_session_hooks_removes_retired_caveman_hooks(monkeypatch, tm
         for item in group["hooks"]
     ]
     assert "/tmp/notify.sh" in enabled_commands
-    caveman_commands = [command for command in enabled_commands if "caveman-activate.js" in command]
-    assert len(caveman_commands) == 1
-    assert "CAVEMAN_DEFAULT_MODE=lite" in caveman_commands[0]
-    assert "CAVEMAN_HOOK_EVENT=SessionStart" in caveman_commands[0]
-    assert f'node "{caveman_root / "hooks" / "caveman-activate.js"}"' in caveman_commands[0]
+    # Caveman is retired globally (_resolve_caveman_root returns ""), so the legacy
+    # enable_caveman=True toggle must still inject nothing, and the inherited global
+    # caveman hook must be filtered out on both paths.
+    assert [command for command in enabled_commands if "caveman" in command.lower()] == []
+    assert [command for command in disabled_commands if "caveman" in command.lower()] == []
+    assert (caveman_root / "hooks" / "caveman-activate.js").exists()
     assert "PreToolUse" not in enabled["hooks"]
 
 
@@ -1367,10 +1388,29 @@ def test_mms_caveman_legacy_helpers_are_inert(tmp_path):
     assert mms_launchers._runtime_caveman_enabled({"caveman_mode": "enable"}) is False
     assert mms_launchers._runtime_caveman_level({"caveman_level": "lite"}) == "light"
     assert mms_launchers._resolve_caveman_root() == ""
-    assert mms_launchers._configure_claude_caveman_hooks(
-        {"SessionStart": [{"hooks": [{"type": "command", "command": "echo caveman"}]}]},
+    inherited_caveman_hook = (
+        "CAVEMAN_HOOK_COMPACT=1 CAVEMAN_HOOK_EVENT=SessionStart "
+        f'node "{hooks_dir / "caveman-activate.js"}"'
+    )
+    rendered = mms_launchers._configure_claude_caveman_hooks(
+        {
+            "SessionStart": [
+                {
+                    "hooks": [
+                        {"type": "command", "command": "/tmp/keep.sh"},
+                        {"type": "command", "command": inherited_caveman_hook},
+                    ]
+                }
+            ]
+        },
         enable_caveman=True,
-    )["SessionStart"] == []
+    )
+    assert [hook["command"] for group in rendered["SessionStart"] for hook in group["hooks"]] == ["/tmp/keep.sh"]
+    # An all-caveman group leaves the event with nothing to run at all.
+    assert mms_launchers._configure_claude_caveman_hooks(
+        {"SessionStart": [{"hooks": [{"type": "command", "command": inherited_caveman_hook}]}]},
+        enable_caveman=True,
+    ) == {}
 
 
 def test_map_auto_index_hook_keeps_codex_stdout_empty(tmp_path):
@@ -1854,6 +1894,7 @@ def test_codex_gateway_env_refreshes_durable_hook_trust_cache_from_sibling(monke
         "_real_user_path",
         lambda *parts: str(real_home.joinpath(*parts)),
     )
+    _use_real_home_config_root(monkeypatch, real_home)
 
     mms_launchers._codex_gateway_env(
         {"id": "relay-a", "api_key": "sk-runtime", "nsr_mode": "disable"},
@@ -1914,6 +1955,7 @@ def test_codex_gateway_env_reuses_stable_codex_home_for_hook_trust(monkeypatch, 
     monkeypatch.setattr(mms_launchers, "_install_session_packet_env", lambda *args, **kwargs: None)
     monkeypatch.setattr(mms_launchers, "_build_codex_session_hooks", lambda *args, **kwargs: hooks_payload)
     monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+    _use_real_home_config_root(monkeypatch, real_home)
 
     env1 = mms_launchers._codex_gateway_env(
         {"id": "relay-a", "api_key": "sk-runtime", "nsr_mode": "disable"},
@@ -1944,7 +1986,7 @@ def test_codex_gateway_env_reuses_stable_codex_home_for_hook_trust(monkeypatch, 
     assert "/s/2222/.codex/hooks.json:session_start:0:0" not in target_config
 
 
-def test_overlay_caveman_session_entries_merges_session_and_caveman_assets(monkeypatch, tmp_path):
+def test_overlay_caveman_session_entries_no_longer_exposes_caveman_assets(monkeypatch, tmp_path):
     import mms_launchers
 
     session_home = tmp_path / "session"
@@ -1969,18 +2011,21 @@ def test_overlay_caveman_session_entries_merges_session_and_caveman_assets(monke
 
     monkeypatch.setenv("MMS_CAVEMAN_ROOT", str(caveman_root))
 
-    mms_launchers._overlay_caveman_session_entries(
+    assert mms_launchers._overlay_caveman_session_entries(
         str(parent_dir),
         str(session_home),
         enable_caveman=True,
-    )
+    ) is None
 
+    # Caveman is retired: the session keeps the untouched shared asset links and the
+    # legacy enable_caveman=True toggle adds nothing, not even an overlay dir.
     assert os.path.islink(parent_dir / "commands")
     assert os.path.islink(parent_dir / "skills")
-    assert os.path.islink(parent_dir / "commands" / "keep.toml")
-    assert os.path.islink(parent_dir / "commands" / "caveman.toml")
-    assert os.path.islink(parent_dir / "skills" / "keep-skill")
-    assert os.path.islink(parent_dir / "skills" / "caveman")
+    assert (parent_dir / "commands" / "keep.toml").is_file()
+    assert (parent_dir / "skills" / "keep-skill").is_dir()
+    assert not (parent_dir / "commands" / "caveman.toml").exists()
+    assert not (parent_dir / "skills" / "caveman").exists()
+    assert not (session_home / ".mms-caveman-overlay").exists()
 
 
 def _session_skill_dir(tmp_path, cli_dir):
@@ -2055,7 +2100,7 @@ def test_overlay_agent_browser_session_entries_no_longer_exposes_a_separate_skil
     assert mms_launchers._resolve_agent_browser_root() == str(agent_browser_root)
 
 
-def test_codex_gateway_env_materializes_session_caveman_hooks_and_assets(monkeypatch, tmp_path):
+def test_codex_gateway_env_materializes_session_hooks_and_assets_without_caveman(monkeypatch, tmp_path):
     import mms_launchers
 
     real_home = tmp_path / "real-home"
@@ -2137,7 +2182,6 @@ def test_codex_gateway_env_materializes_session_caveman_hooks_and_assets(monkeyp
         "_real_user_path",
         lambda *parts: str(real_home.joinpath(*parts)),
     )
-
     env = mms_launchers._codex_gateway_env(
         {"id": "relay-a", "api_key": "sk-runtime", "caveman_mode": "enable"},
         "https://relay.example.com",
@@ -2152,14 +2196,15 @@ def test_codex_gateway_env_materializes_session_caveman_hooks_and_assets(monkeyp
         for item in group["hooks"]
     ]
     assert "/tmp/notify.sh" in commands
-    caveman_commands = [command for command in commands if "caveman-activate.js" in command]
-    assert caveman_commands == []
+    assert [command for command in commands if "caveman" in command.lower()] == []
+    # The real ~/.codex assets stay reachable from the stable CODEX_HOME; caveman is
+    # retired, so nothing from MMS_CAVEMAN_ROOT is merged in.
     assert os.path.islink(session_codex / "commands")
     assert os.path.islink(session_codex / "skills")
-    assert os.path.islink(session_codex / "commands" / "keep.toml")
-    assert os.path.islink(session_codex / "commands" / "caveman.toml")
+    assert (session_codex / "commands" / "keep.toml").is_file()
     assert os.path.islink(session_codex / "skills" / "keep-skill")
-    assert os.path.islink(session_codex / "skills" / "caveman")
+    assert not (session_codex / "commands" / "caveman.toml").exists()
+    assert not (session_codex / "skills" / "caveman").exists()
     packet = json.loads(Path(env["MMS_SESSION_PACKET_JSON"]).read_text(encoding="utf-8"))
     assert packet["cli"] == "codex"
     assert packet["model"]["primary"] == "gpt-5.4"
@@ -2167,7 +2212,7 @@ def test_codex_gateway_env_materializes_session_caveman_hooks_and_assets(monkeyp
     assert env["MMS_SESSION_PACKET_FORMAT"] == "toon"
 
 
-def test_codex_gateway_env_materializes_session_web_access_skill(monkeypatch, tmp_path):
+def test_codex_gateway_env_no_longer_materializes_a_separate_web_access_skill(monkeypatch, tmp_path):
     import mms_launchers
 
     real_home = tmp_path / "real-home"
@@ -2193,6 +2238,7 @@ def test_codex_gateway_env_materializes_session_web_access_skill(monkeypatch, tm
         "_real_user_path",
         lambda *parts: str(real_home.joinpath(*parts)),
     )
+    _use_real_home_config_root(monkeypatch, real_home)
 
     env = mms_launchers._codex_gateway_env(
         {"id": "relay-a", "api_key": "sk-runtime"},
@@ -2200,9 +2246,12 @@ def test_codex_gateway_env_materializes_session_web_access_skill(monkeypatch, tm
     )
 
     session_codex = Path(env["CODEX_HOME"])
+    # web-access is a Weber backend now, not a skill of its own: the root still
+    # resolves, but the session never exposes it as a separate skill entry.
     assert os.path.islink(session_codex / "skills" / "keep-skill")
-    assert os.path.islink(session_codex / "skills" / "web-access")
-    assert (session_codex / "skills" / "web-access" / "SKILL.md").read_text(encoding="utf-8") == "# web-access\n"
+    assert not (session_codex / "skills" / "web-access").exists()
+    assert not (session_codex / "skills" / "web-access").is_symlink()
+    assert mms_launchers._resolve_web_access_root() == str(web_access_root)
 
 
 def test_codex_gateway_env_seeds_plugin_marketplace_cache(monkeypatch, tmp_path):
@@ -2237,6 +2286,7 @@ def test_codex_gateway_env_seeds_plugin_marketplace_cache(monkeypatch, tmp_path)
         "_real_user_path",
         lambda *parts: str(real_home.joinpath(*parts)),
     )
+    _use_real_home_config_root(monkeypatch, real_home)
 
     env = mms_launchers._codex_gateway_env(
         {"id": "relay-a", "api_key": "sk-runtime"},
@@ -2253,7 +2303,7 @@ def test_codex_gateway_env_seeds_plugin_marketplace_cache(monkeypatch, tmp_path)
     assert not (session_tmp / "diagrams").exists()
 
 
-def test_codex_gateway_env_materializes_session_agent_browser_skill(monkeypatch, tmp_path):
+def test_codex_gateway_env_no_longer_materializes_a_separate_agent_browser_skill(monkeypatch, tmp_path):
     import mms_launchers
 
     real_home = tmp_path / "real-home"
@@ -2280,6 +2330,7 @@ def test_codex_gateway_env_materializes_session_agent_browser_skill(monkeypatch,
         "_real_user_path",
         lambda *parts: str(real_home.joinpath(*parts)),
     )
+    _use_real_home_config_root(monkeypatch, real_home)
 
     env = mms_launchers._codex_gateway_env(
         {"id": "relay-a", "api_key": "sk-runtime"},
@@ -2287,9 +2338,11 @@ def test_codex_gateway_env_materializes_session_agent_browser_skill(monkeypatch,
     )
 
     session_codex = Path(env["CODEX_HOME"])
+    # agent-browser is a Weber backend now, not a skill of its own.
     assert os.path.islink(session_codex / "skills" / "keep-skill")
-    assert os.path.islink(session_codex / "skills" / "agent-browser")
-    assert (session_codex / "skills" / "agent-browser" / "SKILL.md").read_text(encoding="utf-8") == "# agent-browser\n"
+    assert not (session_codex / "skills" / "agent-browser").exists()
+    assert not (session_codex / "skills" / "agent-browser").is_symlink()
+    assert mms_launchers._resolve_agent_browser_root() == str(agent_browser_root)
 
 
 def test_overlay_toon_session_entries_merges_existing_session_skills(monkeypatch, tmp_path):
@@ -2438,6 +2491,7 @@ def test_codex_gateway_env_materializes_session_toon_skill_and_wrapper(monkeypat
     monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
     monkeypatch.setattr(mms_launchers, "_mms_toon_script_path", lambda: str(toon_script))
     monkeypatch.setattr(mms_launchers, "_SESSION_REAL_HOME_WRAPPER_COMMANDS", ())
+    _use_real_home_config_root(monkeypatch, real_home)
 
     env = mms_launchers._codex_gateway_env(
         {"id": "relay-a", "api_key": "sk-runtime"},
@@ -3533,10 +3587,11 @@ def test_claude_guard_runtime_uses_gateway_home_for_api_key(monkeypatch, tmp_pat
         "_real_user_path",
         lambda *parts: str(tmp_path.joinpath(*parts)),
     )
+    config_root = _use_real_home_config_root(monkeypatch, tmp_path)
 
     result = mms_launchers._claude_guard_runtime({"id": "relay-a", "auth_mode": "api_key"})
 
-    assert result["home_dir"] == str(tmp_path / ".config" / "mms" / "claude-gateway")
+    assert os.path.realpath(result["home_dir"]) == os.path.realpath(str(config_root / "claude-gateway"))
 
 
 def test_launch_cli_enforces_network_guard_for_sensitive_claude_api_key_bypass(monkeypatch):

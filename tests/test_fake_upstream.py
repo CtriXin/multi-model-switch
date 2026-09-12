@@ -18,7 +18,7 @@ def test_fake_upstream_runtime_httpx_request_and_log(monkeypatch, tmp_path):
     body = response.json()
     assert any(item["id"] == "claude-sonnet-4-6" for item in body["data"])
 
-    log_path = tmp_path / ".config" / "mms" / "fake-upstream" / "requests.jsonl"
+    log_path = tmp_path / ".config" / "mms-next" / "fake-upstream" / "requests.jsonl"
     assert log_path.exists()
     assert stat.S_IMODE(log_path.stat().st_mode) == 0o600
     rows = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]

@@ -26,7 +26,10 @@ def test_ignores_ambient_session_home_env(monkeypatch):
     result = _paths(gateway_home="/tmp/explicit-gateway-home/1111")
 
     assert len(result) == 1
-    assert result[0] == "/tmp/explicit-gateway-home/1111/.config/mms/route_status.json"
+    # 单一 config root 之后，gateway session 目录本身就是落点，
+    # 不再在里面再挂一层退休的 `.config/mms`。
+    assert result[0] == "/tmp/explicit-gateway-home/1111/route_status.json"
+    assert "/.config/mms/" not in result[0]
     # ambient env 绝不能渗进来
     assert "ambient-session-home" not in result[0]
     assert "ambient-config-root" not in result[0]
@@ -41,8 +44,8 @@ def test_multi_session_isolation():
     paths_b = _paths(gateway_home=pid_b)
 
     assert paths_a != paths_b
-    assert paths_a[0].endswith("/s/7180/.config/mms/route_status.json")
-    assert paths_b[0].endswith("/s/98400/.config/mms/route_status.json")
+    assert paths_a[0].endswith("/s/7180/route_status.json")
+    assert paths_b[0].endswith("/s/98400/route_status.json")
 
 
 def test_fallback_without_gateway_home_uses_config_root(monkeypatch):

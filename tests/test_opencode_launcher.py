@@ -401,7 +401,9 @@ def test_opencode_kimi_k3_uses_profile_effort_not_stale_generic_thinking(monkeyp
     )
     model_config = payload["provider"]["mms"]["models"]["k3"]
 
-    assert model_config["limit"]["context"] == 262_144
+    # kimi-code 的 profile calibration 是 1_048_576（PR #209），
+    # 仍然压过上面 stub 出来的 1_000_000 generic policy。
+    assert model_config["limit"]["context"] == 1_048_576
     assert model_config["options"] == {"reasoningEffort": "max"}
     assert "thinking" not in json.dumps(model_config)
 
