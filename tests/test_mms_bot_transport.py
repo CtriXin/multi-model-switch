@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
+from mms_web.bot_executor import PiBotExecutor
 from mms_web.bots import BotRuntime
 from mms_web.server import WebApplication, create_server
 
@@ -247,3 +248,39 @@ def test_client_payload_matches_worker_runtime_contract(
     )
     assert result.returncode == 0, result.stderr
     assert app.bots._tasks[task["id"]][field] == value
+
+
+class _Catalog:
+    def snapshot(self):
+        return {"presets": [{"id": "pi:test", "name": "test-model", "channel": "test", "harness": "pi", "available": True}],
+                "workspaces": [{"id": "ws-test"}]}
+
+
+class _Sessions:
+    def __init__(self):
+        self.launched = []
+
+    def capabilities(self):
+        return {"launch": True}
+
+    def launch(self, payload):
+        self.launched.append(payload)
+        return {"session": {"id": "session-1", "state": "idle", "modelName": "test-model"}}
+
+    def get_session(self, session_id):
+        return {"session": {"id": session_id, "state": "idle"}, "events": [], "artifacts": []}
+
+    def diagnostics(self, session_id):
+        return {}
+
+
+def test_bot_prompt_asks_for_one_line_peer_reports_without_paths_or_hashes(tmp_path):
+    sessions = _Sessions()
+    executor = PiBotExecutor(sessions, _Catalog())
+    bot = {"id": "bot_1", "name": "worker", "description": "", "systemPrompt": "",
+           "presetId": "pi:test", "workspaceId": "ws-test"}
+    task = {"id": "task_1", "prompt": "写一个文件", "launchRequestId": "launch-1", "collaborationRequested": False}
+    executor.start(task, bot, tmp_path / "context.json")
+    prompt = sessions.launched[0]["prompt"]
+    assert "向其他 Bot 回报时只写一句结论" in prompt
+    assert "不在正文贴路径或哈希" in prompt

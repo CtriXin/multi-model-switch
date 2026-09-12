@@ -163,3 +163,9 @@ Bot 编辑器复用 Pilot 的 `ModelPicker` / `ModelExplorer`：先从模型目�
 桌面通知只有在用户点击“开启桌面通知”并授予浏览器权限后才会在页面不在前台时弹出一次；没授权或关闭时只保留未读。
 
 Webhook 配置保存在 `state_root/bots/notify.json`，形状为 `{"webhooks": [{"url": "...", "events": ["task.completed", "task.failed"], "secret": "..."}]}`，只允许 http(s) 地址，最多 10 个。投递是 5 秒超时、失败重试一次，并且永远不阻塞任务；请求体是事件 JSON，带 `X-MMS-Signature: sha256=<hmac_sha256(secret, body)>` 和 `X-MMS-Event`。`events` 留空表示全部事件。这个文件由 Bot 记忆面板的“通知”小节读写，不会写入真实 `~/.config/mms*`。
+
+## v2.4 协作回执结构化
+
+`dispatch` 出去的子任务结束时，回传给发起方 Bot 的消息不再是模型原文：正文取该任务 `outcome.summary`（没有结构化结论时取原文前 200 字），并附 `artifacts: [{id, name, kind, taskId}]` 索引；本地绝对路径、sha256 和 session artifact id 只留在任务内部记录里，不进入回执正文。`GET /bots/:botId/communications` 的结果行返回同样的 `content` 与 `artifacts` 字段，前端未改动（`kind: "system"` 的行按通用消息标签显示）。
+
+运行状态不再冒充结果：任务被取消、进程中断，或 Pi 停止 / 报错导致 `failed` 时，投给对方的是一条 `system` 消息，正文为“<Bot 名> 的任务已中断，未产生结果”，归类为系统事件而不是结果；Bot 自己调用 `fail` 明确报告失败时仍按结果回传它的结论。Bot 提示词也要求向其他 Bot 回报时只写一句结论，证据和文件通过 `complete` 提交成果，不在正文贴路径或哈希。
