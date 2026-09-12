@@ -4,9 +4,13 @@ from __future__ import annotations
 import shlex
 import sys
 import os
+import time
 from pathlib import Path
+from uuid import uuid4
 
 from .errors import WebError
+
+PLAN_TIMEOUT_SECONDS = 20.0
 
 
 class PiBotExecutor:
@@ -37,7 +41,8 @@ class PiBotExecutor:
         prompt = (
             f"你是 MMS Bot {bot['name']}。{bot.get('systemPrompt') or bot.get('description') or ''}\n"
             f"当前任务：{task['id']}。用户目标：\n{task['prompt']}\n\n"
-            f"执行策略：direct-first（用户是否明确要求协作：{'是' if task.get('collaborationRequested') else '否'}）。"
+            + ("分工计划已由系统决定并执行，不要重复创建计划中已有的子任务。\n" if task.get("planResolved") and task.get("executionMode") == "delegate" else "")
+            + f"执行策略：direct-first（用户是否明确要求协作：{'是' if task.get('collaborationRequested') else '否'}）。"
             "把自己当作唯一负责人，先直接完成目标；不要为了展示协作、模型分工或流程而调用其他 Bot。"
             "只有用户明确要求找其他 Bot，或目标明确要求独立角色共同完成时，才使用 dispatch/message；交接后继续对用户负责。\n"
             "完成实际工作并反馈证据。遇到不确定或需用户授权的操作应等待用户。"
@@ -93,6 +98,48 @@ class PiBotExecutor:
         pid = self.sessions.diagnostics(session_id).get("pid") if hasattr(self.sessions, "diagnostics") else None
         return {"sessionId": session_id, "processId": pid, "baseline": before, "artifactBaseline": baseline,
                 "model": detail["session"].get("modelName", "")}
+
+    def plan(self, prompt, bot, timeout=PLAN_TIMEOUT_SECONDS):
+        """One short throwaway planning call on the task Bot's own preset.
+
+        The session is launched only to ask for a JSON plan, then stopped and
+        archived so it never lingers in Pilot's session list. Returns the last
+        assistant text, or None on failure/timeout; callers fall back to the
+        deterministic keyword plan. Never raises for model-side problems.
+        """
+        selected = self.validate(bot)
+        request_id = "bot-plan-" + uuid4().hex[:16]
+        detail = self.sessions.launch({
+            "requestId": request_id,
+            "workspaceId": bot.get("workspaceId") or "default",
+            "presetId": selected["presetId"],
+            "title": "计划 · " + str(bot.get("name") or "Bot"),
+            "prompt": prompt,
+        })
+        session_id = detail["session"]["id"]
+        try:
+            deadline = time.monotonic() + max(1.0, float(timeout))
+            while time.monotonic() < deadline:
+                view = self.sessions.get_session(session_id)
+                state = view["session"].get("state")
+                answers = [str(e.get("text")) for e in view.get("events", [])
+                           if e.get("kind") == "assistant" and e.get("text")]
+                if state in {"idle", "completed"} and answers:
+                    return answers[-1]
+                if state in {"error", "stopped"}:
+                    return None
+                time.sleep(0.4)
+            return None
+        finally:
+            for payload in ({"requestId": request_id + "-stop"},
+                            {"requestId": request_id + "-archive", "archived": True}):
+                try:
+                    if "archived" in payload:
+                        self.sessions.manage(session_id, payload)
+                    else:
+                        self.sessions.stop(session_id, payload)
+                except Exception:
+                    pass
 
     def _maybe_compact(self, session_id, bot, task):
         """Compact only at the idle boundary, using Pi's native RPC."""

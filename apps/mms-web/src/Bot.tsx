@@ -28,8 +28,9 @@ import {
   X,
   Zap,
 } from "lucide-react";
+import { BotPlan } from "./BotPlan";
 import { previewType } from "./bot-artifact-preview";
-import type { Preset } from "./types";
+import type { BotTaskPlan, Preset } from "./types";
 import "./bot.css";
 
 export type BotStatus = "idle" | "busy" | "paused";
@@ -74,12 +75,9 @@ export interface BotTask {
   parentTaskId?: string | null;
   priority?: number;
   queueReason?: string | null;
-  coordinatorPlan?: {
-    mode: "direct" | "delegate";
-    reason?: string;
-    candidates?: Array<{ id: string; name: string; description?: string }>;
-    steps?: Array<{ id: string; kind: string; botId: string; status: string }>;
-  } | null;
+  coordinatorPlan?: BotTaskPlan | null;
+  planExecutedAt?: string | null;
+  planDecidedAt?: string | null;
   originMessageId?: string | null;
   senderBotId?: string | null;
   acceptedAt?: string | null;
@@ -164,7 +162,7 @@ export {
   taskStatusLabels,
 };
 
-function PixelAvatar({
+export function PixelAvatar({
   avatarId,
   color,
   seed = "",
@@ -1463,6 +1461,7 @@ export function BotChat({
               )}
               <RichText text={conversationTask.prompt} />
             </div>
+            <BotPlan task={conversationTask} bots={bots} />
             {conversationEvents.map((event) => event.type === "instruction" ? (
               <div className={`bot-chat-message ${event.senderBotId && event.senderBotId !== bot.id ? "bot-chat-event bot-chat-event-handoff" : "bot-chat-user"}`} key={event.id}>
                 {event.senderBotId && event.senderBotId !== bot.id && (

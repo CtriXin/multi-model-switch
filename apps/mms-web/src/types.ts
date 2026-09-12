@@ -237,3 +237,29 @@ export interface BotNotifyConfig {
   events: BotNotificationType[];
   timeoutSeconds?: number;
 }
+
+/** Coordinator plan attached to a Bot task (T2). */
+export type BotPlanStepStatus = "pending" | "dispatched" | "done" | "failed" | "blocked";
+export interface BotPlanStep {
+  id: string;
+  kind: "execute" | "delegate" | string;
+  botId: string;
+  goal?: string;
+  dependsOn?: string[];
+  presetId?: string | null;
+  status: BotPlanStepStatus | string;
+  taskId?: string | null;
+  error?: string;
+}
+export type BotPlanStatus = "proposed" | "auto" | "approved" | "rejected";
+export interface BotTaskPlan {
+  version?: number;
+  mode: "direct" | "delegate";
+  reason?: string;
+  steps?: BotPlanStep[];
+  candidates?: Array<{ id: string; name: string; description?: string }>;
+  merge?: string;
+  source?: "model" | "keywords" | "fallback" | "off" | "user";
+  status?: BotPlanStatus;
+  modelDecision?: boolean;
+}

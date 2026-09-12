@@ -21,6 +21,14 @@ Bot 可以从内部 worker 分发子任务。子任务完成后，结果消息�
 
 每个新任务都会保存一份轻量 `coordinatorPlan`：简单目标保持 direct，检测到明确协作意图时记录候选 Bot 和待确认的 delegate steps。它只提供可读的计划和执行上下文，不启动额外的 planner session，也不会把临时 worker 变成永久 Bot。排队任务按 `priority`（0–100，数值越大越先执行）排序，并在任务详情中显示当前等待资源原因。
 
+### Coordinator 计划层（2026-09-12，T2）
+
+计划从 Pi 提示词里拿出来，成为落库、可见、可执行的对象。任务启动前，`BotRuntime.plan_task` 用任务所属 Bot 自己的 preset 发一次短 planner 请求（用完即弃，结束后自动停止并归档，不常驻 planner session），输入是用户目标、可用 Bot 列表和该 Bot 的相关记忆摘要，要求输出严格 JSON（`mode` / `reason` / `steps[].botId/goal/dependsOn/presetId` / `merge`）。解析失败、模型不可用或超过 20 秒都退回关键词计划并标记 `source: "fallback"`，任何情况下不阻塞任务启动。
+
+`mode == "delegate"` 时由 runtime 而不是提示词执行计划：按 `dependsOn` 顺序为每个 step 创建子任务（沿用现有 dispatch 路径、五层深度和同链不重复守卫），父任务进入 `waiting/children`；子任务全部终态后父任务只恢复一次，恢复提示携带各子任务的 `outcome.summary`。step 可指定 `presetId` 覆盖目标 Bot 的模型，为空则沿用其 preset。重启后按已有子任务终态判断是否恢复，`taskId` 对账保证不重复创建子任务；子任务失败不自动重试，失败摘要交给 owner 决定。
+
+计划在聊天里以计划块可见（`BotPlan`）。Bot 设置项：`planner` = `model`（默认）/ `keywords` / `off`（off 时恒为 direct 单步）；`orchestrationPolicy` = `direct-first`（默认，计划生成后直接执行，30 秒内可在计划块撤回）/ `plan-approve`（先生成计划等用户确认）/ `off`（关闭自动分工）。`POST /api/v1/tasks/:id/plan` 接受 `approve` / `reject` / `replace`，replace 的计划按真实 Bot 名单重新校验。
+
 Bot 之间还有独立的 `message`/`reply` mailbox。`dispatch` 用于有依赖的工作分工；`message` 用于通知、澄清和追问，不会伪装成用户消息。接收方空闲时自动投递，忙时排队；每条消息有 `queued`、`delivered`、`processed`、`waiting`、`failed` 回执。`reply MESSAGE_ID` 只能回复发给当前 Bot 的消息，连续自动往返超过 8 跳会暂停，避免 Bot 互相空转。
 
 ## 记忆与上下文
