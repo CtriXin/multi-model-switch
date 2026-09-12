@@ -58,11 +58,19 @@ def test_core_never_imports_the_legacy_root():
 
 
 def test_config_root_fallbacks_do_not_point_at_the_legacy_root():
-    launchers = (ROOT / "mms_launchers.py").read_text(encoding="utf-8")
-    for name in ("_model_context_overrides_path", "_selected_mms_config_root"):
-        start = launchers.index(f"def {name}(")
-        body = launchers[start: launchers.index("\ndef ", start + 1)]
-        assert '_real_user_path(".config", "mms")' not in body, name
+    # `_model_context_overrides_path` moved to the shared context resolver
+    # (#230); its fallback is still on this contract.
+    sources = {
+        "mms_launchers.py": ("_selected_mms_config_root",),
+        "mms_context_window.py": ("model_context_overrides_path",),
+    }
+    for filename, names in sources.items():
+        text = (ROOT / filename).read_text(encoding="utf-8")
+        for name in names:
+            start = text.index(f"def {name}(")
+            body = text[start: text.index("\ndef ", start + 1)]
+            assert '_real_user_path(".config", "mms")' not in body, name
+            assert '".config", "mms")' not in body, name
     bridge = (ROOT / "mms_bridge.py").read_text(encoding="utf-8")
     start = bridge.index("def _incident_log_path(")
     body = bridge[start: bridge.index("\ndef ", start + 1)]

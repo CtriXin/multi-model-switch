@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 import os
 
+import mms_capability_resolver
+import mms_context_window
+
 
 def _empty_context_overrides():
     return {"models": {}, "provider_overrides": {}}
@@ -18,66 +21,66 @@ def _conservative_capabilities(*_args, **_kwargs):
 def test_mimo_pro_1m_suffix_uses_one_m_context(monkeypatch):
     import mms_launchers
 
-    monkeypatch.setattr(mms_launchers, "_load_model_context_overrides", _empty_context_overrides)
+    monkeypatch.setattr(mms_context_window, "load_model_context_overrides", _empty_context_overrides)
 
     assert (
         mms_launchers._lookup_context_window(
             "mimo-v2.5-pro[1m]",
             provider_id="mimo-direct-anthropic",
         )
-        == 1_000_000
+        == 1_048_576
     )
     assert (
         mms_launchers._effective_context_window(
             "mimo-v2.5-pro[1m]",
             provider_id="mimo-direct-anthropic",
         )
-        == 1_000_000
+        == 1_048_576
     )
 
 
 def test_mimo_non_pro_1m_suffix_uses_one_m_context(monkeypatch):
     import mms_launchers
 
-    monkeypatch.setattr(mms_launchers, "_load_model_context_overrides", _empty_context_overrides)
+    monkeypatch.setattr(mms_context_window, "load_model_context_overrides", _empty_context_overrides)
 
     assert (
         mms_launchers._lookup_context_window(
             "mimo-v2.5[1m]",
             provider_id="mimo-direct-anthropic",
         )
-        == 1_000_000
+        == 1_048_576
     )
 
 
-def test_mimo_pro_without_1m_suffix_keeps_safe_context(monkeypatch):
+def test_mimo_plain_name_and_selector_agree_on_the_anthropic_route(monkeypatch):
+    """#230: the `[1m]` selector is the same model as the plain name.
+
+    The launcher used to cap the plain name at a "safe" 256K here while Pi and
+    OpenCode read 1M for the same model on the same channel, straight from the
+    provider profile. One truth now: the profile answers both, and both
+    harnesses see the same number.
+    """
     import mms_launchers
 
-    monkeypatch.setattr(mms_launchers, "_load_model_context_overrides", _empty_context_overrides)
-    monkeypatch.setattr(mms_launchers, "resolve_model_capabilities", _conservative_capabilities)
+    monkeypatch.setattr(mms_context_window, "load_model_context_overrides", _empty_context_overrides)
 
-    assert (
-        mms_launchers._lookup_context_window(
-            "mimo-v2.5-pro",
-            provider_id="mimo-direct-anthropic",
+    for model in ("mimo-v2.5-pro", "mimo-v2.5"):
+        plain = mms_launchers._lookup_context_window(model, provider_id="mimo-direct-anthropic")
+        selector = mms_launchers._lookup_context_window(
+            f"{model}[1m]", provider_id="mimo-direct-anthropic"
         )
-        == 262_144
-    )
+        assert plain == selector == 1_048_576, model
 
 
-def test_mimo_without_1m_suffix_keeps_safe_context_on_anthropic(monkeypatch):
+def test_mimo_falls_back_to_the_shared_data_file_without_a_profile(monkeypatch):
+    """A channel whose profile says nothing still gets the documented window."""
     import mms_launchers
 
-    monkeypatch.setattr(mms_launchers, "_load_model_context_overrides", _empty_context_overrides)
-    monkeypatch.setattr(mms_launchers, "resolve_model_capabilities", _conservative_capabilities)
+    monkeypatch.setattr(mms_context_window, "load_model_context_overrides", _empty_context_overrides)
+    monkeypatch.setattr(mms_capability_resolver, "resolve_model_capabilities", _conservative_capabilities)
 
-    assert (
-        mms_launchers._lookup_context_window(
-            "mimo-v2.5",
-            provider_id="mimo-direct-anthropic",
-        )
-        == 262_144
-    )
+    assert mms_launchers._lookup_context_window("mimo-v2-pro", provider_id="some-relay") == 262_144
 
 
 def test_mimo_one_m_policy_shortcut_enables_plain_model_1m(monkeypatch, tmp_path):
@@ -85,7 +88,7 @@ def test_mimo_one_m_policy_shortcut_enables_plain_model_1m(monkeypatch, tmp_path
 
     monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
     monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
-    monkeypatch.setattr(mms_launchers, "_load_model_context_overrides", _empty_context_overrides)
+    monkeypatch.setattr(mms_context_window, "load_model_context_overrides", _empty_context_overrides)
     (tmp_path / "model-policy.json").write_text(
         json.dumps(
             {
@@ -115,7 +118,7 @@ def test_mimo_context_policy_enables_plain_model_1m(monkeypatch, tmp_path):
 
     monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
     monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
-    monkeypatch.setattr(mms_launchers, "_load_model_context_overrides", _empty_context_overrides)
+    monkeypatch.setattr(mms_context_window, "load_model_context_overrides", _empty_context_overrides)
     (tmp_path / "model-policy.json").write_text(
         json.dumps(
             {
@@ -143,7 +146,7 @@ def test_mimo_context_policy_enables_plain_model_1m(monkeypatch, tmp_path):
 def test_mimo_approved_capability_enables_plain_model_1m_before_safe_cap(monkeypatch):
     import mms_launchers
 
-    monkeypatch.setattr(mms_launchers, "_load_model_context_overrides", _empty_context_overrides)
+    monkeypatch.setattr(mms_context_window, "load_model_context_overrides", _empty_context_overrides)
 
     def fake_resolve_model_capabilities(model_name, *, provider_id="", **_kwargs):
         assert model_name == "mimo-v2.5"
@@ -153,7 +156,7 @@ def test_mimo_approved_capability_enables_plain_model_1m_before_safe_cap(monkeyp
             "sources": {"context_window_tokens": "approved_facts"},
         }
 
-    monkeypatch.setattr(mms_launchers, "resolve_model_capabilities", fake_resolve_model_capabilities)
+    monkeypatch.setattr(mms_capability_resolver, "resolve_model_capabilities", fake_resolve_model_capabilities)
 
     assert (
         mms_launchers._lookup_context_window(
@@ -169,7 +172,7 @@ def test_mimo_plain_model_uses_one_m_on_openrouter_and_openai_routes(monkeypatch
     import mms_provider_profiles
 
     monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
-    monkeypatch.setattr(mms_launchers, "_load_model_context_overrides", _empty_context_overrides)
+    monkeypatch.setattr(mms_context_window, "load_model_context_overrides", _empty_context_overrides)
     mms_provider_profiles.load_provider_profiles.cache_clear()
 
     assert mms_launchers._lookup_context_window("mimo-v2.5", provider_id="openrouter") == 1_048_576
@@ -239,8 +242,8 @@ def test_exact_1m_context_override_wins_before_suffix_stripping(monkeypatch):
     import mms_launchers
 
     monkeypatch.setattr(
-        mms_launchers,
-        "_load_model_context_overrides",
+        mms_context_window,
+        "load_model_context_overrides",
         lambda: {
             "models": {"mimo-v2.5-pro[1m]": 900_000, "mimo-v2.5-pro": 262_144},
             "provider_overrides": {},

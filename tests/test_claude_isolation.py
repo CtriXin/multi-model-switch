@@ -895,7 +895,9 @@ def test_model_context_overrides_follow_selected_config_root(monkeypatch, tmp_pa
         json.dumps({"models": {"root-selected-model": 222_000}}),
         encoding="utf-8",
     )
-    mms_launchers._MODEL_CONTEXT_OVERRIDES_CACHE.update({"path": None, "mtime": None, "data": {"models": {}, "provider_overrides": {}}})
+    import mms_context_window
+
+    mms_context_window.clear_context_window_caches()
 
     monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
     monkeypatch.setenv("REAL_HOME", str(real_home))
@@ -906,14 +908,14 @@ def test_model_context_overrides_follow_selected_config_root(monkeypatch, tmp_pa
 
     # No explicit root: the default is mms-next.
     assert mms_launchers._lookup_context_window("root-selected-model") == 222_000
-    assert mms_launchers._MODEL_CONTEXT_OVERRIDES_CACHE["path"] == str(preview_root / "model-context-overrides.json")
+    assert mms_context_window._OVERRIDES_CACHE["path"] == str(preview_root / "model-context-overrides.json")
 
     # An explicit pin at the retired legacy root is redirected to the shared
     # root (#177): a stale shell export must not resurrect the old config.
     monkeypatch.setenv("MMS_CONFIG_ROOT", str(stable_root))
 
     assert mms_launchers._lookup_context_window("root-selected-model") == 222_000
-    assert mms_launchers._MODEL_CONTEXT_OVERRIDES_CACHE["path"] == str(preview_root / "model-context-overrides.json")
+    assert mms_context_window._OVERRIDES_CACHE["path"] == str(preview_root / "model-context-overrides.json")
 
 
 def test_mmf_wrapper_selects_mms_next_without_stable_fallback(tmp_path):
