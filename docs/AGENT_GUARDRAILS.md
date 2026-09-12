@@ -144,7 +144,7 @@
 - `mms` / `mmf` / `mmg` / Pilot 都读写同一个根；Pilot 保存通道后 terminal 读到的是同一份 approved bundle。
 - legacy `~/.config/mms` 已退出配置来源：不做自动导入，不做回退，`MMS_CONFIG_ROOT_MODE=stable` 被忽略；`mmd` / `mmm` 包装器已退休。
 - 同一个根下的 `~/.config/mms-next/*-gateway/`、`accounts/`、`fake-upstream/` 是运行时 / 会话状态目录，不是配置；gateway 根由 `mms_launchers._selected_mms_config_root()` 解析，Codex gateway `CODEX_HOME` 契约不变。
-- 检测到 Pilot 在运行时，安装脚本暂停安装并退出，不关闭进程、不清理会话（#199）；用户从 Pilot 页面的「更新」入口升级，或先 `mms web stop` 再重跑安装器。安装前被请求退出过的 Pilot，安装结束后由脚本重新打开。
+- 检测到 Pilot 在运行时，安装脚本暂停安装并退出，不关闭进程、不清理会话（#199）；用户从 Pilot 页面的「更新」入口升级，或先 `mms web stop`（多实例用 `--all`）再重跑安装器；`--keep-running-pilot` 仅为兼容保留，不改变这个结果，脚本也不再有“装完重开 Pilot”的流程。
 - 新增一处读取 `~/.config/mms` 作为配置来源属于回归；`tests/test_single_config_root.py` 与 fresh-user gate 覆盖这条契约。
 
 ## Global OAuth Hard Cut
