@@ -280,6 +280,12 @@ export interface ConfigPreview {
   changes: { label: string; before: string; after: string }[];
   warnings: string[];
 }
+export interface UpdateHistoryItem {
+  version: string;
+  notes: string;
+  upgradeNotice?: string;
+  publishedAt?: string;
+}
 export type Page = "new" | "models" | "bots" | "session";
 
 // Bot 结果送达（T3）：页面通知与 webhook 共用同一事件形状。

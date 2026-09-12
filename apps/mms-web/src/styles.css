@@ -1640,6 +1640,31 @@ dialog:has(.dialog-body.sheet) .dialog-body.sheet > header {
   color: var(--amber);
   margin-bottom: 18px;
 }
+.inline-alert-retryable {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.inline-retry-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--amber) 15%, var(--surface));
+  color: var(--amber);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 150ms ease-out;
+}
+.inline-retry-button:hover {
+  background: color-mix(in srgb, var(--amber) 25%, var(--surface));
+  border-color: var(--amber);
+}
 .form-error {
   color: var(--danger);
   margin-top: 15px;
