@@ -140,7 +140,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 
 安装器默认会：
 
-- 安装到 `~/.mms`，并把 `mms`、`mmf`、`mmslogs` 链接到 `~/.local/bin`。
+- 安装到 `~/.mms`，默认只把公开命令 `mms`（以及 `mms-web`、`mmslogs`）链接到 `~/.local/bin`。`mmf`、`mmg` 等是维护者本机的开发入口，不会被普通安装覆盖。
 - 创建 `~/.mms/.venv`；系统 Python 不够新时，用 MMS-managed Python 兜底。
 - 发现 PATH、Homebrew、NVM 下的 `claude` / `codex` / `opencode` / `agy`。
 - 安装内建 session assets，但不会静默改写真实 provider/account 配置。

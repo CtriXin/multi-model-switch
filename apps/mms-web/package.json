@@ -1,6 +1,6 @@
 {
   "name": "@mms/web",
-  "version": "4.19.2",
+  "version": "4.19.3",
   "private": true,
   "type": "module",
   "scripts": {
