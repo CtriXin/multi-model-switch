@@ -172,7 +172,7 @@ test("BotChat respects enterToSend setting and BotArtifactPreview provides copy 
   assert.match(botStudioContent, /enterToSend=\{enterToSend\}/);
 
   // Artifact copy button
-  assert.match(previewContent, /navigator\.clipboard\.writeText/);
+  assert.match(previewContent, /copyText\(state\.text\)/);
   assert.match(previewContent, /className=\{`bot-preview-copy/);
   assert.match(botCss, /\.bot-preview-copy\s*\{/);
 });
@@ -186,4 +186,3 @@ test("ModelExplorer has inline retry button on launch options error", () => {
   assert.match(stylesCss, /\.inline-alert-retryable/);
   assert.match(stylesCss, /\.inline-retry-button/);
 });
-

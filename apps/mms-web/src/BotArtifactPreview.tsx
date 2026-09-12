@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { MouseEvent } from "react";
 import { Check, Copy, Download, FileText, X } from "lucide-react";
 import { RichText } from "./components";
+import { copyText } from "./clipboard";
 import type { BotArtifact } from "./Bot";
 import { artifactContentUrl, decodePreviewText, parseDelimited, PREVIEW_BYTE_LIMIT, previewType, TEXT_BYTE_LIMIT, TEXT_DISPLAY_LIMIT, readPreviewBytes } from "./bot-artifact-preview";
 
@@ -48,12 +49,9 @@ export function BotArtifactPreview({ artifact, onClose }: Props) {
   const title = artifact.name;
   const handleCopy = async () => {
     if (!state.text) return;
-    try {
-      await navigator.clipboard.writeText(state.text);
+    if (await copyText(state.text)) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch {
-      /* ignore */
     }
   };
   return (
