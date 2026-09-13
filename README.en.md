@@ -51,7 +51,7 @@ Limits: it listens on the loopback address only, there is no remote multi-user a
 
 ## Current Version
 
-Current release: `v4.20.0` on the `dev` track. Stable and canary tracks keep
+Current release: `v4.21.0` on the `dev` track. Stable and canary tracks keep
 their branch-specific versions; see [Release channels](docs/RELEASE_CHANNELS.md)
 for the channel contract.
 
@@ -131,7 +131,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 Exact pin when needed:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref v4.20.0
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref v4.21.0
 curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref main
 ```
 
