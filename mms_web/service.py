@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import locale
 import os
 import shlex
 import signal
@@ -142,6 +143,27 @@ def _is_windows() -> bool:
     return os.name == "nt"
 
 
+def _decode_windows_command_output(data) -> str:
+    """Decode console-tool output that can never crash the lifecycle path.
+
+    netstat and powershell.exe write the machine's OEM/ANSI codepage (cp936 on
+    a Chinese system), not UTF-8; ``text=True`` decodes with the locale and can
+    raise UnicodeDecodeError on perfectly normal output, killing start/stop.
+    Try strict UTF-8 first (pwsh 7 and UTF-8-mode systems), then the ANSI
+    codepage, then a lossy read.
+    """
+    if isinstance(data, str):
+        return data
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    try:
+        return data.decode(locale.getpreferredencoding(False) or "mbcs", errors="replace")
+    except LookupError:
+        return data.decode("utf-8", errors="replace")
+
+
 def state_identity(path) -> str:
     """A path-free fingerprint of one state root, published by the server.
 
@@ -179,8 +201,9 @@ def _probe(port: int, timeout: float = 0.4):
 def _listening_pids(port: int) -> list[int]:
     try:
         if _is_windows():
-            out = subprocess.run(["netstat", "-ano", "-p", "TCP"],
-                                 capture_output=True, text=True, timeout=5).stdout
+            raw = subprocess.run(["netstat", "-ano", "-p", "TCP"],
+                                 capture_output=True, timeout=5).stdout
+            out = _decode_windows_command_output(raw)
             pids = []
             for line in out.splitlines():
                 fields = line.split()
@@ -204,8 +227,9 @@ def _command_line(pid: int) -> list[str]:
     try:
         if _is_windows():
             command = "$p=Get-CimInstance Win32_Process -Filter 'ProcessId=%s'; if ($p) { $p.CommandLine }" % pid
-            out = subprocess.run(["powershell.exe", "-NoProfile", "-Command", command],
-                                 capture_output=True, text=True, timeout=5).stdout.strip()
+            raw = subprocess.run(["powershell.exe", "-NoProfile", "-Command", command],
+                                 capture_output=True, timeout=5).stdout
+            out = _decode_windows_command_output(raw).strip()
         else:
             out = subprocess.run(["ps", "-o", "command=", "-p", str(pid)],
                                  capture_output=True, text=True, timeout=5).stdout.strip()
