@@ -285,8 +285,8 @@ class PiRpcDriver:
         self.request({"type": "clear_queue"}, timeout=self._abort_timeout)
         return self.request({"type": "abort"}, timeout=self._abort_timeout if timeout is None else timeout)
 
-    def get_state(self) -> dict:
-        response = self.request({"type": "get_state"})
+    def get_state(self, *, timeout: float | None = None) -> dict:
+        response = self.request({"type": "get_state"}, timeout=timeout)
         return response.get("data") if isinstance(response.get("data"), dict) else {}
 
     # -- approvals -----------------------------------------------------

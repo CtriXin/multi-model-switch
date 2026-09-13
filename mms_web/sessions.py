@@ -595,7 +595,12 @@ class SessionService(SessionActions, SessionSideQuestions):
             raise WebError("LAUNCH_FAILED", "Pi 子进程无法启动", status=502) from exc
         live.driver = driver
         try:
-            state = driver.get_state()
+            # Windows npm/Pi startup can spend longer than the normal RPC
+            # response window while the provider/model registry warms up.
+            # Keep the strict state check, but give that first handshake a
+            # bounded grace period instead of reporting a false launch failure.
+            startup_timeout = 90.0 if os.name == "nt" else None
+            state = driver.get_state(timeout=startup_timeout)
             if not state.get("model"):
                 raise DriverClosedError("Pi 没有加载所选模型")
         except (DriverClosedError, RpcTimeoutError):
