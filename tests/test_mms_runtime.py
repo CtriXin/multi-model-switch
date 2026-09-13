@@ -1,5 +1,13 @@
+import os
 import sys
 from types import SimpleNamespace
+
+import pytest
+
+# These three fixtures build extensionless POSIX executables; on Windows the
+# resolver correctly rejects extensionless files (CreateProcess cannot start
+# them), so the POSIX contract is only checkable on POSIX.
+posix_only = pytest.mark.skipif(os.name == "nt", reason="POSIX CLI executables carry no extension")
 
 
 def test_runtime_accepts_current_supported_python():
@@ -56,6 +64,7 @@ def test_runtime_reexecs_even_when_reexec_flag_is_inherited(monkeypatch):
     assert "stderr" not in captured
 
 
+@posix_only
 def test_cli_resolver_finds_claude_in_other_nvm_version(tmp_path, monkeypatch):
     import mms_runtime
 
@@ -75,6 +84,7 @@ def test_cli_resolver_finds_claude_in_other_nvm_version(tmp_path, monkeypatch):
     assert resolved == str(claude)
 
 
+@posix_only
 def test_prepare_cli_command_prepends_resolved_bin_dir(tmp_path):
     import mms_runtime
 
@@ -95,6 +105,7 @@ def test_prepare_cli_command_prepends_resolved_bin_dir(tmp_path):
     assert env["PATH"].split(":")[0] == str(node22.resolve())
 
 
+@posix_only
 def test_cli_resolver_preserves_nvm_bin_symlink(tmp_path):
     import mms_runtime
 
