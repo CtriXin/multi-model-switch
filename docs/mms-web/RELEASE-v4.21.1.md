@@ -6,7 +6,7 @@
 
 ## Windows 修复
 
-- `mms web start/status/stop/restart`：`netstat` 与 `powershell.exe`（CIM 进程查询）改为字节捕获，先严格 UTF-8、再按系统 ANSI 代码页（GBK 系统为 cp936）安全解码，兜底 `errors=replace`；不再因系统输出解码失败让整个生命周期命令崩溃。
+- `mms web start/status/stop/restart`：`netstat` 改为字节捕获并按系统 codepage 安全解码；PowerShell CIM 命令行通过 ASCII Base64 承载 UTF-8，避免 GBK、ACP、UTF-8 之间的歧义，不再因系统输出解码失败或中文路径乱码让生命周期命令崩溃。
 - 发送消息后会话无法继续：catalog 与 model-settings 两个 worker 子进程的 JSON 契约固定为 UTF-8 字节（父进程发送 UTF-8 bytes、worker 端 `stdin` 按 UTF-8 读取、父进程按 UTF-8 `errors=replace` 解码），不再被 GBK locale 的 `text=True` 双向损坏。
 - 新增 Windows 编码回归测试：GBK 字节下 netstat/CIM 解析、含中文路径的命令行拆分、worker UTF-8 roundtrip（GBK locale 模拟），并纳入 Windows Acceptance pytest 套件。
 

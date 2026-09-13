@@ -5,6 +5,7 @@ subprocess output with the locale codepage. netstat / powershell CIM output
 crashed ``mms web start/status/stop``; the UTF-8-writing catalog and
 model-settings workers crashed the send/configure conversation path.
 """
+import base64
 import io
 import json
 import locale
@@ -68,9 +69,50 @@ def test_windows_cim_command_line_with_chinese_path_decodes(monkeypatch):
     monkeypatch.setattr(service, "_is_windows", lambda: True)
     monkeypatch.setattr(service, "_windows_console_codepages", lambda: ["cp936"])
     monkeypatch.setattr(service.subprocess, "run",
-                        lambda *a, **k: SimpleNamespace(stdout=command_line.encode("gbk"), returncode=0))
+                        lambda *a, **k: SimpleNamespace(stdout=base64.b64encode(command_line.encode("utf-8")), returncode=0))
     argv = service._command_line(1234)
     assert argv == ["C:\\用户\\中文目录\\python.exe", "-m", "mms_web", "--state-root", "D:\\状态 目录"]
+
+
+def test_windows_cim_preserves_paths_whose_gbk_bytes_also_decode_as_utf8(monkeypatch):
+    """GBK output can be valid UTF-8 bytes and must not become mojibake."""
+    from mms_web import service
+
+    command_line = r'"C:\Users\Admin\mms.exe" --state-root "D:\状态 目录"'
+    assert command_line.encode("gbk").decode("utf-8") != command_line
+    monkeypatch.setattr(service, "_is_windows", lambda: True)
+    monkeypatch.setattr(service.subprocess, "run",
+                        lambda *a, **k: SimpleNamespace(stdout=base64.b64encode(command_line.encode("utf-8")), returncode=0))
+    assert service._command_line(1234) == [
+        r"C:\Users\Admin\mms.exe", "--state-root", r"D:\状态 目录"
+    ]
+
+
+@pytest.mark.parametrize("output", [b"not base64!", base64.b64encode(b"\xff")])
+def test_windows_cim_invalid_output_does_not_create_a_corrupt_path(monkeypatch, output):
+    from mms_web import service
+
+    monkeypatch.setattr(service, "_is_windows", lambda: True)
+    monkeypatch.setattr(service.subprocess, "run",
+                        lambda *a, **k: SimpleNamespace(stdout=output, returncode=0))
+    assert service._command_line(1234) == []
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="requires native Windows CIM")
+def test_native_windows_cim_roundtrips_unicode_state_root(tmp_path):
+    from mms_web import service
+
+    state_root = str(tmp_path / "状态 目录 📁")
+    # Read the actual Windows process command line through PowerShell 5.1.
+    # Neither this test nor the child creates a service or touches real config.
+    with subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)",
+                           "--state-root", state_root]) as child:
+        try:
+            argv = service._command_line(child.pid)
+            assert service._option(argv, "--state-root") == state_root
+        finally:
+            child.terminate()
+            child.wait(timeout=10)
 
 
 class _EncodingPipes:
