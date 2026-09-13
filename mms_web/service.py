@@ -11,6 +11,7 @@ from `lsof`/`ps` or `netstat`/CIM, never from a pid file that could go stale.
 """
 from __future__ import annotations
 
+import base64
 import http.client
 import json
 import os
@@ -172,10 +173,9 @@ def _windows_console_codepages() -> list[str]:
 def _decode_windows_command_output(data) -> str:
     """Decode console-tool output that can never crash the lifecycle path.
 
-    netstat and powershell.exe write the machine's OEM/ANSI codepage (cp936 on
-    a Chinese system), never UTF-8 and never the locale Python reports under
-    PYTHONUTF8=1. Try strict UTF-8 first (pwsh 7 and UTF-8-mode systems), then
-    the OEM/ANSI codepages, then a lossy read.
+    Only netstat's ASCII protocol/port/PID fields are consumed. Localized
+    headings may use an OEM/ANSI codepage, even under PYTHONUTF8=1.
+    Unicode process command lines use a separate Base64/UTF-8 contract.
     """
     if isinstance(data, str):
         return data
@@ -253,14 +253,20 @@ def _listening_pids(port: int) -> list[int]:
 def _command_line(pid: int) -> list[str]:
     try:
         if _is_windows():
-            command = "$p=Get-CimInstance Win32_Process -Filter 'ProcessId=%s'; if ($p) { $p.CommandLine }" % pid
+            # Transport Unicode through ASCII: Windows PowerShell's console
+            # codepage can differ from both Python's locale and the system ACP.
+            command = (
+                "$p=Get-CimInstance Win32_Process -Filter 'ProcessId=%s'; "
+                "if ($p) { [Convert]::ToBase64String("
+                "[Text.Encoding]::UTF8.GetBytes($p.CommandLine)) }"
+            ) % pid
             raw = subprocess.run(["powershell.exe", "-NoProfile", "-Command", command],
                                  capture_output=True, timeout=5).stdout
-            out = _decode_windows_command_output(raw).strip()
+            out = base64.b64decode(raw.strip(), validate=True).decode("utf-8").strip()
         else:
             out = subprocess.run(["ps", "-o", "command=", "-p", str(pid)],
                                  capture_output=True, text=True, timeout=5).stdout.strip()
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, ValueError):
         return []
     return _split_command_line(out)
 
