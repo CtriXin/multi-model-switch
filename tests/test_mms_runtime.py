@@ -135,3 +135,67 @@ def test_windows_cli_resolver_skips_posix_wrapper_for_cmd_shim(tmp_path, monkeyp
     resolved = mms_runtime.resolve_cli_binary("pi", env={"MMS_PI_BIN": str(wrapper), "PATH": str(tmp_path)})
 
     assert resolved == str(cmd)
+
+
+def _windows_shim_pair(tmp_path):
+    """An npm-global layout: extensionless POSIX shim beside the real pi.cmd."""
+    bare = tmp_path / "pi"
+    bare.write_text("#!/bin/sh\nexec node ...\n", encoding="utf-8")
+    bare.chmod(0o755)
+    cmd = tmp_path / "pi.cmd"
+    cmd.write_text("@echo off\r\n", encoding="utf-8")
+    cmd.chmod(0o755)  # the X_OK check still runs on the POSIX test host
+    return bare, cmd
+
+
+def test_windows_resolver_prefers_cmd_sibling_over_extensionless_shim(tmp_path, monkeypatch):
+    """where.exe lists the bare npm shim first; MMS must still return pi.cmd."""
+    import mms_runtime
+
+    bare, cmd = _windows_shim_pair(tmp_path)
+    monkeypatch.setattr(mms_runtime.os, "name", "nt")
+    monkeypatch.setattr(mms_runtime, "_repo_cli_wrapper", lambda name: "")
+    # Simulate a PATHEXT quirk where shutil.which returns the bare shim.
+    monkeypatch.setattr(mms_runtime.shutil, "which", lambda name, path=None: str(bare))
+
+    resolved = mms_runtime.resolve_cli_binary("pi", env={"PATH": str(tmp_path)})
+
+    assert resolved == str(cmd)
+
+
+def test_windows_resolver_rewrites_bare_override_to_cmd_sibling(tmp_path, monkeypatch):
+    import mms_runtime
+
+    bare, cmd = _windows_shim_pair(tmp_path)
+    monkeypatch.setattr(mms_runtime.os, "name", "nt")
+    monkeypatch.setattr(mms_runtime, "_repo_cli_wrapper", lambda name: "")
+
+    resolved = mms_runtime.resolve_cli_binary("pi", env={"MMS_PI_BIN": str(bare), "PATH": str(tmp_path)})
+
+    assert resolved == str(cmd)
+
+
+def test_windows_resolver_rejects_shim_without_executable_sibling(tmp_path, monkeypatch):
+    """A bare shim with no pi.cmd/pi.exe beside it is never a Popen target."""
+    import mms_runtime
+
+    bare, _ = _windows_shim_pair(tmp_path)
+    (tmp_path / "pi.cmd").unlink()
+    (tmp_path / "pi.ps1").write_text("pi.ps1\n", encoding="utf-8")  # .ps1 is not CreateProcess-startable
+    monkeypatch.setattr(mms_runtime.os, "name", "nt")
+    monkeypatch.setattr(mms_runtime, "_repo_cli_wrapper", lambda name: "")
+    monkeypatch.setattr(mms_runtime.shutil, "which", lambda name, path=None: str(bare))
+
+    assert mms_runtime.resolve_cli_binary("pi", env={"PATH": str(tmp_path)}) == ""
+    assert mms_runtime.resolve_cli_binary("pi", env={"MMS_PI_BIN": str(tmp_path / "pi.ps1"), "PATH": str(tmp_path)}) == ""
+
+
+def test_posix_resolver_keeps_accepting_extensionless_executables(tmp_path, monkeypatch):
+    import mms_runtime
+
+    bare, _ = _windows_shim_pair(tmp_path)
+    monkeypatch.setattr(mms_runtime.os, "name", "posix")
+    monkeypatch.setattr(mms_runtime, "_repo_cli_wrapper", lambda name: "")
+    monkeypatch.setattr(mms_runtime.shutil, "which", lambda name, path=None: str(bare))
+
+    assert mms_runtime.resolve_cli_binary("pi", env={"PATH": str(tmp_path)}) == str(bare)
