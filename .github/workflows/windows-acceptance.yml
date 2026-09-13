@@ -30,6 +30,7 @@ on:
       - "tests/test_mms_web_install_lock.py"
       - "tests/test_mms_web_local_files.py"
       - "tests/test_mms_web_service.py"
+      - "tests/test_mms_web_windows_imports.py"
       - "tests/test_mms_web_status.py"
       - "tests/test_mms_web_sessions_pi_driver.py"
       - "tests/test_npx_installer_package.py"
@@ -166,6 +167,7 @@ jobs:
             tests/test_mms_web_install_lock.py `
             tests/test_mms_web_local_files.py `
             tests/test_mms_web_service.py `
+            tests/test_mms_web_windows_imports.py `
             tests/test_mms_web_status.py `
             tests/test_mms_web_sessions_pi_driver.py `
             tests/test_npx_installer_package.py `
