@@ -6,7 +6,6 @@ executor, retry-after-uncertain-launch, or arbitrary local-file serving.
 from __future__ import annotations
 
 import base64
-import fcntl
 import hashlib
 import json
 import secrets
@@ -17,6 +16,8 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
+
+from .file_lock import LOCK_EX, LOCK_NB, flock
 
 from .errors import WebError
 from .runtime import private_json
@@ -175,7 +176,7 @@ class BotRuntime(BotCommunications):
             self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
             handle = (self.root / "owner.lock").open("a+")
             try:
-                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                flock(handle, LOCK_EX | LOCK_NB)
             except OSError:
                 handle.close()
                 raise WebError("BOT_STORE_BUSY", "另一个 Pilot 正在管理这份 Bot 记录。", 409) from None

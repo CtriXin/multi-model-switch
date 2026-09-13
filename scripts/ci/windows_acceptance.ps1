@@ -243,6 +243,117 @@ print("PI_DISCOVERED", found)
 '@
   Assert-True ($piProbe -match "PI_DISCOVERED") "pilot-style PATH discovery failed: $piProbe"
   Write-Host "pi OK: $($piVersion -join ' ') -> $piProbe"
+
+  # --- Phase 7b: MMS resolver must return pi.cmd/pi.exe and RPC must answer --
+  Write-Phase "7b pi-rpc-get-state"
+  $whereOrder = (& where.exe pi 2>$null | ForEach-Object { "$_" }) -join "`n"
+  Write-Host "where.exe pi order:`n$whereOrder"
+  $rpcProbe = Invoke-PyProbe @'
+import json, queue, subprocess, sys, threading
+from mms_runtime import resolve_cli_binary
+
+resolved = resolve_cli_binary("pi")
+assert resolved, "resolve_cli_binary found no pi"
+assert resolved.lower().endswith((".cmd", ".exe", ".bat", ".com")), \
+    "resolver returned a non-CreateProcess target: " + resolved
+proc = subprocess.Popen([resolved, "--mode", "rpc", "--no-session"],
+                        stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                        stderr=subprocess.DEVNULL, text=True, encoding="utf-8")
+lines = queue.Queue()
+reader = threading.Thread(target=lambda: [lines.put(l) for l in proc.stdout], daemon=True)
+reader.start()
+proc.stdin.write(json.dumps({"id": "smoke1", "type": "get_state"}) + "\n")
+proc.stdin.flush()
+deadline_lines = []
+try:
+    while True:
+        line = lines.get(timeout=30).strip()
+        if not line:
+            continue
+        event = json.loads(line)
+        if event.get("type") == "response" and event.get("id") == "smoke1":
+            assert event.get("success") is True, "get_state failed: " + line
+            print("RPC_GET_STATE_OK", resolved)
+            break
+except queue.Empty:
+    print("RPC_TIMEOUT no get_state response from", resolved)
+    sys.exit(4)
+finally:
+    try:
+        proc.stdin.close()
+    except OSError:
+        pass
+    proc.kill()
+    proc.wait(timeout=10)
+'@
+  Assert-True ($rpcProbe -match "RPC_GET_STATE_OK") "pi rpc get_state smoke failed: $rpcProbe"
+  Write-Host $rpcProbe
+
+  # --- Phase 7c: one real model reply (opt-in, secret-gated) ------------------
+  # Runs only when MMS_SMOKE_OPENAI_KEY is provided (GitHub secret or a manual
+  # machine export). The key goes straight to Pi's own OPENAI_API_KEY handling;
+  # no MMS config, model route, or protocol is touched.
+  if ($env:MMS_SMOKE_OPENAI_KEY) {
+    Write-Phase "7c pi-model-reply"
+    $env:OPENAI_API_KEY = $env:MMS_SMOKE_OPENAI_KEY
+    $replyProbe = Invoke-PyProbe @'
+import json, os, queue, subprocess, sys, threading
+from mms_runtime import resolve_cli_binary
+
+resolved = resolve_cli_binary("pi")
+assert resolved, "resolve_cli_binary found no pi"
+proc = subprocess.Popen([resolved, "--mode", "rpc", "--no-session",
+                         "--provider", "openai", "--model", "gpt-4o-mini"],
+                        stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                        stderr=subprocess.DEVNULL, text=True, encoding="utf-8")
+lines = queue.Queue()
+threading.Thread(target=lambda: [lines.put(l) for l in proc.stdout], daemon=True).start()
+
+def send(payload):
+    proc.stdin.write(json.dumps(payload) + "\n")
+    proc.stdin.flush()
+
+try:
+    send({"id": "p1", "type": "prompt", "message": "Reply with the single word: ok"})
+    settled = False
+    while True:
+        line = lines.get(timeout=180).strip()
+        if not line:
+            continue
+        event = json.loads(line)
+        if event.get("type") == "response" and event.get("id") == "p1":
+            assert event.get("success") is True, "prompt rejected: " + line
+        if event.get("type") == "agent_settled":
+            settled = True
+            break
+    assert settled
+    send({"id": "t1", "type": "get_last_assistant_text"})
+    while True:
+        line = lines.get(timeout=30).strip()
+        if not line:
+            continue
+        event = json.loads(line)
+        if event.get("type") == "response" and event.get("id") == "t1":
+            text = ((event.get("data") or {}).get("text") or "").strip()
+            assert text, "empty assistant reply: " + line
+            print("RPC_MODEL_REPLY_OK", resolved, "reply=", text[:80])
+            break
+except queue.Empty:
+    print("RPC_TIMEOUT waiting for model reply")
+    sys.exit(4)
+finally:
+    try:
+        proc.stdin.close()
+    except OSError:
+        pass
+    proc.kill()
+    proc.wait(timeout=10)
+'@
+    Assert-True ($replyProbe -match "RPC_MODEL_REPLY_OK") "pi model reply smoke failed: $replyProbe"
+    Write-Host $replyProbe
+  } else {
+    Write-Host "phase 7c skipped: MMS_SMOKE_OPENAI_KEY not configured (get_state smoke in 7b still ran)"
+  }
 } else {
   Assert-True ($null -eq $piCommand) "pi must be absent in the floor cell so the missing-Pi path stays covered"
   Write-Host "pi intentionally absent; missing-Pi messaging was checked in phase 2"
