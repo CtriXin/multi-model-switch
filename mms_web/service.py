@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import http.client
 import json
-import locale
 import os
 import shlex
 import signal
@@ -143,14 +142,40 @@ def _is_windows() -> bool:
     return os.name == "nt"
 
 
+def _windows_console_codepages() -> list[str]:
+    """OEM/ANSI codepages console tools actually emit; empty off Windows.
+
+    ``locale.getpreferredencoding(False)`` is unusable here: PYTHONUTF8=1 (set
+    by the installer/CI) makes it answer "utf-8" while netstat and
+    powershell.exe still write the machine codepage (cp936 on a Chinese
+    system). Ask the Win32 API directly instead.
+    """
+    if os.name != "nt":
+        return []
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        pages = []
+        for getter in (kernel32.GetOEMCP, kernel32.GetACP):
+            try:
+                page = int(getter())
+            except (TypeError, ValueError):
+                continue
+            if page:
+                pages.append(f"cp{page}")
+        return pages
+    except (AttributeError, OSError):
+        return []
+
+
 def _decode_windows_command_output(data) -> str:
     """Decode console-tool output that can never crash the lifecycle path.
 
     netstat and powershell.exe write the machine's OEM/ANSI codepage (cp936 on
-    a Chinese system), not UTF-8; ``text=True`` decodes with the locale and can
-    raise UnicodeDecodeError on perfectly normal output, killing start/stop.
-    Try strict UTF-8 first (pwsh 7 and UTF-8-mode systems), then the ANSI
-    codepage, then a lossy read.
+    a Chinese system), never UTF-8 and never the locale Python reports under
+    PYTHONUTF8=1. Try strict UTF-8 first (pwsh 7 and UTF-8-mode systems), then
+    the OEM/ANSI codepages, then a lossy read.
     """
     if isinstance(data, str):
         return data
@@ -158,10 +183,12 @@ def _decode_windows_command_output(data) -> str:
         return data.decode("utf-8")
     except UnicodeDecodeError:
         pass
-    try:
-        return data.decode(locale.getpreferredencoding(False) or "mbcs", errors="replace")
-    except LookupError:
-        return data.decode("utf-8", errors="replace")
+    for encoding in _windows_console_codepages():
+        try:
+            return data.decode(encoding, errors="replace")
+        except LookupError:
+            continue
+    return data.decode("utf-8", errors="replace")
 
 
 def state_identity(path) -> str:

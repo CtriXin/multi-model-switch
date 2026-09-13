@@ -24,12 +24,28 @@ def test_windows_command_output_decodes_gbk_without_crashing(monkeypatch):
 
     text = "活动 TCP 连接 中文目录\\pi.CMD"
     gbk_bytes = text.encode("gbk")
-    monkeypatch.setattr(locale, "getpreferredencoding", lambda do_setlocale=True: "gbk")
+    monkeypatch.setattr(service, "_windows_console_codepages", lambda: ["cp936"])
     assert service._decode_windows_command_output(gbk_bytes) == text
     # UTF-8 output (pwsh 7 / UTF-8 systems) is preferred when it decodes cleanly.
     assert service._decode_windows_command_output(text.encode("utf-8")) == text
     # Undecodable junk must never raise — the lifecycle path depends on it.
     assert service._decode_windows_command_output(b"\xff\xfe garbage \x80")
+
+
+def test_windows_decoder_ignores_locale_under_pythonutf8(monkeypatch):
+    """PYTHONUTF8=1 makes getpreferredencoding answer utf-8 while console tools
+    still write cp936; the decoder must follow the Win32 codepage, not locale."""
+    from mms_web import service
+
+    text = "中文进程命令行"
+    gbk_bytes = text.encode("gbk")
+    monkeypatch.setattr(locale, "getpreferredencoding", lambda do_setlocale=True: "utf-8")
+    monkeypatch.setattr(service, "_windows_console_codepages", lambda: ["cp936"])
+    assert service._decode_windows_command_output(gbk_bytes) == text
+    # No codepage answer at all (off-Windows or API failure) still never raises.
+    monkeypatch.setattr(service, "_windows_console_codepages", lambda: [])
+    decoded = service._decode_windows_command_output(gbk_bytes)
+    assert isinstance(decoded, str) and decoded
 
 
 def test_windows_netstat_bytes_are_parsed_after_safe_decode(monkeypatch):
@@ -38,7 +54,7 @@ def test_windows_netstat_bytes_are_parsed_after_safe_decode(monkeypatch):
     netstat = "  TCP    127.0.0.1:8765     0.0.0.0:0    监听  中文 4321\r\n" \
               "  TCP    0.0.0.0:8765       0.0.0.0:0    LISTENING         9876\r\n"
     monkeypatch.setattr(service, "_is_windows", lambda: True)
-    monkeypatch.setattr(locale, "getpreferredencoding", lambda do_setlocale=True: "gbk")
+    monkeypatch.setattr(service, "_windows_console_codepages", lambda: ["cp936"])
     monkeypatch.setattr(service.subprocess, "run",
                         lambda *a, **k: SimpleNamespace(stdout=netstat.encode("gbk"), returncode=0))
     # The non-ASCII state text must not break PID extraction.
@@ -50,7 +66,7 @@ def test_windows_cim_command_line_with_chinese_path_decodes(monkeypatch):
 
     command_line = '"C:\\用户\\中文目录\\python.exe" -m mms_web --state-root "D:\\状态 目录"'
     monkeypatch.setattr(service, "_is_windows", lambda: True)
-    monkeypatch.setattr(locale, "getpreferredencoding", lambda do_setlocale=True: "gbk")
+    monkeypatch.setattr(service, "_windows_console_codepages", lambda: ["cp936"])
     monkeypatch.setattr(service.subprocess, "run",
                         lambda *a, **k: SimpleNamespace(stdout=command_line.encode("gbk"), returncode=0))
     argv = service._command_line(1234)
@@ -136,6 +152,7 @@ def test_run_worker_decodes_utf8_json_under_gbk_locale(tmp_path, monkeypatch):
                                stderr=b"")
 
     monkeypatch.setattr(catalog.subprocess, "run", fake_run)
+    # Simulate the GBK host locale; the UTF-8 bytes contract must be immune to it.
     monkeypatch.setattr(locale, "getpreferredencoding", lambda do_setlocale=True: "gbk")
     result = cat._run_worker({"command": "ping"})
     assert result == {"ok": True, "路径": "中文值"}
