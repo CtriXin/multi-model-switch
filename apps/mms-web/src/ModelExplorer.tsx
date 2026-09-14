@@ -9,7 +9,6 @@ import {
   Brain,
   Image,
   Layers,
-  RotateCcw,
 } from "lucide-react";
 import type { Model, Preset } from "./types";
 import { request } from "./api";
@@ -172,9 +171,8 @@ export function ModelExplorer({
   const [query, setQuery] = useState("");
   const [onlyFavorite, setOnlyFavorite] = useState(false);
   const [revision, setRevision] = useState(0);
-  const [retry, setRetry] = useState(0);
   const selected = presets.find((p) => p.id === value);
-  const { facts, error } = useLaunchFacts(value, workspaceId, retry);
+  const { facts, error } = useLaunchFacts(value, workspaceId);
   const prefs = readRoutePreferences();
   const groups = useMemo(() => {
     const map = new Map<string, Preset[]>();
@@ -366,17 +364,9 @@ export function ModelExplorer({
                   ))}
                 </div>
                 {error && (
-                  <div className="inline-alert inline-alert-retryable" role="alert">
-                    <span>{error}</span>
-                    <button
-                      type="button"
-                      className="inline-retry-button"
-                      onClick={() => setRetry((r) => r + 1)}
-                    >
-                      <RotateCcw size={13} />
-                      重试
-                    </button>
-                  </div>
+                  <p className="inline-alert" role="alert">
+                    {error}
+                  </p>
                 )}
                 <details className="quick-config">
                   <summary>
