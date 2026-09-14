@@ -61,6 +61,16 @@ def effective_entries(cwd, home, *, include_external=False):
     return list(entries.values())
 
 
+def _pi_skills_module(executable):
+    """Resolve Pi's native skills module for POSIX and npm Windows layouts."""
+    executable_path = Path(executable).resolve()
+    dist = next((path for path in executable_path.parents if path.name == "dist"), None)
+    candidates = [dist / "core/skills.js"] if dist else []
+    for parent in (executable_path.parent, *executable_path.parents):
+        candidates.append(parent / "node_modules/@earendil-works/pi-coding-agent/dist/core/skills.js")
+    return next((path for path in candidates if path.is_file()), Path("/nonexistent"))
+
+
 class SkillCatalog:
     def __init__(self, catalog, state_root):
         self.catalog, self.root = catalog, Path(state_root) / "skill-reader"
@@ -89,20 +99,38 @@ class SkillCatalog:
         executable, node = pi_runtime()
         if not node:
             raise WebError("SKILLS_UNAVAILABLE", "需要可用的 Pi 才能读取 skills。", 409)
-        dist = next((p for p in Path(executable).resolve().parents if p.name == "dist"), None)
-        module = dist / "core/skills.js" if dist else Path("/nonexistent")
+        module = _pi_skills_module(executable)
         if not module.is_file():
             raise WebError("SKILLS_UNAVAILABLE", "当前 Pi 版本未提供 skills 读取接口。", 409)
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         origins = effective_entries(workspace["path"], real_home(), include_external=self.preferences()["mergeExternal"])
-        with tempfile.TemporaryDirectory(dir=self.root, prefix="overlay-") as temporary:
-            overlay = Path(temporary)
-            for origin in origins:
-                entry = origin["path"]
-                (overlay / Path(entry).name).symlink_to(entry)
+        if os.name == "nt":
+            # Windows may reject symlink creation without Developer Mode or
+            # elevation. Pass real skill roots in high-to-low precedence order;
+            # Pi's first-wins conflict rule is equivalent to the POSIX overlay.
+            paths = []
+            seen = set()
+            for origin in reversed(origins):
+                root = str(origin.get("sourceRoot") or "").strip()
+                if root and root not in seen and Path(root).is_dir():
+                    seen.add(root)
+                    paths.append(root)
+            request = {"module": str(module), "cwd": workspace["path"],
+                       "agentDir": str(self.root), "paths": paths}
             result = subprocess.run([node, str(Path(__file__).with_name("skill_catalog.mjs"))],
-                input=json.dumps({"module":str(module), "cwd":workspace["path"], "agentDir":str(self.root), "paths":[str(overlay)]}),
-                text=True, capture_output=True, timeout=15, env={**os.environ, "HOME":str(self.root)})
+                input=json.dumps(request), text=True, encoding="utf-8", errors="replace",
+                capture_output=True, timeout=15, env={**os.environ, "HOME": str(self.root)})
+        else:
+            with tempfile.TemporaryDirectory(dir=self.root, prefix="overlay-") as temporary:
+                overlay = Path(temporary)
+                for origin in origins:
+                    entry = origin["path"]
+                    (overlay / Path(entry).name).symlink_to(entry)
+                request = {"module": str(module), "cwd": workspace["path"],
+                           "agentDir": str(self.root), "paths": [str(overlay)]}
+                result = subprocess.run([node, str(Path(__file__).with_name("skill_catalog.mjs"))],
+                    input=json.dumps(request), text=True, encoding="utf-8", errors="replace",
+                    capture_output=True, timeout=15, env={**os.environ, "HOME": str(self.root)})
         if result.returncode:
             raise WebError("SKILLS_UNAVAILABLE", "无法读取当前 Pi skills，请检查安装。", 409)
         result = json.loads(result.stdout)

@@ -11,7 +11,7 @@ from pathlib import Path
 import stat
 
 from .errors import WebError
-from .files import MAX_FILE, TEXT_LIMIT, allowed, image_type
+from .files import MAX_FILE, TEXT_LIMIT, _is_link_or_reparse, allowed, image_type
 
 PREVIEW_CSP = ("sandbox; default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; "
                "img-src data:; font-src data:; connect-src 'none'; form-action 'none'; "
@@ -32,6 +32,32 @@ def output_path(root: Path, raw: str) -> str:
 
 def read_output(root: Path, raw: str) -> tuple[str, bytes]:
     relative = output_path(root, raw)
+    if os.name == "nt":
+        # Windows has no O_DIRECTORY/dir_fd. Walk the path lexically and
+        # reject symlinks, junctions, and other reparse points at every hop
+        # before opening the file, preserving the POSIX no-follow boundary.
+        current = Path(root)
+        try:
+            if _is_link_or_reparse(current):
+                raise OSError("workspace root is redirected")
+            parts = Path(relative).parts
+            for part in parts[:-1]:
+                current = current / part
+                if _is_link_or_reparse(current) or not current.is_dir():
+                    raise OSError("output directory is redirected")
+            target = current / parts[-1]
+            if _is_link_or_reparse(target):
+                raise OSError("output path is redirected")
+            info = target.stat()
+            if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_FILE:
+                raise WebError("PREVIEW_UNAVAILABLE", "成果预览支持最大 8 MB 图片或 1 MB 文本。", 400)
+            with target.open("rb") as stream:
+                data = stream.read(MAX_FILE + 1)
+            if len(data) > MAX_FILE:
+                raise WebError("PREVIEW_UNAVAILABLE", "文件已超过预览大小限制。", 400)
+            return relative, data
+        except OSError as exc:
+            raise WebError("FILE_UNAVAILABLE", "原文件已移动、删除或变为不可预览的链接。", 409) from exc
     descriptors = []
     try:
         # Walk with directory descriptors: a generated symlink must never make
