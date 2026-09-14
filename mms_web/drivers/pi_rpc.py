@@ -69,11 +69,16 @@ def _summarize_args(args) -> str:
 
 
 class _PendingRequest:
-    __slots__ = ("event", "response")
+    __slots__ = ("event", "response", "error", "quiet")
 
-    def __init__(self) -> None:
+    def __init__(self, quiet: bool = False) -> None:
         self.event = threading.Event()
         self.response: dict | None = None
+        self.error: str | None = None
+        # Quiet requests surface failures to their caller only, never as a
+        # transcript notice: capability probes must not pollute the session
+        # events a user is reading.
+        self.quiet = quiet
 
 
 class PiRpcDriver:
@@ -202,13 +207,13 @@ class PiRpcDriver:
 
     # -- commands ------------------------------------------------------
 
-    def request(self, command: dict, *, timeout: float | None = None) -> dict:
+    def request(self, command: dict, *, timeout: float | None = None, quiet: bool = False) -> dict:
         with self._state_lock:
             if self._exit_code is not None:
                 raise DriverClosedError("pi process exited")
             request_id = f"r{self._next_request_id}"
             self._next_request_id += 1
-            pending = _PendingRequest()
+            pending = _PendingRequest(quiet=quiet)
             self._pending[request_id] = pending
         payload = {"id": request_id, **command}
         try:
@@ -288,6 +293,19 @@ class PiRpcDriver:
     def get_state(self) -> dict:
         response = self.request({"type": "get_state"})
         return response.get("data") if isinstance(response.get("data"), dict) else {}
+
+    def get_commands(self, *, timeout: float | None = None) -> list:
+        """Registered slash commands, as the RPC ``get_commands`` reports them.
+
+        Used to detect capabilities such as the native ``/btw`` extension;
+        the caller decides what a missing entry means, never this method.
+        Failures are quiet: an unsupported command is a fact about the other
+        process, not a session event the user needs to read.
+        """
+        response = self.request({"type": "get_commands"}, timeout=timeout, quiet=True)
+        data = response.get("data") if isinstance(response.get("data"), dict) else {}
+        commands = data.get("commands")
+        return [item for item in commands if isinstance(item, dict)] if isinstance(commands, list) else []
 
     # -- approvals -----------------------------------------------------
 
@@ -425,11 +443,15 @@ class PiRpcDriver:
             pending = self._pending.pop(request_id, None)
         if pending is None:
             return
-        pending.response = message
-        pending.event.set()
         if message.get("success") is False:
             error = str(message.get("error") or "unknown error")
-            self._notice(f"命令 {message.get('command') or '?'} 失败: {_clip(error, 400)}", title="命令错误")
+            pending.error = error
+            if not pending.quiet:
+                self._notice(f"命令 {message.get('command') or '?'} 失败: {_clip(error, 400)}", title="命令错误")
+        else:
+            pending.error = None
+        pending.response = message
+        pending.event.set()
 
     def _handle_ui_request(self, message: dict) -> None:
         request_id = str(message.get("id") or "")

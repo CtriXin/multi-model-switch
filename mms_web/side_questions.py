@@ -36,6 +36,7 @@ from datetime import datetime
 from typing import Any
 
 from .errors import WebError
+from .drivers.base import RpcTimeoutError
 
 BTW_FINAL_STATES = {"completed", "failed", "cancelled", "uncertain"}
 BTW_SOURCES = {"state", "completion"}
@@ -54,6 +55,10 @@ _MAX_CONTEXT_ITEMS = 8
 _MAX_TURNS = 6
 _MAX_TURN_TEXT = 1200
 _MAX_TURNS_CHARS = 5000
+# How long the /btw prompt itself may take to be accepted. The answer window
+# is the ordinary btw timeout, applied to the terminal event instead.
+_BTW_PROMPT_TIMEOUT = 10.0
+_MAX_FALLBACK_REASON = 300
 _IDEM_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _MASK = "[已隐藏密钥]"
 
@@ -106,6 +111,11 @@ def public_side_question(row: dict) -> dict:
 
 def _looks_like_state(question: str) -> bool:
     return any(hint in question for hint in _STATE_HINTS)
+
+
+def _clip_text(text: str, limit: int = _MAX_FALLBACK_REASON) -> str:
+    text = str(text or "")
+    return text if len(text) <= limit else text[:limit] + "…"
 
 
 def _btw_event_context(value: Any) -> dict:
@@ -242,6 +252,7 @@ class SessionSideQuestions:
                 # ``completion`` rows once the excerpt is built; a ``state``
                 # answer reads the live snapshot instead and leaves it None.
                 "contextScope": None,
+                "fallbackReason": None,
                 "error": None,
                 "createdAt": now,
                 "acceptedAt": now,
@@ -281,7 +292,15 @@ class SessionSideQuestions:
             return
         at = _btw_event_at(payload, self._now())
         with session.lock:
-            row = session.side_questions.get(btw_id)
+            # Events for questions this host asked natively carry the
+            # extension's own id: route them to the host row via the map that
+            # the accepted event established.
+            row = session.side_questions.get(session.btw_native_map.get(btw_id, btw_id))
+            if row is None and kind == "accepted":
+                host_id = self._match_native_pending(session, payload)
+                if host_id is not None:
+                    session.btw_native_map[btw_id] = host_id
+                    row = session.side_questions.get(host_id)
             if row is None:
                 if kind != "accepted":
                     return
@@ -371,7 +390,30 @@ class SessionSideQuestions:
                     row["redactionSummary"]["secretsMasked"] += masked
                 row["status"] = kind
                 row["completedAt"] = at
+                timer = self._btw_timers.pop(row["btwId"], None)
+                if timer is not None:
+                    timer.cancel()
             session.persist(self._state_dir)
+
+    def _match_native_pending(self, session, payload: dict) -> str | None:
+        """Bind an accepted event to the host row whose /btw prompt it answers.
+
+        Called with the session lock held. The extension echoes the question
+        it received; the host sent the row's already-redacted question, so the
+        same normalisation on both sides makes the match exact. First match
+        wins, which keeps duplicate identical questions from pairing twice.
+        """
+        question, _ = _redact_counted(
+            " ".join(str(payload.get("question") or "").split())[:_MAX_QUESTION],
+            session.secrets,
+        )
+        if not question:
+            return None
+        for host_id, pending in list(session.btw_native_pending.items()):
+            if pending.get("question") == question:
+                session.btw_native_pending.pop(host_id, None)
+                return host_id
+        return None
 
     @staticmethod
     def _btw_redact_stream(session, value: str) -> tuple[str, int]:
@@ -396,6 +438,21 @@ class SessionSideQuestions:
             if row["status"] in BTW_FINAL_STATES:
                 # Already settled: cancel is an idempotent no-op, not an error.
                 return public_side_question(row)
+            native_id = next(
+                (nid for nid, hid in session.btw_native_map.items() if hid == row["btwId"]),
+                None,
+            )
+        if native_id is not None:
+            # Best effort: tell the extension to stop spending tokens. The
+            # row settles below regardless, so a lost command can at worst
+            # leave the extension finishing a turn nobody reads.
+            try:
+                session.driver.request(
+                    {"type": "prompt", "message": f"/btw:cancel {native_id}"},
+                    timeout=_BTW_PROMPT_TIMEOUT,
+                )
+            except Exception:
+                pass
         cancel = self._btw_cancel.get(row["btwId"])
         if cancel is not None:
             cancel.set()
@@ -462,6 +519,127 @@ class SessionSideQuestions:
     # -- completion source --------------------------------------------
 
     def _answer_from_completion(self, session, row: dict) -> None:
+        """Answer a completion question, native extension first.
+
+        When the session carries the fork's ``/btw`` extension
+        (``meta.btwNative``), the question is handed to it through a single
+        ``/btw`` prompt: the extension answers inside the Pi process with the
+        session's own context and reports back through BTW_EVENT notifies.
+        It falls back to the host sidecar exactly once per question — when
+        the extension refuses the prompt, the driver fails to deliver it, or
+        no terminal event arrives before the timeout — never in a loop, and
+        never silently: the reason is recorded on the row.
+        """
+        if self._native_ready(session):
+            reason = self._try_native_answer(session, row)
+            if reason is None:
+                return  # accepted by the extension; events drive the row now
+            self._btw_fallback_to_host(session, row, reason)
+            return
+        # No native extension was detected for this session: the host
+        # sidecar is the ordinary path, not a fallback, so nothing is recorded.
+        self._answer_from_completion_host(session, row)
+
+    def _native_ready(self, session) -> bool:
+        driver = session.driver
+        return bool(session.meta.get("btwNative")) and callable(getattr(driver, "request", None))
+
+    def _try_native_answer(self, session, row: dict) -> str | None:
+        """Hand one question to the native extension. None means accepted.
+
+        Pi answers an extension-command ``prompt`` only after the command's
+        handler finishes, so waiting for that response would block the ask
+        for the whole answer. The prompt is therefore sent by a worker
+        thread; the ask returns as soon as the question is recorded, and the
+        row advances through BTW_EVENT. The worker uses the response only to
+        learn about a pre-acceptance rejection; the fallback clock starts
+        once the extension is known to have taken the question.
+        """
+        driver = session.driver
+        if driver is None:
+            return "native unavailable: no driver"
+        question = " ".join(str(row["question"]).split())  # one line, one command
+        with session.lock:
+            session.btw_native_pending[row["btwId"]] = {
+                "question": question,
+                "sentAt": self._now(),
+            }
+        worker = threading.Thread(
+            target=self._btw_native_prompt_worker, args=(session, row),
+            daemon=True, name=f"mms-btw-native-{row['btwId']}",
+        )
+        worker.start()
+        return None
+
+    def _btw_native_prompt_worker(self, session, row: dict) -> None:
+        driver = session.driver
+        message = f"/btw {' '.join(str(row['question']).split())}".rstrip()
+        optimistic = False
+        try:
+            response = driver.request({"type": "prompt", "message": message}, timeout=_BTW_PROMPT_TIMEOUT)
+        except RpcTimeoutError:
+            # The handler outlived the wait: pi has taken the command (its
+            # pre-acceptance refusals answer fast). Treat it as accepted and
+            # let the events, and then the fallback clock, decide the rest.
+            optimistic = True
+        except Exception as exc:  # driver refused or died before acceptance
+            self._btw_native_rejected(session, row, f"native prompt failed: {exc.__class__.__name__}")
+            return
+        if not optimistic:
+            if not isinstance(response, dict) or response.get("success") is not True:
+                error = str((response or {}).get("error") or "")[:120] if isinstance(response, dict) else "malformed response"
+                self._btw_native_rejected(session, row, f"extension rejected: {error}" if error else "extension rejected")
+                return
+        # The extension has (or provably will) take(n) the question. The row
+        # advances through BTW_EVENT only; this timer is the fallback trigger
+        # when no terminal event lands.
+        with session.lock:
+            if session.side_questions.get(row["btwId"]) is not row or row["status"] in BTW_FINAL_STATES:
+                return
+            timer = threading.Timer(
+                self._btw_timeout, self._btw_native_timeout, args=(session, row["btwId"])
+            )
+            timer.daemon = True
+            self._btw_timers[row["btwId"]] = timer
+        timer.start()
+
+    def _btw_native_rejected(self, session, row: dict, reason: str) -> None:
+        with session.lock:
+            session.btw_native_pending.pop(row["btwId"], None)
+            alive = session.side_questions.get(row["btwId"]) is row
+        if alive:
+            self._btw_fallback_to_host(session, row, reason)
+
+    def _btw_native_timeout(self, session, btw_id: str) -> None:
+        with session.lock:
+            session.btw_native_pending.pop(btw_id, None)
+            row = session.side_questions.get(btw_id)
+            if row is None or row["status"] in BTW_FINAL_STATES:
+                return
+        self._btw_fallback_to_host(
+            session, row,
+            f"native 超时（{int(self._btw_timeout)} 秒内无终态事件），已改由 Pilot 旁路回答。",
+        )
+
+    def _btw_fallback_to_host(self, session, row: dict, reason: str) -> None:
+        """One host-sidecar retry per question, never a loop."""
+        with session.lock:
+            session.btw_native_pending.pop(row["btwId"], None)
+            if row.get("_native_fallback_done"):
+                return
+            row["_native_fallback_done"] = True
+            row["fallbackReason"] = _clip_text(reason)
+            # Whatever the extension reported about scope belongs to the
+            # extension's answer; the host sidecar sets its own when it runs.
+            row["runner"] = "host"
+            row["contextScope"] = None
+            session.persist(self._state_dir)
+        timer = self._btw_timers.pop(row["btwId"], None)
+        if timer is not None:
+            timer.cancel()
+        self._answer_from_completion_host(session, row)
+
+    def _answer_from_completion_host(self, session, row: dict) -> None:
         # Per session, not per service: the read-only answer runs on the route
         # this session already launched with, so a host that injects nothing
         # still gets the session's own model rather than no model at all.

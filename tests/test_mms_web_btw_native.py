@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -30,6 +31,12 @@ from test_mms_web_sessions_service import (  # noqa: E402
     make_service,
 )
 from test_mms_web_sessions_pi_driver import make_driver  # noqa: E402  (pytest resolves imported fixtures)
+
+from test_mms_web_btw_backend import wait_btw  # noqa: E402
+
+
+NATIVE_COMMANDS = [{"name": "btw"}, {"name": "btw:cancel"}]
+UPSTREAM_ONLY_COMMANDS = [{"name": "btw"}]  # upstream pi-btw: no headless, no btw:cancel
 
 
 def btw_event(event: str, btw_id: str = "btw-abc123def456", **fields) -> dict:
@@ -300,3 +307,229 @@ def test_service_maps_payload_from_driver_sink(tmp_path, monkeypatch):
     native_lifecycle(drivers[0])
     row = service.get_side_question(session_id, "btw-abc123def456")
     assert row["runner"] == "pi-extension"
+
+
+# -- T2b: btwNative detection -----------------------------------------
+
+
+def wait_probe(service: SessionService, session_id: str, timeout: float = 5.0) -> None:
+    """The launch-path probe runs off the critical path; wait for its write."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        meta = service._get(session_id).meta
+        if "btwNative" in meta:
+            return
+        time.sleep(0.02)
+    raise AssertionError(f"btwNative never probed for {session_id}")
+
+
+def test_probe_sets_btw_native_only_for_the_fork(tmp_path, monkeypatch):
+    service, _ = make_service(tmp_path, monkeypatch=monkeypatch, driver_commands=NATIVE_COMMANDS)
+    session_id = launch_ok(service)["session"]["id"]
+    wait_probe(service, session_id)
+    assert service._get(session_id).meta["btwNative"] is True
+    assert service.get_session(session_id)["session"]["btwNative"] is True
+
+    service2, _ = make_service(tmp_path / "b", monkeypatch=monkeypatch, driver_commands=UPSTREAM_ONLY_COMMANDS)
+    session_id2 = launch_ok(service2)["session"]["id"]
+    wait_probe(service2, session_id2)
+    assert service2._get(session_id2).meta["btwNative"] is False
+
+    service3, _ = make_service(tmp_path / "c", monkeypatch=monkeypatch)
+    session_id3 = launch_ok(service3)["session"]["id"]
+    wait_probe(service3, session_id3)
+    assert service3._get(session_id3).meta["btwNative"] is False
+
+
+def test_probe_failure_never_blocks_launch(tmp_path, monkeypatch):
+    service, _ = make_service(tmp_path, monkeypatch=monkeypatch)
+
+    def explode(self, *, timeout=None):
+        raise RuntimeError("get_commands exploded")
+
+    monkeypatch.setattr(FakeDriver, "get_commands", explode)
+    session_id = launch_ok(service)["session"]["id"]
+    wait_probe(service, session_id)
+    assert service._get(session_id).meta.get("btwNative") is False
+
+
+# -- T2b: native-first answering ---------------------------------------
+
+
+def emit_answer(driver: FakeDriver, btw_id: str, question: str, answer: str = "扩展的回答。") -> None:
+    """The event stream the real extension sends for one answered question."""
+    driver.emit_side_question_event(btw_event("accepted", btw_id, question=question))
+    driver.emit_side_question_event(btw_event("running", btw_id))
+    driver.emit_side_question_event(btw_event("delta", btw_id, text=answer[:4]))
+    driver.emit_side_question_event(btw_event("delta", btw_id, text=answer[4:]))
+    driver.emit_side_question_event(btw_event("completed", btw_id, text=answer,
+        context={"mode": "branch", "entries": 7, "chars": 1234, "truncated": True}))
+
+
+def test_native_answers_via_events_and_only_sends_the_btw_prompt(tmp_path, monkeypatch):
+    """A6 core: runner=pi-extension, branch scope, one /btw prompt, no user event."""
+    service, drivers = make_service(tmp_path, monkeypatch=monkeypatch, driver_commands=NATIVE_COMMANDS,
+                                    sidecar_runner=lambda *a, **k: {"answer": "host"})
+    session_id = launch_ok(service, prompt="主任务")["session"]["id"]
+    wait_probe(service, session_id)
+    session = service._get(session_id)
+    events_before = [dict(e) for e in session.events]
+    sequence_before = session.last_sequence
+
+    row = service.ask_side_question(session_id, {"question": "现在的分支策略是什么？"})
+
+    # The prompt carried the question to the extension, one command, nothing else.
+    assert drivers[0].prompts == ["主任务", "/btw 现在的分支策略是什么？"]
+    emit_answer(drivers[0], "btw-native11", "现在的分支策略是什么？", "扩展的回答。")
+    final = wait_btw(service, session_id, row["btwId"], {"completed"})
+    assert final["runner"] == "pi-extension"
+    assert final["answer"] == "扩展的回答。"
+    assert final["contextScope"] == {"mode": "branch", "entries": 7, "chars": 1234, "truncated": True}
+    assert final["fallbackReason"] is None
+    # Invariants: no new user event, no sequence move, no second prompt.
+    assert [e["id"] for e in session.events] == [e["id"] for e in events_before]
+    assert session.last_sequence == sequence_before
+    assert [p for p in drivers[0].prompts if not p.startswith("/btw")] == ["主任务"]
+    assert not any(e.get("kind") == "user" for e in session.events[len(events_before):])
+
+
+def test_native_row_survives_restart_and_keeps_runner(tmp_path, monkeypatch):
+    service, drivers = make_service(tmp_path, monkeypatch=monkeypatch, driver_commands=NATIVE_COMMANDS)
+    session_id = launch_ok(service)["session"]["id"]
+    row = service.ask_side_question(session_id, {"question": "重启后还在吗"})
+    emit_answer(drivers[0], "btw-restart1", "重启后还在吗")
+    wait_btw(service, session_id, row["btwId"], {"completed"})
+    service.stop(session_id, {"requestId": "req-stop"})
+    service.close()
+
+    service2, _ = make_service(tmp_path, monkeypatch=monkeypatch)
+    rows = service2.list_side_questions(session_id)
+    assert [r["btwId"] for r in rows] == [row["btwId"]]
+    assert rows[0]["runner"] == "pi-extension"
+
+
+def test_native_prompt_rejected_falls_back_to_host_once(tmp_path, monkeypatch):
+    calls = []
+
+    def runner(context, *, cancel_event, timeout):
+        calls.append(context["question"])
+        return {"answer": "host 兜底回答。"}
+
+    service, drivers = make_service(tmp_path, monkeypatch=monkeypatch, driver_commands=NATIVE_COMMANDS,
+                                    sidecar_runner=runner)
+    session_id = launch_ok(service)["session"]["id"]
+    drivers[0].fail_next_prompt = {"type": "response", "command": "prompt", "success": False, "error": "no active model"}
+
+    row = service.ask_side_question(session_id, {"question": "被拒的问题"})
+
+    final = wait_btw(service, session_id, row["btwId"], {"completed"})
+    assert "extension rejected" in final["fallbackReason"]
+    assert final["runner"] == "host"
+    assert final["answer"] == "host 兜底回答。"
+    assert len(calls) == 1  # exactly one host retry, never a loop
+    # The rejection was recorded before the host retry answered.
+    assert final["fallbackReason"] == service.get_side_question(session_id, row["btwId"])["fallbackReason"]
+
+
+def test_native_timeout_falls_back_to_host_once(tmp_path, monkeypatch):
+    calls = []
+
+    def runner(context, *, cancel_event, timeout):
+        calls.append(1)
+        return {"answer": "迟到的 host 回答。"}
+
+    service, drivers = make_service(tmp_path, monkeypatch=monkeypatch, driver_commands=NATIVE_COMMANDS,
+                                    sidecar_runner=runner, btw_timeout=0.4)
+    session_id = launch_ok(service)["session"]["id"]
+
+    row = service.ask_side_question(session_id, {"question": "慢扩展"})
+    # The extension accepted (map established) but never sends a terminal event.
+    drivers[0].emit_side_question_event(btw_event("accepted", "btw-slow1", question="慢扩展"))
+    drivers[0].emit_side_question_event(btw_event("running", "btw-slow1"))
+
+    final = wait_btw(service, session_id, row["btwId"], {"completed"}, timeout=5.0)
+    assert final["runner"] == "host"
+    assert final["answer"] == "迟到的 host 回答。"
+    assert "超时" in final["fallbackReason"]
+    assert len(calls) == 1
+    # A late native terminal event after the host retry cannot reopen the row.
+    drivers[0].emit_side_question_event(btw_event("completed", "btw-slow1", text="迟到的事件"))
+    assert service.get_side_question(session_id, row["btwId"])["answer"] == "迟到的 host 回答。"
+
+
+def test_native_prompt_timeout_is_treated_as_accepted_then_backed_by_clock(tmp_path, monkeypatch):
+    """A slow handler must not block the ask; the fallback clock still fires."""
+    calls = []
+
+    def runner(context, *, cancel_event, timeout):
+        calls.append(1)
+        return {"answer": "慢受理后的 host 回答。"}
+
+    service, drivers = make_service(tmp_path, monkeypatch=monkeypatch, driver_commands=NATIVE_COMMANDS,
+                                    sidecar_runner=runner, btw_timeout=0.4)
+    session_id = launch_ok(service)["session"]["id"]
+    wait_probe(service, session_id)
+    drivers[0].timeout_next_prompt = True  # the /btw handler outlives the wait
+    import time as _time
+    started = _time.monotonic()
+
+    row = service.ask_side_question(session_id, {"question": "慢受理"})
+
+    assert _time.monotonic() - started < 2.0  # the ask returned without the answer
+    final = wait_btw(service, session_id, row["btwId"], {"completed"}, timeout=5.0)
+    assert final["runner"] == "host"
+    assert final["answer"] == "慢受理后的 host 回答。"
+    assert len(calls) == 1
+
+
+def test_cancel_native_question_sends_btw_cancel_and_settles(tmp_path, monkeypatch):
+    """A3 seam: /btw:cancel <native id> reaches the driver; the row settles."""
+    service, drivers = make_service(tmp_path, monkeypatch=monkeypatch, driver_commands=NATIVE_COMMANDS)
+    session_id = launch_ok(service)["session"]["id"]
+
+    row = service.ask_side_question(session_id, {"question": "会被取消的问题"})
+    drivers[0].emit_side_question_event(btw_event("accepted", "btw-cxl9", question="会被取消的问题"))
+    drivers[0].emit_side_question_event(btw_event("running", "btw-cxl9"))
+
+    cancelled = service.cancel_side_question(session_id, row["btwId"])
+
+    assert cancelled["status"] == "cancelled"
+    assert drivers[0].prompts[-1] == "/btw:cancel btw-cxl9"
+    # The extension's own cancelled event is absorbed (idempotent terminal).
+    drivers[0].emit_side_question_event(btw_event("cancelled", "btw-cxl9"))
+    assert service.get_side_question(session_id, row["btwId"])["status"] == "cancelled"
+
+
+def test_native_unavailable_falls_back_to_host_runner(tmp_path, monkeypatch):
+    """A6: extension absent -> host sidecar answers; visible, not faked."""
+    def runner(context, *, cancel_event, timeout):
+        return {"answer": "host 回答（无扩展）。"}
+
+    service, drivers = make_service(tmp_path, monkeypatch=monkeypatch, sidecar_runner=runner)
+    # No commands: probe leaves btwNative unset.
+    session_id = launch_ok(service)["session"]["id"]
+    wait_probe(service, session_id)
+
+    row = service.ask_side_question(session_id, {"question": "没有扩展时谁回答"})
+
+    assert service._get(session_id).meta.get("btwNative") is False
+    final = wait_btw(service, session_id, row["btwId"], {"completed"})
+    assert final["runner"] == "host"
+    assert final["answer"] == "host 回答（无扩展）。"
+    assert final["fallbackReason"] is None  # no native attempt was made or promised
+    assert drivers[0].prompts == ["hi"]
+
+
+def test_native_map_routes_duplicates_of_same_question(tmp_path, monkeypatch):
+    """Two identical questions pair FIFO; each row keeps its own lifecycle."""
+    service, drivers = make_service(tmp_path, monkeypatch=monkeypatch, driver_commands=NATIVE_COMMANDS)
+    session_id = launch_ok(service)["session"]["id"]
+    wait_probe(service, session_id)
+
+    first = service.ask_side_question(session_id, {"question": "重复的问题"})
+    second = service.ask_side_question(session_id, {"question": "重复的问题"})
+    emit_answer(drivers[0], "btw-dup-a", "重复的问题", "第一个回答。")
+    emit_answer(drivers[0], "btw-dup-b", "重复的问题", "第二个回答。")
+
+    assert wait_btw(service, session_id, first["btwId"], {"completed"})["answer"] == "第一个回答。"
+    assert wait_btw(service, session_id, second["btwId"], {"completed"})["answer"] == "第二个回答。"
