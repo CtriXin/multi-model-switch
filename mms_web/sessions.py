@@ -129,6 +129,14 @@ class _LiveSession:
         self.side_questions: dict[str, dict] = {}
         self.btw_idem: dict[str, str] = {}
         self.updated_at = meta.get("updatedAt") or _now_iso()
+        # Two read-only liveness markers for Pilot and /btw, neither of them
+        # progress. `last_event_at` is the last transcript write, whichever
+        # side wrote it; `native_at` is the last callback the driver delivered
+        # from the Pi process (event, activity, state, approval, exit), so it
+        # moves only when the process itself said something. Nothing here is
+        # extrapolated from a clock or a percentage.
+        self.last_event_at: str = self.updated_at
+        self.native_at: str | None = None
         from .artifact_history import ArtifactHistory
         self.artifact_history = ArtifactHistory(state_root, meta, self.secrets) if state_root else None
 
@@ -155,6 +163,7 @@ class _LiveSession:
         self.events.append(event)
         self._trim_events()
         self.updated_at = now()
+        self.last_event_at = self.updated_at
         return event
 
     def upsert_event(self, fields: dict, now: Callable[[], str]) -> dict:
@@ -174,6 +183,7 @@ class _LiveSession:
         # Last write wins as the event's end time; the reply duration reads it.
         existing["updatedAt"] = now()
         self.updated_at = now()
+        self.last_event_at = self.updated_at
         return existing
 
     def _trim_events(self) -> None:
@@ -217,6 +227,8 @@ class _LiveSession:
             "state": self.state,
             "activity": self.activity_view(),
             "updatedAt": self.updated_at,
+            "lastEventAt": self.last_event_at,
+            "heartbeatAt": self.native_at,
             "owner": "web",
             "archived": bool(self.meta.get("archived")),
             "cwd": self.meta.get("cwd", ""),
@@ -311,6 +323,8 @@ class _LiveSession:
             "events": self.events,
             "approvals": self.approvals,
             "requestLog": self.request_log,
+            "lastEventAt": self.last_event_at,
+            "heartbeatAt": self.native_at,
             "sideQuestions": list(self.side_questions.values()),
             "btwIdem": self.btw_idem,
             "lastSequence": self.last_sequence,
@@ -1203,6 +1217,7 @@ class SessionService(SessionActions, SessionSideQuestions):
         if not isinstance(fields, dict):
             return
         with session.lock:
+            session.native_at = self._now()
             if isinstance(fields.get("nativeContext"), dict):
                 session.meta["contextEvidence"] = redact(fields["nativeContext"], session.secrets)
                 session.persist(self._state_dir)
@@ -1275,6 +1290,7 @@ class SessionService(SessionActions, SessionSideQuestions):
 
     def _apply_proto_state(self, session: _LiveSession, state: str) -> None:
         with session.lock:
+            session.native_at = self._now()
             if state not in _PROTO_STATES:
                 return
             if not session.alive():
@@ -1295,6 +1311,7 @@ class SessionService(SessionActions, SessionSideQuestions):
         if phase not in {"running", "thinking", "responding", "tool", "compacting", "retrying", "error", "stopped", "idle"}:
             return
         with session.lock:
+            session.native_at = self._now()
             if session.finalized or session.state in _FINAL_STATES:
                 return
             value = {"phase": phase, **{key: str(details[key])[:120] for key in ("eventId", "toolName") if details.get(key)}}
@@ -1309,6 +1326,7 @@ class SessionService(SessionActions, SessionSideQuestions):
 
     def _apply_approval_pending(self, session: _LiveSession, approval_id: str, method: str, title: str) -> None:
         with session.lock:
+            session.native_at = self._now()
             session.approvals[approval_id] = {"method": method, "title": title}
             if session.alive():
                 session.state = "waiting"
@@ -1317,6 +1335,7 @@ class SessionService(SessionActions, SessionSideQuestions):
 
     def _apply_approval_resolved(self, session: _LiveSession, approval_id: str, decision: str) -> None:
         with session.lock:
+            session.native_at = self._now()
             session.approvals.pop(approval_id, None)
             if not session.approvals and session.alive():
                 session.state = "running"
@@ -1325,6 +1344,7 @@ class SessionService(SessionActions, SessionSideQuestions):
 
     def _apply_process_exited(self, session: _LiveSession, exit_code: int, stderr_tail: str) -> None:
         with session.lock:
+            session.native_at = self._now()
             session.approvals.clear()
             session.finalized = True
             if session.stop_requested:
@@ -1474,6 +1494,9 @@ class SessionService(SessionActions, SessionSideQuestions):
                 if isinstance(v, str) and v in live.side_questions
             }
             live.updated_at = str(payload.get("updatedAt") or _now_iso())
+            live.last_event_at = str(payload.get("lastEventAt") or live.updated_at)
+            saved_native = payload.get("heartbeatAt")
+            live.native_at = str(saved_native) if isinstance(saved_native, str) and saved_native else None
             state = str(payload.get("state") or "")
             if state in _FINAL_STATES:
                 live.state = state
