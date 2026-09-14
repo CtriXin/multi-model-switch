@@ -1399,6 +1399,24 @@
   background: color-mix(in srgb, var(--pixel-color) 55%, var(--surface));
 }
 
+/* Grok-style minimalist avatar system */
+.pixel-avatar {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--pixel-color);
+  background: transparent;
+  flex-shrink: 0;
+}
+
+.pixel-avatar svg,
+.pixel-avatar .grok-avatar-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
 /* Pixel avatar sizing by context */
 .bot-card .pixel-avatar {
   width: 36px;
@@ -1588,10 +1606,10 @@
   flex: 0 0 31px;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
+  overflow: visible;
   border-radius: 10px;
-  background: color-mix(in srgb, var(--pixel-color) 16%, var(--surface));
-  image-rendering: pixelated;
+  background: transparent;
+  image-rendering: auto;
 }
 
 .pixel-avatar-mini .pixel-avatar-grid {
@@ -1605,40 +1623,49 @@
 }
 
 .bot-picker-label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   color: var(--muted);
   font-size: 12px;
 }
 
+.bot-picker-label small {
+  color: color-mix(in srgb, var(--muted) 72%, transparent);
+  font-size: 11px;
+  font-weight: 400;
+}
+
 .bot-avatar-options {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px 14px;
   width: 100%;
+  box-sizing: border-box;
 }
 
 .bot-avatar-option {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   justify-content: center;
-  padding: 3px;
+  height: 56px;
+  padding: 4px;
   border: 2px solid transparent;
-  border-radius: 12px;
-  background: var(--soft);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
   cursor: pointer;
-  transition: border-color 150ms ease, background 150ms ease, transform 120ms ease;
+  transition: all 160ms cubic-bezier(0.4, 0, 0.2, 1);
+  min-width: 0;
 }
 
 .bot-avatar-option:hover {
-  border-color: var(--line);
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
   transform: translateY(-1px);
 }
 
 .bot-avatar-option.is-selected {
   border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
-  box-shadow: 0 0 0 1px var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
 }
 
 .bot-avatar-option .pixel-avatar,
@@ -1649,33 +1676,45 @@
 }
 
 .bot-avatar-option .pixel-avatar-mini {
-  width: 31px;
-  height: 31px;
-  flex: 0 0 31px;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+}
+
+.pixel-avatar .bot-avatar-svg,
+.pixel-avatar .grok-avatar-svg {
+  overflow: visible;
+  width: 100%;
+  height: 100%;
 }
 
 .bot-color-options {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  margin-top: 4px;
+  gap: 12px;
+  margin-top: 6px;
+  padding-top: 2px;
 }
 
 .bot-color-option {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   padding: 0;
   border: 2px solid transparent;
   border-radius: 50%;
   cursor: pointer;
+  transition: transform 120ms ease, outline 120ms ease;
 }
 
-.bot-color-option:hover,
+.bot-color-option:hover {
+  transform: scale(1.12);
+}
+
 .bot-color-option.is-selected {
-  border-color: var(--ink);
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  border-color: var(--surface);
+  outline: 2px solid color-mix(in srgb, var(--ink) 26%, transparent);
+  outline-offset: 2px;
 }
 
 /* Artifact Lightbox */

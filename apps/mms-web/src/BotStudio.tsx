@@ -222,7 +222,7 @@ function BotEditor({
           />
         </label>
         <div className="bot-avatar-picker" aria-label="选择头像">
-          <span className="bot-picker-label">头像</span>
+          <span className="bot-picker-label">图形 <small>表情与纹理会为每个 Bot 自动生成</small></span>
           <div className="bot-avatar-options">
             {PIXEL_AVATARS.map((avatar) => (
               <button
@@ -230,13 +230,16 @@ function BotEditor({
                 type="button"
                 className={`bot-avatar-option${avatarId === avatar.id ? " is-selected" : ""}`}
                 onClick={() => setAvatarId(avatar.id)}
+                title={avatar.label}
                 aria-label={avatar.label}
                 aria-pressed={avatarId === avatar.id}
               >
                 <PixelAvatar
                   avatarId={avatar.id}
                   color={avatarColor}
+                  seed={avatar.id}
                   className="pixel-avatar-mini"
+                  selected={avatarId === avatar.id}
                 />
               </button>
             ))}

@@ -85,7 +85,8 @@ export interface Session {
     turnStartedAt?: string;
   } | null;
   updatedAt: string;
-  owner: "web" | "cli" | "glint" | "external";
+  owner: "web" | "cli" | "bot" | "glint" | "external";
+  botId?: string;
   capabilities: {
     send: boolean;
     stop: boolean;

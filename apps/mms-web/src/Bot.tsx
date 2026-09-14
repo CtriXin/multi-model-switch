@@ -128,18 +128,156 @@ export type BotAction = (
   payload: BotDispatchPayload,
 ) => Promise<BotDispatchResult | void> | BotDispatchResult | void;
 
+export interface BotAvatarShapeDef {
+  path: string;
+  faceY: number;
+  eyeDx?: number;
+  eyeR?: number;
+  blushDx?: number;
+  mouth?: "default" | "cat";
+  wink?: boolean;
+  extra?: { d: string; fill: string };
+  eyeLeft: { x: number; y: number };
+  eyeRight: { x: number; y: number };
+}
+
+export const ORGANIC_SMILE_AVATARS: Record<string, BotAvatarShapeDef> = {
+  round: {
+    path: "M 16 3 C 23.18 3 29 8.82 29 16 C 29 23.18 23.18 29 16 29 C 8.82 29 3 23.18 3 16 C 3 8.82 8.82 3 16 3 Z",
+    faceY: 16.2,
+    eyeDx: 5.2,
+    eyeR: 1.25,
+    blushDx: 8.0,
+    eyeLeft: { x: 10.8, y: 15.0 },
+    eyeRight: { x: 21.2, y: 15.0 },
+  },
+  cat: {
+    path: "M 16 5.5 C 18.5 5.5 20.2 4.2 21.8 3.2 C 23.2 2.3 24.8 2.5 25.5 4.0 C 26.2 5.5 25.8 7.5 25.2 9.5 C 27.8 11.8 29.0 14.5 29.0 17.5 C 29.0 23.8 23.2 29.0 16.0 29.0 C 8.8 29.0 3.0 23.8 3.0 17.5 C 3.0 14.5 4.2 11.8 6.8 9.5 C 6.2 7.5 5.8 5.5 6.5 4.0 C 7.2 2.5 8.8 2.3 10.2 3.2 C 11.8 4.2 13.5 5.5 16 5.5 Z",
+    faceY: 17.8,
+    eyeDx: 5.2,
+    eyeR: 1.25,
+    blushDx: 8.2,
+    mouth: "cat",
+    eyeLeft: { x: 10.8, y: 16.6 },
+    eyeRight: { x: 21.2, y: 16.6 },
+  },
+  cube: {
+    path: "M 12 3.5 L 20 3.5 C 25.5 3.5 28.5 6.5 28.5 12 L 28.5 20 C 28.5 25.5 25.5 28.5 20 28.5 L 12 28.5 C 6.5 28.5 3.5 25.5 3.5 20 L 3.5 12 C 3.5 6.5 6.5 3.5 12 3.5 Z",
+    faceY: 16.0,
+    eyeDx: 5.2,
+    eyeR: 1.25,
+    blushDx: 8.0,
+    eyeLeft: { x: 10.8, y: 14.8 },
+    eyeRight: { x: 21.2, y: 14.8 },
+  },
+  bean: {
+    path: "M 11 8.5 L 21 8.5 C 25.5 8.5 29 11.8 29 16 C 29 20.2 25.5 23.5 21 23.5 L 11 23.5 C 6.5 23.5 3 20.2 3 16 C 3 11.8 6.5 8.5 11 8.5 Z",
+    faceY: 16.0,
+    eyeDx: 5.0,
+    eyeR: 1.25,
+    blushDx: 7.8,
+    eyeLeft: { x: 11.0, y: 14.8 },
+    eyeRight: { x: 21.0, y: 14.8 },
+  },
+  rocket: {
+    path: "M 16 3.8 C 18.2 3.8 19.8 5.2 21.0 7.4 L 26.8 19.8 C 28.2 22.8 26.8 27.5 23.5 27.5 L 8.5 27.5 C 5.2 27.5 3.8 22.8 5.2 19.8 L 11.0 7.4 C 12.2 5.2 13.8 3.8 16 3.8 Z",
+    faceY: 18.2,
+    eyeDx: 4.8,
+    eyeR: 1.25,
+    blushDx: 7.6,
+    wink: true,
+    eyeLeft: { x: 11.2, y: 17.0 },
+    eyeRight: { x: 20.8, y: 17.0 },
+  },
+  sprout: {
+    path: "M 16 7.0 C 22.6 7.0 28.0 12.0 28.0 18.0 C 28.0 24.2 22.6 29.0 16 29.0 C 9.4 29.0 4.0 24.2 4.0 18.0 C 4.0 12.0 9.4 7.0 16 7.0 Z",
+    faceY: 18.0,
+    eyeDx: 5.0,
+    eyeR: 1.25,
+    blushDx: 7.8,
+    extra: {
+      d: "M 16 7.0 C 16 4.5 18.2 2.6 20.8 2.6 C 22.2 2.6 22.8 3.5 22.0 4.8 C 20.8 6.5 18.4 6.9 16 7.0 Z",
+      fill: "#34d399",
+    },
+    eyeLeft: { x: 11.0, y: 16.8 },
+    eyeRight: { x: 21.0, y: 16.8 },
+  },
+  puff: {
+    path: "M 8.5 26.5 C 4.5 26.5 2.0 23.5 2.0 19.5 C 2.0 16.0 4.5 13.2 8.0 12.6 C 8.5 7.2 12.8 3.0 18.0 3.0 C 23.0 3.0 27.0 6.8 27.8 11.5 C 29.8 12.2 31.5 14.2 31.5 16.8 C 31.5 19.5 29.8 21.8 27.5 22.5 C 28.0 23.5 28.0 24.8 27.2 25.6 C 26.2 26.5 24.5 26.5 22.5 26.5 Z",
+    faceY: 17.5,
+    eyeDx: 5.0,
+    eyeR: 1.25,
+    blushDx: 7.8,
+    eyeLeft: { x: 11.0, y: 16.3 },
+    eyeRight: { x: 21.0, y: 16.3 },
+  },
+  leaf: {
+    path: "M 16 3.0 C 17.0 3.0 18.2 4.8 19.3 7.0 L 26.0 17.5 C 27.8 20.2 28.2 22.0 28.2 23.5 C 28.2 27.0 22.8 29.0 16 29.0 C 9.2 29.0 3.8 27.0 3.8 23.5 C 3.8 22.0 4.2 20.2 6.0 17.5 L 12.7 7.0 C 13.8 4.8 15.0 3.0 16 3.0 Z",
+    faceY: 18.2,
+    eyeDx: 4.8,
+    eyeR: 1.25,
+    blushDx: 7.6,
+    eyeLeft: { x: 11.2, y: 17.0 },
+    eyeRight: { x: 20.8, y: 17.0 },
+  },
+};
+
+export const GROK_AVATAR_SHAPES = ORGANIC_SMILE_AVATARS;
+
+const ORGANIC_AVATAR_ALIASES: Record<string, string> = {
+  circle: "round",
+  blob: "cat",
+  squircle: "cube",
+  capsule: "bean",
+  triangle: "rocket",
+  hexagon: "sprout",
+  cloud: "puff",
+  drop: "leaf",
+};
+
 export const PIXEL_AVATARS = [
-  { id: "round", label: "圆团", rows: ["..###..", ".#####.", "#######", "##o#o##", "#######", ".#####.", "..###.."] },
-  { id: "cat", label: "小猫", rows: ["#...#..", "##.##..", ".#####.", "##o.o##", "#######", ".#####.", "..###.."] },
-  { id: "puff", label: "蓬蓬", rows: ["..##...", ".#####.", "#######", "##o#o##", "#######", ".#####.", "...##.."] },
-  { id: "cube", label: "方方", rows: ["#######", "#######", "##o#o##", "#######", "#######", "##...##", "#######"] },
-  { id: "leaf", label: "叶子", rows: ["....#..", "...##..", "..###..", ".#####.", "#######", "..###..", "...#..."] },
-  { id: "ghost", label: "幽灵", rows: ["..###..", ".#####.", "#######", "##o#o##", "#######", "##.#.##", "#.#.#.#"] },
-  { id: "rocket", label: "火箭", rows: ["...#...", "..###..", ".#####.", "##o#o##", "#######", "..###..", ".#.#.#."] },
-  { id: "star", label: "星星", rows: ["...#...", "..###..", "#######", ".##o##.", "#######", "..###..", ".#...#."] },
-  { id: "bean", label: "豆豆", rows: ["..####.", ".######", "#######", "##o#o##", "#######", ".#####.", "..###.."] },
-  { id: "bot", label: "机器人", rows: [".#...#.", ".#####.", "#######", "##o#o##", "#######", ".#####.", "#.#.#.#"] },
+  { id: "round", label: "圆圆", shape: "round" },
+  { id: "cat", label: "萌猫", shape: "cat" },
+  { id: "cube", label: "方糖", shape: "cube" },
+  { id: "bean", label: "海豹", shape: "bean" },
+  { id: "rocket", label: "饭团", shape: "rocket" },
+  { id: "sprout", label: "芽宝", shape: "sprout" },
+  { id: "puff", label: "朵云", shape: "puff" },
+  { id: "leaf", label: "水滴", shape: "leaf" },
 ] as const;
+
+// Saved Bots from earlier builds can still refer to a removed preset. Keep
+// those ids renderable, while keeping the picker focused on the softer core set.
+const LEGACY_AVATAR_SHAPES: Record<string, string> = {
+  round: "round",
+  circle: "round",
+  blob: "cat",
+  cat: "cat",
+  cube: "cube",
+  squircle: "cube",
+  bean: "bean",
+  capsule: "bean",
+  rocket: "rocket",
+  triangle: "rocket",
+  hex: "sprout",
+  hexagon: "sprout",
+  sprout: "sprout",
+  bot: "cube",
+  puff: "puff",
+  cloud: "puff",
+  leaf: "leaf",
+  drop: "leaf",
+  diamond: "cube",
+  star: "cat",
+  ticket: "bean",
+  wave: "leaf",
+  shield: "sprout",
+  gem: "leaf",
+  orbit: "round",
+  sun: "round",
+  ghost: "puff",
+  oval: "bean",
+};
 
 export const PIXEL_AVATAR_COLORS = [
   "#b9a5ff",
@@ -176,24 +314,85 @@ export function PixelAvatar({
   seed = "",
   className = "bot-avatar",
   active = false,
+  selected = false,
 }: {
   avatarId?: string;
   color?: string;
   seed?: string;
   className?: string;
   active?: boolean;
+  selected?: boolean;
 }) {
   const seedValue = [...seed].reduce((sum, char) => sum + char.charCodeAt(0), 0);
-  const avatar = PIXEL_AVATARS.find((item) => item.id === avatarId) || PIXEL_AVATARS[seedValue % PIXEL_AVATARS.length];
+  const selectedAvatar = PIXEL_AVATARS.find((item) => item.id === avatarId);
+  const avatar = selectedAvatar || PIXEL_AVATARS[seedValue % PIXEL_AVATARS.length];
   const avatarColor = color || PIXEL_AVATAR_COLORS[seedValue % PIXEL_AVATAR_COLORS.length];
   const effectiveColor = resolveAvatarColor(avatarColor);
+  const rawShape = avatar.shape || LEGACY_AVATAR_SHAPES[avatarId || ""] || "round";
+  const shape = ORGANIC_AVATAR_ALIASES[rawShape] || rawShape;
+  const shapeDef = ORGANIC_SMILE_AVATARS[shape] || ORGANIC_SMILE_AVATARS.round;
+  const id = avatar.id;
+
+  const fy = shapeDef.faceY;
+  const edx = shapeDef.eyeDx ?? 5.0;
+  const er = shapeDef.eyeR ?? 1.25;
+  const bdx = shapeDef.blushDx ?? 7.8;
+  const e1_x = 16.0 - edx;
+  const e2_x = 16.0 + edx;
+  const eye_y = fy - 1.2;
+  const mouth_y = fy + 1.8;
+  const b1_x = 16.0 - bdx;
+  const b2_x = 16.0 + bdx;
+  const blush_y = fy + 1.0;
+
   return (
-    <span className={`${className} pixel-avatar${active ? " is-active" : ""}`} style={{ "--pixel-color": effectiveColor } as CSSProperties} aria-hidden="true">
-      <span className="pixel-avatar-grid">
-        {avatar.rows.flatMap((row, rowIndex) => [...row].map((cell, cellIndex) => (
-          <i className={`pixel-cell pixel-${cell}`} key={`${rowIndex}-${cellIndex}`} />
-        )))}
-      </span>
+    <span
+      className={`${className} pixel-avatar avatar-id-${id} avatar-shape-${shape}${active ? " is-active" : ""}${selected ? " is-selected" : ""}`}
+      style={{ "--pixel-color": effectiveColor } as CSSProperties}
+      aria-hidden="true"
+    >
+      <svg
+        viewBox="0 0 32 32"
+        className="bot-avatar-svg grok-avatar-svg"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <path d={shapeDef.path} fill="currentColor" />
+        {shapeDef.extra && (
+          <path d={shapeDef.extra.d} fill={shapeDef.extra.fill} />
+        )}
+        <circle cx={e1_x} cy={eye_y} r={er} fill="#ffffff" />
+        {shapeDef.wink ? (
+          <path
+            d={`M ${e2_x - 1.3} ${eye_y} Q ${e2_x} ${eye_y - 1.2} ${e2_x + 1.3} ${eye_y}`}
+            fill="none"
+            stroke="#ffffff"
+            strokeWidth="1.15"
+            strokeLinecap="round"
+          />
+        ) : (
+          <circle cx={e2_x} cy={eye_y} r={er} fill="#ffffff" />
+        )}
+        {shapeDef.mouth === "cat" ? (
+          <path
+            d={`M 13.9 ${mouth_y} Q 15.0 ${mouth_y + 1.2} 16.0 ${mouth_y} Q 17.0 ${mouth_y + 1.2} 18.1 ${mouth_y}`}
+            fill="none"
+            stroke="#ffffff"
+            strokeWidth="1.1"
+            strokeLinecap="round"
+          />
+        ) : (
+          <path
+            d={`M 14.7 ${mouth_y} Q 16.0 ${mouth_y + 1.4} 17.3 ${mouth_y}`}
+            fill="none"
+            stroke="#ffffff"
+            strokeWidth="1.1"
+            strokeLinecap="round"
+          />
+        )}
+        <circle cx={b1_x} cy={blush_y} r={1.4} fill="rgba(255, 115, 140, 0.45)" />
+        <circle cx={b2_x} cy={blush_y} r={1.4} fill="rgba(255, 115, 140, 0.45)" />
+      </svg>
     </span>
   );
 }
