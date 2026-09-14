@@ -178,6 +178,11 @@ _SCENARIO_MATRIX = [
         "coverage": "nothing that changes the install is asked; stable channel and shell PATH are the defaults; the only question offers to open MMS Web, which starts detached with a real config root, falls back off a taken port, reuses a running instance, and is skipped without a terminal",
     },
     {
+        "id": "pi-btw-bundled-extension",
+        "state": "fresh HOME with no MMS env; a bundled Pi /btw extension, then a global pi-btw, then pi_btw = false",
+        "coverage": "MMS injects its own /btw bundle into every Pi it starts, and stays out of the way when the user's Pi already loads a pi-btw or when the preference turns it off",
+    },
+    {
         "id": "codex-hook-trust-and-history",
         "state": "isolated Codex gateway with inherited/global hook and bounded resume state",
         "coverage": "hook trust does not reprompt and bounded resume/history is preserved safely",
@@ -435,6 +440,87 @@ def _smoke_nsr_low_noise_hook_matrix() -> None:
                 raise SystemExit(f"{cli} NSR still attached to noisy {event_name} hook")
 
 
+_PI_BTW_PROBE = """
+import json, os, sys
+from pathlib import Path
+
+import mms_pi_support
+
+logs = []
+cwd = sys.argv[1]
+
+
+def resolve(runtime=None):
+    return mms_pi_support.pi_btw_extension_path({}, runtime, cwd, log=logs.append)
+
+
+def record(expect_btw, label):
+    path = resolve()
+    injected = bool(path)
+    print(json.dumps({"label": label, "injected": injected, "expected": expect_btw,
+                      "logs": list(logs)}))
+    logs.clear()
+    if injected != expect_btw:
+        raise SystemExit(f"{label}: injected={injected}, expected={expect_btw}")
+    if path and Path(path).name != "index.ts":
+        raise SystemExit(f"{label}: unexpected extension path {path}")
+
+
+record(True, "clean fresh home")
+
+settings = Path.home() / ".pi" / "agent" / "settings.json"
+settings.parent.mkdir(parents=True, exist_ok=True)
+settings.write_text(json.dumps({"packages": ["npm:pi-usage-hub", "npm:@narumitw/pi-btw@0.58.1"]}),
+                    encoding="utf-8")
+record(False, "upstream pi-btw installed globally")
+saved = json.loads(settings.read_text(encoding="utf-8"))
+if saved["packages"][0] != "npm:pi-usage-hub":
+    raise SystemExit("the read-only check rewrote the user's Pi settings")
+settings.unlink()
+
+project = Path(cwd) / ".pi" / "settings.json"
+project.parent.mkdir(parents=True, exist_ok=True)
+project.write_text(json.dumps({"packages": [{"source": "git:github.com/CtriXin/pi-btw@v0.59.0-fork.1"}]}),
+                   encoding="utf-8")
+record(False, "fork installed by the project")
+project.unlink()
+
+record(True, "both installs removed")
+
+preferences = Path.home() / ".config" / "mms-next" / "preferences.toml"
+preferences.parent.mkdir(parents=True, exist_ok=True)
+preferences.write_text("[launch.cli.pi]" + chr(10) + "pi_btw = false" + chr(10), encoding="utf-8")
+if resolve():
+    raise SystemExit("pi_btw = false did not reach the launcher")
+if not any("pi_btw" in line for line in logs):
+    raise SystemExit("a disabled preference logged nothing: " + repr(logs))
+logs.clear()
+preferences.write_text("[launch.cli.pi]" + chr(10) + "pi_btw = true" + chr(10), encoding="utf-8")
+if not resolve():
+    raise SystemExit("pi_btw = true should inject the bundled extension")
+if resolve(runtime={"pi_btw": False}):
+    raise SystemExit("the launch overlay must win over the preferences default")
+logs.clear()
+preferences.unlink()
+"""
+
+
+def _smoke_pi_btw_bundled_extension() -> None:
+    """Every Pi MMS starts carries /btw, and MMS steps aside when it is already there."""
+    _run("pi-btw bundle check", [sys.executable, str(ROOT_DIR / "scripts" / "sync_pi_btw.py"), "--check"])
+    with tempfile.TemporaryDirectory(prefix="mms-pi-btw-") as tmp:
+        home = Path(tmp).resolve() / "home"
+        project = Path(tmp).resolve() / "project"
+        home.mkdir()
+        project.mkdir()
+        _run(
+            "pi-btw injection matrix",
+            [sys.executable, "-c", _PI_BTW_PROBE, str(project)],
+            env=_env_for_home(home),
+        )
+
+
+
 def _print_scenarios() -> None:
     print("[gate] scenario matrix:")
     for item in _SCENARIO_MATRIX:
@@ -457,6 +543,7 @@ def main() -> int:
     _smoke_shared_config_root_default()
     _smoke_legacy_install_state_matrix()
     _smoke_repeatable_install_dry_run()
+    _smoke_pi_btw_bundled_extension()
     _smoke_nsr_low_noise_hook_matrix()
 
     pytest_targets = _QUICK_PYTEST_TARGETS if args.quick else _PYTEST_TARGETS
