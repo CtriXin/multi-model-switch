@@ -262,6 +262,26 @@ def test_plan_keeps_secrets_out_of_argv_and_parent_env(tmp_path, monkeypatch):
     assert "--session" in payload["extraArgs"]
 
 
+def test_windows_plan_uses_powershell_when_bash_is_unavailable(tmp_path, monkeypatch):
+    monkeypatch.setattr(launch_bridge.sys, "platform", "win32")
+    monkeypatch.delenv("ProgramFiles", raising=False)
+    monkeypatch.delenv("ProgramFiles(x86)", raising=False)
+    monkeypatch.setattr(launch_bridge.shutil, "which", lambda name: "C:/Windows/powershell.exe" if name == "powershell.exe" else None)
+
+    args = launch_bridge._windows_shell_tool_args()
+    assert args[args.index("--tools") + 1] == "read,powershell,edit,write"
+    assert "bash" not in args[args.index("--tools") + 1]
+
+
+def test_windows_plan_keeps_bash_when_git_bash_exists(tmp_path, monkeypatch):
+    monkeypatch.setattr(launch_bridge.sys, "platform", "win32")
+    monkeypatch.setenv("ProgramFiles", "C:/Program Files")
+    monkeypatch.setattr(launch_bridge.Path, "is_file", lambda path: str(path).endswith("Git/bin/bash.exe"))
+    monkeypatch.setattr(launch_bridge.shutil, "which", lambda _name: None)
+
+    assert launch_bridge._windows_shell_tool_args() == []
+
+
 def test_plan_rejects_global_config_even_with_valid_runtime(tmp_path, monkeypatch):
     monkeypatch.setenv("MMS_REAL_HOME", str(tmp_path))
     root = tmp_path / ".config/mms-next"

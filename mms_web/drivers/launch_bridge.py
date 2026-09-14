@@ -114,6 +114,36 @@ def pi_runtime() -> tuple[str, str]:
     return executable, ""
 
 
+def _windows_shell_tool_args() -> list[str]:
+    """Select a shell tool that exists on native Windows.
+
+    Pi's built-in ``bash`` tool requires Git Bash (or another bash provider).
+    Native Windows installations may only have PowerShell; allowing Pi to
+    start with a missing bash tool can terminate the RPC turn when the model
+    invokes it.  Keep the default tool set unchanged everywhere else.
+    """
+    if sys.platform != "win32":
+        return []
+    bash_candidates = []
+    for key in ("ProgramFiles", "ProgramFiles(x86)"):
+        root = os.environ.get(key)
+        if root:
+            bash_candidates.append(Path(root) / "Git" / "bin" / "bash.exe")
+    if any(path.is_file() for path in bash_candidates):
+        return []
+    try:
+        if shutil.which("bash.exe"):
+            return []
+    except OSError:
+        pass
+
+    powershell = shutil.which("pwsh.exe") or shutil.which("powershell.exe")
+    tools = ["read", "edit", "write"]
+    if powershell:
+        tools.insert(1, "powershell")
+    return ["--tools", ",".join(tools)]
+
+
 def probe_mms_pi_seam() -> dict:
     """Whether this machine can run a Pi session, and what is missing if not.
 
@@ -159,10 +189,11 @@ def build_pi_launch_plan(model_info, runtime, cwd, *, config_root=None, extra_ar
     env.update(MMS_CONFIG_ROOT=str(root), MMS_REAL_HOME=str(real_home()), MMS_WEB_WORKER="1")
     env["PYTHONUNBUFFERED"] = "1"
     payload = root / ("launch-" + uuid.uuid4().hex + ".json")
+    tool_args = _windows_shell_tool_args()
     private_json(payload, {
         "modelInfo": model_info,
         "runtime": {k: v for k, v in runtime.items() if not k.startswith("_web")},
-        "extraArgs": ["--mode", "rpc", "--session", str(root / "conversation.jsonl"), *(extra_args or [])],
+        "extraArgs": ["--mode", "rpc", "--session", str(root / "conversation.jsonl"), *tool_args, *(extra_args or [])],
     })
     return LaunchPlan([sys.executable, str(_WORKER), str(payload)], env, str(cwd), "pi",
                      notes=["original MMS launcher in a dedicated worker process"])

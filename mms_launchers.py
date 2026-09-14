@@ -1094,6 +1094,38 @@ def _session_guard_process_identity(pid):
     return str(result.stdout or "").strip()
 
 
+def _windows_session_guard_pid_alive(pid):
+    """Return Windows PID liveness, or ``None`` when running on POSIX."""
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+        kernel32.OpenProcess.restype = ctypes.c_void_p
+        kernel32.GetExitCodeProcess.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
+        kernel32.GetExitCodeProcess.restype = ctypes.c_int
+        kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+        kernel32.CloseHandle.restype = ctypes.c_int
+
+        # PROCESS_QUERY_LIMITED_INFORMATION is sufficient and avoids requiring
+        # elevation for the session-cleanup check.
+        handle = kernel32.OpenProcess(0x1000, 0, int(pid))
+        if not handle:
+            # Access denied still means the PID refers to a live process.
+            return ctypes.get_last_error() == 5
+        try:
+            exit_code = ctypes.c_ulong()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+                return False
+            return exit_code.value == 259  # STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
+    except (AttributeError, OSError, TypeError, ValueError):
+        return False
+
+
 def _session_guard_pid_alive(pid, *, identity=""):
     try:
         normalized_pid = int(pid)
@@ -1101,12 +1133,16 @@ def _session_guard_pid_alive(pid, *, identity=""):
         return False
     if normalized_pid <= 0:
         return False
-    try:
-        os.kill(normalized_pid, 0)
-    except (ProcessLookupError, FileNotFoundError):
+    windows_alive = _windows_session_guard_pid_alive(normalized_pid)
+    if windows_alive is False:
         return False
-    except PermissionError:
-        return True
+    if windows_alive is None:
+        try:
+            os.kill(normalized_pid, 0)
+        except (ProcessLookupError, FileNotFoundError):
+            return False
+        except PermissionError:
+            return True
     if identity:
         current_identity = _session_guard_process_identity(normalized_pid)
         if current_identity == str(identity or "").strip():
@@ -12074,6 +12110,13 @@ def _exec_or_run(
         sys.exit(1)
     session_home = str((env or {}).get("MMS_SESSION_HOME") or "").strip()
 
+    # The Web worker itself is started with piped stdio. On Windows, overlaying
+    # that piped Python process with os.execvpe is unreliable (notably on
+    # Python 3.12): the child can exit after its startup banner without
+    # inheriting the RPC pipe. Keep the worker as a small wait/forwarding
+    # process so Pi receives the same stdin/stdout/stderr handles.
+    if os.name == "nt":
+        force_subprocess = True
     if once or cleanup_path or state_home or cleanup_context or exit_callback or force_subprocess:
         exit_code = None
         child = None
