@@ -135,7 +135,7 @@ Claude 之前给出的“能力层约七成、交付层为零”的方向判断�
 - `Coordinator` 目前只是轻量计划记录和候选建议，还不是完整的语义 planner。
 - `BrowserProvider` 目前只有 Ego adapter；Windows / Linux 适配仍为空。
 - 调度已经有 priority 和 queueReason，但成本、额度和资源预算仍未完成。
-- 本地运行能力已经存在，且 PR #242 已合并到 `dev`；但 Windows acceptance 失败，Stable 发布和用户验收仍未完成。
+- 本地运行能力已经存在；Bot 代码在 `dev-pre`，不在 `dev`，Stable 发布和用户验收仍未完成。
 
 这些校正是为了避免后续会话把“代码存在”“接口可读”或“测试通过”误写成产品和交付已经完成。
 
@@ -178,7 +178,7 @@ Claude 之前给出的“能力层约七成、交付层为零”的方向判断�
 ### 交付链已经进入合并态，但还不是完整发布验收
 
 - issue #238 已关闭。
-- PR #242（Bot 工作台 v2.x）已经合并到 `dev`，merge commit 为 `0d9a7ffa11c7ef485324df54c2793e49599ca749`。
+- PR #242（Bot 工作台 v2.x）曾合并到 `dev`（merge commit `0d9a7ffa`），2026-09-14 owner 决定 `dev` 保持 4.21.x 稳定线，该合并已在 `dev` 上撤销；Bot 工作台现在的集成分支是 `dev-pre`（起点 065cf856，含 #242 与 #244），版本轨道 5.0。
 - 当前 task worktree 已快进到 `origin/dev` 的 `0d9a7ffa`，并在其上保留本轮未提交的收尾改动。
 - fresh-user gate 和全量基线对比在 PR 评论中通过；Windows acceptance 的 4 个 job 随后失败在 `mms web lifecycle` 30 秒内未就绪，因此 Windows 仍不能标为通过。
 - 这表示代码已经有正式合并记录，但不等于 Stable 发布，也不等于用户验收完成。
