@@ -119,11 +119,13 @@ launch `{requestId,workspaceId,presetId,title,prompt}`；send `{requestId,text}`
 
 - `POST /sessions/:id/side-questions {question, idempotencyKey?, sourceHint?}`：创建会话拥有的旁问。`sourceHint` 仅接受 `state|completion`；缺省按问题是否询问状态来路由。相同 `idempotencyKey` 返回原旁问，不重复创建。
 - `GET /sessions/:id/side-questions`、`GET /sessions/:id/side-questions/:btwId`：列表与单条；`POST /sessions/:id/side-questions/:btwId/cancel`：取消未完成的旁问，已完成行幂等返回原状。
-- 旁问行包含 `btwId/mainSessionId/owner=sidecar/status/answer/source/contextRevision/routeSnapshot/usage/redactionSummary/error/createdAt/acceptedAt/startedAt/completedAt`；状态机 `prepared → accepted → running → completed|failed|cancelled|uncertain`。
+- 旁问行包含 `btwId/mainSessionId/owner=sidecar/status/answer/source/contextRevision/contextScope/routeSnapshot/usage/redactionSummary/error/createdAt/acceptedAt/startedAt/completedAt`；状态机 `prepared → accepted → running → completed|failed|cancelled|uncertain`。
 - 隔离不变量：旁问不进入主 transcript 事件流、不进入 follow-up 队列、不调用 driver、不改变模型/通道/effort；主 session 的 `last_sequence` 不因旁问改变。`SessionDetail.sideQuestions` 只读返回旁问记录。
 - `state` 来源是确定性的会话快照回答（阶段、耗时、最近工具、队列、审批、错误）；`completion` 来源是只读旁路请求，只接收预算化且脱敏的上下文快照与 cancel event，不经过 driver、不写工作区、不追加主 transcript。默认走**会话自己的路由**：从该 session 私有 `resume.json` 读回它启动时的 provider / model / key，发一次无状态非流式 completion；路由声明 `anthropic_messages` 且带 `anthropic_base_url` 时用 `/v1/messages`，否则退到 `chat/completions`，且不做任何 endpoint 探测。宿主注入的 `sidecar_runner` 优先于会话路由。两者都不可用时 fail closed：记录 `failed` 且原因可见，主任务不受影响。
 - bootstrap `capabilities.sidecarCompletion` 表示**本 build 能否尝试**模型旁问，不表示某个会话一定能答；单个会话能否回答取决于它自己的路由，由该旁问行的 `error` 说明。
 - 脱敏：question/answer/error/context 均按会话 secrets 掩码，`redactionSummary.secretsMasked` 记录次数。
+- 2026-09-14 上下文摘录：`completion` 快照另带 `recentTurns`，即 session 事件镜像里最近至多 6 轮 user/assistant 文本（每轮 ≤1200 字、合计 ≤5000 字，经 secrets 脱敏），不含工具输出正文、thinking、附件或文件；不读取真实配置、密钥或 Pi 的 `conversation.jsonl`。行上的 `contextScope {recentTurns,totalTurns,truncated}` 说明摘录覆盖了几轮、是否截断；`state` 行为 `null`。
+- 2026-09-14 session view 新增 `lastEventAt`（最近一次 transcript 写入）与 `heartbeatAt`（最近一次 driver 从 Pi 进程送达的回调：event/activity/state/approval/exit；未收到过为 `null`）。两者都是已发生事件的时间戳，随 session 持久化并在重启后按记录恢复；没有完成百分比或推测进度。
 - 生命周期边界：主任务 stop 不取消进行中的旁问；服务 `close()` 把进行中旁问标为 `uncertain`；进程重启后加载时把进行中行标为 `cancelled`，已完成行保留。fork 只携带已完结的旁问。
 
 ## Prelaunch selection (2026-09-08)
