@@ -1,0 +1,42 @@
+# NOTICE — fork provenance
+
+`@ctrixin/pi-btw` is a fork of `@narumitw/pi-btw` (MIT), maintained by CtriXin.
+The upstream MIT `LICENSE` and its original copyright notice (`Copyright (c) 2026 narumiruna`) are
+retained unchanged in [`LICENSE`](./LICENSE). All upstream code stays under the MIT license; the
+modifications made in this fork are distributed under the same MIT terms.
+
+## Upstream baseline
+
+| Item | Value |
+| --- | --- |
+| Upstream project | `narumiruna/pi-extensions` (monorepo), package directory `packages/pi-btw` |
+| Upstream package | `@narumitw/pi-btw` |
+| Imported version | `0.58.1` |
+| Release commit | `5a4e10598471ca47d428e14cb6952eef11175d2f` (`chore(release): version packages`) |
+| Published tarball | `https://registry.npmjs.org/@narumitw/pi-btw/-/pi-btw-0.58.1.tgz` |
+| Tarball integrity | `sha512-hz8z759/VSLbzghJL4hFu5lKeoeWdvmMwixWhPWXBWvIg4C6ndU9mqYCkuuogKGUlKg5tQKe/GxTqdsSbrKtmw==` |
+
+The imported `src/` files are byte-identical to the published `0.58.1` tarball; this was verified
+during import by diffing every `src/**/*.ts` file against the extracted tarball.
+
+## Import method
+
+The upstream `packages/pi-btw` history was extracted with `git filter-repo`
+(`--path packages/pi-btw/ --path-rename packages/pi-btw/:`) from a clone of
+`narumiruna/pi-extensions` at the release commit above, then rebased onto this repository's `main`.
+Commit hashes in this repository are therefore rewritten and do not match upstream hashes. Only the
+`@narumitw/pi-btw@0.58.1` tag of the upstream monorepo is preserved (rewritten).
+
+## Files added or changed from the upstream baseline
+
+- Repository skeleton: `package.json` (new name/version/repository/pinned deps), `tsconfig.json`,
+  `biome.json`, `vitest.config.ts`, `.gitignore`, `.github/workflows/ci.yml`, `NOTICE`.
+- Test scaffolding copied from the same upstream commit because the package tests import it:
+  upstream `test/support.ts`, `test/test-timeout-policy.ts`, `test/vitest.global-setup.ts`,
+  `test/vitest.setup.ts`, `test/vitest.runner.ts`.
+- Test import paths: `../../../test/support.js` → `../support.js` in the four upstream test files
+  that used the monorepo root helper.
+- Documentation: [`README.md`](./README.md) fork section, [`docs/install.md`](./docs/install.md),
+  [`docs/host-integration.md`](./docs/host-integration.md).
+
+See `README.md` → "Fork changes" for the functional differences and their status.

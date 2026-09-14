@@ -1,0 +1,25 @@
+{
+  "package": "@ctrixin/pi-btw",
+  "version": "0.59.0-fork.1",
+  "ref": "v0.59.0-fork.1",
+  "commit": "9609405751568b2ffc9ff5979bd8280d8eac384a",
+  "source": "/private/tmp/pi-btw-vendor",
+  "entryPoint": "src/index.ts",
+  "upstream": "@narumitw/pi-btw",
+  "esbuild": "0.28.2",
+  "pi": "0.85.1",
+  "sha256": "9a26fb290449b2a4c04cfde7be5d58ffd0553a9aebca19f076f45ce1dbb823e4",
+  "bytes": 470655,
+  "externalPeers": [
+    "@earendil-works/pi-ai",
+    "@earendil-works/pi-coding-agent",
+    "@earendil-works/pi-tui"
+  ],
+  "bundledDependencies": [
+    "@narumitw/pi-tui-kit",
+    "grok-mermaid"
+  ],
+  "unresolvedRequires": [
+    "highlight.js"
+  ]
+}
