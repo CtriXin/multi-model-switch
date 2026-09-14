@@ -17,6 +17,7 @@ import { askSideQuestion, cancelSideQuestion, getSideQuestion } from "./api";
 import { newRequestId } from "./request-id";
 import { formatEventTime, formatEventTimeTitle } from "./time";
 import {
+  contextScopeLine,
   defaultExpanded,
   isInFlight,
   mergeSideQuestions,
@@ -125,14 +126,41 @@ export function useSideQuestions(
 function Facts({ row }: { row: SideQuestion }) {
   const route = routeLine(row);
   const masked = row.redactionSummary?.secretsMasked || 0;
+  const scope = contextScopeLine(row);
   const tokens = row.usage?.totalTokens ?? row.usage?.total_tokens;
   return (
     <dl className="btw-facts">
       <div>
+        <dt>回答方式</dt>
+        <dd
+          title={
+            row.runner === "pi-extension"
+              ? "由 Pi 会话内的 /btw 扩展用主会话上下文回答，只发一条 /btw 命令。"
+              : "由 Pilot 的只读旁路回答：只读取脱敏后的会话摘要与最近几轮。"
+          }
+        >
+          {row.runner === "pi-extension" ? "Pi 扩展" : "Pilot 旁路"}
+        </dd>
+      </div>
+      <div>
         <dt>来源</dt>
         <dd>{sourceLabel(row)}</dd>
       </div>
-      {!!row.contextRevision && (
+      {!!scope && (
+        <div>
+          <dt>上下文范围</dt>
+          <dd
+            title={
+              row.runner === "pi-extension"
+                ? "扩展报告的分支范围：回答基于主会话分支。"
+                : "Pilot 旁路只读取脱敏后的最近几轮，不是全部主上下文。"
+            }
+          >
+            {scope}
+          </dd>
+        </div>
+      )}
+      {!!row.contextRevision && !scope && (
         <div>
           <dt>上下文</dt>
           <dd title="旁问只读取这一版会话状态摘要，没有主任务的全部上下文。">
@@ -158,6 +186,14 @@ function Facts({ row }: { row: SideQuestion }) {
           <dd>已隐藏 {masked} 处密钥</dd>
         </div>
       )}
+      {!!row.fallbackReason && (
+        <div>
+          <dt>降级</dt>
+          <dd title="这条旁问先尝试了 Pi 扩展，失败后由 Pilot 旁路回答。原因如下。">
+            {row.fallbackReason}
+          </dd>
+        </div>
+      )}
     </dl>
   );
 }
@@ -176,7 +212,9 @@ function Body({
       {question && <p className="btw-full-question">{row.question}</p>}
       {isInFlight(row) && (
         <p className="btw-progress" role="status">
-          正在旁路回答，主任务继续运行，不会因为这条旁问停止或改变。
+          {row.runner === "pi-extension"
+            ? "Pi 扩展正在回答，主任务继续运行，不会因为这条旁问停止或改变。"
+            : "正在旁路回答，主任务继续运行，不会因为这条旁问停止或改变。"}
         </p>
       )}
       {!!row.answer && <RichText text={row.answer} />}

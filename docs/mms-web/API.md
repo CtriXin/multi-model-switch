@@ -128,6 +128,15 @@ launch `{requestId,workspaceId,presetId,title,prompt}`；send `{requestId,text}`
 - 2026-09-14 session view 新增 `lastEventAt`（最近一次 transcript 写入）与 `heartbeatAt`（最近一次 driver 从 Pi 进程送达的回调：event/activity/state/approval/exit；未收到过为 `null`）。两者都是已发生事件的时间戳，随 session 持久化并在重启后按记录恢复；没有完成百分比或推测进度。
 - 生命周期边界：主任务 stop 不取消进行中的旁问；服务 `close()` 把进行中旁问标为 `uncertain`；进程重启后加载时把进行中行标为 `cancelled`，已完成行保留。fork 只携带已完结的旁问。
 
+### 2026-09-14 原生 `/btw` 扩展优先（btwNative）
+
+- 会话启动/adopt/resume 后，host 调一次 RPC `get_commands`：命令集同时含 `btw` 与 `btw:cancel`（fork 独有，上游原包无 headless）才把 `session.btwNative` 置 `true` 并写入 session view；探测失败或扩展缺席为 `false`，不阻塞会话，也不伤装。下次 adopt/resume 会重探。
+- `btwNative=true` 的会话，`completion` 旁问优先走扩展：host 只向 driver 发一条 `/btw <问题>` prompt（问题取自脱敏后的行文本、压成单行），扩展在 Pi 进程内用主会话分支上下文回答，经 `BTW_EVENT:` notify 回报 `accepted/running/delta/completed/failed/cancelled`；行上的 `runner` 字段区分 `pi-extension` 与 `host`，`contextScope` 为扩展报告的分支范围 `{mode,entries,chars,truncated,leafId}`。
+- 降级：扩展拒绝 prompt（`success:false`）、driver 交付失败或超时窗内无终态事件时，记录 `fallbackReason` 并**只退一次** host 旁路（会话自身路由或 sidecar_runner），不循环；无终态事件后迟到的扩展事件不会重开已完结的行。扩展未被检测到时不属于降级：直接走 host 旁路，`fallbackReason` 为 `null`。
+- 取消：对 `runner=pi-extension` 的进行中行，取消会先尽力向 driver 发 `/btw:cancel <扩展 id>`，然后行立即落 `cancelled`（幂等）；扩展侧的 `cancelled` 事件随后到达时被吸收。
+- 隔离不变量不变并加强：native 路径下 driver 只收到 `/btw …` 这一条 prompt；主 transcript 不新增任何 user 事件，`last_sequence`、队列、模型/effort 不变（回归测试断言）。
+- 行新增字段：`runner`（`host|pi-extension`，旧持久化行缺省按 host 展示）、`fallbackReason`（string|null）；session view 新增 `btwNative`（boolean）。
+
 ## Prelaunch selection (2026-09-08)
 
 - `POST /launch-options {presetId, workspaceId}`: read-only resolution through the original MMS provider/preferences/model-policy path using a disposable private configuration snapshot. Public fields: `model` (id/name/input/contextWindow/maxTokens/reasoning), `protocol`, `configuredThinkingLevel`, `defaultThinkingLevel`, `supportedThinkingLevels`, `thinkingLevelMap`. No credentials or endpoint URLs.
