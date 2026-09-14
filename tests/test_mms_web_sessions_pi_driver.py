@@ -36,6 +36,7 @@ class RecordingSink:
         self.approvals_pending: dict[str, dict] = {}
         self.approvals_resolved: list[tuple[str, str]]
         self.approvals_resolved = []
+        self.side_question_events: list[dict] = []
         self.exited: list[tuple[int, str]] = []
         self.exit_event = threading.Event()
 
@@ -74,6 +75,10 @@ class RecordingSink:
         with self.lock:
             self.exited.append((exit_code, stderr_tail))
         self.exit_event.set()
+
+    def side_question_event(self, payload: dict) -> None:
+        with self.lock:
+            self.side_question_events.append(payload)
 
     # helpers
 

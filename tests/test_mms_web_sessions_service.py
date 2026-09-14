@@ -100,6 +100,12 @@ class FakeDriver:
     def emit_approval(self, service, session, approval_id="ap-1", method="confirm"):
         service._apply_approval_pending(session, approval_id, method, "title")
 
+    def emit_side_question_event(self, payload: dict) -> None:
+        """Simulate a BTW_EVENT: notify delivered by a Pi extension."""
+        if self._sink is None:
+            raise RuntimeError("FakeDriver has no sink")
+        self._sink.side_question_event(payload)
+
 
 def make_service(tmp_path: Path, catalog=None, real_launch: bool = True, monkeypatch=None, **kwargs) -> tuple[SessionService, list[FakeDriver]]:
     catalog = catalog or FakeCatalog()

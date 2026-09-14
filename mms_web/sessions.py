@@ -91,6 +91,12 @@ class _DriverSink:
             return
         self._service._apply_process_exited(self._session, exit_code, stderr_tail)
 
+    def side_question_event(self, payload: dict) -> None:
+        """One extension BTW_EVENT; mapped onto side-question rows only."""
+        if not self.active:
+            return
+        self._service._apply_side_question_event(self._session, payload)
+
 
 class _LiveSession:
     def __init__(self, meta: dict, state_root: Path | None = None) -> None:
@@ -128,6 +134,9 @@ class _LiveSession:
         # /btw side questions live beside the transcript, never in events.
         self.side_questions: dict[str, dict] = {}
         self.btw_idem: dict[str, str] = {}
+        # Holds a possibly-cut secret suffix while extension deltas stream in,
+        # mirroring stream_tails for the main transcript.
+        self.btw_stream_tails: dict[str, str] = {}
         self.updated_at = meta.get("updatedAt") or _now_iso()
         # Two read-only liveness markers for Pilot and /btw, neither of them
         # progress. `last_event_at` is the last transcript write, whichever

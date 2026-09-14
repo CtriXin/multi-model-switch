@@ -470,6 +470,21 @@ class PiRpcDriver:
             except (ValueError, TypeError):
                 pass
             return
+        if method == "notify" and str(message.get("message", "")).startswith("BTW_EVENT:"):
+            # Side-question events ride the notify channel; malformed JSON is
+            # a protocol anomaly to surface, never a reason to crash the
+            # reader or touch the main transcript.
+            raw = str(message.get("message") or "").split(":", 1)[1]
+            try:
+                payload = json.loads(raw)
+            except (ValueError, TypeError):
+                self._notice("BTW 事件不是合法 JSON，已跳过。", title="协议异常")
+                return
+            if not isinstance(payload, dict):
+                self._notice("BTW 事件负载不是对象，已跳过。", title="协议异常")
+                return
+            self._sink.side_question_event(payload)
+            return
         if method == "notify" and str(message.get("message", "")).startswith("MMS_WEB_STATE:"):
             try:
                 state = json.loads(message["message"].split(":", 1)[1])

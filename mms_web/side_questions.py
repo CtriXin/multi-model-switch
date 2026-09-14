@@ -39,6 +39,10 @@ from .errors import WebError
 
 BTW_FINAL_STATES = {"completed", "failed", "cancelled", "uncertain"}
 BTW_SOURCES = {"state", "completion"}
+BTW_RUNNERS = {"host", "pi-extension"}
+# Row-mapping semantics exist only for these extension events; "history" is
+# a listing reply the host consumes elsewhere, and unknown kinds carry none.
+_BTW_ROW_EVENTS = {"accepted", "running", "delta", "completed", "failed", "cancelled"}
 
 _MAX_QUESTION = 2000
 _MAX_ANSWER = 20000
@@ -102,6 +106,45 @@ def public_side_question(row: dict) -> dict:
 
 def _looks_like_state(question: str) -> bool:
     return any(hint in question for hint in _STATE_HINTS)
+
+
+def _btw_event_context(value: Any) -> dict:
+    """Whitelist the contract's context fields; anything else is dropped."""
+    if not isinstance(value, dict):
+        return {}
+    scope: dict = {}
+    if isinstance(value.get("mode"), str):
+        scope["mode"] = str(value["mode"])[:40]
+    for key in ("entries", "chars"):
+        if isinstance(value.get(key), int) and value[key] >= 0:
+            scope[key] = value[key]
+    if isinstance(value.get("truncated"), bool):
+        scope["truncated"] = value["truncated"]
+    if isinstance(value.get("leafId"), str):
+        scope["leafId"] = str(value["leafId"])[:128]
+    return scope
+
+
+def _btw_event_usage(value: Any) -> dict | None:
+    """Same whitelist for usage; a malformed usage is ignored, not stored."""
+    if not isinstance(value, dict):
+        return None
+    usage: dict = {}
+    for key in ("input", "output", "cacheRead", "cacheWrite"):
+        item = value.get(key)
+        if isinstance(item, int) and item >= 0:
+            usage[key] = item
+    cost = value.get("cost")
+    if cost is None or isinstance(cost, (int, float)):
+        usage["cost"] = cost
+    return usage or None
+
+
+def _btw_event_at(payload: dict, fallback: str) -> str:
+    at = payload.get("at")
+    if isinstance(at, str) and _parse_iso(at) is not None:
+        return at
+    return fallback
 
 
 def _route_snapshot(session) -> dict:
@@ -190,6 +233,7 @@ class SessionSideQuestions:
                 "status": "accepted",
                 "answer": None,
                 "source": hint or ("state" if _looks_like_state(question) else "completion"),
+                "runner": "host",
                 "contextRevision": f"r-{session.last_sequence}",
                 "routeSnapshot": _route_snapshot(session),
                 "usage": None,
@@ -213,6 +257,132 @@ class SessionSideQuestions:
         else:
             self._answer_from_completion(session, row)
         return self.get_side_question(session.meta["id"], row["btwId"])
+
+    # -- extension events ----------------------------------------------
+
+    def _apply_side_question_event(self, session, payload: dict) -> None:
+        """Map one extension ``BTW_EVENT`` onto the side-question rows.
+
+        Only ``session.side_questions`` is touched: whatever the extension
+        reports, the main transcript, the queue and the model stay exactly as
+        they were. Rows this path creates or updates carry
+        ``runner="pi-extension"`` so the API can tell extension answers from
+        host-sidecar answers. Events for unknown ids are ignored unless they
+        are the row-creating ``accepted``; duplicate, late or out-of-order
+        events never move a row backwards and never reopen a settled one.
+        """
+        if not isinstance(payload, dict):
+            return
+        kind = str(payload.get("event") or "")
+        if kind not in _BTW_ROW_EVENTS:
+            return
+        btw_id = str(payload.get("id") or "")
+        if not btw_id or not _IDEM_RE.match(btw_id):
+            return
+        at = _btw_event_at(payload, self._now())
+        with session.lock:
+            row = session.side_questions.get(btw_id)
+            if row is None:
+                if kind != "accepted":
+                    return
+                # A finalized or exited session accepts no new rows: the
+                # extension is provably gone, so a late accepted would only
+                # dangle. Terminal updates for existing rows still land.
+                if session.finalized or not session.alive():
+                    return
+                question, masked = _redact_counted(
+                    str(payload.get("question") or "").strip()[:_MAX_QUESTION] or "（扩展未提供问题）",
+                    session.secrets,
+                )
+                session.side_questions[btw_id] = {
+                    "btwId": btw_id,
+                    "mainSessionId": session.meta["id"],
+                    "owner": "sidecar",
+                    "question": question,
+                    "status": "accepted",
+                    "answer": None,
+                    "source": "completion",
+                    "runner": "pi-extension",
+                    "contextRevision": f"r-{session.last_sequence}",
+                    "routeSnapshot": _route_snapshot(session),
+                    "usage": _btw_event_usage(payload.get("usage")),
+                    "redactionSummary": {"secretsMasked": masked},
+                    "contextScope": _btw_event_context(payload.get("context")),
+                    "error": None,
+                    "createdAt": at,
+                    "acceptedAt": at,
+                    "startedAt": None,
+                    "completedAt": None,
+                }
+                session.persist(self._state_dir)
+                return
+            if row["status"] in BTW_FINAL_STATES:
+                return
+            row["runner"] = "pi-extension"
+            context = _btw_event_context(payload.get("context"))
+            if context:
+                row["contextScope"] = context
+            if kind == "accepted":
+                pass  # idempotent: an existing row never moves backwards
+            elif kind == "running":
+                if row["status"] == "accepted":
+                    row["status"] = "running"
+                    row["startedAt"] = at
+            elif kind == "delta":
+                text = str(payload.get("text") or "")
+                if text:
+                    tail = session.btw_stream_tails.pop(btw_id, "")
+                    value, masked = self._btw_redact_stream(session, str(row.get("answer") or "") + tail + text)
+                    keep = max(
+                        (
+                            n
+                            for secret in session.secrets
+                            if secret
+                            for n in range(1, min(len(secret), len(value) + 1))
+                            if value.endswith(secret[:n])
+                        ),
+                        default=0,
+                    )
+                    if keep:
+                        session.btw_stream_tails[btw_id] = value[-keep:]
+                        value = value[:-keep]
+                    row["answer"] = value[:_MAX_ANSWER]
+                    row["redactionSummary"]["secretsMasked"] += masked
+            else:
+                if row.get("startedAt") is None:
+                    row["startedAt"] = str(row.get("acceptedAt") or at)
+                if kind == "completed":
+                    answer = str(payload.get("text") or "")
+                    if not answer.strip():
+                        # No final text: keep whatever the deltas accumulated.
+                        answer = str(row.get("answer") or "") + session.btw_stream_tails.pop(btw_id, "")
+                    answer, masked = _redact_counted(answer, session.secrets)
+                    if answer.strip():
+                        row["answer"] = answer[:_MAX_ANSWER]
+                        row["redactionSummary"]["secretsMasked"] += masked
+                    usage = _btw_event_usage(payload.get("usage"))
+                    if usage is not None:
+                        row["usage"] = usage
+                    row["error"] = None
+                else:
+                    default = "旁问已取消。" if kind == "cancelled" else "扩展未说明失败原因。"
+                    error, masked = _redact_counted(str(payload.get("error") or "")[:500] or default, session.secrets)
+                    row["error"] = error
+                    row["redactionSummary"]["secretsMasked"] += masked
+                row["status"] = kind
+                row["completedAt"] = at
+            session.persist(self._state_dir)
+
+    @staticmethod
+    def _btw_redact_stream(session, value: str) -> tuple[str, int]:
+        masked = 0
+        for secret in session.secrets or []:
+            if secret:
+                hits = value.count(secret)
+                if hits:
+                    masked += hits
+                    value = value.replace(secret, _MASK)
+        return value, masked
 
     # -- cancel -------------------------------------------------------
 
