@@ -194,11 +194,13 @@ try {
     $venvPython = Join-Path $venv "Scripts\python.exe"
     if (-not (Test-Path -LiteralPath $venvPython)) {
       & $python.path @($python.args) -m venv $venv
-      if ($LASTEXITCODE -ne 0) { throw "创建 venv 失败：$venv。可以加 -NoVenv 跳过，但那样必须自己安装 rich httpx tomli-w。" }
+      if ($LASTEXITCODE -ne 0) { throw "创建 venv 失败：$venv。可以加 -NoVenv 跳过，但那样必须自己安装 rich httpx tomli-w tzdata。" }
     }
     & $venvPython -m pip install --quiet --upgrade pip
-    & $venvPython -m pip install --quiet rich httpx tomli-w
-    if ($LASTEXITCODE -ne 0) { throw "安装 Python 依赖失败（rich httpx tomli-w）。没有 httpx，Pilot 无法连接模型通道。" }
+    # tzdata: Windows CPython ships no IANA database; zoneinfo(Asia/Singapore)
+    # in session timestamps fails without it.
+    & $venvPython -m pip install --quiet rich httpx tomli-w tzdata
+    if ($LASTEXITCODE -ne 0) { throw "安装 Python 依赖失败（rich httpx tomli-w tzdata）。没有 httpx，Pilot 无法连接模型通道。" }
     $launchPython = $venvPython
     $launchArgs = @()
   }
@@ -227,7 +229,9 @@ try {
   Write-TextFile $ps1 (($psLines -join "`n") + "`n")
 
   & $launchPython -c "import httpx, rich" 2>$null
-  if ($LASTEXITCODE -ne 0) { Write-Warning "启动用的 Python 缺少 httpx/rich，Pilot 绑定通道会失败。请运行：`"$launchPython`" -m pip install rich httpx tomli-w" }
+  if ($LASTEXITCODE -ne 0) { Write-Warning "启动用的 Python 缺少 httpx/rich，Pilot 绑定通道会失败。请运行：`"$launchPython`" -m pip install rich httpx tomli-w tzdata" }
+  & $launchPython -c "from zoneinfo import ZoneInfo; ZoneInfo('Asia/Singapore')" 2>$null
+  if ($LASTEXITCODE -ne 0) { Write-Warning "启动用的 Python 缺少 tzdata，会话时间戳会失败。请运行：`"$launchPython`" -m pip install tzdata" }
 
   $resolvedConfig = ""
   try {

@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
+from .file_lock import LOCK_EX, LOCK_SH, LOCK_UN, flock
 from .runtime import private_json
 from .file_lock import flock, LOCK_EX, LOCK_SH, LOCK_UN
 

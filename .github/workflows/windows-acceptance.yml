@@ -17,15 +17,20 @@ on:
       - ".github/workflows/windows-acceptance.yml"
       - "scripts/ci/windows_acceptance.ps1"
       - "mms_platform.py"
+      - "mms_runtime.py"
+      - "mms_pi_support.py"
       - "mms_web/**"
       - "packages/mms-install/**"
       - "apps/mms-web/src/local-file-paths.ts"
       - "tests/test_mms_platform.py"
+      - "tests/test_mms_runtime.py"
+      - "tests/test_pi_windows_resolution.py"
       - "tests/test_mms_web_browser_capability.py"
       - "tests/test_mms_web_file_lock.py"
       - "tests/test_mms_web_install_lock.py"
       - "tests/test_mms_web_local_files.py"
       - "tests/test_mms_web_service.py"
+      - "tests/test_mms_web_windows_imports.py"
       - "tests/test_mms_web_status.py"
       - "tests/test_mms_web_sessions_pi_driver.py"
       - "tests/test_npx_installer_package.py"
@@ -103,7 +108,8 @@ jobs:
 
       - name: Install Python test tools
         shell: pwsh
-        run: python -m pip install pytest httpx rich tomli-w
+        # tzdata: Windows CPython has no IANA database; zoneinfo needs it.
+        run: python -m pip install pytest httpx rich tomli-w tzdata
 
       - name: Install Pi (positive discoverability cell)
         if: matrix.pi_present
@@ -134,6 +140,8 @@ jobs:
         env:
           MMS_CONFIG_ROOT: ${{ runner.temp }}\mms-ci-config
           MMS_STATE_ROOT: ${{ runner.temp }}\mms-ci-state
+          # Optional one-real-model-reply smoke (phase 7c); unset secret = skipped.
+          MMS_SMOKE_OPENAI_KEY: ${{ secrets.MMS_WINDOWS_SMOKE_OPENAI_KEY }}
         run: |
           $piPresent = [bool]::Parse('${{ matrix.pi_present }}')
           & .\scripts\ci\windows_acceptance.ps1 `
@@ -152,11 +160,14 @@ jobs:
           $env:PYTHONPATH = $PWD.Path
           python -m pytest -q `
             tests/test_mms_platform.py `
+            tests/test_mms_runtime.py `
+            tests/test_pi_windows_resolution.py `
             tests/test_mms_web_browser_capability.py `
             tests/test_mms_web_file_lock.py `
             tests/test_mms_web_install_lock.py `
             tests/test_mms_web_local_files.py `
             tests/test_mms_web_service.py `
+            tests/test_mms_web_windows_imports.py `
             tests/test_mms_web_status.py `
             tests/test_mms_web_sessions_pi_driver.py `
             tests/test_npx_installer_package.py `
