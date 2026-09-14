@@ -18,9 +18,12 @@ Bot 是长期存在的员工，用户用聊天交代事情。MMS 只做身份、
 | T1 | Bot 界面视觉系统重做（本轮重点） | `T1-ui-visual-system.md` | gemini3.6 主做，glm5.3 评审 | `apps/mms-web/src/bot*.css`、`Bot.tsx`、`BotStudio.tsx`、`BotMemoryPanel.tsx`、`BotCommunications.tsx` |
 | T2 | Coordinator 计划层落地 | `T2-coordinator-plan.md` | k3 | `mms_web/bot_coordinator.py`、`bots.py`、`bot_executor.py`、新增 `BotPlan.tsx` |
 | T3 | 失败重试与结果送达 | `T3-resilience-and-notify.md` | deepseek | 新增 `mms_web/bot_notify.py`、`bots.py` 最小改动、`server.py` 一个路由 |
+| T1c | 新建即对话：命名、头像、预设在聊天里完成 | `T1c-create-in-chat.md` | gemini3.6 主做，glm5.3 评审 | `Bot.tsx` 头部与向导、`BotStudio.tsx` 的 `onUpdateBot`、新增 `bot-presets.ts` |
 | T4 | 落地与交付链 | `T4-landing-governance.md` | Claude（本会话） | rebase、issue、PR 拆分、全量回归、fresh-user gate |
 
-建议只是建议，派发给谁由用户决定。每个包顶部都写了范围、不许碰的文件、验收和汇报格式。
+建议只是建议，派发给谁由用户决定。
+第二轮（2026-09-14）追加 T1c。T1c 不从 6a223c7c 开分支，而是从任务分支当时的 HEAD 开，派发前先确认主 workspace 里的几何头像改动已提交。
+每个包顶部都写了范围、不许碰的文件、验收和汇报格式。
 
 评审分工：T1 的验收里有截图比对，需要能识图的模型。glm5.3 不能识图，只做代码侧评审（hex 计数、token 使用、diff 里是否混入行为改动、build 与测试结果）；截图的视觉评审由 Claude 做。
 
