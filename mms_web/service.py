@@ -11,6 +11,7 @@ from `lsof`/`ps` or `netstat`/CIM, never from a pid file that could go stale.
 """
 from __future__ import annotations
 
+import base64
 import http.client
 import json
 import os
@@ -142,6 +143,54 @@ def _is_windows() -> bool:
     return os.name == "nt"
 
 
+def _windows_console_codepages() -> list[str]:
+    """OEM/ANSI codepages console tools actually emit; empty off Windows.
+
+    ``locale.getpreferredencoding(False)`` is unusable here: PYTHONUTF8=1 (set
+    by the installer/CI) makes it answer "utf-8" while netstat and
+    powershell.exe still write the machine codepage (cp936 on a Chinese
+    system). Ask the Win32 API directly instead.
+    """
+    if os.name != "nt":
+        return []
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        pages = []
+        for getter in (kernel32.GetOEMCP, kernel32.GetACP):
+            try:
+                page = int(getter())
+            except (TypeError, ValueError):
+                continue
+            if page:
+                pages.append(f"cp{page}")
+        return pages
+    except (AttributeError, OSError):
+        return []
+
+
+def _decode_windows_command_output(data) -> str:
+    """Decode console-tool output that can never crash the lifecycle path.
+
+    Only netstat's ASCII protocol/port/PID fields are consumed. Localized
+    headings may use an OEM/ANSI codepage, even under PYTHONUTF8=1.
+    Unicode process command lines use a separate Base64/UTF-8 contract.
+    """
+    if isinstance(data, str):
+        return data
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    for encoding in _windows_console_codepages():
+        try:
+            return data.decode(encoding, errors="replace")
+        except LookupError:
+            continue
+    return data.decode("utf-8", errors="replace")
+
+
 def state_identity(path) -> str:
     """A path-free fingerprint of one state root, published by the server.
 
@@ -179,8 +228,9 @@ def _probe(port: int, timeout: float = 0.4):
 def _listening_pids(port: int) -> list[int]:
     try:
         if _is_windows():
-            out = subprocess.run(["netstat", "-ano", "-p", "TCP"],
-                                 capture_output=True, text=True, timeout=5).stdout
+            raw = subprocess.run(["netstat", "-ano", "-p", "TCP"],
+                                 capture_output=True, timeout=5).stdout
+            out = _decode_windows_command_output(raw)
             pids = []
             for line in out.splitlines():
                 fields = line.split()
@@ -203,13 +253,20 @@ def _listening_pids(port: int) -> list[int]:
 def _command_line(pid: int) -> list[str]:
     try:
         if _is_windows():
-            command = "$p=Get-CimInstance Win32_Process -Filter 'ProcessId=%s'; if ($p) { $p.CommandLine }" % pid
-            out = subprocess.run(["powershell.exe", "-NoProfile", "-Command", command],
-                                 capture_output=True, text=True, timeout=5).stdout.strip()
+            # Transport Unicode through ASCII: Windows PowerShell's console
+            # codepage can differ from both Python's locale and the system ACP.
+            command = (
+                "$p=Get-CimInstance Win32_Process -Filter 'ProcessId=%s'; "
+                "if ($p) { [Convert]::ToBase64String("
+                "[Text.Encoding]::UTF8.GetBytes($p.CommandLine)) }"
+            ) % pid
+            raw = subprocess.run(["powershell.exe", "-NoProfile", "-Command", command],
+                                 capture_output=True, timeout=5).stdout
+            out = base64.b64decode(raw.strip(), validate=True).decode("utf-8").strip()
         else:
             out = subprocess.run(["ps", "-o", "command=", "-p", str(pid)],
                                  capture_output=True, text=True, timeout=5).stdout.strip()
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, ValueError):
         return []
     return _split_command_line(out)
 

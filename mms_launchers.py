@@ -12074,6 +12074,13 @@ def _exec_or_run(
         sys.exit(1)
     session_home = str((env or {}).get("MMS_SESSION_HOME") or "").strip()
 
+    # The Web worker itself is started with piped stdio. On Windows, overlaying
+    # that piped Python process with os.execvpe is unreliable (notably on
+    # Python 3.12): the child can exit after its startup banner without
+    # inheriting the RPC pipe. Keep the worker as a small wait/forwarding
+    # process so Pi receives the same stdin/stdout/stderr handles.
+    if os.name == "nt":
+        force_subprocess = True
     if once or cleanup_path or state_home or cleanup_context or exit_callback or force_subprocess:
         exit_code = None
         child = None

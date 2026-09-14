@@ -358,14 +358,17 @@ class CatalogService:
         (self._state_root / "launch-home").mkdir(parents=True, exist_ok=True)
         process = subprocess.run(
             [sys.executable, str(_WORKER_PATH)],
-            input=json.dumps(payload, ensure_ascii=False),
+            # The worker speaks UTF-8 JSON on both ends (its result stream is
+            # dup'ed with encoding="utf-8"). text=True would decode with the
+            # locale codepage — cp936 on a Chinese Windows machine — and crash
+            # the whole send/configure path on any non-ASCII content.
+            input=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
             capture_output=True,
-            text=True,
             env=env,
             cwd=str(_REPO_ROOT),
             timeout=timeout,
         )
-        stdout = (process.stdout or "").strip()
+        stdout = (process.stdout or b"").decode("utf-8", errors="replace").strip()
         if not stdout:
             raise WebError(
                 "WORKER_FAILED",
