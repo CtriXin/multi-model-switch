@@ -20,6 +20,7 @@ import signal
 import subprocess
 import sys
 import time
+import uuid
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -120,6 +121,7 @@ def help_text(command: str | None = None) -> str:
         ("--listen loopback|lan|all", "仅本次启动的访问范围；不给就用设置里的开关"),
         ("--hostname HOST", "额外允许的访问域名，可重复"),
         ("--json", "让上面五个命令输出 JSON"),
+        ("--model-smoke", "doctor 专用：实际发送一条短模型请求，可能消耗额度"),
     ])
     return (
         f"MMS Pilot {VERSION} — 在浏览器里用 MMS 的模型、通道和会话\n\n"
@@ -421,8 +423,29 @@ def _doctor_request(base_url: str, path: str, timeout: float = 8.0) -> tuple[boo
         return False, detail
 
 
+def _doctor_post(base_url: str, path: str, payload: dict, csrf_token: str,
+                 timeout: float = 12.0) -> tuple[bool, object]:
+    request = urllib.request.Request(
+        base_url.rstrip("/") + path,
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={"Accept": "application/json", "Content-Type": "application/json",
+                 "X-MMS-CSRF": csrf_token}, method="POST")
+    try:
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(request, timeout=timeout) as response:
+            return True, json.loads(response.read().decode("utf-8", errors="replace"))
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError, ValueError) as error:
+        detail = str(error)
+        if isinstance(error, urllib.error.HTTPError):
+            try:
+                detail = f"HTTP {error.code}: {error.read().decode('utf-8', errors='replace')[:500]}"
+            except OSError:
+                detail = f"HTTP {error.code}"
+        return False, detail
+
+
 def doctor(*, state_root: Path, port_base: int, limit: int, restart: bool = False,
-           as_json: bool = False) -> int:
+           as_json: bool = False, model_smoke: bool = False) -> int:
     """Self-check the Windows lifecycle without changing config or credentials."""
     if restart:
         stop(state_root=state_root, port_base=port_base, limit=limit, everyone=False, quiet=True)
@@ -471,6 +494,42 @@ def doctor(*, state_root: Path, port_base: int, limit: int, restart: bool = Fals
         detail_ok = True
         checks.append({"name": "session-detail", "ok": True, "skipped": True,
                        "detail": "没有可读取的历史会话"})
+
+    if model_smoke:
+        preset = next((p for p in (bootstrap.get("presets", []) if isinstance(bootstrap, dict) else [])
+                       if isinstance(p, dict) and p.get("available") and p.get("harness") == "pi"), None)
+        workspace = next((w for w in (bootstrap.get("workspaces", []) if isinstance(bootstrap, dict) else [])
+                          if isinstance(w, dict) and w.get("id")), None)
+        csrf = str(bootstrap.get("csrfToken") or "") if isinstance(bootstrap, dict) else ""
+        smoke_ok = False
+        smoke_detail: object = "没有可用的 Pi preset 或工作文件夹"
+        if preset and workspace and csrf:
+            payload = {"requestId": "mms-doctor-" + uuid.uuid4().hex,
+                       "workspaceId": workspace["id"], "presetId": preset["id"],
+                       "title": "MMS doctor smoke", "prompt": "请只回复 OK。"}
+            posted, created = _doctor_post(base_url, "/api/v1/sessions", payload, csrf)
+            session_id = (created.get("session", {}).get("id") if isinstance(created, dict) else None)
+            if posted and session_id:
+                deadline = time.monotonic() + 30
+                while time.monotonic() < deadline:
+                    ok, detail = _doctor_request(base_url, "/api/v1/sessions/" + urllib.parse.quote(str(session_id), safe=""))
+                    if not ok:
+                        smoke_detail = detail
+                        break
+                    state = str(detail.get("session", {}).get("state") or "") if isinstance(detail, dict) else ""
+                    if state in {"completed", "error", "stopped"}:
+                        smoke_ok = state == "completed"
+                        smoke_detail = "state=" + state
+                        break
+                    time.sleep(1)
+                else:
+                    smoke_detail = "30 秒内没有收到完成状态"
+            elif not posted:
+                smoke_detail = created
+            else:
+                smoke_detail = "创建会话没有返回 session.id"
+        checks.append({"name": "model-smoke", "ok": smoke_ok,
+                       **({"detail": smoke_detail} if not smoke_ok else {})})
 
     launch = bootstrap.get("capabilities", {}).get("launch") if isinstance(bootstrap, dict) else None
     launch_reason = bootstrap.get("capabilities", {}).get("launchReason") if isinstance(bootstrap, dict) else ""
@@ -598,6 +657,7 @@ def run(verb: str, argv: list[str]) -> int:
     parser.add_argument("--open", action="store_true", help="start/restart: open the browser afterwards")
     parser.add_argument("--all", action="store_true", help="stop: every Pilot on this machine, not only this state root")
     parser.add_argument("--restart", action="store_true", help="doctor: restart this Pilot before checking it")
+    parser.add_argument("--model-smoke", action="store_true", help="doctor: send one short model request (may consume provider quota)")
     args = parser.parse_args(argv)
     state_root = args.state_root.expanduser().resolve()
     extra = ["--config-root", str(args.config_root.expanduser())] if args.config_root else []
@@ -633,6 +693,6 @@ def run(verb: str, argv: list[str]) -> int:
         return 0
     if verb == "doctor":
         return doctor(state_root=state_root, port_base=args.port, limit=limit,
-                      restart=args.restart, as_json=args.json)
+                      restart=args.restart, as_json=args.json, model_smoke=args.model_smoke)
     parser.error(f"unknown verb {verb}")
     return 2
