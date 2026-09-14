@@ -355,9 +355,27 @@ class WebApplication:
         if parts == ["workspaces", "choose"]:
             import subprocess
             import sys
-            if sys.platform != "darwin":
+            if sys.platform == "darwin":
+                command = ["osascript", "-e", 'POSIX path of (choose folder with prompt "选择 MMS 的工作文件夹")']
+            elif sys.platform == "win32":
+                # PowerShell is present on supported Windows installs. Keep
+                # the dialog in the interactive desktop and emit one UTF-8
+                # path so Chinese folder names survive the pipe.
+                script = (
+                    "Add-Type -AssemblyName System.Windows.Forms; "
+                    "$d=New-Object System.Windows.Forms.FolderBrowserDialog; "
+                    "$d.Description='选择 MMS 的工作文件夹'; "
+                    "if($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK){ "
+                    "[Console]::OutputEncoding=[Text.Encoding]::UTF8; "
+                    "[Console]::Write($d.SelectedPath) }"
+                )
+                command = ["powershell.exe", "-NoProfile", "-STA", "-WindowStyle", "Normal", "-ExecutionPolicy", "Bypass", "-Command", script]
+            else:
                 raise WebError("FOLDER_PICKER_UNAVAILABLE", "请直接填写电脑上的文件夹路径。", 409)
-            result = subprocess.run(["osascript", "-e", 'POSIX path of (choose folder with prompt "选择 MMS 的工作文件夹")'], capture_output=True, text=True, timeout=120)
+            try:
+                result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", timeout=120)
+            except (OSError, subprocess.TimeoutExpired, UnicodeError) as exc:
+                raise WebError("FOLDER_PICKER_UNAVAILABLE", "无法打开文件夹选择器，请直接填写完整路径。", 409) from exc
             return {"path": result.stdout.strip() if result.returncode == 0 else ""}
         if not self.catalog:
             raise WebError("CAPABILITY_UNAVAILABLE", "本地服务尚未连接。", 409)
