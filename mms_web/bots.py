@@ -26,7 +26,6 @@ from .bot_communications import BotCommunications
 from .bot_coordinator import plan_for, direct_plan, build_planner_prompt, parse_model_plan, sanitize_plan
 from . import bot_retry
 from .bot_notify import Notifier
-from .file_lock import flock, LOCK_EX, LOCK_NB
 
 TERMINAL = {"completed", "failed", "cancelled", "interrupted"}
 PLAN_UNDO_SECONDS = 30

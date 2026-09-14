@@ -18,7 +18,6 @@ from uuid import uuid4
 
 from .file_lock import LOCK_EX, LOCK_SH, LOCK_UN, flock
 from .runtime import private_json
-from .file_lock import flock, LOCK_EX, LOCK_SH, LOCK_UN
 
 SCHEMA = 1
 MAX_FACTS = 100
