@@ -30,8 +30,10 @@ def history(path):
     # Pi writes conversation.jsonl as UTF-8 on every platform.  Do not use
     # the host locale here: Windows installations commonly default to a
     # Chinese codepage, which makes a normal Chinese/emoji reply raise
-    # UnicodeDecodeError while the web UI is polling the session.
-    for line in Path(path).read_text(encoding="utf-8").splitlines():
+    # UnicodeDecodeError while the web UI is polling the session.  Pi may also
+    # be appending the final UTF-8 code point while this snapshot is read; a
+    # partial tail must not turn a live session into an HTTP 500.
+    for line in Path(path).read_text(encoding="utf-8", errors="replace").splitlines():
         try:
             entries.append(json.loads(line))
         except ValueError:

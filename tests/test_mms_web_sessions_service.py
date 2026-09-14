@@ -36,6 +36,20 @@ def test_native_history_is_read_as_utf8(tmp_path):
     assert rows[0]["message"]["content"][0]["text"] == "你好 👋"
 
 
+def test_native_history_ignores_a_partial_utf8_tail(tmp_path):
+    path = tmp_path / "conversation.jsonl"
+    complete = json.dumps(
+        {"message": {"role": "assistant", "content": [{"type": "text", "text": "完成"}]}},
+        ensure_ascii=False,
+    ).encode("utf-8")
+    path.write_bytes(complete + b'\n{"message": {"content": "' + bytes([0xE4]))
+
+    rows = history(path)
+
+    assert len(rows) == 1
+    assert rows[0]["message"]["content"][0]["text"] == "完成"
+
+
 class FakeCatalog:
     def __init__(self, launch_result=None, error: Exception | None = None) -> None:
         self.launch_result = launch_result or {
