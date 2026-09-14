@@ -20,6 +20,20 @@ sys.path.insert(0, str(REPO_ROOT))
 from mms_web.drivers.base import DriverClosedError, RpcTimeoutError  # noqa: E402
 from mms_web.errors import WebError  # noqa: E402
 from mms_web.sessions import SessionService  # noqa: E402
+from mms_web.session_actions import history  # noqa: E402
+
+
+def test_native_history_is_read_as_utf8(tmp_path):
+    path = tmp_path / "conversation.jsonl"
+    path.write_text(
+        json.dumps({"message": {"role": "assistant", "content": [{"type": "text", "text": "你好 👋"}]}}, ensure_ascii=False)
+        + "\n",
+        encoding="utf-8",
+    )
+
+    rows = history(path)
+
+    assert rows[0]["message"]["content"][0]["text"] == "你好 👋"
 
 
 class FakeCatalog:
