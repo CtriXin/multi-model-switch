@@ -337,7 +337,7 @@ class WebApplication:
                     "[Console]::OutputEncoding=[Text.Encoding]::UTF8; "
                     "[Console]::Write($d.SelectedPath) }"
                 )
-                command = ["powershell.exe", "-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-Command", script]
+                command = ["powershell.exe", "-NoProfile", "-STA", "-WindowStyle", "Normal", "-ExecutionPolicy", "Bypass", "-Command", script]
             else:
                 raise WebError("FOLDER_PICKER_UNAVAILABLE", "请直接填写电脑上的文件夹路径。", 409)
             try:

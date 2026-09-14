@@ -16,6 +16,6 @@ def test_windows_workspace_picker_uses_powershell_and_utf8(monkeypatch, tmp_path
     monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(subprocess, "run", run)
     assert app.post(["workspaces", "choose"], {}) == {"path": "C:\\Users\\Admin\\下载"}
-    assert calls[0][0][:4] == ["powershell.exe", "-NoProfile", "-STA", "-ExecutionPolicy"]
+    assert calls[0][0][:6] == ["powershell.exe", "-NoProfile", "-STA", "-WindowStyle", "Normal", "-ExecutionPolicy"]
     assert calls[0][1]["encoding"] == "utf-8"
     app.close()
