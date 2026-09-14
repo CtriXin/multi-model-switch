@@ -10,7 +10,9 @@ model, channel or effort. Two answer sources exist:
   after the main process exited, and authoritative about *observed* state.
 - ``completion``: one read-only request on the session's own route, or a
   runner the host injected as ``sidecar_runner``. Either way it receives only
-  a budgeted, redacted context snapshot plus a cancel event, and must never
+  a budgeted, redacted context snapshot (state plus the last few user and
+  assistant turns already mirrored into ``session.events``; never tool
+  output bodies, never files, never the driver) plus a cancel event, and must never
   touch the workspace, the main transcript, approvals or the driver. When no
   route and no runner can answer, the capability fails closed: the question is
   recorded as ``failed`` with a visible reason, and the main task is
@@ -42,6 +44,12 @@ _MAX_QUESTION = 2000
 _MAX_ANSWER = 20000
 _MAX_CONTEXT_TEXT = 500
 _MAX_CONTEXT_ITEMS = 8
+# Recent-turn excerpt budget. The rows come from the session's own redacted
+# event mirror, so no file, config or driver is read to build it. Small on
+# purpose: this is an excerpt the side model is told is an excerpt.
+_MAX_TURNS = 6
+_MAX_TURN_TEXT = 1200
+_MAX_TURNS_CHARS = 5000
 _IDEM_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _MASK = "[已隐藏密钥]"
 
@@ -186,6 +194,10 @@ class SessionSideQuestions:
                 "routeSnapshot": _route_snapshot(session),
                 "usage": None,
                 "redactionSummary": {"secretsMasked": masked_question},
+                # What the answer was allowed to see. Filled in for
+                # ``completion`` rows once the excerpt is built; a ``state``
+                # answer reads the live snapshot instead and leaves it None.
+                "contextScope": None,
                 "error": None,
                 "createdAt": now,
                 "acceptedAt": now,
@@ -298,6 +310,7 @@ class SessionSideQuestions:
             row["startedAt"] = self._now()
             context, masked = _redact_counted(self._completion_context(session, row), session.secrets)
             row["redactionSummary"]["secretsMasked"] += masked
+            row["contextScope"] = dict(context.get("contextScope") or {})
             session.persist(self._state_dir)
         cancel = threading.Event()
         self._btw_cancel[row["btwId"]] = cancel
@@ -315,8 +328,41 @@ class SessionSideQuestions:
         )
         worker.start()
 
+    def _recent_turns(self, session) -> tuple[list[dict], dict]:
+        """The last few user/assistant texts, newest last, within budget.
+
+        Reads only ``session.events``, which the driver already filled and
+        redacted; tool output bodies, thinking and attachments stay out. The
+        scope says how much of the transcript this is, so neither the row nor
+        the model can mistake an excerpt for the whole conversation.
+        """
+        candidates = [
+            event for event in session.events
+            if event.get("kind") in {"user", "assistant"} and str(event.get("text") or "").strip()
+        ]
+        turns: list[dict] = []
+        used = 0
+        clipped = False
+        for event in reversed(candidates):
+            if len(turns) >= _MAX_TURNS or used >= _MAX_TURNS_CHARS:
+                break
+            text = str(event.get("text") or "").strip()
+            if len(text) > _MAX_TURN_TEXT:
+                text = text[:_MAX_TURN_TEXT] + "…"
+                clipped = True
+            turns.append({"role": event["kind"], "text": text})
+            used += len(text)
+        turns.reverse()
+        scope = {
+            "recentTurns": len(turns),
+            "totalTurns": len(candidates),
+            "truncated": clipped or len(turns) < len(candidates),
+        }
+        return turns, scope
+
     def _completion_context(self, session, row: dict) -> dict:
         """The only data a sidecar may see: budgeted and later redacted."""
+        turns, scope = self._recent_turns(session)
         tools = [event for event in session.events if event.get("kind") == "tool"]
         errors = [
             event for event in session.events
@@ -340,6 +386,8 @@ class SessionSideQuestions:
                 for event in tools[-_MAX_CONTEXT_ITEMS:]
             ],
             "recentErrors": [clip(event.get("text")) for event in errors[-4:]],
+            "recentTurns": turns,
+            "contextScope": scope,
             "route": _route_snapshot(session),
         }
 

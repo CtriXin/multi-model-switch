@@ -7,8 +7,9 @@ turn inside a busy Pi loop would share that loop's state; so this sends one
 plain, stateless completion on the session's own route and returns the text.
 
 What the request is allowed to carry is decided elsewhere. `side_questions.py`
-builds a budgeted, redacted snapshot and hands it over; this module adds no
-history, reads no files, exposes no tools, and writes nothing back. The answer
+builds a budgeted, redacted snapshot, including a short excerpt of the last
+user/assistant turns, and hands it over; this module adds no history of its
+own, reads no files, exposes no tools, and writes nothing back. The answer
 returns to the side-question row and never to the transcript.
 
 Protocol follows the route, Anthropic Messages first when the route declares
@@ -30,10 +31,11 @@ _MAX_ANSWER_TOKENS = 800
 # only thing the model must not do is invent what the main task did.
 _SYSTEM = (
     "用户在一个正在运行的任务旁边问了你一个问题。正常回答，"
-    "该用你自己的知识就用，不要因为下面的快照没提到就拒绝回答。\n"
-    "关于那个主任务，你唯一知道的就是附上的状态快照：你没有参与它，"
-    "也读不到它的对话。涉及主任务时只依据快照，快照里没有的就说不知道，"
-    "不要推测它做过什么，也不要假装读过它的上下文。\n"
+    "该用你自己的知识就用，不要因为下面的材料没提到就拒绝回答。\n"
+    "关于那个主任务，你知道的只有附上的状态快照和最近几轮对话摘录：你没有参与它，"
+    "也读不到它的对话全文、工具输出和文件。摘录可能被截断，"
+    "contextScope 会说明它覆盖了多少轮。涉及主任务时只依据这些材料，"
+    "材料里没有的就说不知道，不要推测它做过什么，也不要假装读过完整上下文。\n"
     "用用户提问的语言回答，简短，直接说结论。"
 )
 
@@ -87,10 +89,18 @@ def _openai_target(runtime: dict) -> str:
 
 def _prompt(context: dict) -> str:
     question = str(context.get("question") or "").strip()
-    snapshot = {key: value for key, value in context.items() if key != "question"}
+    turns = context.get("recentTurns") or []
+    snapshot = {
+        key: value for key, value in context.items() if key not in {"question", "recentTurns"}
+    }
+    excerpt = "\n".join(
+        f"[{turn.get('role')}] {turn.get('text')}" for turn in turns if isinstance(turn, dict)
+    ) or "（没有可用的对话摘录）"
     return (
         "会话状态快照：\n"
         + json.dumps(snapshot, ensure_ascii=False, indent=1)
+        + "\n\n最近对话摘录（按时间先后，可能截断）：\n"
+        + excerpt
         + f"\n\n用户的旁问：{question}"
     )
 
