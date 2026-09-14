@@ -35,7 +35,7 @@ def read_output(root: Path, raw: str) -> tuple[str, bytes]:
     if os.name == "nt":
         # Windows has no O_DIRECTORY/dir_fd. Walk the path lexically and
         # reject symlinks, junctions, and other reparse points at every hop
-        # before opening the file, preserving the POSIX no-follow boundary.
+        # before opening the file, using the same checks as Windows imports.
         current = Path(root)
         try:
             if _is_link_or_reparse(current):

@@ -66,8 +66,7 @@ def _pi_skills_module(executable):
     executable_path = Path(executable).resolve()
     dist = next((path for path in executable_path.parents if path.name == "dist"), None)
     candidates = [dist / "core/skills.js"] if dist else []
-    for parent in (executable_path.parent, *executable_path.parents):
-        candidates.append(parent / "node_modules/@earendil-works/pi-coding-agent/dist/core/skills.js")
+    candidates.append(executable_path.parent / "node_modules/@earendil-works/pi-coding-agent/dist/core/skills.js")
     return next((path for path in candidates if path.is_file()), Path("/nonexistent"))
 
 
@@ -106,15 +105,10 @@ class SkillCatalog:
         origins = effective_entries(workspace["path"], real_home(), include_external=self.preferences()["mergeExternal"])
         if os.name == "nt":
             # Windows may reject symlink creation without Developer Mode or
-            # elevation. Pass real skill roots in high-to-low precedence order;
-            # Pi's first-wins conflict rule is equivalent to the POSIX overlay.
-            paths = []
-            seen = set()
-            for origin in reversed(origins):
-                root = str(origin.get("sourceRoot") or "").strip()
-                if root and root not in seen and Path(root).is_dir():
-                    seen.add(root)
-                    paths.append(root)
+            # elevation. Pi accepts individual skill directories/Markdown files.
+            # Load only the entries selected by MMS; scanning their parent roots
+            # would reintroduce overridden skills and unrelated bundled siblings.
+            paths = [origin["path"] for origin in reversed(origins)]
             request = {"module": str(module), "cwd": workspace["path"],
                        "agentDir": str(self.root), "paths": paths}
             result = subprocess.run([node, str(Path(__file__).with_name("skill_catalog.mjs"))],

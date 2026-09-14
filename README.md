@@ -137,17 +137,26 @@ Windows 目前是 Native Preview。下面按一台刚装好 Windows 11、还没�
 
    安装完成后，关闭所有 PowerShell 窗口，再打开一个新窗口。这样新的 `PATH` 才会生效。然后再次执行 `python --version`、`node --version` 和 `npm --version`。如果电脑没有 `winget`，从 [python.org](https://www.python.org/downloads/windows/) 和 [nodejs.org](https://nodejs.org/en/download) 安装，并在安装向导中勾选加入 `PATH`。
 
-3. 安装 MMS Windows Native Preview。下面的命令会下载官方安装脚本；它会准备 MMS 自己的 Python venv、Pi 和 Pilot，不会导入或覆盖已有 config/session：
+   Pi 是 MMS 调用的本机 coding agent，需要单独安装到 Node 的 global package。PowerShell 里使用 `npm.cmd` 可以避开执行策略对 `npm.ps1` 的拦截：
 
    ```powershell
-   $script = Join-Path $env:TEMP 'mms-install-v4.21.13.ps1'
+   npm.cmd install --global @earendil-works/pi-coding-agent
+   pi.cmd --version
+   ```
+
+   如果 `pi.cmd` 找不到，关闭所有 PowerShell 窗口后再开一个新窗口；仍找不到就执行 `npm.cmd prefix --global`，把显示的目录本身加入用户 `PATH`（Windows 通常不是 `bin` 子目录），然后再开新窗口。安装器只检查 Pi 是否已经在 `PATH`，不会替你安装 Pi。
+
+3. 安装 MMS Windows Native Preview。下面的命令会下载官方安装脚本；它会准备 MMS 自己的 Python venv 和 Pilot，不会导入或覆盖已有 config/session：
+
+   ```powershell
+   $script = Join-Path $env:TEMP 'mms-install-v4.21.14.ps1'
 
    Invoke-WebRequest -UseBasicParsing `
-     -Uri 'https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.21.13/packages/mms-install/bin/install.ps1' `
+     -Uri 'https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.21.14/packages/mms-install/bin/install.ps1' `
      -OutFile $script
 
    powershell.exe -NoProfile -ExecutionPolicy Bypass `
-     -File $script -Ref v4.21.13
+     -File $script -Ref v4.21.14
    ```
 
    安装结束后再打开一个 PowerShell，确认命令来自 MMS：
@@ -170,7 +179,7 @@ Windows 目前是 Native Preview。下面按一台刚装好 Windows 11、还没�
 5. Windows 暂时没有可依赖的 MMS TUI（直接输入不带参数的 `mms` 可能遇到 Python `curses` / `_curses`）。启动 Pi 请用下面这个明确的命令；它会显示模型选择，选好后按 Enter：
 
    ```powershell
-   $mms = "$env:LOCALAPPDATA\MMS\versions\v4.21.13\mms"
+   $mms = "$env:LOCALAPPDATA\MMS\versions\v4.21.14\mms"
    $python = "$env:LOCALAPPDATA\MMS\.venv\Scripts\python.exe"
    & $python $mms pi
    ```

@@ -4,14 +4,16 @@
 
 ## 先在终端启动 Pi
 
-网页有问题时，在开始菜单搜索并打开 PowerShell，进入工作文件夹，再启动：
+网页有问题时，在开始菜单搜索并打开 PowerShell，进入工作文件夹，再启动。Windows 暂时不依赖 MMS 全屏 TUI；如果 `mms pi` 被 PowerShell 的脚本解析或 TUI 影响，使用下面的明确入口：
 
 ```powershell
 Set-Location "$env:USERPROFILE\Downloads"
-mms pi
+$mms = "$env:LOCALAPPDATA\MMS\versions\v4.21.14\mms"
+$python = "$env:LOCALAPPDATA\MMS\.venv\Scripts\python.exe"
+& $python $mms pi
 ```
 
-这是 MMS 的 Pi 启动入口，不依赖 MMS 的全屏 TUI。已配置的模型和通道仍由 MMS 提供；缺少模型服务时，需要先在 Pilot 中填写你自己的服务地址和 API Key。
+安装前先确认 `pi.cmd --version` 能输出版本；Pi 需要用 `npm.cmd install --global @earendil-works/pi-coding-agent` 单独安装。已配置的模型和通道仍由 MMS 提供；缺少模型服务时，需要先在 Pilot 中填写你自己的服务地址和 API Key。
 
 ## 把这段话发给本地 AI
 
@@ -104,7 +106,7 @@ gh --version
 
 ```powershell
 $githubUser = Read-Host '你的 GitHub 用户名'
-$baseTag = Read-Host '本次问题的基线 tag，例如 v4.21.13'
+$baseTag = Read-Host '本次问题的基线 tag，例如 v4.21.14'
 $repairRoot = Join-Path $env:USERPROFILE 'mms-repair'
 git clone "https://github.com/$githubUser/multi-model-switch.git" $repairRoot
 Set-Location $repairRoot
