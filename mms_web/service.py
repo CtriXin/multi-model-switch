@@ -20,9 +20,12 @@ import signal
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
-VERBS = ("status", "url", "start", "stop", "restart")
+VERBS = ("status", "url", "start", "stop", "restart", "doctor")
 HELP_FLAGS = ("help", "-h", "--help")
 DEFAULT_PORT_BASE = 8765
 PORT_SEARCH_LIMIT = 20
@@ -99,12 +102,14 @@ def help_text(command: str | None = None) -> str:
         ("url", "只打印当前实例的地址，方便复制"),
         ("stop", "请当前实例退出；加 --all 停掉本机全部 Pilot"),
         ("restart", "先停再起"),
+        ("doctor", "自动检查并验证 Pilot、本地 API 和会话详情"),
     ])
     examples = _rows([
         (f"{name} start --open", "后台启动并打开浏览器"),
         (f"{name} url", "拿地址"),
         (f"{name} status", "分不清哪个实例是自己的时候看这个"),
         (f"{name} stop", "收工"),
+        (f"{name} doctor", "自检；没有 Pilot 时自动启动"),
         (f"{name} --open", "前台启动，日志直接打在终端"),
     ])
     options = _rows([
@@ -396,6 +401,103 @@ def _print_status(instances: list[dict], state_root: Path, as_json: bool) -> Non
         print("● 当前实例。停止：mms web stop；重启：mms web restart")
 
 
+def _doctor_request(base_url: str, path: str, timeout: float = 8.0) -> tuple[bool, object]:
+    """Read one local Pilot API endpoint without depending on shell encoding."""
+    request = urllib.request.Request(base_url.rstrip("/") + path,
+                                     headers={"Accept": "application/json"})
+    try:
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(request, timeout=timeout) as response:
+            raw = response.read()
+        return True, json.loads(raw.decode("utf-8", errors="replace"))
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError, ValueError) as error:
+        detail = str(error)
+        if isinstance(error, urllib.error.HTTPError):
+            try:
+                body = error.read().decode("utf-8", errors="replace")
+                detail = f"HTTP {error.code}: {body[:500]}"
+            except OSError:
+                detail = f"HTTP {error.code}"
+        return False, detail
+
+
+def doctor(*, state_root: Path, port_base: int, limit: int, restart: bool = False,
+           as_json: bool = False) -> int:
+    """Self-check the Windows lifecycle without changing config or credentials."""
+    if restart:
+        stop(state_root=state_root, port_base=port_base, limit=limit, everyone=False, quiet=True)
+    started = False
+    try:
+        instance = _mine(discover(port_base, limit, state_root))
+        if instance is None:
+            instance = start(state_root=state_root, port_base=port_base, limit=limit,
+                             open_browser=False, quiet=True)
+            started = True
+    except (SystemExit, OSError) as error:
+        result = {"ok": False, "started": started, "error": str(error),
+                  "stateRoot": str(state_root),
+                  "log": str(state_root / "logs" / "mms-web.log")}
+        if as_json:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        else:
+            print("FAIL Pilot 启动：" + str(error))
+            print("日志：" + result["log"])
+        return 1
+
+    base_url = f"http://127.0.0.1:{instance['port']}"
+    checks: list[dict] = []
+
+    def check(name: str, path: str, predicate=None):
+        ok, payload = _doctor_request(base_url, path)
+        passed = ok and (predicate(payload) if predicate else True)
+        checks.append({"name": name, "path": path, "ok": passed,
+                       **({"detail": payload} if not passed else {})})
+        return passed, payload
+
+    bootstrap_ok, bootstrap = check(
+        "bootstrap", "/api/v1/bootstrap",
+        lambda value: isinstance(value, dict) and value.get("version") == "1" and isinstance(value.get("capabilities"), dict),
+    )
+    sessions_ok, sessions = check(
+        "sessions", "/api/v1/sessions",
+        lambda value: isinstance(value, dict) and isinstance(value.get("sessions"), list),
+    )
+    rows = sessions.get("sessions", []) if isinstance(sessions, dict) else []
+    detail_rows = [row for row in rows[:3] if isinstance(row, dict) and row.get("id")]
+    if detail_rows:
+        detail_ok, _ = check("session-detail", "/api/v1/sessions/" + urllib.parse.quote(str(detail_rows[0]["id"]), safe=""),
+                             lambda value: isinstance(value, dict) and isinstance(value.get("session"), dict))
+    else:
+        detail_ok = True
+        checks.append({"name": "session-detail", "ok": True, "skipped": True,
+                       "detail": "没有可读取的历史会话"})
+
+    launch = bootstrap.get("capabilities", {}).get("launch") if isinstance(bootstrap, dict) else None
+    launch_reason = bootstrap.get("capabilities", {}).get("launchReason") if isinstance(bootstrap, dict) else ""
+    launch_ok = bool(launch)
+    checks.append({"name": "launch-capability", "ok": launch_ok,
+                   **({"detail": launch_reason or "会话启动能力未就绪"} if not launch_ok else {})})
+    result = {"ok": all(item["ok"] for item in checks), "started": started,
+              "instance": instance, "checks": checks,
+              "launch": launch, "launchReason": launch_reason,
+              "log": str(state_root / "logs" / "mms-web.log")}
+    if as_json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        print(f"MMS doctor：{'PASS' if result['ok'] else 'FAIL'}")
+        print(f"Pilot：{base_url}  v{instance.get('version') or '?'}  pid {instance.get('pid') or '?'}")
+        for item in checks:
+            status = "PASS" if item["ok"] else "FAIL"
+            suffix = "（跳过：无历史会话）" if item.get("skipped") else ""
+            print(f"{status} {item['name']}{suffix}")
+            if not item["ok"]:
+                print(f"  {item.get('detail')}")
+        if launch is False:
+            print("FAIL launch：" + str(launch_reason or "会话启动能力未就绪"))
+        print("日志：" + result["log"])
+    return 0 if result["ok"] else 1
+
+
 def start(*, state_root: Path, port_base: int, limit: int, open_browser: bool,
           extra_args: list[str] | None = None, quiet: bool = False) -> dict:
     """Return the running instance, starting one detached when there is none."""
@@ -495,6 +597,7 @@ def run(verb: str, argv: list[str]) -> int:
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--open", action="store_true", help="start/restart: open the browser afterwards")
     parser.add_argument("--all", action="store_true", help="stop: every Pilot on this machine, not only this state root")
+    parser.add_argument("--restart", action="store_true", help="doctor: restart this Pilot before checking it")
     args = parser.parse_args(argv)
     state_root = args.state_root.expanduser().resolve()
     extra = ["--config-root", str(args.config_root.expanduser())] if args.config_root else []
@@ -528,5 +631,8 @@ def run(verb: str, argv: list[str]) -> int:
         if args.json:
             print(json.dumps(mine, ensure_ascii=False))
         return 0
+    if verb == "doctor":
+        return doctor(state_root=state_root, port_base=args.port, limit=limit,
+                      restart=args.restart, as_json=args.json)
     parser.error(f"unknown verb {verb}")
     return 2
