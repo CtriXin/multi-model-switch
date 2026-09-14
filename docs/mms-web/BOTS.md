@@ -19,11 +19,11 @@ v2 会保存结果原文并尝试提取结论、证据、改动、未完成事�
 
 Bot 可以从内部 worker 分发子任务。子任务完成后，结果消息回写父任务，父任务进入后续执行；分发链最多五层，不能沿同一链再次调用同一个 Bot。任务中的 `requestId` 用于幂等重试，相同 ID 对应不同内容会被拒绝。
 
-每个新任务都会保存一份轻量 `coordinatorPlan`：简单目标保持 direct，检测到明确协作意图时记录候选 Bot 和待确认的 delegate steps。它只提供可读的计划和执行上下文，不启动额外的 planner session，也不会把临时 worker 变成永久 Bot。排队任务按 `priority`（0–100，数值越大越先执行）排序，并在任务详情中显示当前等待资源原因。
+每个新任务都会保存一份轻量 `coordinatorPlan`：简单目标保持 direct，检测到明确协作意图时记录候选 Bot 和待确认的 delegate steps。普通 `direct-first` 请求直接进入当前 Bot 的持久会话，不启动额外 planner session；只有明确协作意图或显式选择 `plan-approve` 时才调用一次短 planner。它不会把临时 worker 变成永久 Bot。排队任务按 `priority`（0–100，数值越大越先执行）排序，并在任务详情中显示当前等待资源原因。
 
 ### Coordinator 计划层（2026-09-12，T2）
 
-计划从 Pi 提示词里拿出来，成为落库、可见、可执行的对象。任务启动前，`BotRuntime.plan_task` 用任务所属 Bot 自己的 preset 发一次短 planner 请求（用完即弃，结束后自动停止并归档，不常驻 planner session），输入是用户目标、可用 Bot 列表和该 Bot 的相关记忆摘要，要求输出严格 JSON（`mode` / `reason` / `steps[].botId/goal/dependsOn/presetId` / `merge`）。解析失败、模型不可用或超过 20 秒都退回关键词计划并标记 `source: "fallback"`，任何情况下不阻塞任务启动。
+计划从 Pi 提示词里拿出来，成为落库、可见、可执行的对象。需要规划时，`BotRuntime.plan_task` 用任务所属 Bot 自己的 preset 发一次短 planner 请求（用完即弃，结束后自动停止并归档，不常驻 planner session），输入是用户目标、可用 Bot 列表和该 Bot 的相关记忆摘要，要求输出严格 JSON（`mode` / `reason` / `steps[].botId/goal/dependsOn/presetId` / `merge`）。普通 `direct-first` 任务跳过这一步，直接使用持久会话；解析失败、模型不可用或超过 20 秒都退回关键词计划并标记 `source: "fallback"`，任何情况下不阻塞任务启动。
 
 `mode == "delegate"` 时由 runtime 而不是提示词执行计划：按 `dependsOn` 顺序为每个 step 创建子任务（沿用现有 dispatch 路径、五层深度和同链不重复守卫），父任务进入 `waiting/children`；子任务全部终态后父任务只恢复一次，恢复提示携带各子任务的 `outcome.summary`。step 可指定 `presetId` 覆盖目标 Bot 的模型，为空则沿用其 preset。重启后按已有子任务终态判断是否恢复，`taskId` 对账保证不重复创建子任务；子任务失败不自动重试，失败摘要交给 owner 决定。
 
@@ -138,13 +138,25 @@ Bot 工作台采用聊天软件式界面：左侧是 `Bots` 列表，主区只�
 
 Bot 的默认回报是 1–3 句自然语言。文件路径、截图和其他证据只有在确实需要时才作为附件或简短补充出现。视觉参考保存在 `docs/mms-web/design/bot-chat-v2-reference.png`。
 
-### Pixel avatars
+### 几何头像
 
-每个 Bot 可从 10 个内置的 7×7 pixel avatar 模板中选择，并独立选择 6 种颜色。头像是 Bot 身份的一部分，保存在 Bot 配置中；旧 Bot 会根据自身 id 稳定地获得默认模板和颜色。
+每个 Bot 可从一行内的 10 个柔和几何图形中选择，并独立选择 6 种颜色：圆形、软团、
+椭圆、圆角方形、软三角、水滴、胶囊、圆菱、云朵和软六边。图形使用不对称圆角、
+轻微旋转和柔和边界，避免生硬的多边形；表情会放大并与嘴巴拉开距离，位置按 Bot
+identity 稳定生成，所以刷新不会跳变，新建的 Bot 又会自然产生不同性格。用户只选择
+图形和颜色，表情位置不单独暴露为配置项，并会留在当前形状的可读区域内。旧版本
+保存的其他头像 id 仍能兼容渲染，但不再出现在新建/编辑选择器里。
 
 ### 模型与通道
 
 Bot 编辑器复用 Pilot 的 `ModelPicker` / `ModelExplorer`：先从模型目录选模型，再在详情中选择实际通道；`Harness` 保持在路由信息中单独可见。Bot 最终保存的仍是精确 `presetId`，所以不会改变现有 MMS 启动解析链。
+
+### 与 Pilot 会话列表隔离
+
+Bot 仍复用 Pilot 的 Pi session runtime 来保留连续记忆，但启动时会持久化
+`owner=bot` 和 `botId`。Pilot 的 `/sessions` 列表会过滤这些 Bot session；旧版本
+已经产生的 Bot session 也会按 Bot 记录中的 `sessionId` 兼容过滤。Bot 任务详情仍可
+按 session id 读取，不会因为隐藏侧栏而丢失上下文。
 
 ## v2.3 失败重试与结果送达
 
