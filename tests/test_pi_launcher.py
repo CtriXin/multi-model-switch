@@ -1966,6 +1966,15 @@ def _global_settings(btw_pi, packages):
     return path
 
 
+def _project_settings(btw_pi, packages):
+    import json as _json
+
+    path = btw_pi["project"] / ".pi" / "settings.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_json.dumps({"packages": packages}), encoding="utf-8")
+    return path
+
+
 def test_bundled_btw_extension_is_a_verified_single_file(btw_pi):
     import hashlib as _hashlib
     import json as _json
@@ -2056,14 +2065,50 @@ def test_launch_pi_keeps_glint_bridge_before_bundled_btw(btw_pi, monkeypatch):
     ]
 
 
-def test_bundled_btw_yields_to_our_global_package(btw_pi):
+def test_bundled_btw_still_injects_when_only_the_real_home_has_one(btw_pi):
     settings = _global_settings(btw_pi, ["npm:pi-usage-hub", "npm:@ctrixin/pi-btw@0.59.0-fork.1"])
 
-    assert btw_pi["resolve"]() == ""
-    assert "不重复注入" in btw_pi["logs"][0]
+    # MMS hands every session its own PI_CODING_AGENT_DIR, so this package is
+    # never loaded and cannot collide. Deferring to it would leave the session
+    # with no /btw at all, which is the opposite of what the user installed.
+    assert btw_pi["resolve"]().endswith("index.ts")
+    assert "PI_CODING_AGENT_DIR" in btw_pi["logs"][0]
     assert "@ctrixin/pi-btw" in btw_pi["logs"][0]
     # the user's file is only read, never rewritten
     assert json.loads(settings.read_text(encoding="utf-8"))["packages"][0] == "npm:pi-usage-hub"
+
+
+def test_bundled_btw_yields_when_the_session_loads_that_agent_tree(btw_pi):
+    """The one case the real ~/.pi/agent does collide: a session pointed at it."""
+    _global_settings(btw_pi, ["npm:@narumitw/pi-btw@0.58.1"])
+    agent_dir = str(btw_pi["home"] / ".pi" / "agent")
+
+    path = btw_pi["support"].pi_btw_extension_path(
+        {"PI_CODING_AGENT_DIR": agent_dir},
+        None,
+        str(btw_pi["project"]),
+        log=btw_pi["logs"].append,
+    )
+
+    assert path == ""
+    assert "不重复注入" in btw_pi["logs"][0]
+
+
+def test_bundled_btw_ignores_a_pi_btw_in_another_session_agent_dir(btw_pi, tmp_path):
+    """An isolated agent dir is scanned, but it is not the user's real tree."""
+    _global_settings(btw_pi, ["npm:@narumitw/pi-btw@0.58.1"])
+    session_agent = tmp_path / "pi-gateway" / "s" / "4242" / ".pi" / "agent"
+    session_agent.mkdir(parents=True)
+
+    path = btw_pi["support"].pi_btw_extension_path(
+        {"PI_CODING_AGENT_DIR": str(session_agent)},
+        None,
+        str(btw_pi["project"]),
+        log=btw_pi["logs"].append,
+    )
+
+    assert path.endswith("index.ts")
+    assert "PI_CODING_AGENT_DIR" in btw_pi["logs"][0]
 
 
 @pytest.mark.parametrize(
@@ -2074,20 +2119,29 @@ def test_bundled_btw_yields_to_our_global_package(btw_pi):
         ["/Users/xin/checkouts/pi-btw"],
     ],
 )
-def test_bundled_btw_yields_to_upstream_and_local_installs(btw_pi, packages):
-    _global_settings(btw_pi, packages)
+def test_bundled_btw_yields_to_upstream_and_local_project_installs(btw_pi, packages):
+    _project_settings(btw_pi, packages)
 
     assert btw_pi["resolve"]() == ""
     assert "不重复注入" in btw_pi["logs"][0]
 
 
-def test_bundled_btw_yields_to_a_named_global_extension_file(btw_pi):
-    extension = btw_pi["home"] / ".pi" / "agent" / "extensions" / "pi-btw.ts"
+def test_bundled_btw_yields_to_a_named_project_extension_file(btw_pi):
+    extension = btw_pi["project"] / ".pi" / "extensions" / "pi-btw.ts"
     extension.parent.mkdir(parents=True)
     extension.write_text("export default function () {}\n", encoding="utf-8")
 
     assert btw_pi["resolve"]() == ""
     assert "不重复注入" in btw_pi["logs"][0]
+
+
+def test_bundled_btw_still_injects_for_a_named_global_extension_file(btw_pi):
+    extension = btw_pi["home"] / ".pi" / "agent" / "extensions" / "pi-btw.ts"
+    extension.parent.mkdir(parents=True)
+    extension.write_text("export default function () {}\n", encoding="utf-8")
+
+    assert btw_pi["resolve"]().endswith("index.ts")
+    assert "PI_CODING_AGENT_DIR" in btw_pi["logs"][0]
 
 
 def test_bundled_btw_yields_to_project_package(btw_pi):
@@ -2189,7 +2243,7 @@ def test_bundled_btw_check_failure_never_breaks_the_launch(btw_pi, monkeypatch):
 
 def test_launch_pi_omits_bundled_btw_when_pi_already_loads_one(btw_pi, monkeypatch):
     mms_pi_support = btw_pi["support"]
-    _global_settings(btw_pi, ["npm:@narumitw/pi-btw@0.58.1"])
+    _project_settings(btw_pi, ["npm:@narumitw/pi-btw@0.58.1"])
     captured = {}
     monkeypatch.chdir(btw_pi["project"])
     monkeypatch.setattr(
@@ -2262,7 +2316,7 @@ def _pilot_worker_argv(tmp_path, monkeypatch, runtime):
     root = tmp_path / "web-root"
     root.mkdir()
     project = tmp_path / "project"
-    project.mkdir()
+    project.mkdir(exist_ok=True)
     payload = root / "launch-1.json"
     payload.write_text(
         _json.dumps(
@@ -2315,10 +2369,25 @@ def test_pilot_launch_worker_injects_the_bundled_btw_extension(tmp_path, monkeyp
     assert btw[0] < controls[0]
 
 
-def test_pilot_launch_worker_yields_to_a_global_pi_btw(tmp_path, monkeypatch):
+def test_pilot_launch_worker_still_injects_past_a_global_pi_btw(tmp_path, monkeypatch):
     import json as _json
 
     settings = tmp_path / "real-home" / ".pi" / "agent" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(_json.dumps({"packages": ["npm:@narumitw/pi-btw"]}), encoding="utf-8")
+
+    record = _pilot_worker_argv(tmp_path, monkeypatch, {"id": "relay-a", "auth_mode": "api_key"})
+
+    # Pilot isolates PI_CODING_AGENT_DIR too, so the real-home package is not
+    # loaded and the session would otherwise have had no /btw at all.
+    assert len([item for item in record["extraArgs"] if item.endswith("pi-btw/index.ts")]) == 1
+    assert any(item.endswith("web-controls.ts") for item in record["extraArgs"])
+
+
+def test_pilot_launch_worker_yields_to_a_project_pi_btw(tmp_path, monkeypatch):
+    import json as _json
+
+    settings = tmp_path / "project" / ".pi" / "settings.json"
     settings.parent.mkdir(parents=True)
     settings.write_text(_json.dumps({"packages": ["npm:@narumitw/pi-btw"]}), encoding="utf-8")
 

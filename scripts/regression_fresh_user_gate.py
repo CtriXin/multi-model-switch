@@ -179,8 +179,8 @@ _SCENARIO_MATRIX = [
     },
     {
         "id": "pi-btw-bundled-extension",
-        "state": "fresh HOME with no MMS env; a bundled Pi /btw extension, then a global pi-btw, then pi_btw = false",
-        "coverage": "MMS injects its own /btw bundle into every Pi it starts, and stays out of the way when the user's Pi already loads a pi-btw or when the preference turns it off",
+        "state": "fresh HOME with no MMS env; a bundled Pi /btw extension, then a pi-btw in the real home, in the project, in the session's own agent dir, then pi_btw = false",
+        "coverage": "MMS injects its own /btw bundle into every Pi it starts, stays out of the way only when the session really loads another pi-btw (project settings, or an agent tree it is pointed at), keeps injecting past an isolated-away global one, and honours the preference",
     },
     {
         "id": "codex-hook-trust-and-history",
@@ -450,29 +450,39 @@ logs = []
 cwd = sys.argv[1]
 
 
-def resolve(runtime=None):
-    return mms_pi_support.pi_btw_extension_path({}, runtime, cwd, log=logs.append)
+def resolve(runtime=None, env=None):
+    return mms_pi_support.pi_btw_extension_path(env or {}, runtime, cwd, log=logs.append)
 
 
-def record(expect_btw, label):
-    path = resolve()
+def record(expect_btw, label, env=None, expect_log=None):
+    path = resolve(env=env)
     injected = bool(path)
     print(json.dumps({"label": label, "injected": injected, "expected": expect_btw,
                       "logs": list(logs)}))
+    seen = list(logs)
     logs.clear()
     if injected != expect_btw:
         raise SystemExit(f"{label}: injected={injected}, expected={expect_btw}")
     if path and Path(path).name != "index.ts":
         raise SystemExit(f"{label}: unexpected extension path {path}")
+    if expect_log and not any(expect_log in line for line in seen):
+        raise SystemExit(f"{label}: no log line mentioning {expect_log}: {seen!r}")
 
 
 record(True, "clean fresh home")
 
-settings = Path.home() / ".pi" / "agent" / "settings.json"
+agent_dir = Path.home() / ".pi" / "agent"
+settings = agent_dir / "settings.json"
 settings.parent.mkdir(parents=True, exist_ok=True)
 settings.write_text(json.dumps({"packages": ["npm:pi-usage-hub", "npm:@narumitw/pi-btw@0.58.1"]}),
                     encoding="utf-8")
-record(False, "upstream pi-btw installed globally")
+# MMS gives the session its own PI_CODING_AGENT_DIR, so this copy is never
+# loaded: skipping here would leave the session with no /btw at all.
+record(True, "upstream pi-btw in the real home, session isolated",
+       expect_log="PI_CODING_AGENT_DIR")
+# ... and the one case where that same file really is loaded.
+record(False, "session pointed at the agent tree that carries pi-btw",
+       env={"PI_CODING_AGENT_DIR": str(agent_dir)}, expect_log="\u4e0d\u91cd\u590d\u6ce8\u5165")
 saved = json.loads(settings.read_text(encoding="utf-8"))
 if saved["packages"][0] != "npm:pi-usage-hub":
     raise SystemExit("the read-only check rewrote the user's Pi settings")
@@ -482,7 +492,7 @@ project = Path(cwd) / ".pi" / "settings.json"
 project.parent.mkdir(parents=True, exist_ok=True)
 project.write_text(json.dumps({"packages": [{"source": "git:github.com/CtriXin/pi-btw@v0.59.0-fork.1"}]}),
                    encoding="utf-8")
-record(False, "fork installed by the project")
+record(False, "fork installed by the project", expect_log="\u4e0d\u91cd\u590d\u6ce8\u5165")
 project.unlink()
 
 record(True, "both installs removed")

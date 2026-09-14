@@ -292,26 +292,50 @@ def _pi_btw_bundle_verified(bundle, vendor, log):
     return True
 
 
-def _pi_btw_settings_files(_env, cwd):
-    """The Pi settings trees the plan names: the user's global one, and the
-    project's own.
+def _pi_btw_session_agent_dir(env):
+    """The agent tree this launch hands Pi, or "" when nothing names one yet."""
+    source = env if isinstance(env, dict) else os.environ
+    try:
+        return str(source.get("PI_CODING_AGENT_DIR") or "").strip()
+    except Exception:
+        return ""
 
-    MMS gives every session a fresh `PI_CODING_AGENT_DIR` that it writes itself,
-    so the real `~/.pi/agent` is not what a launched Pi reads today. The check
-    still covers it on purpose: the moment a session loads that tree again - a
-    future change, or Pi run without MMS isolation - a second `btw` command
-    collides, and Pi's rename makes the bare form leak into the main context.
-    Project settings are the case that bites either way, because they load from
-    the launch cwd whatever `PI_CODING_AGENT_DIR` says.
+
+def _pi_btw_same_tree(left, right):
+    try:
+        return os.path.realpath(str(left)) == os.path.realpath(str(right))
+    except OSError:
+        return str(left) == str(right)
+
+
+def _pi_btw_tree_paths(root):
+    """The two places one Pi settings tree can carry a package."""
+    root = Path(root)
+    return (root / "settings.json", root / "extensions")
+
+
+def _pi_btw_settings_roots(env, cwd):
+    """Split the Pi settings trees into the ones this session really loads and
+    the user's real agent tree when the session isolates away from it.
+
+    Project settings load from the launch cwd whatever `PI_CODING_AGENT_DIR`
+    says, so they are always in the first group. The agent tree is whichever one
+    that variable names: MMS writes a fresh one per session, so a `pi-btw` in the
+    user's real `~/.pi/agent` is not read by an MMS-launched Pi and cannot
+    collide with ours. It only collides when a session actually loads that tree.
     """
-    files = [
-        Path(_real_user_path(".pi", "agent", "settings.json")),
-        Path(_real_user_path(".pi", "agent", "extensions")),
-    ]
     base = Path(str(cwd or "")) if str(cwd or "").strip() else Path.cwd()
-    files.append(base / ".pi" / "settings.json")
-    files.append(base / ".pi" / "extensions")
-    return files
+    loaded = [base / ".pi"]
+    real_agent = Path(_real_user_path(".pi", "agent"))
+    agent_dir = _pi_btw_session_agent_dir(env)
+    if not agent_dir:
+        # Both entrances reach Pi through `_pi_gateway_env`, which always sets an
+        # isolated agent dir before exec, so the real tree is not loaded here.
+        return loaded, [real_agent]
+    loaded.append(Path(agent_dir))
+    if _pi_btw_same_tree(agent_dir, real_agent):
+        return loaded, []
+    return loaded, [real_agent]
 
 
 def _pi_btw_package_names(path):
@@ -342,14 +366,14 @@ def _pi_btw_btw_named(path):
     return "btw" in Path(text).name.lower()
 
 
-def _pi_btw_existing_install(env, cwd):
-    """Describe a pi-btw this Pi could already load, or "" when there is none.
+def _pi_btw_scan_root(root):
+    """A pi-btw declared in one settings tree, or "" when there is none.
 
     A path under an `extensions` directory counts on its name; a settings.json
     counts on the package source, which carries the npm/git/path spec the user
     typed (`npm:…`, `git:…`, local path) and may pin a version.
     """
-    for path in _pi_btw_settings_files(env, cwd):
+    for path in _pi_btw_tree_paths(root):
         try:
             if path.is_dir():
                 for item in sorted(path.iterdir()):
@@ -366,6 +390,28 @@ def _pi_btw_existing_install(env, cwd):
     return ""
 
 
+def _pi_btw_existing_install(env, cwd):
+    """`(collides, global_only)`: a pi-btw this session really loads, and one
+    that only sits in the user's real agent tree.
+
+    The split is the whole point: only the first is a reason to stay out of the
+    way. Skipping on the second would hand the session no `/btw` at all, because
+    the copy it defers to is in a tree this Pi never opens.
+    """
+    loaded_roots, unloaded_roots = _pi_btw_settings_roots(env, cwd)
+    collides = ""
+    for root in loaded_roots:
+        collides = _pi_btw_scan_root(root)
+        if collides:
+            break
+    global_only = ""
+    for root in unloaded_roots:
+        global_only = _pi_btw_scan_root(root)
+        if global_only:
+            break
+    return collides, global_only
+
+
 def pi_btw_extension_path(env=None, runtime=None, cwd=None, log=None):
     """Absolute path of the bundled /btw extension to inject, or "" to stay out.
 
@@ -374,9 +420,13 @@ def pi_btw_extension_path(env=None, runtime=None, cwd=None, log=None):
 
     - `pi_btw = false` in `preferences.toml` (per CLI override included) → no;
     - no usable bundle, or one that does not match its own build record → no;
-    - a `pi-btw` this Pi could already load from a settings tree → no, because
-      Pi renames a duplicated command to `/btw:1`/`/btw:2` and a bare `/btw 问题`
-      then falls through to the main agent as an ordinary message.
+    - a `pi-btw` **this session loads** — the project settings tree, or the agent
+      tree `PI_CODING_AGENT_DIR` names → no, because Pi renames a duplicated
+      command to `/btw:1`/`/btw:2` and a bare `/btw 问题` then falls through to the
+      main agent as an ordinary message.
+    - a `pi-btw` only in the user's real `~/.pi/agent` → still yes, with a line
+      saying why: MMS isolates `PI_CODING_AGENT_DIR`, that copy is never loaded,
+      and deferring to it would leave the session with no `/btw`.
 
     A refusal is logged through `log`, never silent; it must not break a launch.
     """
@@ -399,14 +449,20 @@ def pi_btw_extension_path(env=None, runtime=None, cwd=None, log=None):
             return ""
         if not _pi_btw_bundle_verified(bundle, vendor, log_line):
             return ""
-        existing = _pi_btw_existing_install(env, cwd)
-        if existing:
+        collides, global_only = _pi_btw_existing_install(env, cwd)
+        if collides:
             log_line(
-                "检测到 Pi 可能已自行加载 pi-btw，MMS 不重复注入："
-                f"{existing}（同装会把 /btw 改名成 /btw:1，"
+                "本次会话会加载的 Pi 配置里已有 pi-btw，MMS 不重复注入："
+                f"{collides}（同装会把 /btw 改名成 /btw:1，"
                 "裸 /btw 问题会进入主上下文）"
             )
             return ""
+        if global_only:
+            log_line(
+                "你的全局 Pi 配置里装了 pi-btw，但 MMS 给每个会话独立的 "
+                f"PI_CODING_AGENT_DIR，那份不会被加载：{global_only}；"
+                "本次仍注入 MMS 内建 /btw。"
+            )
         return str(bundle)
     except Exception as exc:  # a missing /btw must never break a launch
         log_line(f"内建 /btw 扩展检查失败，本次启动不注入：{type(exc).__name__}: {exc}")
