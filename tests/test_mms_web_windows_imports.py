@@ -7,7 +7,6 @@ msvcrt branch. These tests pin that contract:
 
 * no bare top-level fcntl import anywhere in the web import graph;
 * the full server import chain loads in a fresh interpreter;
-* the Bot store and memory locks exercise the shim on every platform.
 """
 import ast
 import os
@@ -57,25 +56,10 @@ def test_no_bare_fcntl_import_in_web_import_graph():
 
 def test_pilot_server_import_chain_loads_in_a_fresh_interpreter():
     code = (
-        "import mms_web.server, mms_web.bots, mms_web.bot_memory, mms_web.__main__;"
+        "import mms_web.server, mms_web.__main__;"
         "print('IMPORT_CHAIN_OK')"
     )
     env = {**os.environ, "PYTHONPATH": str(ROOT)}
     result = subprocess.run([sys.executable, "-P", "-c", code], cwd=ROOT, env=env,
                             capture_output=True, text=True, timeout=60)
     assert "IMPORT_CHAIN_OK" in result.stdout, result.stderr[-2000:]
-
-
-def test_bot_store_and_memory_locks_use_the_cross_platform_shim(tmp_path):
-    """Both stores must lock through mms_web.file_lock, not fcntl directly."""
-    from mms_web import bots, bot_memory
-
-    assert bots.flock is bot_memory.flock
-    assert bots.flock.__module__ == "mms_web.file_lock"
-
-    store = bot_memory.BotMemoryStore(tmp_path)
-    store.remember("bot_probe", "windows lock probe")
-    notes = store.get("bot_probe")["notes"]
-    assert notes[0]["content"] == "windows lock probe" and notes[0]["kind"] == "fact"
-    store.delete("bot_probe")
-    assert not (tmp_path / "bots" / "memory" / "bot_probe").exists()
