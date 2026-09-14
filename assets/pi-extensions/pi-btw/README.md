@@ -1,7 +1,8 @@
 # `assets/pi-extensions/pi-btw` — 内建 Pi /btw 扩展（构建产物，不要手改）
 
 `index.ts` 是 `@ctrixin/pi-btw`（`@narumitw/pi-btw` 的 fork）用 esbuild 打成的**单文件**，
-MMS 在启动每一个自己拉起的 Pi 时通过 `--extension` 注入它，让「旁问」不打断主任务。
+（D1 修订后叫 `@ctrixin-dev/pi-btw`；tag `v0.59.0-fork.1` 里仍是旧名 `@ctrixin/pi-btw`，
+两者 `sync_pi_btw.py` 都接受。）MMS 在启动每一个自己拉起的 Pi 时通过 `--extension` 注入它，让「旁问」不打断主任务。
 Pilot 与终端 `mms`/`mmf` 走同一个解析函数
 （`mms_pi_support.pi_btw_extension_path()`），规则见 `docs/MMS_USER_PREFERENCES.md` 的 `pi_btw`。
 

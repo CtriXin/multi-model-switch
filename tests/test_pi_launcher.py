@@ -1977,7 +1977,9 @@ def test_bundled_btw_extension_is_a_verified_single_file(btw_pi):
     assert bundle.is_file()
     assert (vendor / "VERSION").read_text(encoding="utf-8").strip()
     record = _json.loads((vendor / "SOURCE.json").read_text(encoding="utf-8"))
-    assert record["package"] == "@ctrixin/pi-btw"
+    # The fork was renamed when the npm org turned out to be taken; either name
+    # is a legitimate sync source, anything else is not ours.
+    assert record["package"] in {"@ctrixin/pi-btw", "@ctrixin-dev/pi-btw"}
     assert _hashlib.sha256(bundle.read_bytes()).hexdigest() == record["sha256"]
     # Pi resolves its own packages; a second copy inside the bundle would be a
     # different module instance.
