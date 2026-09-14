@@ -34,6 +34,15 @@ class PiBotExecutor:
             raise WebError("BOT_GLOBAL_WORKSPACE_REQUIRED", "共享电脑的默认工作环境不可用，请重启 MMS Pilot。", 409)
         return {"model": preset.get("name", ""), "channel": preset.get("channel", ""), "presetId": preset.get("id", "")}
 
+    def _launch_bot_session(self, payload, bot_id):
+        """Use the owner-aware seam, with a narrow legacy-test fallback."""
+        launcher = getattr(self.sessions, "launch_bot", None)
+        if callable(launcher):
+            return launcher(payload, bot_id)
+        # Small fakes and older injected session adapters may only expose the
+        # Pilot launch method. Production SessionService always has launch_bot.
+        return self.sessions.launch(payload)
+
     def start(self, task, bot, context_path):
         selected = self.validate(bot)
         script = Path(__file__).with_name("bot_client.py")
@@ -87,10 +96,10 @@ class PiBotExecutor:
                 self.sessions._get(session_id).secrets.append(task["token"])
             detail = self.sessions.send(session_id, {"requestId": task["launchRequestId"], "text": prompt})
         else:
-            detail = self.sessions.launch({
+            detail = self._launch_bot_session({
                 "requestId": task["launchRequestId"], "workspaceId": bot.get("workspaceId") or "default",
                 "presetId": selected["presetId"], "title": bot["name"], "prompt": prompt,
-            })
+            }, bot["id"])
             session_id = detail["session"]["id"]
             if hasattr(self.sessions, "_get") and task.get("token"):
                 self.sessions._get(session_id).secrets.append(task["token"])
@@ -110,13 +119,13 @@ class PiBotExecutor:
         """
         selected = self.validate(bot)
         request_id = "bot-plan-" + uuid4().hex[:16]
-        detail = self.sessions.launch({
+        detail = self._launch_bot_session({
             "requestId": request_id,
             "workspaceId": bot.get("workspaceId") or "default",
             "presetId": selected["presetId"],
             "title": "计划 · " + str(bot.get("name") or "Bot"),
             "prompt": prompt,
-        })
+        }, bot["id"])
         session_id = detail["session"]["id"]
         try:
             deadline = time.monotonic() + max(1.0, float(timeout))

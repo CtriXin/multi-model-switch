@@ -61,6 +61,16 @@ def test_model_plan_drops_unknown_bots_backward_deps_and_self():
     assert plan["steps"][0]["dependsOn"] == []
 
 
+def test_model_plan_drops_self_and_forward_dependencies():
+    owner = bot("a", "总管")
+    writer = bot("b", "写手")
+    reply = '{"mode":"delegate","reason":"x","steps":[' \
+            '{"id":"s1","botId":"b","goal":"写文件","dependsOn":["s1","s2"]},' \
+            '{"id":"s2","botId":"b","goal":"再检查","dependsOn":["s1"]}]}'
+    plan = parse_model_plan(reply, owner, [owner, writer])
+    assert [step["dependsOn"] for step in plan["steps"]] == [[], ["s1"]]
+
+
 def test_model_plan_rejects_missing_fields_and_direct_needs_no_steps():
     owner = bot("a", "总管")
     bots = [owner, bot("b", "写手")]

@@ -6,7 +6,6 @@ executor, retry-after-uncertain-launch, or arbitrary local-file serving.
 from __future__ import annotations
 
 import base64
-import fcntl
 import hashlib
 import json
 import secrets
@@ -25,6 +24,7 @@ from .bot_communications import BotCommunications
 from .bot_coordinator import plan_for, direct_plan, build_planner_prompt, parse_model_plan, sanitize_plan
 from . import bot_retry
 from .bot_notify import Notifier
+from .file_lock import flock, LOCK_EX, LOCK_NB
 
 TERMINAL = {"completed", "failed", "cancelled", "interrupted"}
 PLAN_UNDO_SECONDS = 30
@@ -32,9 +32,14 @@ PLANNER_MODES = {"model", "keywords", "off"}
 ORCHESTRATION_POLICIES = {"direct-first", "plan-approve", "off"}
 MAX_TASKS = 2000
 MAX_MESSAGES = 500
-PIXEL_AVATAR_IDS = ("round", "cat", "puff", "cube", "leaf", "ghost", "rocket", "star", "bean", "bot")
+PIXEL_AVATAR_IDS = ("round", "cat", "puff", "cube", "leaf", "ghost", "rocket", "star", "bean", "bot",
+                    "diamond", "hex", "ticket", "wave", "shield", "gem", "orbit", "sun")
 PIXEL_AVATAR_COLORS = ("#b9a5ff", "#ff9f91", "#73dfc7", "#ffd77d", "#8bb8ff", "#f18bd5")
-_COLLABORATION_HINTS = ("找", "派给", "分派", "协作", "并行", "让.*bot", "让.*同事", "请.*检查")
+_COLLABORATION_HINTS = (
+    "找", "派给", "分派", "协作", "并行", "让.*bot", "让.*同事", "请.*检查",
+    r"让\s+(?!我|你|他|它|我们|自己)[A-Za-z0-9_-]{1,40}\s",
+    r"让\s*(?!我|你|他|它|我们|自己)[\u4e00-\u9fff]{1,8}(?:帮|写|检查|处理|做|整理|核对|各)",
+)
 
 
 def now():
@@ -175,7 +180,7 @@ class BotRuntime(BotCommunications):
             self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
             handle = (self.root / "owner.lock").open("a+")
             try:
-                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                flock(handle, LOCK_EX | LOCK_NB)
             except OSError:
                 handle.close()
                 raise WebError("BOT_STORE_BUSY", "另一个 Pilot 正在管理这份 Bot 记录。", 409) from None
@@ -1039,7 +1044,23 @@ class BotRuntime(BotCommunications):
             # planning failure must never block the task itself.
             if not task.get("planResolved"):
                 try:
-                    self.plan_task(task, bot)
+                    # Keep direct-first lightweight: a normal request should
+                    # use the Bot's persistent session immediately. The
+                    # throwaway model planner is reserved for an explicit
+                    # collaboration request or an opt-in approval policy.
+                    if (bot.get("planner", "model") == "model"
+                            and bot.get("orchestrationPolicy", "direct-first") == "direct-first"
+                            and not task.get("collaborationRequested")):
+                        with self._lock:
+                            live = self._task(task["id"])
+                            if not live.get("planResolved"):
+                                plan = direct_plan(bot, "普通任务由当前 Bot 直接完成。", "direct-first")
+                                plan["status"] = "auto"
+                                live.update(coordinatorPlan=plan, executionMode="direct",
+                                            planResolved=True, planDecidedAt=now(), updatedAt=now())
+                                self._persist()
+                    else:
+                        self.plan_task(task, bot)
                 except Exception:
                     with self._lock:
                         live = self._task(task["id"])

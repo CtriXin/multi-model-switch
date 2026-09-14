@@ -117,6 +117,22 @@ def test_bot_avatar_preset_and_color_round_trip(tmp_path):
         rt.close()
 
 
+def test_bot_accepts_geometric_avatar_ids(tmp_path):
+    rt = runtime(tmp_path)
+    try:
+        worker = rt.create_bot({
+            "name": "几何同事",
+            "description": "test",
+            "systemPrompt": "",
+            "workspaceId": "ws-1",
+            "presetId": "pi:fake",
+            "avatarId": "diamond",
+        })
+        assert worker["avatarId"] == "diamond"
+    finally:
+        rt.close()
+
+
 def test_bot_can_be_created_without_user_selected_preset(tmp_path):
     rt = runtime(tmp_path)
     try:

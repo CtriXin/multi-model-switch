@@ -267,6 +267,12 @@ class _Sessions:
         self.launched.append(payload)
         return {"session": {"id": "session-1", "state": "idle", "modelName": "test-model"}}
 
+    def launch_bot(self, payload, bot_id):
+        payload = dict(payload)
+        payload["owner"] = "bot"
+        payload["botId"] = bot_id
+        return self.launch(payload)
+
     def get_session(self, session_id):
         return {"session": {"id": session_id, "state": "idle"}, "events": [], "artifacts": []}
 
@@ -282,5 +288,7 @@ def test_bot_prompt_asks_for_one_line_peer_reports_without_paths_or_hashes(tmp_p
     task = {"id": "task_1", "prompt": "写一个文件", "launchRequestId": "launch-1", "collaborationRequested": False}
     executor.start(task, bot, tmp_path / "context.json")
     prompt = sessions.launched[0]["prompt"]
+    assert sessions.launched[0]["owner"] == "bot"
+    assert sessions.launched[0]["botId"] == bot["id"]
     assert "向其他 Bot 回报时只写一句结论" in prompt
     assert "不在正文贴路径或哈希" in prompt

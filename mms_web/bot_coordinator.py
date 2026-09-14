@@ -16,7 +16,11 @@ import re
 from copy import deepcopy
 
 
-_COLLABORATION_HINTS = ("找", "派给", "分派", "协作", "并行", "让.*bot", "让.*同事", "请.*检查")
+_COLLABORATION_HINTS = (
+    "找", "派给", "分派", "协作", "并行", "让.*bot", "让.*同事", "请.*检查",
+    r"让\s+(?!我|你|他|它|我们|自己)[A-Za-z0-9_-]{1,40}\s",
+    r"让\s*(?!我|你|他|它|我们|自己)[\u4e00-\u9fff]{1,8}(?:帮|写|检查|处理|做|整理|核对|各)",
+)
 MAX_PLAN_STEPS = 5
 
 
@@ -169,9 +173,13 @@ def sanitize_plan(data, owner: dict, bots: list[dict], source: str):
             step_id = f"s{index + 1}"
             if step_id in seen_ids:
                 step_id = f"step-{index + 1}"
-        seen_ids.add(step_id)
+        # Dependencies may only point to already accepted steps.  Capture
+        # the prior set before adding this id so a self-reference cannot pass
+        # validation and leave the scheduler waiting forever.
+        prior_ids = seen_ids.copy()
         depends_on = raw.get("dependsOn")
-        depends_on = [str(dep)[:40] for dep in depends_on if str(dep) in seen_ids] if isinstance(depends_on, list) else []
+        depends_on = [str(dep)[:40] for dep in depends_on if str(dep) in prior_ids] if isinstance(depends_on, list) else []
+        seen_ids.add(step_id)
         preset_id = raw.get("presetId")
         preset_id = str(preset_id).strip()[:500] if isinstance(preset_id, str) and preset_id.strip() else None
         steps.append({"id": step_id, "kind": "delegate", "botId": target["id"], "goal": goal,

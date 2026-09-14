@@ -7,7 +7,6 @@ the caller are retained as ``kind=task`` notes and are clearly labelled.
 """
 from __future__ import annotations
 
-import fcntl
 import json
 import re
 import shutil
@@ -18,6 +17,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from .runtime import private_json
+from .file_lock import flock, LOCK_EX, LOCK_SH, LOCK_UN
 
 SCHEMA = 1
 MAX_FACTS = 100
@@ -151,11 +151,11 @@ class BotMemoryStore:
         lock_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         handle = lock_path.open("a+")
         try:
-            fcntl.flock(handle, fcntl.LOCK_EX if write else fcntl.LOCK_SH)
+            flock(handle, LOCK_EX if write else LOCK_SH)
             yield path
         finally:
             try:
-                fcntl.flock(handle, fcntl.LOCK_UN)
+                flock(handle, LOCK_UN)
             finally:
                 handle.close()
 
@@ -296,10 +296,10 @@ class BotMemoryStore:
             lock_path = directory / "owner.lock"
             handle = lock_path.open("a+")
             try:
-                fcntl.flock(handle, fcntl.LOCK_EX)
+                flock(handle, LOCK_EX)
             finally:
                 try:
-                    fcntl.flock(handle, fcntl.LOCK_UN)
+                    flock(handle, LOCK_UN)
                 finally:
                     handle.close()
             shutil.rmtree(directory)

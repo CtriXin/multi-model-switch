@@ -499,13 +499,27 @@ def test_planner_timeout_falls_back_to_keyword_plan_without_blocking(tmp_path):
     executor.plan = lambda prompt, bot, timeout=20.0: None
     try:
         target = make_bot(runtime)
-        task = runtime.create_task({"requestId": "fallback-task", "botId": target["id"], "prompt": "列出工作目录里的 txt 文件"})
+        task = runtime.create_task({"requestId": "fallback-task", "botId": target["id"], "prompt": "请找其它 Bot 列出工作目录里的 txt 文件"})
         launch(runtime, task["id"])
         view = runtime.get_task(task["id"])
         assert view["status"] == "running"
         assert view["coordinatorPlan"]["source"] == "fallback"
         assert view["coordinatorPlan"]["mode"] == "direct"
         assert view["executionMode"] == "direct"
+    finally:
+        runtime.close()
+
+
+def test_direct_first_simple_task_skips_throwaway_model_planner(tmp_path):
+    runtime, executor = planning_runtime(tmp_path, '{"mode":"delegate","steps":[]}')
+    try:
+        target = make_bot(runtime)
+        task = runtime.create_task({"requestId": "simple-direct", "botId": target["id"], "prompt": "整理这份文件并告诉我结果"})
+        launch(runtime, task["id"])
+        view = runtime.get_task(task["id"])
+        assert executor.plan_calls == 0
+        assert view["executionMode"] == "direct"
+        assert view["coordinatorPlan"]["source"] == "direct-first"
     finally:
         runtime.close()
 
