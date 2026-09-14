@@ -3,7 +3,6 @@
   "version": "0.59.0-fork.1",
   "ref": "v0.59.0-fork.1",
   "commit": "9609405751568b2ffc9ff5979bd8280d8eac384a",
-  "source": "/private/tmp/pi-btw-vendor",
   "entryPoint": "src/index.ts",
   "upstream": "@narumitw/pi-btw",
   "esbuild": "0.28.2",

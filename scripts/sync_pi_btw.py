@@ -442,7 +442,6 @@ def main() -> int:
         "version": version,
         "ref": ref,
         "commit": commit,
-        "source": str(source),
         "entryPoint": _entry_point(source),
         "upstream": UPSTREAM_PACKAGE,
         "esbuild": esbuild_version,
