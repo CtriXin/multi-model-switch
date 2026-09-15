@@ -934,8 +934,9 @@ export function BotStudio({
                         <strong>{bot?.name || latest.botName || "Bot"}</strong>
                       </span>
                       <span className="bot-card-description">
-                        {group.rows.length} 条未读 ·{" "}
-                        {latest.summary || notificationLabel(latest.type)}
+                        {bot?.pendingQuestion
+                          ? "等你回复"
+                          : `${group.rows.length} 条未读 · ${latest.summary || notificationLabel(latest.type)}`}
                       </span>
                     </span>
                   </button>

@@ -33,7 +33,8 @@ import {
 } from "lucide-react";
 import { BotPlan } from "./BotPlan";
 import { previewType } from "./bot-artifact-preview";
-import type { BotChildResult, BotTaskPlan, Preset } from "./types";
+import type { BotChildResult, BotPendingQuestion, BotTaskPlan, Preset } from "./types";
+import { request } from "./api";
 import {
   suggestBotName,
   looksLikeStandingInstruction,
@@ -71,6 +72,7 @@ export interface BotDefinition {
   compactAtPercent?: number;
   avatarId?: string;
   avatarColor?: string;
+  pendingQuestion?: BotPendingQuestion | null;
 }
 export interface BotTask {
   id: string;
@@ -95,6 +97,11 @@ export interface BotTask {
   updatedAt: string;
   outcome?: BotOutcome | null;
   childResults?: BotChildResult[];
+  waitQuestion?: string;
+  waitOptions?: string[];
+  waitSince?: string;
+  waitDismissed?: boolean;
+  waitAnsweredAt?: string;
 }
 export interface BotOutcome {
   summary: string;
@@ -409,11 +416,13 @@ export function PixelAvatar({
 export function BotStatusBadge({
   status,
   compact = false,
+  label: customLabel,
 }: {
   status: BotStatus | TaskStatus;
   compact?: boolean;
+  label?: string;
 }) {
-  const label = getStatusBadgeText(status);
+  const label = customLabel || getStatusBadgeText(status);
   return (
     <span
       className={`bot-state bot-state-${status}${compact ? " bot-state-compact" : ""}`}
@@ -423,6 +432,34 @@ export function BotStatusBadge({
       {!compact && label}
     </span>
   );
+}
+
+export function getBotHeaderStatusText(
+  bot: BotDefinition | null | undefined,
+  tasks?: BotTask[],
+): string {
+  if (!bot) return "";
+  if (bot.pendingQuestion) {
+    return "等你回复";
+  }
+  const botTasks = tasks?.filter((t) => t.botId === bot.id) || [];
+  const runningTask = botTasks.find(
+    (t) => t.status === "running" || t.status === "starting",
+  );
+  if (bot.status === "busy" || runningTask) {
+    return "执行中";
+  }
+  const waitingTask = botTasks.find(
+    (t) => Boolean(t.waitReason) || t.status === "waiting",
+  );
+  if (bot.status === "paused" || waitingTask) {
+    return "等待你";
+  }
+  const failedTask = botTasks.find((t) => t.status === "failed");
+  if (failedTask) {
+    return "执行失败";
+  }
+  return getStatusBadgeText(bot.status) || "待命";
 }
 
 function cleanTranscriptText(value: string) {
@@ -477,8 +514,12 @@ export function BotCard({
     };
   }, [menuOpen]);
 
-  const indicatorStatus = getIndicatorStatus(bot, task, tasks);
-  const secondLine = getBotSecondLine(bot, task, tasks);
+  const indicatorStatus = bot.pendingQuestion
+    ? "waiting"
+    : getIndicatorStatus(bot, task, tasks);
+  const secondLine = bot.pendingQuestion
+    ? "等你回复"
+    : getBotSecondLine(bot, task, tasks);
 
   return (
     <article className={`bot-card bot-card-${bot.status}${selected ? " is-selected" : ""}`}>
@@ -1097,6 +1138,8 @@ export function TaskInspector({
       (word) => task.waitReason?.toLowerCase().includes(word),
     );
   const canWake = wakeableWait || task.status === "scheduled";
+  const [legacyDismissed, setLegacyDismissed] = useState(false);
+  const [legacyDismissing, setLegacyDismissing] = useState(false);
   return (
     <section className="bot-inspector" aria-label="任务详情">
       <div className="bot-inspector-heading">
@@ -1110,10 +1153,34 @@ export function TaskInspector({
       </div>
       <p className="bot-task-prompt">{task.prompt}</p>
       {task.waitReason && (
-        <p className="bot-wait-reason">
-          <Timer size={14} />
-          {waitReasonLabel(task.waitReason)}
-        </p>
+        task.status === "waiting" && task.waitReason === "user" && !task.waitQuestion && !legacyDismissed ? (
+          <div className="bot-legacy-wait-row">
+            <span>这条旧任务在等待，但没有留下问题</span>
+            <button
+              type="button"
+              className="bot-legacy-wait-dismiss"
+              onClick={async () => {
+                setLegacyDismissing(true);
+                try {
+                  await request(`/tasks/${encodeURIComponent(task.id)}/wait`, { action: "dismiss" });
+                  setLegacyDismissed(true);
+                } catch (e) {
+                  console.error(e);
+                } finally {
+                  setLegacyDismissing(false);
+                }
+              }}
+              disabled={legacyDismissing}
+            >
+              {legacyDismissing ? "正在结束…" : "结束等待"}
+            </button>
+          </div>
+        ) : !legacyDismissed ? (
+          <p className="bot-wait-reason">
+            <Timer size={14} />
+            {waitReasonLabel(task.waitReason)}
+          </p>
+        ) : null
       )}
       {task.queueReason && task.status === "queued" && (
         <p className="bot-wait-reason">
@@ -1581,6 +1648,66 @@ export function BotChat({
   // 预设编辑器中的规则列表
   const [editingRules, setEditingRules] = useState<string[]>([]);
 
+  // 等你回复（T3d-ui）
+  const [dismissedPendingTaskIds, setDismissedPendingTaskIds] = useState<string[]>([]);
+  const [highlightQuestionCard, setHighlightQuestionCard] = useState(false);
+  const [legacyDismissedTaskIds, setLegacyDismissedTaskIds] = useState<string[]>([]);
+  const questionCardRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const hasPendingQuestion = Boolean(
+    bot?.pendingQuestion &&
+    !dismissedPendingTaskIds.includes(bot.pendingQuestion.taskId)
+  );
+
+  useEffect(() => {
+    if (hasPendingQuestion) {
+      setHighlightQuestionCard(true);
+      textareaRef.current?.focus();
+      questionCardRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      const timer = setTimeout(() => setHighlightQuestionCard(false), 1600);
+      return () => clearTimeout(timer);
+    }
+  }, [bot?.id, bot?.pendingQuestion?.taskId, hasPendingQuestion]);
+
+  async function handleAnswerWait(taskId: string, answerText: string) {
+    if (!answerText.trim() || busy || disabled) return;
+    setBusy(true);
+    setError("");
+    try {
+      await request(`/tasks/${encodeURIComponent(taskId)}/wait`, {
+        action: "answer",
+        text: answerText.trim(),
+      });
+      setDismissedPendingTaskIds((prev) => [...prev, taskId]);
+      setValue("");
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : "回答提问失败，请稍后重试。",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDismissWait(taskId: string) {
+    if (busy || disabled) return;
+    setBusy(true);
+    setError("");
+    try {
+      await request(`/tasks/${encodeURIComponent(taskId)}/wait`, {
+        action: "dismiss",
+      });
+      setDismissedPendingTaskIds((prev) => [...prev, taskId]);
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : "结束等待失败，请稍后重试。",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   useEffect(() => {
     if (editingName) {
       nameEditInputRef.current?.focus();
@@ -1817,6 +1944,12 @@ export function BotChat({
     event.preventDefault();
     const content = value.trim();
     if (!content || busy || disabled || !bot) return;
+
+    if (hasPendingQuestion && bot?.pendingQuestion) {
+      await handleAnswerWait(bot.pendingQuestion.taskId, content);
+      return;
+    }
+
     setBusy(true);
     setError("");
     try {
@@ -1976,7 +2109,12 @@ export function BotChat({
                   {bot?.name || "选择一个 Bot"}
                 </h1>
               )}
-              {bot && <BotStatusBadge status={bot.status} />}
+              {bot && (
+                <BotStatusBadge
+                  status={bot.pendingQuestion ? "waiting" : bot.status}
+                  label={getBotHeaderStatusText(bot, tasks)}
+                />
+              )}
             </div>
             {editingDesc && bot ? (
               <div className="bot-chat-desc-edit-wrap">
@@ -2387,10 +2525,30 @@ export function BotChat({
               );
             })}
             {conversationTask.waitReason && (
-              <div className="bot-chat-notice">
-                <Timer size={13} />
-                <span>{waitReasonLabel(conversationTask.waitReason)}</span>
-              </div>
+              conversationTask.status === "waiting" && conversationTask.waitReason === "user" && !conversationTask.waitQuestion && !legacyDismissedTaskIds.includes(conversationTask.id) ? (
+                <div className="bot-chat-notice bot-legacy-wait-row">
+                  <span>这条旧任务在等待，但没有留下问题</span>
+                  <button
+                    type="button"
+                    className="bot-legacy-wait-dismiss"
+                    onClick={async () => {
+                      try {
+                        await request(`/tasks/${encodeURIComponent(conversationTask.id)}/wait`, { action: "dismiss" });
+                        setLegacyDismissedTaskIds((prev) => [...prev, conversationTask.id]);
+                      } catch (e) {
+                        console.error(e);
+                      }
+                    }}
+                  >
+                    结束等待
+                  </button>
+                </div>
+              ) : !legacyDismissedTaskIds.includes(conversationTask.id) ? (
+                <div className="bot-chat-notice">
+                  <Timer size={13} />
+                  <span>{waitReasonLabel(conversationTask.waitReason)}</span>
+                </div>
+              ) : null
             )}
             {resultText && (
               <div className="bot-chat-message bot-chat-event bot-chat-final">
@@ -2497,11 +2655,66 @@ export function BotChat({
         </div>
       )}
       <div className="bot-chat-composer-container">
+        {hasPendingQuestion && bot?.pendingQuestion && (
+          <div
+            ref={questionCardRef}
+            className={`bot-question-card${highlightQuestionCard ? " is-highlighted" : ""}`}
+            role="region"
+            aria-label="Bot 提问"
+          >
+            <div className="bot-question-card-header">
+              <span className="bot-question-card-badge">等你回复</span>
+              <div className="bot-question-card-actions">
+                <button
+                  type="button"
+                  className="bot-question-card-reply-btn"
+                  onClick={() => void handleAnswerWait(bot.pendingQuestion!.taskId, value.trim())}
+                  disabled={busy || disabled || !value.trim()}
+                  title="以输入框内容回复"
+                >
+                  回复
+                </button>
+                <button
+                  type="button"
+                  className="bot-question-card-dismiss"
+                  onClick={() => void handleDismissWait(bot.pendingQuestion!.taskId)}
+                  disabled={busy || disabled}
+                  title="结束等待"
+                >
+                  结束等待
+                </button>
+              </div>
+            </div>
+            <div className="bot-question-card-body">
+              <RichText text={bot.pendingQuestion.question} repair />
+            </div>
+            {bot.pendingQuestion.options && bot.pendingQuestion.options.length > 0 && (
+              <div className="bot-question-card-options">
+                {bot.pendingQuestion.options.map((option, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    className="bot-question-card-option"
+                    disabled={busy || disabled}
+                    onClick={() => void handleAnswerWait(bot.pendingQuestion!.taskId, option)}
+                  >
+                    {option}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         <form className="bot-chat-composer" onSubmit={submit}>
           <textarea
+            ref={textareaRef}
             value={value}
             onChange={(event) => setValue(event.target.value)}
-            placeholder={`告诉 ${bot?.name || "Bot"} 现在要做什么…`}
+            placeholder={
+              hasPendingQuestion
+                ? "回答它的问题…"
+                : `告诉 ${bot?.name || "Bot"} 现在要做什么…`
+            }
             rows={1}
             disabled={disabled || busy || !bot}
             aria-label="发送给 Bot 的消息"
@@ -2540,8 +2753,8 @@ export function BotChat({
                 className="bot-chat-send"
                 type="submit"
                 disabled={disabled || busy || !value.trim() || !bot}
-                aria-label={busy ? "发送中" : runAt ? "定时执行" : "发送"}
-                title={busy ? "发送中" : runAt ? "定时执行" : "发送"}
+                aria-label={busy ? "发送中" : hasPendingQuestion ? "回复" : runAt ? "定时执行" : "发送"}
+                title={busy ? "发送中" : hasPendingQuestion ? "回复" : runAt ? "定时执行" : "发送"}
               >
                 {busy ? (
                   <LoaderCircle className="bot-spin" size={15} />

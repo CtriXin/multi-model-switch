@@ -683,3 +683,57 @@ T2c 跟进（UI 整理建议）:
 处置:从 origin/dev 9b69c38a 重做分支 claude/dev-4.21-no-bot：revert -m 1 0d9a7ffa、去 Bot 测试断言、RELEASE_CHANNELS 规则、补 RELEASE-v4.21.12/14 说明、重建无 Bot 静态包。PR #262 → dev，#255 已关闭指向 #262。撤销同时移除了同一合并带入的 Pilot"运行环境"设置页与 update/history，已核实无 tag 含它们、4.21.14 已发布静态包本就不含，属源码对齐产物；若 4.21 线要保留需另开 PR 挑回。
 验证:pytest windows/updates/release/install 171 passed/1 skipped；Node 55；tsc 0；gate PASS 675；ci_pytest_regression --base origin/dev 无新增失败；规则检查 bot 文件与 page=bots 全为空。
 未完成:Windows 真机未验证；#262 待 owner 合并。
+
+## 2026-09-15 15:35 SGT · gemini-3.6 · 370e87ec37e741df
+需求:执行 T3d-ui 工单（等你回复：提问卡、头部与侧栏，docs/mms-web/bot-work/T3d-ui-question-card.md）。
+包:T3d-ui
+分支 / worktree:`bot/T3d-waiting-ui` · `/Users/xin/.local/share/stride/tasks/370e87ec37e741df/wt-T3d-ui`（从 c5c12e7c 创建，未提交、未 push）
+处置:
+1. `apps/mms-web/src/types.ts`: 补充 `BotPendingQuestion` 与 `BotWaitFields` 类型定义。
+2. `apps/mms-web/src/Bot.tsx`:
+   - `BotDefinition` 增加 `pendingQuestion?: BotPendingQuestion | null`。
+   - `BotTask` 补充 `waitQuestion`、`waitOptions`、`waitSince`、`waitDismissed`、`waitAnsweredAt` 字段。
+   - 实现并导出纯函数 `getBotHeaderStatusText(bot, tasks)`（有 pendingQuestion 优先显示"等你回复"，回退至 running "执行中"、waiting "等待你"、failed "执行失败"、idle "待命"）。
+   - `BotCard` 指示灯与第二行描述依据 `bot.pendingQuestion` 优先展示"等你回复"。
+   - 聊天头部状态徽章与 `BotStatusBadge` 增加自定义 label 支持，接入 `getBotHeaderStatusText`。
+   - 聊天底部固定提问卡（`.bot-question-card`）：RichText 格式化提问文本、逐个 options 按钮直发回复、"回复"按钮、"结束等待"（dismiss）按钮。输入框自动聚焦并切换 placeholder 为"回答它的问题…"。发送或 option 点击调用 `POST /api/v1/tasks/:id/wait`。
+   - 切换至含 pendingQuestion 的 Bot 时，自动平滑滚动并高亮一次提问卡。
+   - 旧任务（`status=waiting && waitReason=user && !waitQuestion`）展示"这条旧任务在等待，但没有留下问题"加"结束等待"（dismiss）按钮。
+3. `apps/mms-web/src/BotStudio.tsx`: 仅修改通知卡片第二行取值逻辑（优先读取 `bot.pendingQuestion`）。
+4. `apps/mms-web/src/bot.css`:
+   - 新增提问卡、高亮脉冲动画、options 选项按钮、旧等待任务样式，严格遵守 token 体系与 40px gutter 对齐，无横向溢出。
+   - 全局 hex 计数严格保持 12（0 新增 hex）。
+5. `apps/mms-web/tests/bot-waiting-status.test.mjs`:
+   - 新增单元测试，覆盖 `getBotHeaderStatusText` 状态文案计算与优先级。
+
+改动文件（git diff --stat）:
+```text
+ apps/mms-web/src/Bot.tsx       | 245 ++++++++++++++++++++++++++++++++++++++---
+ apps/mms-web/src/BotStudio.tsx |   5 +-
+ apps/mms-web/src/bot.css       | 144 ++++++++++++++++++++++++
+ apps/mms-web/src/types.ts      |  15 +++
+ 4 files changed, 391 insertions(+), 18 deletions(-)
+ 新增: apps/mms-web/tests/bot-waiting-status.test.mjs
+ 新增: docs/mms-web/design/t3d/ (4 张验收截图)
+```
+
+测试命令与结果:
+- `npx tsc --noEmit -p apps/mms-web`: 0 错误。
+- `node --test apps/mms-web/tests/*.test.mjs`: 95 passed, 0 failed（门禁 ≥ 94）。
+- `PYTHONPATH=. python3 -m pytest -q tests/test_mms_web_bots.py tests/test_mms_bot_runtime.py tests/test_mms_bot_transport.py tests/test_mms_bot_client.py tests/test_mms_bot_computer.py tests/test_bot_memory.py tests/test_mms_bot_coordinator.py tests/test_mms_bot_retry.py tests/test_mms_bot_notify.py`: 202 passed in 20.32s。
+- `npm run build --workspace @mms/web`: 成功（tsc + vite 构建通过）。
+- Hex 门禁: `grep -roh '#[0-9a-fA-F]\{3,6\}' apps/mms-web/src/bot*.css | wc -l` 严格为 12。
+
+实时验证（独立实例端口 61704，state-root /tmp/bot-verify-T3d-ui，未碰 60824）:
+- 验收 1（有问题）: 牛马 Bot 真实提问"先问我一个问题再开始：我要 A 还是 B？"，侧栏与头部均显示"等你回复"，提问卡展示问题与 [方案 A] [方案 B] [都要] 三个选项按钮，输入框 placeholder 为"回答它的问题…"。
+  截图: `docs/mms-web/design/t3d/t3d_1_question_card_active.png`
+- 验收 2（旧任务无问题）: 大总管 Bot 旧等待任务显示"这条旧任务在等待，但没有留下问题"加 [结束等待] 按钮。
+  截图: `docs/mms-web/design/t3d/t3d_2_legacy_task_no_question.png`
+- 验收 3（回复后恢复）: 点击 [方案 A] 选项按钮，自动发送回答入流，提问卡平滑消失，输入框恢复默认 placeholder，头部与侧栏状态恢复为"待命"。
+  截图: `docs/mms-web/design/t3d/t3d_3_reply_recovered.png`
+- 验收 4（400px 移动端窄屏）: 400px 视口下提问卡、选项按钮与输入框自适应良好，无重叠、无遮挡、无横向滚动条。
+  截图: `docs/mms-web/design/t3d/t3d_4_narrow_400px.png`
+
+未完成 / 遗留: 无。T3d-ui 全部需求均已实现并通过端到端视觉与单元测试验收。代码保持未提交状态。
+耗时: 约 45 分钟 · 归因: [AGENT]
+
