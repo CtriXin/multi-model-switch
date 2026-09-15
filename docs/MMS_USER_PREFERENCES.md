@@ -44,12 +44,16 @@ reasoning_effort = "high"     # low | medium | high | xhigh
 nsr_mode = "enable"           # enable | disable
 agent_pack = "none"           # none | ecc | omc
 bypass = true                 # true | false
+pi_btw = true                 # true | false；MMS 内建 Pi /btw 旁问扩展
 
 [launch.cli.codex]
 reasoning_effort = "high"
 
 [launch.cli.claude]
 agent_pack = "ecc"
+
+[launch.cli.pi]
+pi_btw = false                # 只关 Pi 的旁问扩展
 
 [launch.cli.agy]
 
@@ -84,6 +88,7 @@ omc = "~/.mms/agent-packs/oh-my-claudecode"
 | `nsr_mode` | `enable` / `disable` | Default session-local NSR Stop-hook injection for Claude/Codex; default is `enable`, but the rewritten loop only activates after `/nsr` |
 | `agent_pack` | `none` / `ecc` / `omc` | Default Claude agent pack toggle |
 | `bypass` | `true` / `false` | Default launch approval bypass toggle |
+| `pi_btw` | `true` / `false` | 只对 `pi` 生效：是否注入 MMS 内建的 `/btw` 旁问扩展，默认 `true` |
 | `disabled_session_surfaces` | table with `skills` / `mcp` / `hooks` arrays | Per-launch disabled surface overlay |
 
 Supported CLI names:
