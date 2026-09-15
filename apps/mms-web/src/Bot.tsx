@@ -1399,6 +1399,8 @@ export function BotChat({
   const [dismissedPendingTaskIds, setDismissedPendingTaskIds] = useState<string[]>([]);
   const [highlightQuestionCard, setHighlightQuestionCard] = useState(false);
   const [legacyDismissedTaskIds, setLegacyDismissedTaskIds] = useState<string[]>([]);
+  const [legacyDismissingTaskId, setLegacyDismissingTaskId] = useState<string | null>(null);
+  const [legacyDismissError, setLegacyDismissError] = useState("");
   const questionCardRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -2278,17 +2280,33 @@ export function BotChat({
                   <button
                     type="button"
                     className="bot-legacy-wait-dismiss"
+                    disabled={legacyDismissingTaskId === conversationTask.id}
                     onClick={async () => {
+                      // One click sends exactly one POST: the button is disabled
+                      // for the whole round trip, and a second dismiss would be
+                      // rejected as TASK_NOT_WAITING (409) by the server.
+                      if (legacyDismissingTaskId === conversationTask.id) return;
+                      setLegacyDismissingTaskId(conversationTask.id);
+                      setLegacyDismissError("");
                       try {
                         await request(`/tasks/${encodeURIComponent(conversationTask.id)}/wait`, { action: "dismiss" });
                         setLegacyDismissedTaskIds((prev) => [...prev, conversationTask.id]);
-                      } catch (e) {
-                        console.error(e);
+                      } catch (cause) {
+                        setLegacyDismissError(
+                          cause instanceof Error ? cause.message : "结束等待失败，请稍后重试。",
+                        );
+                      } finally {
+                        setLegacyDismissingTaskId(null);
                       }
                     }}
                   >
-                    结束等待
+                    {legacyDismissingTaskId === conversationTask.id ? "正在结束…" : "结束等待"}
                   </button>
+                  {legacyDismissError && (
+                    <span className="bot-legacy-wait-error" role="status">
+                      {legacyDismissError}
+                    </span>
+                  )}
                 </div>
               ) : !legacyDismissedTaskIds.includes(conversationTask.id) ? (
                 <div className="bot-chat-notice">

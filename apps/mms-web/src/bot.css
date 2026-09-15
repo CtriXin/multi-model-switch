@@ -2897,6 +2897,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
   padding: 8px 12px;
   background: color-mix(in srgb, var(--warn) 10%, var(--surface));
@@ -2924,3 +2925,14 @@
   color: var(--accent);
 }
 
+
+.bot-legacy-wait-dismiss:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.bot-legacy-wait-error {
+  flex-basis: 100%;
+  font-size: 12px;
+  color: var(--bot-danger);
+}
