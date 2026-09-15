@@ -54,3 +54,24 @@ Task: Stride 370e87ec37e741df
 ## 并行规则
 
 沿用 README：`git worktree add ../wt-T1f -b bot/T1f-wizard codex/stride-370e87ec37e741df`，端口 61705，不碰 60824，不提交、不 push、不 merge。
+
+## 验收回修（2026-09-15，Claude 验收后退回）
+
+主体链路实测可用（逐题对话、键盘选项、自由输入、起名、记忆入库、预设页签），tsc 0、Node 98、hex 12。下面这些要改完再交，按严重度排。改动仍在 `../wt-T1f`（分支 `bot/T1f-wizard`）上继续，开工前先 `git merge codex/stride-370e87ec37e741df`（任务分支已合入 T3d-ui 与 T2c；`Bot.tsx` 侧栏卡片第二行会冲突，规则是：有 `pendingQuestion` 显示"等你回复"，其次预设摘要，再描述；`BotStudio.tsx` 同理），解完先跑 tsc。
+
+必修：
+
+1. **删"了解到的偏好"后保存是假的。** `runWizard` / `parsePreset` 给 `extra` 同时写 `q_<id>` 和 shortLabel 两个键，面板只删 shortLabel，`buildPreset` 又从 `q_<id>` 复活。只保留一个键（用 `q_<id>` 做键、shortLabel 做显示），面板删除后 `GET` 读回必须没有。补单测。
+2. **跳过向导的 Bot 每次重开都再走一遍向导。** "先聊聊再说"或点 × 后要持久化"已跳过"：最省事是往 systemPrompt 写一行空的 `了解到的偏好：` 段标记，或者用现有 `PUT /bots/:id` 里任一已有字段（看 `bots.py` 的 bot 字段清单，不要新增后端字段）。`onboardingDone` 以此判断。
+3. **预设面板的 focus / style / autonomy 只有 4 个写死芯片。** 向导分支和自由输入产生的值（温和提醒、专业严谨等）在面板看不到也改不了，点芯片会静默覆盖。改成：芯片来自题库里该字段所有可能选项，加一个"自定义"输入，当前值若不在选项里就以自定义形式显示并选中。
+
+与工单不符，一并改：
+
+4. 首题顺序按工单：日常事务与提醒 / 工作与项目 / 查询与研究 / 写作与沟通 / 先聊聊再说，键 A 到 E 对应；D 的 value 与 label 一致（"写作与沟通"）。
+5. 自由回答只写进 `extra`，不要同时写 focus/style/autonomy 造成 systemPrompt 同一句出现两次。
+6. 题库补到 10 到 12 题。
+7. 侧栏卡片第二行：不要在 `Bot.tsx` 内联复制 `getBotSecondLine`，直接扩展 `bot-visual-system.ts` 里那个函数并更新它的测试；`BotStudio.tsx:939` 改回去（那是未读通知卡，不是侧栏卡片）。
+8. 头部把 `description === "随时可以接活"` 当空，侧栏卡片却照显，两处统一。
+9. 清死代码：`Bot.tsx` 1340 / 1350 / 1729 / 1980 附近未用变量，`BotPresetPanel.tsx` 未用的 `WIZARD_POOL` 导入；把顺手删掉的 T1c / T1e 说明注释放回 `bot-presets.ts`。
+
+回修后的验收补两条：删偏好后 `GET` 一致的截图；跳过向导的 Bot 重开后直接进聊天的截图。其余验收项照旧。
