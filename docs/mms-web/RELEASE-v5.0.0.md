@@ -4,7 +4,7 @@
 
 本版本走 `dev-pre` 预览通道，不是 Stable。5.0 的边界是 Bot 工作台；`dev` / `main` 继续维护 `4.21.z` 稳定线，两条线在 owner 宣布 5.0 发布前不合并。
 
-内容由两部分组成：`dev-pre` 上的 Bot 工作台，加上从 `v4.21.12` 合入的 v4.21.1–v4.21.12 全部 Windows 修复。配置根仍是 `~/.config/mms-next`，无需迁移；已有 config、session 和 OAuth 不受影响。
+内容由两部分组成：`dev-pre` 上的 Bot 工作台，加上从 `v4.21.14` 合入的 v4.21.1–v4.21.14 全部 Windows 修复。配置根仍是 `~/.config/mms-next`，无需迁移；已有 config、session 和 OAuth 不受影响。
 
 Bot 工作台的功能验证在 macOS 上进行。**Windows 上的 Bot 工作台没有做过验收**，本版本合入的 Windows 修复只覆盖 Pilot、Pi 启动与会话链路，不构成对 Bot 工作台的 Windows 支持声明。
 
@@ -26,7 +26,7 @@ Bot 工作台的功能验证在 macOS 上进行。**Windows 上的 Bot 工作台
 
 ## 包含的 4.21.x Windows 修复
 
-合入 `v4.21.12`，即 v4.21.1 到 v4.21.12 的全部修复：
+合入 `v4.21.14`，即 v4.21.1 到 v4.21.14 的全部修复：
 
 - Pi 启动：允许更慢的启动握手；RPC 管道在 launcher 中保持传递；Pi 的 bash 不可用时改用 PowerShell。
 - 会话历史：Pi 历史按 UTF-8 读取，GBK 系统不再出现乱码或轮询中断。
@@ -34,8 +34,14 @@ Bot 工作台的功能验证在 macOS 上进行。**Windows 上的 Bot 工作台
 - Pi 生命周期：sink 出错后 RPC reader 继续存活，流式历史不再中断。
 - Pilot doctor：自检，可选模型 smoke。
 - 会话守护：用 Win32 API 查询守护进程 pid，不再依赖命令行工具输出的编码。
+- Pi 共享 bin：Windows 上改用 junction 建立共享 agent bin 链接，不再依赖需要开发者模式或提权的符号链接；POSIX 仍走原有 `os.symlink` 路径。
+- Pilot skills 读取：Windows 没有可用的符号链接 overlay，改为按优先级直接把选中的 skill 条目传给 Pi，避免扫描父目录把被覆盖的 skill 带回来；子进程输出固定按 UTF-8 解码。
+- 成果预览：Windows 缺少 `O_DIRECTORY` / `dir_fd`，改为逐段词法校验路径，对工作区根、每级目录和目标文件都拒绝符号链接、junction 及其它 reparse point。
+- 服务日志：未归类异常在返回通用 500 的同时把 traceback 打到服务日志，用户可见文案不变。
 
-细节以 `RELEASE-v4.21.0.md`、`RELEASE-v4.21.1.md`、`RELEASE-v4.21.12.md` 与对应提交为准。
+同时带入 README 的 Windows Native Preview 从零安装步骤、`docs/mms-web/WINDOWS-CONTRIBUTING.md` 与 `WINDOWS-PI-FIX-HANDOFF.md`。
+
+细节以 `RELEASE-v4.21.0.md`、`RELEASE-v4.21.1.md`、`RELEASE-v4.21.12.md`、`RELEASE-v4.21.14.md` 与对应提交为准。
 
 ## 验证边界
 
@@ -47,4 +53,4 @@ Bot 工作台涉及本机文件、浏览器和长期后台执行，预览通道�
 
 ## 回滚
 
-`dev-pre` 是预览通道，可以回退到上一个正式 release（`v4.21.12` 或更早的 4.x）。Windows 安装保留版本目录，出现问题时可停止 Pilot 并选择先前版本目录；不要删除包含会话和 runtime 的 state 目录。Bot 数据位于 `state_root/bots`，回退到不含 Bot 工作台的版本后该目录不会被读取，但也不会被自动删除。
+`dev-pre` 是预览通道，可以回退到上一个正式 release（`v4.21.14` 或更早的 4.x）。Windows 安装保留版本目录，出现问题时可停止 Pilot 并选择先前版本目录；不要删除包含会话和 runtime 的 state 目录。Bot 数据位于 `state_root/bots`，回退到不含 Bot 工作台的版本后该目录不会被读取，但也不会被自动删除。
