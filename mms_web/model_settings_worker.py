@@ -441,7 +441,7 @@ if __name__ == "__main__":
     from mms_web.catalog_worker import _result_stream, _emit
     stream = _result_stream()
     try:
-        _emit(stream, {"ok": True, **run(json.load(sys.stdin))})
+        _emit(stream, {"ok": True, **run(json.loads(sys.stdin.buffer.read().decode("utf-8")))})
     except WebError as error:
         _emit(stream, {"ok": False, "code": error.code, "message": error.message, "status": error.status})
     except Exception:

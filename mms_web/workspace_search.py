@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import sys
 import time
+import re
 from pathlib import Path
 
 from .errors import WebError
@@ -22,6 +23,17 @@ _SPOTLIGHT_LIMIT = 400
 _ZOXIDE_LIMIT = 100
 _MATCH_LIMIT = 40
 _SCAN_SECONDS = 2.0
+
+_WINDOWS_PATH = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\)")
+
+
+def _windows_platform() -> bool:
+    return os.name == "nt"
+
+
+def _is_explicit_path(query: str) -> bool:
+    """Recognize POSIX, drive-letter, and UNC paths without touching the disk."""
+    return query.startswith(("/", "~/")) or bool(_WINDOWS_PATH.match(query))
 
 
 def search_workspaces(catalog, payload):
@@ -42,7 +54,7 @@ def search_workspaces(catalog, payload):
                 candidates.extend({"path": path, "name": Path(path).name} for path in result.stdout.splitlines()[:100])
         except (OSError, subprocess.TimeoutExpired, UnicodeError):
             pass
-    if query.startswith(("/", "~/")):
+    if _is_explicit_path(query):
         candidates.insert(0, {"path": query, "name": Path(query).name})
     rows, seen = [], set()
     by_path = {str(Path(w["path"]).expanduser().resolve()): w for w in known if not w.get("hidden")}
@@ -58,7 +70,20 @@ def search_workspaces(catalog, payload):
             continue
         if len(rows) == 40:
             break
-    if not rows and terms and not query.startswith(("/", "~/")):
+    if not rows and terms and not _is_explicit_path(query):
+        # Windows has no Spotlight index. Search the user's shallow home tree
+        # so common folders such as Downloads and Documents work for fresh
+        # installs without scanning other drives or profile internals.
+        if _windows_platform() and len(terms) == 1:
+            swept, _ = _scan_directories(terms[0], [(real_home(), _SCAN_DEPTH_HOME)], contains=True)
+            for path in swept:
+                if terms[0] in path.name.lower() and str(path) not in seen:
+                    seen.add(str(path))
+                    rows.append({"id": "", "name": path.name, "path": str(path)})
+                    if len(rows) == 20:
+                        break
+        if rows:
+            return {"workspaces": rows}
         # Nothing familiar matched, so fall back to the folders the system already indexes.
         for path in _spotlight_directories(query, real_home())[0]:
             try:
@@ -96,7 +121,7 @@ def _spotlight_directories(name: str, home: Path) -> tuple[list[Path], bool]:
     return [Path(line) for line in lines[:_SPOTLIGHT_LIMIT]], len(lines) <= _SPOTLIGHT_LIMIT
 
 
-def _scan_directories(name: str, plans: list[tuple[Path, int]]) -> tuple[list[Path], bool]:
+def _scan_directories(name: str, plans: list[tuple[Path, int]], *, contains: bool = False) -> tuple[list[Path], bool]:
     """Sweep likely roots within one budget, retaining same-name alternatives.
 
     Returns the hits and whether the sweep finished. Running out of budget or
@@ -129,7 +154,7 @@ def _scan_directories(name: str, plans: list[tuple[Path, int]]) -> tuple[list[Pa
                         continue
                 except OSError:
                     continue
-                if entry.name == name:
+                if entry.name.lower() == name.lower() or (contains and name.lower() in entry.name.lower()):
                     found.append(Path(entry.path))
                 if depth + 1 < depth_limit and entry.name not in _SKIP_SCAN:
                     frontier.append((Path(entry.path), depth + 1))
