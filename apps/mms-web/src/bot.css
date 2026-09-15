@@ -730,8 +730,7 @@
 .bot-chat-stream > .bot-chat-event + .bot-chat-event,
 .bot-chat-stream > .bot-chat-event + .bot-chat-notice,
 .bot-chat-stream > .bot-chat-event + .bot-chat-error,
-.bot-chat-stream > .bot-chat-event + .bot-chat-artifacts,
-.bot-chat-stream > .bot-chat-event + .bot-communications-marker {
+.bot-chat-stream > .bot-chat-event + .bot-chat-artifacts {
   margin-top: 12px;
 }
 
@@ -979,32 +978,6 @@
   color: var(--bot-amber);
   font-size: 12px;
   line-height: 1.4;
-}
-
-.bot-communications-marker {
-  margin-left: var(--bot-gutter);
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  color: var(--muted);
-  background: var(--surface);
-  font-size: 12px;
-  font-family: inherit;
-  cursor: pointer;
-  transition: all 150ms ease-out;
-  width: fit-content;
-}
-
-.bot-communications-marker:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.bot-communications-marker small {
-  color: var(--muted);
 }
 
 .bot-chat-error {

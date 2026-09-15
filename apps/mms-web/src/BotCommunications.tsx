@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertCircle, ArrowRight, ChevronDown, ChevronUp, FileText, LoaderCircle, MessageSquare, X, Zap } from "lucide-react";
+import { AlertCircle, ArrowRight, FileText, LoaderCircle, MessageSquare, X, Zap } from "lucide-react";
 import { RichText } from "./components";
 import { request } from "./api";
 import { PixelAvatar } from "./Bot";

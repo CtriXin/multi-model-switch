@@ -1460,8 +1460,12 @@ function getChainedParentTaskId(
   task: BotTask,
   allTasks: BotTask[],
   allComms: BotCommunication[],
+  visited: Set<string> = new Set(),
 ): string | null {
   if (!task.senderBotId) return null;
+  // A reply chain can loop back on itself; stop instead of recursing forever.
+  if (visited.has(task.id)) return null;
+  visited.add(task.id);
   const related = allComms.filter((c) => c.deliveryTaskId === task.id || c.taskId === task.id);
   for (const c of related) {
     if (c.replyTo) {
@@ -1472,7 +1476,7 @@ function getChainedParentTaskId(
           const candTask = allTasks.find((t) => t.id === candidateId);
           if (candTask) {
             if (!candTask.senderBotId || candTask.senderBotId === candTask.botId) return candTask.id;
-            const ancestor = getChainedParentTaskId(candTask, allTasks, allComms);
+            const ancestor = getChainedParentTaskId(candTask, allTasks, allComms, visited);
             if (ancestor) return ancestor;
           }
         }
@@ -2198,7 +2202,9 @@ export function BotChat({
           );
 
           const isPeerExplanation = (text: string) => {
-            return /(?:已向.+发送|已向.+说|协作者.+打招呼)/i.test(text.trim());
+            const value = text.trim();
+            return /(?:已向.+发送|已向.+说|协作者.+打招呼)/i.test(value)
+              || /已与\s*.+?\s*完成双向消息/.test(value);
           };
 
           const isPeerRelatedEvent = (event: BotEvent) => {
@@ -2207,12 +2213,8 @@ export function BotChat({
             if (/(?:已分发给|已分发子任务|已向.+发送|已向.+说|子任务.*已回传|子任务.*完成|消息已排队投递|双向消息完成|已回复.+[：“"]|协作者.*打招呼)/i.test(content)) {
               return true;
             }
-            for (const group of communicationGroups) {
-              const peer = bots.find((b) => b.id === group.peerId);
-              if (peer && content.includes(peer.name)) {
-                return true;
-              }
-            }
+            // Merely naming a peer is not a peer event: ordinary narration
+            // that mentions another bot belongs in the main chat.
             return false;
           };
 
