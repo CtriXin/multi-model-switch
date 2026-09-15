@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+ contextScopeLine,
  defaultExpanded,
  isInFlight,
  isSettled,
@@ -109,6 +110,26 @@ test('each status has its own visible word and tone', () => {
 test('the answer source is named, never guessed', () => {
  assert.equal(sourceLabel(row({ source: 'state' })), 'Pilot 状态');
  assert.equal(sourceLabel(row({ source: 'completion' })), '只读旁问模型');
+ assert.equal(
+  sourceLabel(row({ source: 'completion', runner: 'pi-extension' })),
+  'Pi 扩展',
+ );
+ // Rows persisted before the runner field existed still read as host answers.
+ assert.equal(sourceLabel(row({ source: 'completion', runner: undefined })), '只读旁问模型');
+});
+
+test('the context scope line reports what each runner saw', () => {
+ assert.equal(
+  contextScopeLine(row({ source: 'completion', runner: 'pi-extension', contextScope: { mode: 'branch', entries: 7, truncated: false } })),
+  '主会话分支 7 条',
+ );
+ assert.equal(
+  contextScopeLine(row({ source: 'completion', contextScope: { recentTurns: 4, totalTurns: 9, truncated: true } })),
+  '最近 4 轮 · 共 9 轮 · 已截断',
+ );
+ assert.equal(contextScopeLine(row({ contextScope: null })), '');
+ assert.equal(contextScopeLine(row({})), '');
+ assert.equal(contextScopeLine(row({ contextScope: { mode: 'branch' } })), '');
 });
 
 test('an unfinished question says so instead of showing an empty line', () => {

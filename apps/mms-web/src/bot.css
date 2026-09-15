@@ -1293,6 +1293,262 @@
   background: color-mix(in srgb, var(--ink) 6%, transparent);
 }
 
+/* Conversational Wizard */
+.bot-conversational-wizard {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+}
+
+.bot-wizard-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px 20px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  max-width: 640px;
+  width: 100%;
+}
+
+.bot-wizard-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.bot-wizard-question-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.bot-wizard-skip-btn {
+  border: none;
+  background: none;
+  padding: 4px;
+  border-radius: 4px;
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 120ms ease, background 120ms ease;
+  flex-shrink: 0;
+}
+
+.bot-wizard-skip-btn:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+}
+
+.bot-wizard-options-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 14px 0 6px;
+}
+
+.bot-wizard-option-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 140ms ease, background 140ms ease;
+}
+
+.bot-wizard-option-row:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg));
+}
+
+.bot-wizard-option-badge {
+  min-width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.bot-wizard-option-row:hover:not(:disabled) .bot-wizard-option-badge {
+  background: var(--accent);
+  color: white;
+}
+
+.bot-wizard-option-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.bot-wizard-option-label {
+  font-size: 13.5px;
+  font-weight: 550;
+  color: var(--text);
+}
+
+.bot-wizard-option-hint {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.bot-wizard-free-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--line);
+}
+
+.bot-wizard-free-input {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  box-sizing: border-box;
+}
+
+.bot-wizard-free-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.bot-wizard-free-submit {
+  padding: 0 14px;
+  height: 34px;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+/* Preset Panel */
+.bot-preset-panel {
+  width: 360px;
+  flex-shrink: 0;
+}
+
+.bot-preset-field {
+  margin-bottom: 14px;
+}
+
+.bot-preset-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 6px;
+  display: block;
+}
+
+.bot-preset-extra-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.bot-preset-extra-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bot-preset-extra-tag {
+  font-size: 12px;
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.bot-preset-extra-input {
+  flex: 1;
+  padding: 6px 10px;
+  font-size: 13px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--text);
+  box-sizing: border-box;
+}
+
+.bot-preset-extra-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.bot-preset-small-input {
+  width: 110px;
+  padding: 6px 10px;
+  font-size: 13px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--text);
+  box-sizing: border-box;
+}
+
+.bot-preset-small-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.bot-preset-add-extra,
+.bot-preset-add-rule {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.bot-preset-add-btn {
+  padding: 0 10px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.bot-preset-footer {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.bot-preset-save-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 /* Composer */
 .bot-chat-composer-container {
   padding: 0 max(clamp(24px, 7vw, 140px), calc((100% - 1000px) / 2)) 20px;
@@ -2780,3 +3036,159 @@
   }
 }
 
+/* T3d-ui: Question Card & Waiting UI */
+.bot-question-card {
+  margin-bottom: 10px;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 12%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: border-color 200ms ease, box-shadow 200ms ease;
+}
+
+.bot-question-card.is-highlighted {
+  animation: bot-question-pulse 1.5s ease-out;
+}
+
+@keyframes bot-question-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 50%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 25%, transparent);
+  }
+  100% {
+    box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 12%, transparent);
+  }
+}
+
+.bot-question-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.bot-question-card-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.bot-question-card-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bot-question-card-dismiss {
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: all 150ms ease;
+}
+
+.bot-question-card-dismiss:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.bot-question-card-reply-btn {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  color: var(--surface);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 3px 10px;
+  cursor: pointer;
+  transition: opacity 150ms ease;
+}
+
+.bot-question-card-reply-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.bot-question-card-body {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--ink);
+}
+
+.bot-question-card-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.bot-question-card-option {
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--line));
+  border-radius: 8px;
+  color: var(--ink);
+  font-size: 13px;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: all 150ms ease;
+}
+
+.bot-question-card-option:hover {
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+  border-color: var(--accent);
+}
+
+.bot-legacy-wait-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 8px 12px;
+  background: color-mix(in srgb, var(--warn) 10%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--warn) 30%, var(--line));
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.bot-legacy-wait-dismiss {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  font-size: 12px;
+  padding: 3px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: all 150ms ease;
+}
+
+.bot-legacy-wait-dismiss:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+
+.bot-legacy-wait-dismiss:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.bot-legacy-wait-error {
+  flex-basis: 100%;
+  font-size: 12px;
+  color: var(--bot-danger);
+}

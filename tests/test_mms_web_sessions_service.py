@@ -82,11 +82,26 @@ class FakeDriver:
         self.fail_next_prompt: dict | None = None
         self.timeout_next_prompt = False
         self.reject_ui: WebError | None = None
+        # get_commands answer; tests set [{"name": "btw"}, ...] to enable
+        # the native path.
+        self.commands: list[dict] = []
 
     # driver API used by SessionService
 
     def alive(self) -> bool:
         return self._alive
+
+    def request(self, command: dict, *, timeout: float | None = None) -> dict:
+        ctype = command.get("type")
+        if ctype == "get_commands":
+            return {"type": "response", "command": "get_commands", "success": True,
+                    "data": {"commands": [dict(item) for item in self.commands]}}
+        if ctype == "prompt":
+            return self.send_prompt(str(command.get("message") or ""))
+        return {"type": "response", "success": False, "error": f"unsupported: {ctype}"}
+
+    def get_commands(self, *, timeout: float | None = None) -> list[dict]:
+        return [dict(item) for item in self.commands]
 
     def send_prompt(self, text: str) -> dict:
         if self.timeout_next_prompt:
@@ -128,8 +143,14 @@ class FakeDriver:
     def emit_approval(self, service, session, approval_id="ap-1", method="confirm"):
         service._apply_approval_pending(session, approval_id, method, "title")
 
+    def emit_side_question_event(self, payload: dict) -> None:
+        """Simulate a BTW_EVENT: notify delivered by a Pi extension."""
+        if self._sink is None:
+            raise RuntimeError("FakeDriver has no sink")
+        self._sink.side_question_event(payload)
 
-def make_service(tmp_path: Path, catalog=None, real_launch: bool = True, monkeypatch=None, **kwargs) -> tuple[SessionService, list[FakeDriver]]:
+
+def make_service(tmp_path: Path, catalog=None, real_launch: bool = True, monkeypatch=None, driver_commands=None, **kwargs) -> tuple[SessionService, list[FakeDriver]]:
     catalog = catalog or FakeCatalog()
     drivers: list[FakeDriver] = []
     if monkeypatch is not None:
@@ -139,6 +160,8 @@ def make_service(tmp_path: Path, catalog=None, real_launch: bool = True, monkeyp
 
     def driver_factory(plan, sink):
         driver = FakeDriver(sink=sink)
+        if driver_commands is not None:
+            driver.commands = [dict(item) for item in driver_commands]
         drivers.append(driver)
         return driver
 

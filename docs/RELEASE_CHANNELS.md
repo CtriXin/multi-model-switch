@@ -38,7 +38,13 @@ MMS 采用 Stable / Dev / Canary 三通道。目标是把“普通用户能放�
 
 `z` 是每个 channel 自己的 release 计数：如果 release 只覆盖一个 commit，就按该 commit `z+1`；如果 release 覆盖一组已验证 commits，就作为一次复合 release 只 `z+1` 一次。未 tag 的日常小步 commit 仍用 git hash 追踪，不单独占用正式 release 号。
 
-不要把当前 Canary 叫 `5.0`。`5.0` 留给未来真正的大破坏边界，例如 3.6 金丝雀线验证完成后再重构 launcher/runtime 公共 API。
+### 4.21.x 稳定线与 5.0 预发线（2026-09-14，owner 决定）
+
+- `dev` 与 `main` 是当前的稳定安装线，版本 `4.21.z`，内容是 Windows 修复；Bot 工作台（原 PR #242）已从 `dev` 撤销，`dev` 树里不得出现 `mms_web/bots.py`。
+- `5.0` 的边界是 Bot 工作台，走 `dev-pre` 分支（从撤销前的 `dev` 065cf856 建立）；Bot 相关 PR 一律指向 `dev-pre`，不指向 `dev`。
+- `canary` 是 2026-06 起停更的旧实验线，与 `dev` 双向各差六百多个提交，不用它承载 5.0。
+- 回灌方向：`dev`（4.21.z 修复）→ `dev-pre` 用 merge；`dev-pre` 不合进 `dev`，直到 owner 宣布 5.0 发布。发布 5.0 时先撤销 `dev` 上的 revert 提交 09a3b269，再合 `dev-pre`。
+- 检查：`git ls-tree -r --name-only origin/dev | grep mms_web/bots.py` 必须为空；任何 4.x tag 上 `git merge-base --is-ancestor 0d9a7ffa <tag>` 必须为假。
 
 ## 当前过渡策略
 
