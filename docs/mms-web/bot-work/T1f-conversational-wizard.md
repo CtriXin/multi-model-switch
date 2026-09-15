@@ -2,7 +2,7 @@
 
 Date: 2026-09-15
 Task: Stride 370e87ec37e741df
-起点：任务分支 `codex/stride-370e87ec37e741df` 当前 HEAD；先做完 T1e 再做本包
+起点：任务分支 `codex/stride-370e87ec37e741df` 当前 HEAD（T1e 已于 2026-09-15 合入）
 建议模型：gemini3.6
 来源：owner 2026-09-15 反馈，对照 Grok 的新建 Bot 流程截图
 
@@ -53,4 +53,4 @@ Task: Stride 370e87ec37e741df
 
 ## 并行规则
 
-沿用 README：`git worktree add ../wt-T1f -b bot/T1f-wizard codex/stride-370e87ec37e741df`（T1e 合入后再开），端口 61705，不碰 60824，不提交、不 push、不 merge。
+沿用 README：`git worktree add ../wt-T1f -b bot/T1f-wizard codex/stride-370e87ec37e741df`，端口 61705，不碰 60824，不提交、不 push、不 merge。

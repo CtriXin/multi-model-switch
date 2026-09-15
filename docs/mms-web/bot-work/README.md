@@ -25,6 +25,8 @@ Bot 是长期存在的员工，用户用聊天交代事情。MMS 只做身份、
 | T1f | 向导改成对话（题库分支、自由输入、答案入记忆），预设在侧栏与面板可见 | `T1f-conversational-wizard.md` | gemini3.6，T1e 之后 | `Bot.tsx` 向导与面板、`bot-presets.ts`、`BotStudio.tsx` 卡片一行、测试 |
 | T3c | Bot 间往来在主聊天折叠成一张卡，协作面板按任务分段 | `T3c-peer-chat-folding.md` | gemini3.6（纯前端） | `Bot.tsx` 事件渲染、`BotCommunications.tsx`、`bot.css`、测试 |
 | T3d | "等你补充"必须带问题（waitQuestion / pendingQuestion / dismiss / 过期），记忆不存无产出任务 | `T3d-waiting-contract.md` | 后端 deepseek，前端 gemini 随后 | `bots.py` 新方法、`bot_executor.py` wait 参数、`server.py` 一个路由、测试；前端 `Bot.tsx` 提问卡 |
+| T2c | 计划块视觉整理：名字不竖排、goal/summary 分行、按钮固定行尾、状态标签三档、history 时间线 | `T2c-plan-block-visual.md` | gemini3.6 | `BotPlan.tsx`、`bot-plan.css` |
+| T3d-ui | 等你回复：提问卡、头部与侧栏文案、旧任务结束等待 | `T3d-ui-question-card.md` | gemini3.6 | `Bot.tsx`、`BotStudio.tsx` 一行、`types.ts`、`bot.css`、测试 |
 | T4 | 落地与交付链 | `T4-landing-governance.md` | Claude（本会话） | rebase、issue、PR 拆分、全量回归、fresh-user gate |
 
 建议只是建议，派发给谁由用户决定。
