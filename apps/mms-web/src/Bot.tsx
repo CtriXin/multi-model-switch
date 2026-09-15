@@ -1331,6 +1331,7 @@ function BotOnboarding({
   onAnswer,
   onEditAnswer,
   onComplete,
+  onCancel,
 }: {
   bot: BotDefinition;
   answers: OnboardingAnswers;
@@ -1341,25 +1342,30 @@ function BotOnboarding({
   onAnswer: (key: keyof OnboardingAnswers, value: string) => void;
   onEditAnswer?: (key: keyof OnboardingAnswers) => void;
   onComplete: (finalName: string) => Promise<void>;
+  onCancel?: () => void;
 }) {
   const allAnswered = Boolean(answers.focus && answers.style && answers.autonomy);
+  const isNewBot = !bot.name || !bot.name.trim() || bot.name === "未命名" || (bot.name === "新 Bot" && !bot.systemPrompt);
+  const hasCustomName = !isNewBot;
   const suggestedName = suggestBotName(answers, existingNames);
-  const [nameInput, setNameInput] = useState(suggestedName);
+  const [nameInput, setNameInput] = useState(hasCustomName ? bot.name : suggestedName);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (allAnswered) {
-      setNameInput(suggestedName);
+      if (!hasCustomName) {
+        setNameInput(suggestedName);
+      }
       const timer = setTimeout(() => {
         nameInputRef.current?.focus();
         nameInputRef.current?.select();
       }, 50);
       return () => clearTimeout(timer);
     }
-  }, [allAnswered, answers.focus, suggestedName]);
+  }, [allAnswered, answers.focus, suggestedName, hasCustomName]);
 
   const handleFinish = () => {
-    const finalName = nameInput.trim() || suggestedName;
+    const finalName = nameInput.trim() || (hasCustomName ? bot.name : suggestedName);
     void onComplete(finalName);
   };
 
@@ -1374,8 +1380,18 @@ function BotOnboarding({
       <div className="bot-onboarding-content">
         <div className="bot-onboarding-greeting">
           <p>
-            嗨，我是 <strong>{bot.name === "新 Bot" && !bot.systemPrompt ? "你的新协作者" : bot.name}</strong>。告诉我几个你的偏好，之后我会作为默认工作方式：
+            嗨，我是 <strong>{isNewBot ? "你的新协作者" : bot.name}</strong>。告诉我几个你的偏好，之后我会作为默认工作方式：
           </p>
+          {onCancel && (
+            <button
+              type="button"
+              className="bot-onboarding-cancel"
+              onClick={onCancel}
+              aria-label="取消预设编辑"
+            >
+              取消
+            </button>
+          )}
         </div>
         <div className="bot-onboarding-questions">
           {onboardingQuestions.map((q) => {
@@ -1701,6 +1717,16 @@ export function BotChat({
     setSettingNotice("");
   }, [bot?.id]);
   useEffect(() => {
+    if (!onboardingEditing) return;
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOnboardingEditing(false);
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onboardingEditing]);
+  useEffect(() => {
     const stream = streamRef.current;
     if (stream && followLatest.current) stream.scrollTop = stream.scrollHeight;
   }, [bot?.id, tasks, events, artifacts]);
@@ -1952,14 +1978,20 @@ export function BotChat({
           )}
           {bot && onboardingDone && onUpdateBot && (
             <button
-              className="bot-quiet-button"
+              className={"bot-quiet-button" + (onboardingEditing ? " is-active" : "")}
               type="button"
               onClick={() => {
-                const parsed = parsePreset(bot.systemPrompt || "");
-                setEditingRules(parsed.rules);
-                setOnboardingEditing(true);
+                if (onboardingEditing) {
+                  setOnboardingEditing(false);
+                } else {
+                  const parsed = parsePreset(bot.systemPrompt || "");
+                  setEditingRules(parsed.rules);
+                  setOnboarding(parsed.answers);
+                  setOnboardingEditing(true);
+                }
               }}
               aria-label="调整工作预设"
+              aria-pressed={onboardingEditing}
               title="工作预设"
             >
               <Settings2 size={14} />
@@ -2003,6 +2035,7 @@ export function BotChat({
                   onClick={() => {
                     const parsed = parsePreset(bot.systemPrompt || "");
                     setEditingRules(parsed.rules);
+                    setOnboarding(parsed.answers);
                     setOnboardingEditing(true);
                   }}
                 >
@@ -2024,6 +2057,7 @@ export function BotChat({
                   setOnboarding(next);
                 }}
                 onEditAnswer={(key) => setOnboarding((current) => ({ ...current, [key]: undefined }))}
+                onCancel={onboardingEditing ? () => setOnboardingEditing(false) : undefined}
                 onComplete={async (finalName) => {
                   if (!onUpdateBot || !onboarding.focus || !onboarding.style || !onboarding.autonomy) return;
                   setOnboardingBusy(true);
@@ -2035,7 +2069,11 @@ export function BotChat({
                       rules: onboardingEditing ? editingRules : parsed.rules,
                       other: parsed.other,
                     });
-                    await onUpdateBot(bot.id, { name: finalName, systemPrompt: prompt });
+                    const patch: { name?: string; systemPrompt: string } = { systemPrompt: prompt };
+                    if (finalName && finalName.trim() && finalName.trim() !== bot.name) {
+                      patch.name = finalName.trim();
+                    }
+                    await onUpdateBot(bot.id, patch);
                     setOnboardingDone(true);
                     setOnboardingEditing(false);
                   } catch (cause) {

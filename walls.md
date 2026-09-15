@@ -493,3 +493,47 @@
 处置:worktree wt-v5 分支 claude/dev-pre-5.0（起点 90287459）：合入 v4.21.12 再 v4.21.14，cherry-pick RELEASE_CHANNELS 规则与 4.21.12/4.21.14 说明，版本 5.0.0，新增 RELEASE-v5.0.0.md，重建静态包。draft PR #261 → dev-pre，依赖 #254 先合。受保护文件只有 mms_launchers.py 经 merge 带入 +48/-5。
 验证:compileall 通过；focused+windows+updates 147 passed/1 skipped；Node 83；tsc 0；fresh-user gate PASS 676；ci_pytest_regression base 63/2551 vs head 63/2578 无新增失败。
 未验证:Windows acceptance 未在本分支跑；Windows 上 Bot 未验收（已写进发布说明的验证边界）。
+
+## 2026-09-15 11:05 SGT · gemini-3.6 · 370e87ec37e741df
+包: T1e · 预设编辑器四处修正
+分支 / worktree: bot/T1e-preset-editor / wt-T1e
+需求: 解决 2026-09-15 真实模型验收中发现的 4 处缺陷：
+  1. 重新打开"调整工作预设"时名字被换成建议名（编辑已有名字的 Bot 时输入框必须是当前名字，答案变化不覆盖已有名字，保存名字未变不发 name 字段）。
+  2. 预设编辑器没有关闭入口（头部"预设"按钮支持 toggle 并带 aria-pressed，编辑器右上加"取消"文字按钮，按 Esc 键关闭，关闭丢弃未保存修改）。
+  3. 固定尾句排在"补充约定："之后（buildPreset 把 DEFAULT_FOOTER 放在向导答案之后、补充约定之前；parsePreset 兼容新旧两种顺序）。
+  4. 名字输入框双层焦点框（去掉 focus-visible 的外层 outline，保持单一 border 焦点，与 bot-chat-title-input 一致，hex 保持 12）。
+处置:
+  1. `apps/mms-web/src/Bot.tsx`:
+     - `BotOnboarding` 中新增 `hasCustomName` 判断（非空且非未命名/非默认）；已有名字时初始化为当前名，且选项变化不覆盖原有名字；完成时若名字未变则不发送 `name` 字段。
+     - 头部"预设"按钮升级为 toggle（`aria-pressed={onboardingEditing}`，点击可关闭，打开时重新解析 prompt 丢弃未保存草稿）。
+     - 编辑器问候栏右上角增加"取消"文字按钮，点击关闭并丢弃修改；增加全局 `keydown` 监听 `Escape` 键关闭编辑器。
+  2. `apps/mms-web/src/bot-presets.ts`:
+     - `buildPreset` 调整结构：`DEFAULT_FOOTER` 紧接在向导答案之后加入，然后再加入 `RULES_HEADER` 和约定列表；`parsePreset` 对新旧顺序均正常跳过已知 footer。
+  3. `apps/mms-web/src/bot.css`:
+     - 增加 `.bot-onboarding-cancel` 样式与问候栏 row 布局。
+     - `.bot-onboarding-name-input` 增加 `:focus-visible, :focus` 时 `border-color: var(--accent); outline: none;`，消除外层双层 outline。
+  4. `apps/mms-web/tests/bot-presets.test.mjs`:
+     - 增加测试用例验证新旧尾句顺序兼容解析与构建顺序。
+改动文件:
+```text
+ apps/mms-web/src/Bot.tsx                | 58 +++++++++++++++++++++++++++------
+ apps/mms-web/src/bot-presets.ts         |  5 +--
+ apps/mms-web/src/bot.css                | 28 ++++++++++++++++
+ apps/mms-web/tests/bot-presets.test.mjs | 40 +++++++++++++++++++++++
+ 4 files changed, 117 insertions(+), 14 deletions(-)
+```
+测试:
+  - TypeScript 类型检查: `npx tsc --noEmit -p apps/mms-web`（0 错误）。
+  - 前端全量单元测试: `node --test apps/mms-web/tests/*.test.mjs`（84 passed, 0 failed）。
+  - 前端构建打包: `npm run build --workspace @mms/web`（通过）。
+  - Hex 门禁检查: `grep -o '#[0-9a-fA-F]\{3,8\}' apps/mms-web/src/bot*.css | sort -u | wc -l` 严格为 12。
+实时验证:
+  - 独立端口: 61701（独立 state-root `/tmp/bot-verify-T1e`，不碰 60824）。
+  - 验收项 1（保留已有名字与尾句顺序）: 打开"验收临时助手"，输入框初值为"验收临时助手"，修改选项后输入框仍为"验收临时助手"；保存后 `GET /api/v1/bots` 确认 name 未被修改，且 systemPrompt 中尾句排在"补充约定："之前。截图：`file:///Users/xin/.gemini/antigravity-cli/brain/f414fd9d-ced5-4da4-b1a2-7608e91ec350/t1e_1_existing_name_preserved.png`。
+  - 验收项 2（三种关闭方式）:
+    - 取消按钮关闭: `file:///Users/xin/.gemini/antigravity-cli/brain/f414fd9d-ced5-4da4-b1a2-7608e91ec350/t1e_2a_cancel_button_closes.png`
+    - 头部 toggle 关闭: `file:///Users/xin/.gemini/antigravity-cli/brain/f414fd9d-ced5-4da4-b1a2-7608e91ec350/t1e_2b_header_toggle_closes.png`
+    - Esc 键关闭: `file:///Users/xin/.gemini/antigravity-cli/brain/f414fd9d-ced5-4da4-b1a2-7608e91ec350/t1e_2c_esc_closes.png`
+  - 验收项 3（单一焦点边框，无双层 outline）: `file:///Users/xin/.gemini/antigravity-cli/brain/f414fd9d-ced5-4da4-b1a2-7608e91ec350/t1e_3_single_focus_outline.png`。
+未完成 / 未验证: 无。全部 4 处修正均已验证通过，代码保持未提交状态。
+

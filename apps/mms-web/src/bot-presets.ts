@@ -180,6 +180,7 @@ export function buildPreset({
     if (answers?.focus) parts.push(`- 主要帮我处理：${answers.focus}`);
     if (answers?.style) parts.push(`- 回报方式：${answers.style}`);
     if (answers?.autonomy) parts.push(`- 执行方式：${answers.autonomy}`);
+    parts.push(DEFAULT_FOOTER);
   }
 
   // Deduplicate and cap rules to 12 items
@@ -196,10 +197,6 @@ export function buildPreset({
     for (const rule of cleanRules) {
       parts.push(`- ${rule}`);
     }
-  }
-
-  if (hasAnswers) {
-    parts.push(DEFAULT_FOOTER);
   }
 
   if (other && other.trim()) {

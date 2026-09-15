@@ -114,3 +114,43 @@ test("buildPreset enforces 12 rules limit, length <= 200, and deduplication", ()
   // "第一条规则" only appears once
   assert.equal(parsed.rules.filter((r) => r === "第一条规则").length, 1);
 });
+
+test("parsePreset and buildPreset support new footer order and maintain backward compatibility", () => {
+  const legacyOldOrderPrompt = [
+    "这是创建时确认的工作预设，请持续遵守：",
+    "- 主要帮我处理：工作与项目",
+    "- 回报方式：只说结论",
+    "- 执行方式：能直接做就直接做",
+    "补充约定：",
+    "- 第一条自定义约定",
+    "- 结果优先，过程保持安静；遇到无法安全判断的关键分歧时再询问。",
+  ].join("\n");
+
+  const newOrderPrompt = [
+    "这是创建时确认的工作预设，请持续遵守：",
+    "- 主要帮我处理：工作与项目",
+    "- 回报方式：只说结论",
+    "- 执行方式：能直接做就直接做",
+    "- 结果优先，过程保持安静；遇到无法安全判断的关键分歧时再询问。",
+    "补充约定：",
+    "- 第一条自定义约定",
+  ].join("\n");
+
+  const parsedOld = parsePreset(legacyOldOrderPrompt);
+  const parsedNew = parsePreset(newOrderPrompt);
+
+  assert.deepEqual(parsedOld.answers, parsedNew.answers);
+  assert.deepEqual(parsedOld.rules, ["第一条自定义约定"]);
+  assert.deepEqual(parsedNew.rules, ["第一条自定义约定"]);
+  assert.equal(parsedOld.other, "");
+  assert.equal(parsedNew.other, "");
+
+  const built = buildPreset(parsedOld);
+  assert.equal(built, newOrderPrompt);
+  // 确认尾句排在补充约定之前
+  const footerIdx = built.indexOf("- 结果优先，过程保持安静");
+  const rulesIdx = built.indexOf("补充约定：");
+  assert.ok(footerIdx > 0 && rulesIdx > 0);
+  assert.ok(footerIdx < rulesIdx, "固定尾句必须排在向导答案之后、补充约定之前");
+});
+

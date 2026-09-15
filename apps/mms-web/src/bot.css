@@ -1136,12 +1136,38 @@
   gap: 14px;
 }
 
+.bot-onboarding-greeting {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .bot-onboarding-greeting p {
   margin: 0;
   font-size: 15px;
   line-height: 1.7;
   color: var(--ink);
 }
+
+.bot-onboarding-cancel {
+  flex-shrink: 0;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--muted);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 150ms ease, background 150ms ease;
+}
+
+.bot-onboarding-cancel:hover {
+  color: var(--ink);
+  background: var(--soft);
+}
+
 
 .bot-onboarding-questions {
   display: flex;
@@ -1229,8 +1255,10 @@
   box-sizing: border-box;
 }
 
+.bot-onboarding-name-input:focus-visible,
 .bot-onboarding-name-input:focus {
   border-color: var(--accent);
+  outline: none;
 }
 
 .bot-onboarding-rules-editor {
