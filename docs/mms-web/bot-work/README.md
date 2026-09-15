@@ -20,6 +20,7 @@ Bot 是长期存在的员工，用户用聊天交代事情。MMS 只做身份、
 | T3 | 失败重试与结果送达 | `T3-resilience-and-notify.md` | deepseek | 新增 `mms_web/bot_notify.py`、`bots.py` 最小改动、`server.py` 一个路由 |
 | T1c | 新建即对话：命名、头像、预设在聊天里完成 | `T1c-create-in-chat.md` | gemini3.6 主做，glm5.3 评审 | `Bot.tsx` 头部与向导、`BotStudio.tsx` 的 `onUpdateBot`、新增 `bot-presets.ts` |
 | T1d | Bot 页不弹 Pilot 首次引导 | `T1d-guide-on-bots.md` | gemini3.6 | `App.tsx` 引导插入点、`HelpGuide.tsx` 自动开始条件、新增测试 |
+| T2b | Coordinator 成为真正的自动计划层：触发形状检查、状态机、结果图、重启幂等 | `T2b-planner-state-machine.md` | k3 主做，Claude 评审，UI 跟进另开 T2c 给 gemini | `bot_coordinator.py`、`bots.py` 新方法、`server.py` 一个路由的 action、`types.ts`、`BotPlan.tsx` 最小接线、测试 |
 | T4 | 落地与交付链 | `T4-landing-governance.md` | Claude（本会话） | rebase、issue、PR 拆分、全量回归、fresh-user gate |
 
 建议只是建议，派发给谁由用户决定。
