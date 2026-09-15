@@ -2710,19 +2710,22 @@ if [ -x "$BIN_DIR/mms" ]; then
     echo ""
 
     if [ "$PREVIEW_CHANNEL_INSTALL" -eq 1 ]; then
-        echo ""
-        if legacy_config_has_route_candidates; then
+        if [ "$LAUNCH_WEB_MODE" = "always" ]; then
+            echo "  $(t "Pilot 正在打开；请在 WebUI 添加 provider 和 API Key。" "Pilot is opening; add a provider and API key in the WebUI.")"
+        elif legacy_config_has_route_candidates; then
+            echo ""
             echo "  $(t "下一步（首次 preview/mmf 只做这两行）:" "Next step (first preview/mmf run: only do these two lines):")"
             echo "    $NEXT_MMF_CMD preview prepare"
             echo "    $NEXT_MMF_CMD"
             echo "  $(t "说明：prepare 只读取 ~/.config/mms，并写入 ~/.config/mms-next；不会改 stable 配置。" "Note: prepare only reads ~/.config/mms and writes ~/.config/mms-next; stable config is not modified.")"
         else
+            echo ""
             echo "  $(t "下一步（全新机器先配通道）:" "Next step (fresh machine: configure providers first):")"
             echo "    $NEXT_MMF_CMD config web"
             echo "    $NEXT_MMF_CMD"
             echo "  $(t "说明：没有检测到可迁移的旧模型路由，先在 WebUI 添加 provider/API Key 并保存。" "Note: no migratable legacy model routes were detected; add providers/API keys in the WebUI first.")"
         fi
-        echo ""
+        [ "$LAUNCH_WEB_MODE" = "always" ] || echo ""
         echo "  $(t "以后需要排查时再运行:" "Only run this later when debugging:") $NEXT_MMF_CMD config doctor"
     fi
 
