@@ -782,3 +782,29 @@ T2c 跟进（UI 整理建议）:
 未完成 / 遗留: 无。T2c 全部 5 项视觉整理与验收均 100% 完成。代码保持未提交状态。
 耗时: 约 35 分钟 · 归因: [AGENT]
 
+
+## 2026-09-15 20:02 SGT · claude-fable-5.1（subagent 执行）· 370e87ec37e741df
+需求:把已验收的 T3d-ui、T2c 两个前端包合入任务分支，做 4 处小修正，重建静态包，push，重启 60824。owner 已批准本任务全部 commit / merge / push / 重启。
+
+处置:
+1. `bot/T3d-waiting-ui` 提交 d6095210（author Antigravity <gemini-3.6@google.com>），merge b0a049e1 —— clean。
+2. `bot/T2c-plan-visual` 提交 9b76263f（同上署名），merge b59eff7c —— 仅 `walls.md` 冲突，按两边追加解决：T3d-ui 与 T2c 各保留完整条目（含各自的 diff stat 代码块与验证段），未丢任何一侧内容。
+3. 修正 1dfbd1aa：删除零引用的 `TaskInspector`（含它的 legacyDismissed/legacyDismissing 分支）与 `types.ts` 的 `BotWaitFields`。`grep -rn TaskInspector apps/mms-web/src apps/mms-web/tests` 只命中定义本身，共 260 行删除。
+4. 修正 948d31df：旧等待任务那行的"结束等待"加 in-flight —— 请求期间 disabled 并显示"正在结束…"，失败信息落到按钮旁的 `.bot-legacy-wait-error` 一行，不再只 console.error。一次点击只发一次 POST：按钮禁用 + 回调开头再挡一次。`api.ts` 的 `request()` 确有重试，但只在第一次被 `INVALID_CSRF` 拒绝时触发，服务端此时尚未改状态，不会重复 dismiss，也不会撞 `wait_action` 的 `TASK_NOT_WAITING` 409；按要求未改 `api.ts`。
+5. 修正 a72e3329：任务 `waitQuestion` 非空且提问卡正由它驱动时，聊天流里的"等待你补充信息" notice 与底部"唤醒"按钮都不再渲染，避免同一件事问三遍。`waitQuestion` 为空的旧任务分支原样保留。"取消"按钮保留 —— 提问卡不提供停止任务的能力，去掉会丢功能；这一点与工单里"取消/唤醒 那行"的字面表述有出入，已在此记录。
+6. 修正 6e543221：failed 行"重试/跳过"与状态点对齐。状态点中心在行首 10px（margin-top 7 + 半径 3），行尾容器原先 margin-top: 1px 加内容自撑，中心偏低。改为行尾容器 `min-height: 20px` 去掉 margin-top，按钮 `height: 20px` / `padding: 0 8px` / `line-height: 1`（全局 box-sizing: border-box），两者中心都回到 10px。无按钮的行位置不变。
+7. 静态包 d5142823：`build_mms_web_release.py --skip-install`，4.21.14。
+
+新增测试:`apps/mms-web/tests/bot-wait-controls.test.mjs`（7 条，覆盖 4、5）、`apps/mms-web/tests/bot-plan-alignment.test.mjs`（3 条，直接从样式表算两个中心再比较，不是字符串断言）。两个文件都做了反证：拿掉对应修复后，bot-wait-controls 的 4 条断言全部落空，bot-plan-alignment 3 条中 2 条失败。
+
+验证:
+- `npx tsc --noEmit -p apps/mms-web`:退出码 0，无输出。
+- `node --test apps/mms-web/tests/*.test.mjs`:105 pass / 0 fail（门槛 ≥ 100）。
+- `grep -o '#[0-9a-fA-F]\{3,8\}' apps/mms-web/src/bot*.css | sort -u | wc -l`:12。
+- `python3 -m compileall -q mms_web`:退出码 0。
+- `PYTHONPATH=. python3 -m pytest -q tests/test_mms_web_bots.py tests/test_mms_bot_runtime.py`:99 passed in 0.82s。
+- `python3 scripts/regression_fresh_user_gate.py --quick`:PASS，141 passed in 20.86s（本次纯前端，按工单只跑 quick）。
+- `grep -rn '<<<<<<<' mms_web_static`:为空。
+- 60824 用主 workspace 新静态包重启，`/` 与 `/api/v1/bots` 均确认。
+
+未完成 / 未验证:本次 4 处修正只做了类型检查、单元测试与反证，没有在浏览器里逐条回看（提问卡与计划块的视觉此前已由 gemini 验收）；完整 `regression_fresh_user_gate.py`（非 quick）与 `ci_pytest_regression.py` 未跑。T3d-ui / T2c 目前只在任务分支，dev-pre 未包含，转正式需另开任务分支 → dev-pre 的 PR。`wt-T1f` 未动。
