@@ -116,8 +116,8 @@ test("在 Bot 页调用引导或功能介绍时先切回 Pilot 页面再开始",
   // beginGuideStep 必须将页面重置回 "new"
   assert.match(
     appContent,
-    /if \(page === "bots" \|\| step === "welcome"/,
-    "beginGuideStep must transition out of bots page"
+    /if \(page === "bots" \|\| step === "workspace"/,
+    "beginGuideStep must transition out of bots page without hijacking the welcome step"
   );
 
   // guideNavigate 必须在 page === "bots" 时重定向到 "new"

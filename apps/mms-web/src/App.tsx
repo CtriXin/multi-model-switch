@@ -719,7 +719,7 @@ export function App() {
       const inSettings = step === "connection" || step === "settings";
       setSettingsOpen(inSettings);
       if (inSettings) setGuideSettingsKey(old => old + 1);
-      if (page === "bots" || step === "welcome" || step === "workspace" || step === "compose") {
+      if (page === "bots" || step === "workspace" || step === "compose") {
         setPage("new"); setSelectedId(""); setDetail(null); currentSelection.current = "";
         history.replaceState(null, "", location.pathname + location.search);
       }
