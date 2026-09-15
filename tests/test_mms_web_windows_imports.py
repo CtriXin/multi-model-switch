@@ -1,9 +1,9 @@
 """The Pilot web import graph must not require POSIX-only modules on Windows.
 
-Unconditional ``import fcntl`` in ``mms_web/bots.py`` and ``mms_web/bot_memory.py``
-broke ``mms web start`` on Windows with ModuleNotFoundError (Windows acceptance
-phase 8). Locks must go through ``mms_web/file_lock.py``, which carries the
-msvcrt branch. These tests pin that contract:
+An unconditional ``import fcntl`` anywhere in this graph broke ``mms web
+start`` on Windows with ModuleNotFoundError (Windows acceptance phase 8).
+Locks must go through ``mms_web/file_lock.py``, which carries the msvcrt
+branch. These tests pin that contract:
 
 * no bare top-level fcntl import anywhere in the web import graph;
 * the full server import chain loads in a fresh interpreter;
