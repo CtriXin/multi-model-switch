@@ -69,6 +69,17 @@ def test_automatic_capture_does_not_follow_symlinks_or_show_keys(history, tmp_pa
     assert not (store.root / "blobs").exists()
 
 
+def test_windows_preview_reads_utf8_output_without_directory_descriptors(history, monkeypatch):
+    from types import SimpleNamespace
+
+    store, root, _ = history
+    target = root / "emoji.txt"
+    target.write_text("你好👋", encoding="utf-8")
+    monkeypatch.setattr("mms_web.artifact_preview.os", SimpleNamespace(name="nt"))
+
+    assert read_output(root, "emoji.txt") == ("emoji.txt", "你好👋".encode("utf-8"))
+
+
 def test_select_current_quote_then_reject_after_external_edit(history):
     store, root, _ = history
     item = capture(history)

@@ -305,6 +305,30 @@ def test_pi_shared_agent_bin_link_is_reused_across_sessions(monkeypatch, tmp_pat
     assert (Path(shared_bin) / "rg").exists(), "shared bin must survive per-PID cleanup"
 
 
+def test_pi_shared_agent_bin_uses_windows_junction_without_symlink_privilege(monkeypatch, tmp_path):
+    import os
+    from types import SimpleNamespace
+
+    import mms_launchers
+    import mms_pi_support
+
+    preview_root = tmp_path / "mms-next"
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+    monkeypatch.setattr(mms_launchers, "_selected_mms_config_root", lambda _env: str(preview_root))
+    calls = []
+
+    def junction(source, target):
+        calls.append((source, target))
+
+    monkeypatch.setattr(mms_pi_support, "os", SimpleNamespace(
+        name="nt", path=os.path, makedirs=os.makedirs, symlink=os.symlink, junction=junction,
+    ))
+    agent = preview_root / "s" / "123" / ".pi" / "agent"
+    mms_pi_support._pi_link_shared_agent_bin(str(agent))
+
+    assert calls == [(str(preview_root / "pi-gateway" / "agent-bin"), str(agent / "bin"))]
+
+
 def test_pi_wrapper_serializes_cold_npx_prewarm(tmp_path):
     wrapper = Path(__file__).resolve().parents[1] / "scripts" / "pi-cli-wrapper.sh"
     bin_dir = tmp_path / "bin"

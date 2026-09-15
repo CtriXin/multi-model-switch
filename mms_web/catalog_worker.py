@@ -393,7 +393,9 @@ def _cmd_apply_config(stream, payload):
 def main() -> int:
     stream = _result_stream()
     try:
-        payload = json.loads(sys.stdin.read())
+        # The parent sends UTF-8 bytes; never decode stdin with the locale
+        # codepage (cp936 on Chinese Windows would corrupt non-ASCII payloads).
+        payload = json.loads(sys.stdin.buffer.read().decode("utf-8"))
         command = str(payload.get("command") or "").strip()
         if command == "resolve-launch":
             _cmd_resolve_launch(stream, payload)

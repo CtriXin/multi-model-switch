@@ -9,6 +9,17 @@ from mms_web.skills import SkillCatalog
 from mms_web.starter_skills import starter_skills
 
 
+def test_pi_skills_module_resolves_npm_global_windows_layout(tmp_path):
+    from mms_web.skills import _pi_skills_module
+
+    executable = tmp_path / "npm" / "pi.cmd"
+    module = executable.parent / "node_modules/@earendil-works/pi-coding-agent/dist/core/skills.js"
+    module.parent.mkdir(parents=True)
+    module.write_text("", encoding="utf-8")
+
+    assert _pi_skills_module(executable) == module
+
+
 def test_new_user_gets_bundled_skills_without_installing_global_entries(tmp_path):
     project = tmp_path / 'project'
     project.mkdir()
