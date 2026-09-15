@@ -54,6 +54,7 @@ _PY_COMPILE_TARGETS = [
 ]
 
 _PYTEST_TARGETS = [
+    "tests/test_mms_release_version.py",
     "tests/test_mms_web_context_evidence.py",
     "tests/test_mms_web_recipe_contract.py",
     "tests/test_mms_web_updates.py",
