@@ -1,6 +1,7 @@
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, FormEvent, ReactNode } from "react";
 import { RichText } from "./components";
+import { formatDate, formatCompactTime, kindLabel } from "./BotCommunications";
 import type { BotCommunication } from "./BotCommunications";
 import { BotArtifactPreview } from "./BotArtifactPreview";
 import {
@@ -1455,6 +1456,32 @@ function BotOnboarding({
   );
 }
 
+function getChainedParentTaskId(
+  task: BotTask,
+  allTasks: BotTask[],
+  allComms: BotCommunication[],
+): string | null {
+  if (!task.senderBotId) return null;
+  const related = allComms.filter((c) => c.deliveryTaskId === task.id || c.taskId === task.id);
+  for (const c of related) {
+    if (c.replyTo) {
+      const parentComm = allComms.find((p) => p.id === c.replyTo);
+      if (parentComm) {
+        const candidateId = parentComm.taskId || parentComm.deliveryTaskId;
+        if (candidateId && candidateId !== task.id) {
+          const candTask = allTasks.find((t) => t.id === candidateId);
+          if (candTask) {
+            if (!candTask.senderBotId || candTask.senderBotId === candTask.botId) return candTask.id;
+            const ancestor = getChainedParentTaskId(candTask, allTasks, allComms);
+            if (ancestor) return ancestor;
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+
 export function BotChat({
   bot,
   bots,
@@ -1751,9 +1778,32 @@ export function BotChat({
     const readable = cleanTranscriptText(content);
     return readable ? [{ ...event, content: readable }] : [];
   });
-  const conversationTasks = tasks
-    .filter((item) => item.botId === bot?.id)
-    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const conversationTasks = useMemo(() => {
+    return tasks
+      .filter((item) => item.botId === bot?.id)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }, [tasks, bot?.id]);
+
+  const absorbedTasksByParent = useMemo(() => {
+    const map = new Map<string, BotTask[]>();
+    for (const t of conversationTasks) {
+      const parentId = getChainedParentTaskId(t, conversationTasks, communications);
+      if (parentId) {
+        const list = map.get(parentId) || [];
+        list.push(t);
+        map.set(parentId, list);
+      }
+    }
+    return map;
+  }, [conversationTasks, communications]);
+
+  const rootConversationTasks = useMemo(() => {
+    const absorbedIds = new Set<string>();
+    for (const list of absorbedTasksByParent.values()) {
+      for (const t of list) absorbedIds.add(t.id);
+    }
+    return conversationTasks.filter((t) => !absorbedIds.has(t.id));
+  }, [conversationTasks, absorbedTasksByParent]);
   const onboardingMode = Boolean(bot && (!bot.systemPrompt.trim() || bot.systemPrompt.includes("这是创建时确认的工作预设")));
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -2117,20 +2167,23 @@ export function BotChat({
             <RichText text={settingNotice} />
           </div>
         )}
-        {bot && conversationTasks.map((conversationTask) => {
+        {bot && rootConversationTasks.map((conversationTask) => {
+          const absorbed = absorbedTasksByParent.get(conversationTask.id) || [];
+          const allTaskIds = [conversationTask.id, ...absorbed.map((t) => t.id)];
+
           const taskCommunications = communications.filter(
             (message) =>
-              message.taskId === conversationTask.id ||
-              message.deliveryTaskId === conversationTask.id,
+              allTaskIds.includes(message.taskId || "") ||
+              allTaskIds.includes(message.deliveryTaskId || ""),
           );
           const communicationGroups = [...new Set(taskCommunications.map((message) => {
             return message.senderBotId === bot.id ? message.recipientBotId : message.senderBotId;
           }))]
             .map((peerId) => ({
               peerId,
-              messages: taskCommunications.filter(
-                (message) => message.senderBotId === peerId || message.recipientBotId === peerId,
-              ),
+              messages: taskCommunications
+                .filter((message) => message.senderBotId === peerId || message.recipientBotId === peerId)
+                .sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
             }))
             .filter((group) => group.peerId && group.messages.length);
           const taskSender = conversationTask.senderBotId
@@ -2140,18 +2193,69 @@ export function BotChat({
           const initialInstruction = taskEvents.find(
             (event) => event.taskId === conversationTask.id && event.type === "instruction",
           );
+
+          const isPeerExplanation = (text: string) => {
+            return /(?:已向.+发送|已向.+说|协作者.+打招呼)/i.test(text.trim());
+          };
+
+          const isPeerRelatedEvent = (event: BotEvent) => {
+            if (event.type === "handoff") return true;
+            const content = event.content.trim();
+            if (/(?:已分发给|已分发子任务|已向.+发送|已向.+说|子任务.*已回传|子任务.*完成|消息已排队投递|双向消息完成|已回复.+[：“"]|协作者.*打招呼)/i.test(content)) {
+              return true;
+            }
+            for (const group of communicationGroups) {
+              const peer = bots.find((b) => b.id === group.peerId);
+              if (peer && content.includes(peer.name)) {
+                return true;
+              }
+            }
+            return false;
+          };
+
           const conversationEvents = taskEvents.filter(
             (event) =>
-              event.taskId === conversationTask.id &&
+              allTaskIds.includes(event.taskId || "") &&
+              !isPeerRelatedEvent(event) &&
               !(event.id === initialInstruction?.id && event.content === conversationTask.prompt.trim()) &&
               !(["completed", "failed", "cancelled", "interrupted"].includes(conversationTask.status) && !["error", "instruction"].includes(event.type)),
           );
           const conversationArtifacts = artifacts.filter(
-            (artifact) => artifact.taskId === conversationTask.id,
+            (artifact) => allTaskIds.includes(artifact.taskId || ""),
           );
-          const resultText =
-            conversationTask.outcome?.summary?.trim() ||
-            cleanTranscriptText(conversationTask.result || "");
+
+          const getExplanationsForPeer = (peerName: string) => {
+            const lines = new Set<string>();
+            for (const tid of allTaskIds) {
+              const rawEvents = events.filter((e) => e.taskId === tid);
+              for (const e of rawEvents) {
+                if (isPeerExplanation(e.content) && (!peerName || e.content.includes(peerName))) {
+                  lines.add(e.content.trim());
+                }
+              }
+              const t = tasks.find((item) => item.id === tid);
+              if (t?.result && isPeerExplanation(t.result) && (!peerName || t.result.includes(peerName))) {
+                lines.add(t.result.trim());
+              }
+            }
+            return Array.from(lines);
+          };
+
+          const latestTaskWithResult = [conversationTask, ...absorbed]
+            .slice()
+            .reverse()
+            .find((t) => t.outcome?.summary?.trim() || (t.result && !isPeerExplanation(t.result)));
+
+          let resultText = "";
+          if (latestTaskWithResult) {
+            resultText =
+              latestTaskWithResult.outcome?.summary?.trim() ||
+              cleanTranscriptText(latestTaskWithResult.result || "");
+          } else if (conversationTask.result) {
+            resultText =
+              conversationTask.outcome?.summary?.trim() ||
+              cleanTranscriptText(conversationTask.result || "");
+          }
           return (
           <Fragment key={conversationTask.id}>
             <div className={`bot-chat-message ${taskFromBot ? "bot-chat-event bot-chat-event-handoff" : "bot-chat-user"}`}>
@@ -2261,20 +2365,19 @@ export function BotChat({
             ))}
             {communicationGroups.map((group) => {
               const peer = bots.find((item) => item.id === group.peerId);
-              if (!peer || !onOpenCommunications) return null;
-              const sent = group.messages.some((message) => message.senderBotId === bot.id);
+              if (!peer) return null;
+              const explanations = getExplanationsForPeer(peer.name);
               return (
-                <button
-                  className="bot-communications-marker"
+                <BotPeerThread
                   key={`${conversationTask.id}-${peer.id}`}
-                  type="button"
-                  onClick={() => onOpenCommunications(peer.id)}
-                  aria-label={`${sent ? "已发消息给" : "消息来自"} ${peer.name}，${group.messages.length}条消息往来`}
-                >
-                  <MessageSquare size={13} />
-                  <span>{sent ? `已发消息给 ${peer.name}` : `消息来自 ${peer.name}`}</span>
-                  <small>· {group.messages.length}条消息往来</small>
-                </button>
+                  task={conversationTask}
+                  peer={peer}
+                  messages={group.messages}
+                  bots={bots}
+                  currentBot={bot}
+                  onOpenCommunications={onOpenCommunications}
+                  explanations={explanations}
+                />
               );
             })}
             {conversationTask.waitReason && (
@@ -2597,3 +2700,107 @@ export function BotChat({
 export function BotWorkspace({ children }: { children?: ReactNode }) {
   return <div className="bot-workspace">{children}</div>;
 }
+
+export function BotPeerThread({
+  task,
+  peer,
+  messages,
+  bots,
+  currentBot,
+  onOpenCommunications,
+  explanations = [],
+}: {
+  task: BotTask;
+  peer: BotDefinition;
+  messages: BotCommunication[];
+  bots: BotDefinition[];
+  currentBot: BotDefinition;
+  onOpenCommunications?: (peerId: string) => void;
+  explanations?: string[];
+}) {
+  const latestMessage = messages[messages.length - 1];
+  const count = messages.length;
+
+  return (
+    <details className="bot-peer-thread">
+      <summary className="bot-peer-thread-summary">
+        <span className="bot-peer-thread-summary-main">
+          <MessageSquare size={13} className="bot-peer-thread-icon" />
+          <span>与 {peer.name} 的往来 · {count} 条</span>
+        </span>
+        <span className="bot-peer-thread-summary-side">
+          {latestMessage && (
+            <time className="bot-peer-thread-time" dateTime={latestMessage.createdAt}>
+              {formatCompactTime(latestMessage.createdAt)}
+            </time>
+          )}
+          {onOpenCommunications && (
+            <button
+              type="button"
+              className="bot-peer-thread-link"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onOpenCommunications(peer.id);
+              }}
+            >
+              在协作面板查看
+            </button>
+          )}
+        </span>
+      </summary>
+      <div className="bot-peer-thread-body">
+        <div className="bot-peer-thread-messages">
+          {messages.map((message) => {
+            const sender = bots.find((b) => b.id === message.senderBotId);
+            const fromCurrent = message.senderBotId === currentBot.id;
+            return (
+              <div
+                key={message.id}
+                className={`bot-peer-thread-message ${fromCurrent ? "from-current" : "from-peer"}`}
+              >
+                <div className="bot-peer-thread-message-meta">
+                  <PixelAvatar
+                    className="bot-peer-thread-avatar"
+                    avatarId={fromCurrent ? currentBot.avatarId : sender?.avatarId}
+                    color={fromCurrent ? currentBot.avatarColor : sender?.avatarColor}
+                    seed={fromCurrent ? currentBot.id : sender?.id}
+                  />
+                  <span className="bot-peer-thread-author">
+                    {fromCurrent ? currentBot.name : sender?.name || "Bot"}
+                  </span>
+                  <span className="bot-peer-thread-sep">·</span>
+                  <span className={`bot-peer-thread-kind is-${message.kind}`}>
+                    {kindLabel(message.kind)}
+                  </span>
+                  <span className="bot-peer-thread-sep">·</span>
+                  <time className="bot-peer-thread-time" dateTime={message.createdAt}>
+                    {formatDate(message.createdAt)}
+                  </time>
+                </div>
+                <div className="bot-peer-thread-content">
+                  <RichText text={message.content} repair />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        {explanations.length > 0 && (
+          <div className="bot-peer-thread-explanation">
+            <div className="bot-peer-thread-explanation-header">
+              <span className="bot-peer-thread-explanation-badge">Bot 的说明</span>
+            </div>
+            <div className="bot-peer-thread-explanation-body">
+              {explanations.map((text, idx) => (
+                <div key={idx} className="bot-peer-thread-explanation-item">
+                  <RichText text={text} repair />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </details>
+  );
+}
+
