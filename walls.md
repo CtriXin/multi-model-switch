@@ -487,3 +487,9 @@
 验证:T1c 全链路实测通过（无 dialog、起名预填、记为约定写入 systemPrompt、任务后提议出现）。多 Bot 协作未发生：大总管对"分别给我 1）2）"直接 direct 完成，coordinatorPlan.source=direct-first、modelDecision=false，根因是 bots.py 1047-1062 的 direct-first 短路只看协作关键词。这正是 T2b 工单要解决的"形状检查"。
 缺陷:预设编辑器重开时名字被换成建议名（会静默改名）、编辑器无关闭入口、固定尾句排在补充约定之后、名字框双层焦点框 → 开 T1e 给 gemini。Pilot 首页在 API 正常时仍显示"无法连接 MMS 本地服务"与"请选择可用模型"提示（截图 17-pilot-home.png），属 Pilot 侧，待复现。/api/v1/sessions 里有两条 2026-09-12 遗留的 Bot 内部会话（s-c9e97dc6b6cf"新 Bot"未归档可见、s-88bfc3af937d"计划 · 大总管"已归档），owner 记为 web，隔离过滤挡不住，属隔离上线前的旧数据。
 未验证:带协作关键词时的 delegate 链路、plan-approve、子任务失败恢复、重启持久化、窄窗与深色主题。
+
+## 2026-09-15 11:00 SGT · claude-fable-5.1（subagent 执行）· 370e87ec37e741df
+需求:准备 5.0.0 预览分支，基线 v4.21.14，只到准备阶段。
+处置:worktree wt-v5 分支 claude/dev-pre-5.0（起点 90287459）：合入 v4.21.12 再 v4.21.14，cherry-pick RELEASE_CHANNELS 规则与 4.21.12/4.21.14 说明，版本 5.0.0，新增 RELEASE-v5.0.0.md，重建静态包。draft PR #261 → dev-pre，依赖 #254 先合。受保护文件只有 mms_launchers.py 经 merge 带入 +48/-5。
+验证:compileall 通过；focused+windows+updates 147 passed/1 skipped；Node 83；tsc 0；fresh-user gate PASS 676；ci_pytest_regression base 63/2551 vs head 63/2578 无新增失败。
+未验证:Windows acceptance 未在本分支跑；Windows 上 Bot 未验收（已写进发布说明的验证边界）。
