@@ -75,11 +75,13 @@ class ModelSettings:
                "MMS_WEB_STANDALONE": "1" if self.catalog._local_setup() else "0"}
         Path(env["HOME"]).mkdir(mode=0o700, exist_ok=True)
         try:
+            # Same UTF-8 contract as catalog._run_worker: bytes on the wire,
+            # never locale-decoded text=True on a GBK Windows host.
             process = subprocess.run([sys.executable, str(Path(__file__).with_name("model_settings_worker.py"))],
-                input=json.dumps({**payload, "root": str(root), "standalone": self.catalog._local_setup()}),
-                capture_output=True, text=True, env=env, timeout=90)
+                input=json.dumps({**payload, "root": str(root), "standalone": self.catalog._local_setup()}).encode("utf-8"),
+                capture_output=True, env=env, timeout=90)
             try:
-                result = json.loads(process.stdout)
+                result = json.loads((process.stdout or b"").decode("utf-8", errors="replace"))
             except ValueError:
                 raise WebError("SETTINGS_FAILED", "配置服务没有返回有效结果，请重试。", 500)
             if not result.get("ok"):

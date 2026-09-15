@@ -115,6 +115,89 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 
 升级同样是重新粘贴这一条命令，但如果 Pilot 正在运行，安装器会暂停并拒绝，不会替你关闭它：请先在 Pilot 页面里点“更新”，或者执行 `mms web stop`（本机有多个实例用 `mms web stop --all`）退出后再重新执行安装命令。跨配置根的版本会在 Pilot 更新中心明确要求先执行这条安装命令；它不会自动删除或移动旧 `~/.config/mms`，因为那里可能还有 gateway/session 运行数据。
 
+> `install.sh` 是 macOS/Linux 的安装器；Windows 请使用上面的 PowerShell 安装方式。`--channel dev` 会安装 `dev` 分支当前内容，版本号应不低于 Stable；只想安装已发布版本请使用 Stable 命令或固定 `--ref vX.Y.Z`。
+
+### Windows Native Preview：刚装好系统也能照着做
+
+Windows 目前是 Native Preview。下面按一台刚装好 Windows 11、还没有开发环境的电脑来写；普通用户不需要先懂 Python、Node 或 Git。
+
+1. 打开开始菜单，搜索 **Windows PowerShell**，打开普通窗口即可，不要先用管理员权限。复制下面几行检查系统有没有包管理器和运行时：
+
+   ```powershell
+   winget --version
+   python --version
+   node --version
+   npm --version
+   ```
+
+2. 如果 `python` 或 `node` 提示找不到，逐条执行对应安装命令：
+
+   ```powershell
+   winget install --id Python.Python.3.12 -e --source winget
+   winget install --id OpenJS.NodeJS.LTS -e --source winget
+   ```
+
+   安装完成后，关闭所有 PowerShell 窗口，再打开一个新窗口。这样新的 `PATH` 才会生效。然后再次执行 `python --version`、`node --version` 和 `npm --version`。如果电脑没有 `winget`，从 [python.org](https://www.python.org/downloads/windows/) 和 [nodejs.org](https://nodejs.org/en/download) 安装，并在安装向导中勾选加入 `PATH`。
+
+   Pi 是 MMS 调用的本机 coding agent，需要单独安装到 Node 的 global package。PowerShell 里使用 `npm.cmd` 可以避开执行策略对 `npm.ps1` 的拦截：
+
+   ```powershell
+   npm.cmd install --global @earendil-works/pi-coding-agent
+   pi.cmd --version
+   ```
+
+   如果 `pi.cmd` 找不到，关闭所有 PowerShell 窗口后再开一个新窗口；仍找不到就执行 `npm.cmd prefix --global`，把显示的目录本身加入用户 `PATH`（Windows 通常不是 `bin` 子目录），然后再开新窗口。安装器只检查 Pi 是否已经在 `PATH`，不会替你安装 Pi。
+
+3. 安装 MMS Windows Native Preview。下面的命令会下载官方安装脚本；它会准备 MMS 自己的 Python venv 和 Pilot，不会导入或覆盖已有 config/session：
+
+   ```powershell
+   $script = Join-Path $env:TEMP 'mms-install-v4.21.14.ps1'
+
+   Invoke-WebRequest -UseBasicParsing `
+     -Uri 'https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.21.14/packages/mms-install/bin/install.ps1' `
+     -OutFile $script
+
+   powershell.exe -NoProfile -ExecutionPolicy Bypass `
+     -File $script -Ref v4.21.14
+   ```
+
+   安装结束后再打开一个 PowerShell，确认命令来自 MMS：
+
+   ```powershell
+   Get-Command mms
+   mms config root
+   ```
+
+4. 启动 Pilot：
+
+   ```powershell
+   mms web start --open
+   Start-Sleep -Seconds 5
+   mms web status
+   ```
+
+   浏览器地址通常是 `http://127.0.0.1:8765`。它只在这台电脑上可访问。停止、重启和查看 JSON 状态分别是 `mms web stop`、`mms web restart` 和 `mms web status --json`。
+
+5. Windows 暂时没有可依赖的 MMS TUI（直接输入不带参数的 `mms` 可能遇到 Python `curses` / `_curses`）。启动 Pi 请用下面这个明确的命令；它会显示模型选择，选好后按 Enter：
+
+   ```powershell
+   $mms = "$env:LOCALAPPDATA\MMS\versions\v4.21.14\mms"
+   $python = "$env:LOCALAPPDATA\MMS\.venv\Scripts\python.exe"
+   & $python $mms pi
+   ```
+
+   先发送 `hi`、`你是什么模型` 和 `Get-Location`，再试创建一个中文/emoji 文件。不要把 `PYTHONUTF8=1` 永久写入系统环境变量；如果以前设置过，当前窗口可以清掉：
+
+   ```powershell
+   Remove-Item Env:PYTHONUTF8 -ErrorAction SilentlyContinue
+   ```
+
+### Windows 用户发现自己的独立问题怎么办？
+
+先把问题当作一个可以交给维护者的“小 issue”，不要把 API Key、`credentials.sh`、整个 `mms-next` 配置目录或未脱敏的 session 发出去。可以在 Pilot 里直接让本地 AI 先诊断当前电脑；完成诊断后，让它根据你有没有 GitHub 账号选择提交方式：有账号就做 fork 和 PR，没有账号就生成一份脱敏的 Markdown 报告和 `.patch` 文件，由维护者代提交。
+
+给本地 AI 的可复制提示词、完整 PowerShell 取证命令、GitHub fork/PR 的小白步骤和 PR 模板都在 [`docs/mms-web/WINDOWS-CONTRIBUTING.md`](docs/mms-web/WINDOWS-CONTRIBUTING.md)。
+
 <details>
 <summary>其他安装方式</summary>
 
