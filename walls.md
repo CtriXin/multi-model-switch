@@ -493,3 +493,46 @@
 处置:worktree wt-v5 分支 claude/dev-pre-5.0（起点 90287459）：合入 v4.21.12 再 v4.21.14，cherry-pick RELEASE_CHANNELS 规则与 4.21.12/4.21.14 说明，版本 5.0.0，新增 RELEASE-v5.0.0.md，重建静态包。draft PR #261 → dev-pre，依赖 #254 先合。受保护文件只有 mms_launchers.py 经 merge 带入 +48/-5。
 验证:compileall 通过；focused+windows+updates 147 passed/1 skipped；Node 83；tsc 0；fresh-user gate PASS 676；ci_pytest_regression base 63/2551 vs head 63/2578 无新增失败。
 未验证:Windows acceptance 未在本分支跑；Windows 上 Bot 未验收（已写进发布说明的验证边界）。
+
+## 2026-09-15 12:10 SGT · gemini-3.6 · 370e87ec37e741df
+需求: 执行 T3c 工作包（Bot 间往来在主聊天折叠成一张卡，协作面板按任务分段）：
+  1. 主聊天：一个任务里与同一个对方 Bot 的往来折叠成 `<details className="bot-peer-thread">` 卡片，summary 显示"与 <对方名> 的往来 · N 条" + 右侧小时间 + "在协作面板查看"文字按钮；展开后在原位按时间列出消息（带发送方小头像与名字，无"已处理"标签）；默认收起；事件流中相关 peer 往来事件不再单独渲染，收归卡内；Bot 自己的转述句放入卡片尾部标为"Bot 的说明"；Bot 给用户的最后一句结论正常显示，不折叠。
+  2. 协作面板：顶部加对方 Bot 切换条（头像 + 名字 + 最近时间，高亮当前项，1 个对方也展示）；面板副标题动态跟随当前对方（如"调度 与 大总管"）；消息按任务分段（每个 taskId 一段，段头为任务第一句用户请求截取 60 字 + 日期；无 taskId 的归入"未关联任务"；最新任务在最上）；区分 kind（result 标"结果"且超 6 行可展开折叠，message 保持样式，dispatch 标"任务"）；不同天之间插入细分隔线显示日期。
+  3. 响应式适配：400px 窄屏折叠卡和协作面板无溢出。
+处置:
+  1. `apps/mms-web/src/Bot.tsx`:
+     - 引入 `getChainedParentTaskId` 追溯通信链路，将 peer 唤醒触发的子任务自动归入其发起根任务（如把 `task_a576d8caeda84ad3` 归集至 `task_2e9398e2b33843c0`），消除了主聊天中大总管头像冒充用户输入的割裂感。
+     - 渲染 `<BotPeerThread>` 组件，默认收起，summary 显示 `与 <对方名> 的往来 · N 条` + 时间 + `在协作面板查看` 按钮；展开后展示通信流及底部的 `Bot 的说明` 块；过滤 peer 散落事件，保留用户输入和最终回复。
+  2. `apps/mms-web/src/BotCommunications.tsx`:
+     - 导出纯函数 `formatDateOnly`、`groupCommunicationsByDate`、`groupCommunicationsByTask`（按任务分段、截取 60 字、最新在最前、跨天加日期分隔线）。
+     - 顶部增加对方 Bot 切换条（头像、名称、时间，支持单一对方展示），副标题动态跟随对方名称。
+     - kind 细分：`result` 标记"结果"且超过 6 行内联折叠展开，`dispatch` 标记"任务"，`message` 标记"消息"。
+  3. `apps/mms-web/src/bot.css`:
+     - 添加 `.bot-peer-thread`、切换条、任务分段头、日期分隔线、kind 标签、6 行折叠及 400px 移动端窄屏样式。
+     - 修复 Chromium 下 details 设置 `overflow: hidden` 导致 closed 状态高度为 2px 的原生隐蔽渲染 bug，将圆角和裁切优化至 summary。
+     - 为 `.bot-communications-peers` 补齐 `flex-shrink: 0 !important;`，避免 flex 容器纵向挤压导致切换条被压扁。
+  4. `apps/mms-web/tests/bot-peer-folding.test.mjs`:
+     - 新增纯函数单元测试，覆盖按任务分段截断排序与按天分隔。
+  5. `docs/mms-web/DESIGN.md`:
+     - 追加第 6 节规范说明。
+改动文件:
+```text
+ apps/mms-web/DESIGN.md                 |  11 +
+ apps/mms-web/src/Bot.tsx               | 261 +++++++++++++++++--
+ apps/mms-web/src/BotCommunications.tsx | 463 +++++++++++++++++++++++++++------
+ apps/mms-web/src/bot.css               | 402 ++++++++++++++++++++++++++++
+ 4 files changed, 1032 insertions(+), 105 deletions(-)
+ 新增: apps/mms-web/tests/bot-peer-folding.test.mjs, docs/mms-web/design/t3c/ (4 张验收截图)
+```
+测试:
+  - TypeScript 类型检查: `npx tsc --noEmit -p apps/mms-web`（0 错误）。
+  - 前端全量单元测试: `node --test apps/mms-web/tests/*.test.mjs`（85 passed, 0 failed，基线 83 + 新增 2 项断言）。
+  - 前端构建打包: `npm run build --workspace @mms/web`（通过）。
+  - Hex 门禁检查: `grep -o '#[0-9a-fA-F]\{3,8\}' apps/mms-web/src/bot*.css | sort -u | wc -l` 严格为 12。
+实时验证:
+  - 独立端口: 61702（独立只读 state 副本 `/tmp/bot-verify-T3c`，未碰 60824）。
+  - 验收 1（调度主聊天收起状态）: 调度的聊天里只剩用户消息、一张收起的"与 大总管 的往来 · 3 条"卡、调度给用户的最后一句结论。截图: `docs/mms-web/design/t3c/t3c_1_chat_folded.png`（脑部存档: `file:///Users/xin/.gemini/antigravity-cli/brain/f414fd9d-ced5-4da4-b1a2-7608e91ec350/t3c_1_chat_folded.png`）。
+  - 验收 2（展开折叠卡）: 展开后原位列出 3 条消息（带发送方小头像与名字，无"已处理"标签），末尾展示"Bot 的说明"（含过滤出的"已向大总管发送..."）。截图: `docs/mms-web/design/t3c/t3c_2_chat_expanded.png`（脑部存档: `file:///Users/xin/.gemini/antigravity-cli/brain/f414fd9d-ced5-4da4-b1a2-7608e91ec350/t3c_2_chat_expanded.png`）。
+  - 验收 3（协作面板）: 顶部对方切换条高亮大总管，副标题显示"调度 与 大总管"，9月15日问候段与9月11日结果段按任务清晰分段，跨天带日期分隔线，kind 正确区分，结果超 6 行带"展开全文"。截图: `docs/mms-web/design/t3c/t3c_3_communications_sections.png`（脑部存档: `file:///Users/xin/.gemini/antigravity-cli/brain/f414fd9d-ced5-4da4-b1a2-7608e91ec350/t3c_3_communications_sections.png`）。
+  - 验收 4（400px 窄屏适配）: 视口宽度 400px 下，折叠卡和协作面板自适应良好，无横向滚动条，无布局溢出。截图: `docs/mms-web/design/t3c/t3c_4_narrow_400px.png`（脑部存档: `file:///Users/xin/.gemini/antigravity-cli/brain/f414fd9d-ced5-4da4-b1a2-7608e91ec350/t3c_4_narrow_400px.png`）。
+未完成 / 未验证: 无。T3c 规定的全部功能及 4 项验收指标均 100% 验证通过。代码保持未提交（uncommitted）状态。
