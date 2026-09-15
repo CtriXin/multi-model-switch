@@ -1321,6 +1321,14 @@ def test_web_offer_respects_no_launch_web(tmp_path):
         _stop_fake_mms_web(home)
 
 
+def test_preview_install_path_also_offers_mms_web():
+    """Dev/canary installs must use the same post-install web launch policy."""
+    text = INSTALL_SCRIPT.read_text(encoding="utf-8")
+    assert 'if [ "$DID_LAUNCH" -eq 0 ] && [ "$LAUNCH_AFTER_INSTALL" -eq 0 ]; then' in text
+    assert 'if [ "$PREVIEW_CHANNEL_INSTALL" -eq 0 ] && [ "$DID_LAUNCH" -eq 0 ] && [ "$LAUNCH_AFTER_INSTALL" -eq 0 ]; then' not in text
+    assert 'Pilot 会打开用于添加 provider 和 API Key' in text
+
+
 def test_installer_does_not_reuse_another_homes_web_instance(tmp_path):
     first_home = tmp_path / 'first'; second_home = tmp_path / 'second'
     first_home.mkdir(); second_home.mkdir()
