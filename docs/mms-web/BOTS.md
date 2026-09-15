@@ -29,6 +29,36 @@ Bot 可以从内部 worker 分发子任务。子任务完成后，结果消息�
 
 计划在聊天里以计划块可见（`BotPlan`）。Bot 设置项：`planner` = `model`（默认）/ `keywords` / `off`（off 时恒为 direct 单步）；`orchestrationPolicy` = `direct-first`（默认，计划生成后直接执行，30 秒内可在计划块撤回）/ `plan-approve`（先生成计划等用户确认）/ `off`（关闭自动分工）。`POST /api/v1/tasks/:id/plan` 接受 `approve` / `reject` / `replace`，replace 的计划按真实 Bot 名单重新校验。
 
+### 计划状态机（2026-09-15，T2b）
+
+触发在 direct-first 之上加了一道纯函数形状检查 `looks_multi_goal`：编号列表 ≥2 项（`1.` / `1）` / `①` / `- ` 开头的行或行内全角枚举）、`分别 / 同时 / 各自 / 一边…一边`、`@Bot名` 或提到 ≥2 个花名册里的 Bot 名，命中任一即为真。触发顺序：`orchestrationPolicy=off` → direct；`planner=off` → direct；显式协作信号或形状检查为真 → 走一次模型 planner（20 秒预算，roster 带每个 Bot 的描述和最近 3 次成功任务标题），失败退关键词计划，再失败 direct；其它一律 direct，不为单目标任务付出 planner 调用。
+
+计划级状态（每次迁移追加 `plan.history[]`，`{at, from, to, by}`，封顶 50 条）：
+
+| 当前 | 可迁移到 | 说明 |
+| --- | --- | --- |
+| proposed | approved / rejected / cancelled | 等用户确认 |
+| auto | running / rejected / cancelled | rejected 是 30 秒撤回 |
+| approved | running / rejected / cancelled | 同上 |
+| running | merging / failed / cancelled / rejected | failed 来自步骤 abort |
+| merging | done / failed / cancelled | owner 汇总轮 |
+| failed | running | 只能由 retry-step 重开 |
+| rejected / done / cancelled | （终态） | |
+
+步骤级状态：`pending → ready → running → done | failed | skipped`。旧数据里的 `dispatched` / `blocked` 读取时归一为 `running` / `skipped`。每步带 `onFailure`（默认 `retry`）：
+
+| 策略 | 失败后行为 |
+| --- | --- |
+| retry | 子任务先走 T3 的瞬态重试；预算用尽仍失败按 abort 处理 |
+| skip | 步骤标 `skipped`，依赖它的 pending 步骤级联跳过，计划继续 |
+| abort | 计划标 `failed`，其余 pending 步骤标 `skipped`，父任务恢复一次，只说明哪一步失败并询问要不要换人重来 |
+
+取消：`POST /tasks/:id/plan {"action":"cancel"}` 把计划标 `cancelled`，进行中的子任务走现有 stop，父任务恢复并告知用户。`retry-step`（仅 failed 步骤，重新创建子任务，计划 failed → running）和 `skip-step`（标 skipped 并推进）带 `stepId`。
+
+结果图：子任务终态时把结构化结果写进 `steps[].result`（`summary` ≤600 字，另有 `conclusion` / `evidence` / `artifacts[]` 就带），任务上同时存 `childResults[]`（与 `steps[].result` 同源）便于前端一次读取；恢复提示按步骤编号列出各步摘要，owner 的一次回复就是合并结论，合并完成计划进 `done`。
+
+重启与幂等：创建子任务前按 `(parentTaskId, planStepId)` 对账，已有就指回不重建；重启后对 running 的计划只做推进，不重发已完成步骤；父任务恢复有 `childrenChanged` / plan 终态 / `resumedAt` 多重保护，恰好一次。被重启打断（interrupted）的子任务不算计划失败，步骤保持 running，等显式唤醒、skip-step 或取消。
+
 Bot 之间还有独立的 `message`/`reply` mailbox。`dispatch` 用于有依赖的工作分工；`message` 用于通知、澄清和追问，不会伪装成用户消息。接收方空闲时自动投递，忙时排队；每条消息有 `queued`、`delivered`、`processed`、`waiting`、`failed` 回执。`reply MESSAGE_ID` 只能回复发给当前 Bot 的消息，连续自动往返超过 8 跳会暂停，避免 Bot 互相空转。
 
 ## 记忆与上下文

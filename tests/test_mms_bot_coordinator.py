@@ -1,4 +1,6 @@
-from mms_web.bot_coordinator import make_plan, parse_model_plan, build_planner_prompt
+from mms_web.bot_coordinator import (make_plan, parse_model_plan, build_planner_prompt, direct_plan,
+                                     looks_multi_goal, set_plan_status, transition_plan, transition_step,
+                                     normalize_step_status, MAX_PLAN_HISTORY)
 from mms_web.bot_computer import EgoComputer
 
 
@@ -101,3 +103,88 @@ def test_planner_prompt_carries_roster_goal_and_schema():
     assert "用户偏好简洁回报" in prompt
     assert '"mode"' in prompt and "dependsOn" in prompt
     assert "id=a" not in prompt.split("可分工的其它 Bot")[1]
+
+
+def test_planner_prompt_includes_recent_success_titles_when_given():
+    owner = bot("a", "总管")
+    writer = bot("b", "写手", "写文件")
+    prompt = build_planner_prompt("分工", owner, [owner, writer], "", {"b": ["整理月报", "核对数据"]})
+    assert "近期完成=整理月报；核对数据" in prompt
+    bare = build_planner_prompt("分工", owner, [owner, writer])
+    assert "近期完成" not in bare
+
+
+def test_looks_multi_goal_positive_shapes():
+    assert looks_multi_goal("分别给我：1）三句话介绍 git rebase；2）三句话介绍 git merge")
+    assert looks_multi_goal("1. 写一份总结\n2. 写一份摘要")
+    assert looks_multi_goal("- 整理桌面文件\n- 清理下载目录")
+    assert looks_multi_goal("请同时检查日志和配置文件")
+    writer, checker = bot("b", "写手"), bot("c", "检查员")
+    assert looks_multi_goal("请写手处理文案，检查员核对结果", [writer, checker], owner_id="a")
+
+
+def test_looks_multi_goal_negative_single_goals():
+    assert not looks_multi_goal("列出当前目录的 txt 文件")
+    assert not looks_multi_goal("用三句话解释 git rebase")
+    assert not looks_multi_goal("总结这份文档并告诉我结论")
+    assert not looks_multi_goal("把 report.txt 重命名为 final.txt")
+    writer, checker = bot("b", "写手"), bot("c", "检查员")
+    assert not looks_multi_goal("请写手整理这份文件", [writer, checker], owner_id="a")
+
+
+def test_plan_transitions_follow_the_table_and_record_history():
+    plan = direct_plan(bot("a", "总管"), "r", "test")
+    set_plan_status(plan, "auto")
+    assert plan["history"] == [{"at": plan["history"][0]["at"], "from": None, "to": "auto", "by": "system"}]
+    assert transition_plan(plan, "done") is False  # illegal: auto -> done
+    assert plan["status"] == "auto" and len(plan["history"]) == 1
+    assert transition_plan(plan, "running") is True
+    assert transition_plan(plan, "merging", by="system") is True
+    assert transition_plan(plan, "done", by="step:s1") is True
+    assert plan["history"][-1]["from"] == "merging" and plan["history"][-1]["by"] == "step:s1"
+    assert transition_plan(plan, "running") is False  # done is terminal
+    # failed -> running only via the retry-step reopen
+    plan2 = direct_plan(bot("a", "总管"), "r", "test")
+    set_plan_status(plan2, "auto")
+    transition_plan(plan2, "running")
+    assert transition_plan(plan2, "failed", by="step:s2") is True
+    assert transition_plan(plan2, "running", by="user") is True
+
+
+def test_plan_history_is_capped_at_fifty():
+    plan = direct_plan(bot("a", "总管"), "r", "test")
+    set_plan_status(plan, "auto")
+    transition_plan(plan, "running")
+    for _ in range(40):
+        transition_plan(plan, "failed", by="step:s1")
+        transition_plan(plan, "running", by="user")
+    assert len(plan["history"]) == MAX_PLAN_HISTORY
+    assert plan["history"][-1]["to"] == "running"
+
+
+def test_step_transitions_follow_the_table():
+    step = {"id": "s1", "status": "pending"}
+    assert transition_step(step, "done") is False  # pending cannot finish directly
+    assert transition_step(step, "ready") is True
+    assert transition_step(step, "running") is True
+    assert transition_step(step, "failed") is True
+    assert transition_step(step, "ready") is True   # retry-step reopen
+    assert transition_step(step, "skipped") is True
+    assert transition_step(step, "running") is False  # skipped is terminal
+    legacy = {"id": "s2", "status": "dispatched"}
+    assert normalize_step_status("dispatched") == "running"
+    assert normalize_step_status("blocked") == "skipped"
+    assert transition_step(legacy, "done") is True
+
+
+def test_sanitize_plan_defaults_and_validates_on_failure():
+    owner = bot("a", "总管")
+    writer = bot("b", "写手")
+    reply = '{"mode":"delegate","reason":"x","steps":[' \
+            '{"id":"s1","botId":"b","goal":"写","dependsOn":[],"onFailure":"skip"},' \
+            '{"id":"s2","botId":"b","goal":"核","dependsOn":["s1"],"onFailure":"explode"}]}'
+    plan = parse_model_plan(reply, owner, [owner, writer])
+    assert plan["steps"][0]["onFailure"] == "skip"
+    assert plan["steps"][1]["onFailure"] == "retry"
+    direct = direct_plan(owner, "r", "test")
+    assert direct["steps"][0]["onFailure"] == "retry"

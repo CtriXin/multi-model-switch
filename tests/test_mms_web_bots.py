@@ -416,6 +416,52 @@ def test_memory_skips_greetings_and_acknowledgements(tmp_path):
         rt.close()
 
 
+class ScriptedPlanExecutor(FakeExecutor):
+    """Planner seam plus per-task scripted outcomes."""
+
+    def __init__(self, plan_reply=None):
+        super().__init__()
+        self.plan_reply = plan_reply
+        self.outcomes = {}
+
+    def plan(self, prompt, bot, timeout=20.0):
+        return self.plan_reply
+
+    def snapshot(self, task):
+        outcome = self.outcomes.get(task["id"])
+        if outcome == "failed":
+            return {"state": "error", "alive": False, "events": [
+                {"id": f"err-{task['id']}", "kind": "error", "status": "error", "text": "执行失败"}], "artifacts": []}
+        if outcome == "completed" or outcome is None and task["id"] in self.outcomes:
+            return {"state": "completed", "alive": False, "events": [
+                {"id": f"answer-{task['id']}", "kind": "assistant", "status": "done",
+                 "text": f"完成 {task['prompt']}"}], "artifacts": []}
+        return {"state": "running", "alive": True, "events": [], "artifacts": []}
+
+
+def pump_runtime(rt, rounds=6):
+    for _ in range(rounds):
+        rt.tick()
+        drain_launch(rt)
+
+
+def test_plan_action_rejects_unknown_action_and_direct_plan(tmp_path):
+    rt = runtime(tmp_path)
+    try:
+        worker = bot(rt, "worker")
+        task = rt.create_task({"requestId": "plan-action-guard", "botId": worker["id"], "prompt": "整理文件"})
+        complete_one(rt, task["id"])
+        with pytest.raises(WebError) as bad:
+            rt.plan_action(task["id"], {"action": "explode"})
+        assert bad.value.status == 400
+        # A direct plan has no actionable delegate steps.
+        with pytest.raises(WebError) as not_actionable:
+            rt.plan_action(task["id"], {"action": "retry-step", "stepId": "s1"})
+        assert not_actionable.value.status == 409
+    finally:
+        rt.close()
+
+
 def test_memory_keeps_a_structured_conclusion(tmp_path):
     rt = runtime(tmp_path)
     try:
@@ -459,5 +505,44 @@ def test_memory_skips_pure_peer_message_tasks(tmp_path):
         notes = finish_task(rt, worker["id"], message, prompt="处理同事消息",
                             deliveryMessageIds=["comm_1"])
         assert notes == []
+    finally:
+        rt.close()
+
+
+def test_retry_step_requires_failed_step_and_skip_step_unblocks_dependents(tmp_path):
+    executor = ScriptedPlanExecutor()
+    rt = runtime(tmp_path, executor, max_concurrent=4)
+    try:
+        owner = bot(rt, "总控", "ws-owner")
+        writer = bot(rt, "写手", "ws-writer")
+        checker = bot(rt, "检查员", "ws-checker")
+        executor.plan_reply = json.dumps({
+            "mode": "delegate", "reason": "两步", "merge": "owner",
+            "steps": [{"id": "s1", "botId": writer["id"], "goal": "写 b 文件", "dependsOn": [], "onFailure": "abort"},
+                      {"id": "s2", "botId": checker["id"], "goal": "核对 b 文件", "dependsOn": ["s1"], "onFailure": "abort"}]})
+        task = rt.create_task({"requestId": "plan-step-actions", "botId": owner["id"], "prompt": "让写手和检查员各做一步"})
+        rt.tick(); drain_launch(rt)
+        parent = rt.get_task(task["id"])
+        assert len(parent["children"]) == 1  # s2 waits on s1
+        # retry-step on a non-failed step returns 4xx.
+        with pytest.raises(WebError) as wrong:
+            rt.plan_action(task["id"], {"action": "retry-step", "stepId": "s1"})
+        assert 400 <= wrong.value.status < 500
+        first_child = parent["children"][0]
+        executor.outcomes[first_child] = "failed"
+        pump_runtime(rt)
+        parent = rt.get_task(task["id"])
+        assert parent["coordinatorPlan"]["status"] == "failed"
+        steps = {step["id"]: step for step in parent["coordinatorPlan"]["steps"]}
+        assert steps["s1"]["status"] == "failed" and steps["s2"]["status"] == "skipped"
+        # skip-step on the failed step lets the plan settle instead of retrying.
+        executor.outcomes[task["id"]] = "completed"
+        decided = rt.plan_action(task["id"], {"action": "skip-step", "stepId": "s1"})
+        assert decided["coordinatorPlan"]["steps"][0]["status"] == "skipped"
+        pump_runtime(rt)
+        parent = rt.get_task(task["id"])
+        assert parent["status"] == "completed"
+        assert parent["coordinatorPlan"]["status"] == "done"
+        assert len(parent["childResults"]) == 2
     finally:
         rt.close()
