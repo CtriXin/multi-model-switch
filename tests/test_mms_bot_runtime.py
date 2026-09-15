@@ -1321,3 +1321,51 @@ def test_restart_with_failed_step_aborts_once_and_keeps_evidence(tmp_path):
     finally:
         restored.close()
         runtime.close()
+
+
+def test_second_wait_asks_the_new_question_not_the_previous_one(tmp_path):
+    runtime, _ = make_runtime(tmp_path)
+    try:
+        target = make_bot(runtime)
+        task = runtime.create_task({"botId": target["id"], "prompt": "分两步确认"})
+        launch(runtime, task["id"])
+        first = enter_wait(runtime, task["id"], {"action": "wait", "question": "先做哪一项？",
+                                                 "options": ["A", "B"]})
+        assert first["waitQuestion"] == "先做哪一项？" and first["waitOptions"] == ["A", "B"]
+
+        # 回答后字段必须清空，侧栏不再指着已答完的问题。
+        runtime.wait_action(task["id"], {"action": "answer", "text": "A"})
+        answered = runtime.get_task(task["id"])
+        assert answered["waitQuestion"] == "" and answered["waitOptions"] == []
+        assert answered["waitSince"] is None
+        assert runtime.list_bots()[0]["pendingQuestion"] is None
+
+        # 第二轮只给新问题，不带 options：不能复用上一轮的问题和选项。
+        launch(runtime, task["id"])
+        second = enter_wait(runtime, task["id"], {"action": "wait", "question": "要不要我顺手清理旧文件？"})
+        assert second["waitQuestion"] == "要不要我顺手清理旧文件？"
+        assert second["waitOptions"] == []
+        pending = runtime.list_bots()[0]["pendingQuestion"]
+        assert pending and pending["question"] == "要不要我顺手清理旧文件？"
+    finally:
+        runtime.close()
+
+
+def test_a_second_wait_without_a_question_does_not_reuse_the_first(tmp_path):
+    runtime, _ = make_runtime(tmp_path)
+    try:
+        target = make_bot(runtime)
+        task = runtime.create_task({"botId": target["id"], "prompt": "两轮等待"})
+        launch(runtime, task["id"])
+        first = enter_wait(runtime, task["id"], {"action": "wait", "question": "报告要几个章节？"})
+        assert first["status"] == "waiting"
+
+        runtime.wait_action(task["id"], {"action": "answer", "text": "三个"})
+        launch(runtime, task["id"])
+        second = enter_wait(runtime, task["id"], {"action": "wait", "reason": "等待子任务或用户"})
+        assert second["status"] == "completed"
+        assert second["waitDeclined"] is True
+        assert second["waitQuestion"] == ""
+        assert runtime.list_bots()[0]["pendingQuestion"] is None
+    finally:
+        runtime.close()

@@ -150,15 +150,22 @@ def looks_like_question(text) -> bool:
     records: a question mark anywhere, a question-shaped ending, or an
     explicit question form such as “是否…” / “请确认…”.
     """
-    value = " ".join(str(text or "").split()).strip()
-    if not value:
+    raw = str(text or "")
+    if not raw.strip():
         return False
-    if "?" in value or "？" in value:
+    if "?" in raw or "？" in raw:
         return True
-    tail = value.rstrip("。!！.~～ ")[-60:]
-    if tail.endswith(_QUESTION_ENDINGS):
-        return True
-    return any(marker in tail for marker in _QUESTION_MARKERS)
+    # A real model often asks first and explains afterwards, so every line and
+    # sentence is checked, not only the tail of the whole message.
+    for segment in re.split(r"[\n。!！.]+", raw):
+        tail = " ".join(segment.split()).rstrip("~～ ")[-60:]
+        if not tail:
+            continue
+        if tail.endswith(_QUESTION_ENDINGS):
+            return True
+        if any(marker in tail for marker in _QUESTION_MARKERS):
+            return True
+    return False
 
 
 def is_trivial_result(text) -> bool:
@@ -714,16 +721,20 @@ class BotRuntime(BotCommunications):
         """The most recent user-facing text, used when no explicit question came."""
         rows = [row for row in self._messages.get(task["id"], [])
                 if row.get("type") in {"progress", "message"} and str(row.get("content") or "").strip()]
+        # Prefer this turn, so a question asked two rounds ago cannot be reused
+        # as if the Bot had just asked it again.
+        rows = [row for row in rows if row.get("turn") == task.get("turn")] or rows
         return str(rows[-1]["content"]).strip() if rows else ""
 
     def _record_wait_request(self, task, payload):
         """Explicit question/options from the wait tool; text stays the fallback."""
+        # Every round starts from scratch: a stale question from an earlier
+        # wait must never be shown as the one the Bot is asking now.
         question = str(payload.get("question") or "").strip()
-        if question:
-            task["waitQuestion"] = question[:2000]
+        task["waitQuestion"] = question[:2000] if question else ""
         options = payload.get("options")
-        if isinstance(options, list):
-            task["waitOptions"] = [str(item).strip()[:200] for item in options if str(item).strip()][:MAX_WAIT_OPTIONS]
+        task["waitOptions"] = ([str(item).strip()[:200] for item in options if str(item).strip()][:MAX_WAIT_OPTIONS]
+                               if isinstance(options, list) else [])
         task["waitRequested"] = True
 
     def _enter_user_wait(self, task):
@@ -760,6 +771,7 @@ class BotRuntime(BotCommunications):
             if action == "answer":
                 text = text_field(payload, "text", 32000, True)
                 task["waitAnsweredAt"] = now()
+                task.update(waitQuestion="", waitOptions=[], waitSince=None)
                 return self.add_message(task_id, {"content": text})
             if action == "dismiss":
                 task["waitDismissed"] = True
@@ -891,7 +903,8 @@ class BotRuntime(BotCommunications):
                 state = "failed"
                 system_failure = True
         task.pop("retry", None)
-        task.update(status=state, updatedAt=now(), completedAt=now(), token="", waitReason=None)
+        task.update(status=state, updatedAt=now(), completedAt=now(), token="", waitReason=None,
+                    waitQuestion="", waitOptions=[], waitSince=None)
         plan = task.get("coordinatorPlan")
         if plan and plan.get("status") in {"auto", "approved", "running", "merging"}:
             self._settle_plan_on_finish(plan, state)

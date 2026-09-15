@@ -546,3 +546,21 @@ def test_retry_step_requires_failed_step_and_skip_step_unblocks_dependents(tmp_p
         assert len(parent["childResults"]) == 2
     finally:
         rt.close()
+
+
+@pytest.mark.parametrize("text", [
+    # 问题在开头、解释在后面：旧实现只看整段末尾 60 字，会漏判。
+    "报告里要包含哪些章节\n我这边已经把环境准备好了，草稿也写完了一版，随时可以按你定下来的方向继续往下做，本轮不会再额外改动任何文件，结果都留在工作目录里，等你看完再说下一步。",
+    "是否需要我重跑一次。我这边已经把环境准备好了，草稿也写完了一版，随时可以按你定下来的方向继续往下做，本轮不会再额外改动任何文件，结果都留在工作目录里，等你看完再说下一步。",
+    "请确认同步范围\n\n我这边已经把环境准备好了，草稿也写完了一版，随时可以按你定下来的方向继续往下做，本轮不会再额外改动任何文件，结果都留在工作目录里，等你看完再说下一步。",
+])
+def test_looks_like_question_scans_the_whole_text(text):
+    assert looks_like_question(text) is True
+
+
+@pytest.mark.parametrize("text", [
+    "我先按摘要写一版。等你定了再补。已完成，结果在工作目录。",
+    "本轮没有任何文件改动，继续挂起。已确认收到并让我候着。",
+])
+def test_looks_like_question_still_rejects_multi_sentence_statements(text):
+    assert looks_like_question(text) is False

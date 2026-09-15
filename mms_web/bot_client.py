@@ -190,9 +190,14 @@ def _build_parser() -> argparse.ArgumentParser:
     status = with_request_id(commands.add_parser("status", help="查看当前任务或其后代"))
     status.add_argument("task_id", nargs="?")
 
+    wait = with_request_id(commands.add_parser("wait", help="等待子任务或用户"))
+    wait.add_argument("text", nargs="*")
+    wait.add_argument("--question", help="要问用户的问题；省略时从 text 里解析")
+    wait.add_argument("--option", action="append", dest="options", default=None,
+                      help="快捷回复选项，可重复，最多 4 个")
+
     for name, help_text in (
         ("complete", "标记当前轮次完成"),
-        ("wait", "等待子任务或用户"),
         ("fail", "标记当前轮次失败"),
     ):
         command = with_request_id(commands.add_parser(name, help=help_text))
@@ -254,7 +259,14 @@ def _command_payload(args: argparse.Namespace, context: dict[str, str]) -> tuple
     if command == "complete":
         return "complete", {"taskId": context["taskId"], "result": _text(args.text)}
     if command == "wait":
-        return "wait", {"taskId": context["taskId"], "reason": _text(args.text, default="等待子任务或用户")}
+        payload = {"taskId": context["taskId"], "reason": _text(args.text, default="等待子任务或用户")}
+        question = str(getattr(args, "question", None) or "").strip()
+        if question:
+            payload["question"] = question
+        options = [str(item).strip() for item in (getattr(args, "options", None) or []) if str(item).strip()]
+        if options:
+            payload["options"] = options
+        return "wait", payload
     if command == "fail":
         text = _text(args.text)
         if not text:
