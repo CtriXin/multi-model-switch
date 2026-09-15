@@ -222,7 +222,7 @@ function BotEditor({
           />
         </label>
         <div className="bot-avatar-picker" aria-label="选择头像">
-          <span className="bot-picker-label">头像</span>
+          <span className="bot-picker-label">图形 <small>表情与纹理会为每个 Bot 自动生成</small></span>
           <div className="bot-avatar-options">
             {PIXEL_AVATARS.map((avatar) => (
               <button
@@ -230,13 +230,16 @@ function BotEditor({
                 type="button"
                 className={`bot-avatar-option${avatarId === avatar.id ? " is-selected" : ""}`}
                 onClick={() => setAvatarId(avatar.id)}
+                title={avatar.label}
                 aria-label={avatar.label}
                 aria-pressed={avatarId === avatar.id}
               >
                 <PixelAvatar
                   avatarId={avatar.id}
                   color={avatarColor}
+                  seed={avatar.id}
                   className="pixel-avatar-mini"
+                  selected={avatarId === avatar.id}
                 />
               </button>
             ))}
@@ -709,6 +712,24 @@ export function BotStudio({
   }, [sync]);
   const dispatch: BotAction = useCallback(
     async (payload: BotDispatchPayload): Promise<BotDispatchResult> => {
+      if (isPreview) {
+        const mockTask: BotTask = {
+          id: "task-preview-" + Date.now(),
+          botId: payload.botId,
+          prompt: payload.prompt,
+          status: "completed",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          runAt: payload.runAt,
+          result: "已完成。",
+        };
+        setSelectedTaskId(mockTask.id);
+        setTasks((current) => [
+          mockTask,
+          ...current.filter((item) => item.id !== mockTask.id),
+        ]);
+        return { task: mockTask };
+      }
       const task = await run<BotTask>(
         `/bots/${encodeURIComponent(payload.botId)}/tasks`,
         {
@@ -728,7 +749,7 @@ export function BotStudio({
       refreshInBackground();
       return { task };
     },
-    [refreshInBackground, run],
+    [isPreview, refreshInBackground, run],
   );
   const autoDispatch = useCallback(
     async (prompt: string) => {
@@ -813,7 +834,20 @@ export function BotStudio({
   };
   const createDraftBot = useCallback(async () => {
     if (isPreview) {
-      setEditor("new");
+      const draft: BotDefinition = {
+        id: "preview-draft-" + Date.now(),
+        name: "新 Bot",
+        description: "随时可以接活",
+        systemPrompt: "",
+        presetId: null,
+        workspaceId: null,
+        status: "idle",
+        wakeEnabled: true,
+        avatarId: "round",
+        avatarColor: "#b9a5ff",
+      };
+      onBotSaved(draft);
+      setSelectedTaskId(undefined);
       return;
     }
     try {
@@ -1032,14 +1066,22 @@ export function BotStudio({
           onUpdateBot={async (botId, patch) => {
             const current = bots.find((item) => item.id === botId);
             if (!current) return;
+            if (isPreview) {
+              const updated: BotDefinition = {
+                ...current,
+                ...patch,
+              };
+              setBots((items) => items.map((item) => (item.id === updated.id ? updated : item)));
+              return;
+            }
             const saved = await run<BotDefinition>(`/bots/${encodeURIComponent(botId)}`, {
               name: patch.name ?? current.name,
               description: patch.description ?? current.description,
               systemPrompt: patch.systemPrompt ?? current.systemPrompt,
               presetId: patch.presetId ?? current.presetId,
-              wakeEnabled: current.wakeEnabled,
-              avatarId: current.avatarId,
-              avatarColor: current.avatarColor,
+              wakeEnabled: patch.wakeEnabled ?? current.wakeEnabled,
+              avatarId: patch.avatarId ?? current.avatarId,
+              avatarColor: patch.avatarColor ?? current.avatarColor,
             });
             setBots((items) => items.map((item) => (item.id === saved.id ? saved : item)));
           }}
@@ -1049,7 +1091,7 @@ export function BotStudio({
             setCommunicationPeerId(peerBotId);
             setCommunicationsOpen(true);
           }}
-          disabled={isPreview || capability?.available === false}
+          disabled={!isPreview && capability?.available === false}
           enterToSend={enterToSend}
         />
         {memoryOpen && activeBot && (

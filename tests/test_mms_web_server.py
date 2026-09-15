@@ -47,6 +47,22 @@ class TransportTests(unittest.TestCase):
         self.assertFalse(any(data["capabilities"].values()))
         self.assertFalse((self.root / "state").exists())
 
+    def test_bot_sessions_do_not_appear_in_pilot_list(self):
+        class StubSessions:
+            def list_sessions(self):
+                return [
+                    {"id": "s-pilot", "owner": "web", "updatedAt": "2"},
+                    {"id": "s-bot-new", "owner": "bot", "updatedAt": "3"},
+                    # Legacy Bot sessions predate the owner marker.
+                    {"id": "s-bot-old", "owner": "web", "updatedAt": "4"},
+                ]
+
+        with patch.object(self.app, "sessions", StubSessions()), patch.object(
+            self.app.bots, "list_bots", return_value=[{"sessionId": "s-bot-old"}]
+        ):
+            rows = self.app.all_sessions()
+        self.assertEqual([row["id"] for row in rows], ["s-pilot"])
+
     def test_host_and_cross_origin_reads_are_denied(self):
         for headers in [
             {"Host": "attacker.test"}, {"Origin": "https://attacker.test"},

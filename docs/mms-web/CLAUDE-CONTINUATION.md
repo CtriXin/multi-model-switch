@@ -92,7 +92,7 @@ Bot 的目标是一个真实可用的工作流：用户说目标，Bot 自己完
 - ModelPicker / ModelExplorer 复用 Pilot 的模型和通道体验。
 - 当前状态文案为“待命”，自动唤醒使用更明确的 AlarmClockCheck 语义。
 - 卡片配置/删除默认隐藏，hover / keyboard focus 时出现。
-- 轻量 coordinatorPlan：对任务记录 direct/delegate、候选 Bot、原因和待确认步骤；不启动额外 planner session。
+- 轻量 coordinatorPlan：对任务记录 direct/delegate、候选 Bot、原因和待确认步骤；普通 direct-first 任务跳过 planner session，只有明确协作意图或显式 plan-approve 才启动一次短 planner。
 - 任务支持 priority（0–100）、稳定出队和可见 queueReason。
 - EgoComputer 已实现 BrowserProvider 合同并在 capabilities 返回 provider、available、operations、scope。
 
@@ -130,12 +130,12 @@ PYTHONPATH=. pytest -q \
 
 Claude 之前给出的“能力层约七成、交付层为零”的方向判断基本可信，但完成度偏乐观，不能直接当验收结论。当前可采用以下事实替代旧报告中的数字：
 
-- focused tests 最近一次是 72 个通过，不是旧报告中的 68 个。
+- focused tests 最近一次是 142 个通过；前端 Node tests 最近一次是 78 个通过。
 - 实时 `/api/v1/bots` 最近一次读回 4 个真实 Bot，不是旧报告中的 5 个。
 - `Coordinator` 目前只是轻量计划记录和候选建议，还不是完整的语义 planner。
 - `BrowserProvider` 目前只有 Ego adapter；Windows / Linux 适配仍为空。
 - 调度已经有 priority 和 queueReason，但成本、额度和资源预算仍未完成。
-- 本地运行能力已经存在，但当前 worktree 仍没有正式 issue、PR、commit、merge 或 fresh-user gate 交付证据。
+- 本地运行能力已经存在；Bot 代码在 `dev-pre`，不在 `dev`，Stable 发布和用户验收仍未完成。
 
 这些校正是为了避免后续会话把“代码存在”“接口可读”或“测试通过”误写成产品和交付已经完成。
 
@@ -147,7 +147,7 @@ Claude 之前给出的“能力层约七成、交付层为零”的方向判断�
 
 目前 `coordinatorPlan` 能记录 direct/delegate、候选和待确认步骤，但：
 
-- 是否需要分工仍主要依赖中文关键字和 Bot 元数据打分。
+- 是否需要分工仍主要依赖协作意图信号和 Bot 元数据打分；普通 direct-first 任务不会因此额外启动 planner。
 - 实际“派给谁、等谁、如何合并”仍由执行模型决定。
 - 还没有稳定的计划状态机和真正的父子任务结果图。
 - 还没有 planner / worker / reviewer 的一次任务内工作层；如果增加，必须保持轻量、按需，不暴露为永久员工。
@@ -175,16 +175,15 @@ Claude 之前给出的“能力层约七成、交付层为零”的方向判断�
 
 外部成熟项目可以调查和复用，但目前没有实际 adapter。优先复用能接入 MMS/Pi 的项目，不要同时引入多套同类 runtime。接入前要证明它解决了真实瓶颈，而不是为了增加名词。
 
-### 交付链仍未完成
+### 交付链已经进入合并态，但还不是完整发布验收
 
-当前 worktree 的改动还没有：
+- issue #238 已关闭。
+- PR #242（Bot 工作台 v2.x）曾合并到 `dev`（merge commit `0d9a7ffa`），2026-09-14 owner 决定 `dev` 保持 4.21.x 稳定线，该合并已在 `dev` 上撤销；Bot 工作台现在的集成分支是 `dev-pre`（起点 065cf856，含 #242 与 #244），版本轨道 5.0。
+- 当前 task worktree 已快进到 `origin/dev` 的 `0d9a7ffa`，并在其上保留本轮未提交的收尾改动。
+- fresh-user gate 和全量基线对比在 PR 评论中通过；Windows acceptance 的 4 个 job 随后失败在 `mms web lifecycle` 30 秒内未就绪，因此 Windows 仍不能标为通过。
+- 这表示代码已经有正式合并记录，但不等于 Stable 发布，也不等于用户验收完成。
 
-- 正式 issue
-- PR
-- commit / review / merge
-- fresh-user gate 和完整交付验证
-
-不要把“实时接口可读”“build 通过”写成已经正式发布。是否提交、建 issue、开 PR 仍需按仓库规则和当前授权处理。
+不要把“PR 已合并”“实时接口可读”或“build 通过”单独写成完整发布验收。
 
 ## 用户能接受的渐进方式
 

@@ -163,3 +163,32 @@ def test_request_id_can_be_reused(worker):
     assert first.returncode == second.returncode == 0
     assert WorkerHandler.requests[-2]["body"]["requestId"] == "same-request"
     assert WorkerHandler.requests[-1]["body"]["requestId"] == "same-request"
+
+
+def test_wait_passes_an_explicit_question_and_options_through(worker):
+    result = run_client(
+        worker, "wait", "需要你确认一下范围",
+        "--question", "只同步网文1，还是两个站点都同步？",
+        "--option", "只同步 网文1", "--option", "两个站点都同步",
+        "--request-id", "wait-1",
+    )
+    assert result.returncode == 0, result.stderr
+    assert WorkerHandler.requests[-1]["body"] == {
+        "taskId": "task-parent",
+        "reason": "需要你确认一下范围",
+        "question": "只同步网文1，还是两个站点都同步？",
+        "options": ["只同步 网文1", "两个站点都同步"],
+        "action": "wait",
+        "requestId": "wait-1",
+    }
+
+
+def test_wait_without_the_new_flags_keeps_the_old_payload(worker):
+    result = run_client(worker, "wait", "等确认", "--request-id", "wait-2")
+    assert result.returncode == 0, result.stderr
+    assert WorkerHandler.requests[-1]["body"] == {
+        "taskId": "task-parent",
+        "reason": "等确认",
+        "action": "wait",
+        "requestId": "wait-2",
+    }

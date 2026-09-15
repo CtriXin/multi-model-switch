@@ -267,6 +267,12 @@ class _Sessions:
         self.launched.append(payload)
         return {"session": {"id": "session-1", "state": "idle", "modelName": "test-model"}}
 
+    def launch_bot(self, payload, bot_id):
+        payload = dict(payload)
+        payload["owner"] = "bot"
+        payload["botId"] = bot_id
+        return self.launch(payload)
+
     def get_session(self, session_id):
         return {"session": {"id": session_id, "state": "idle"}, "events": [], "artifacts": []}
 
@@ -282,5 +288,33 @@ def test_bot_prompt_asks_for_one_line_peer_reports_without_paths_or_hashes(tmp_p
     task = {"id": "task_1", "prompt": "写一个文件", "launchRequestId": "launch-1", "collaborationRequested": False}
     executor.start(task, bot, tmp_path / "context.json")
     prompt = sessions.launched[0]["prompt"]
+    assert sessions.launched[0]["owner"] == "bot"
+    assert sessions.launched[0]["botId"] == bot["id"]
     assert "向其他 Bot 回报时只写一句结论" in prompt
     assert "不在正文贴路径或哈希" in prompt
+
+
+def test_wait_route_answers_and_dismisses(transport, tmp_path):
+    app, server, request = transport
+    _, task = make_task(app, tmp_path, prompt="整理报告")
+    app.bots.worker(task["id"], {"action": "wait", "question": "要先做哪一项？", "options": ["A", "B"]})
+    app.bots._observe(app.bots._tasks[task["id"]], {"state": "idle", "alive": False, "events": [], "artifacts": []})
+    assert app.bots.get_task(task["id"])["status"] == "waiting"
+
+    status, _, body = request("POST", f"/api/v1/tasks/{task['id']}/wait",
+                              {"action": "answer", "text": "先做 A"}, {"X-MMS-CSRF": app.csrf_token})
+    assert status == 200, body
+    assert json.loads(body)["status"] == "queued"
+    assert app.bots.get_task(task["id"])["waitAnsweredAt"]
+
+    _, second = make_task(app, tmp_path, prompt="等待确认")
+    app.bots.worker(second["id"], {"action": "wait", "question": "要现在发布吗？"})
+    app.bots._observe(app.bots._tasks[second["id"]], {"state": "idle", "alive": False, "events": [], "artifacts": []})
+    status, _, body = request("POST", f"/api/v1/tasks/{second['id']}/wait",
+                              {"action": "dismiss"}, {"X-MMS-CSRF": app.csrf_token})
+    assert status == 200, body
+    closed = json.loads(body)
+    assert closed["status"] == "completed" and closed["waitDismissed"] is True
+
+    status, _, body = request("POST", f"/api/v1/tasks/{second['id']}/wait", {"action": "dismiss"})
+    assert status == 403

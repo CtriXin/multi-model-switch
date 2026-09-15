@@ -105,6 +105,24 @@ def test_full_chain_launch_send_snapshot_stop(service):
     assert service.get_session(session_id)["session"]["state"] == "stopped"
 
 
+def test_bot_owned_launch_is_kept_out_of_pilot_session_list(service):
+    detail = service.launch_bot(
+        {
+            "requestId": "bot-owner-1",
+            "workspaceId": "ws",
+            "presetId": "preset",
+            "title": "日程员",
+            "prompt": "整理今天的安排",
+        },
+        "bot_schedule",
+    )
+    session_id = detail["session"]["id"]
+    view = service.get_session(session_id)["session"]
+    assert view["owner"] == "bot"
+    assert view["botId"] == "bot_schedule"
+    assert any(row["id"] == session_id for row in service.list_sessions())
+
+
 def test_full_chain_approval_confirm_flow(service):
     detail = service.launch(
         {

@@ -18,11 +18,26 @@ Bot 是长期存在的员工，用户用聊天交代事情。MMS 只做身份、
 | T1 | Bot 界面视觉系统重做（本轮重点） | `T1-ui-visual-system.md` | gemini3.6 主做，glm5.3 评审 | `apps/mms-web/src/bot*.css`、`Bot.tsx`、`BotStudio.tsx`、`BotMemoryPanel.tsx`、`BotCommunications.tsx` |
 | T2 | Coordinator 计划层落地 | `T2-coordinator-plan.md` | k3 | `mms_web/bot_coordinator.py`、`bots.py`、`bot_executor.py`、新增 `BotPlan.tsx` |
 | T3 | 失败重试与结果送达 | `T3-resilience-and-notify.md` | deepseek | 新增 `mms_web/bot_notify.py`、`bots.py` 最小改动、`server.py` 一个路由 |
+| T1c | 新建即对话：命名、头像、预设在聊天里完成 | `T1c-create-in-chat.md` | gemini3.6 主做，glm5.3 评审 | `Bot.tsx` 头部与向导、`BotStudio.tsx` 的 `onUpdateBot`、新增 `bot-presets.ts` |
+| T1d | Bot 页不弹 Pilot 首次引导 | `T1d-guide-on-bots.md` | gemini3.6 | `App.tsx` 引导插入点、`HelpGuide.tsx` 自动开始条件、新增测试 |
+| T2b | Coordinator 成为真正的自动计划层：触发形状检查、状态机、结果图、重启幂等 | `T2b-planner-state-machine.md` | k3 主做，Claude 评审，UI 跟进另开 T2c 给 gemini | `bot_coordinator.py`、`bots.py` 新方法、`server.py` 一个路由的 action、`types.ts`、`BotPlan.tsx` 最小接线、测试 |
+| T1e | 预设编辑器四处修正：重开不改名、可关闭、尾句顺序、单一焦点框 | `T1e-preset-editor-fixes.md` | gemini3.6 | `Bot.tsx` 向导/编辑器、`bot-presets.ts`、`bot.css`、测试 |
+| T1f | 向导改成对话（题库分支、自由输入、答案入记忆），预设在侧栏与面板可见 | `T1f-conversational-wizard.md` | gemini3.6，T1e 之后 | `Bot.tsx` 向导与面板、`bot-presets.ts`、`BotStudio.tsx` 卡片一行、测试 |
+| T3c | Bot 间往来在主聊天折叠成一张卡，协作面板按任务分段 | `T3c-peer-chat-folding.md` | gemini3.6（纯前端） | `Bot.tsx` 事件渲染、`BotCommunications.tsx`、`bot.css`、测试 |
+| T3d | "等你补充"必须带问题（waitQuestion / pendingQuestion / dismiss / 过期），记忆不存无产出任务 | `T3d-waiting-contract.md` | 后端 deepseek，前端 gemini 随后 | `bots.py` 新方法、`bot_executor.py` wait 参数、`server.py` 一个路由、测试；前端 `Bot.tsx` 提问卡 |
+| T2c | 计划块视觉整理：名字不竖排、goal/summary 分行、按钮固定行尾、状态标签三档、history 时间线 | `T2c-plan-block-visual.md` | gemini3.6 | `BotPlan.tsx`、`bot-plan.css` |
+| T3d-ui | 等你回复：提问卡、头部与侧栏文案、旧任务结束等待 | `T3d-ui-question-card.md` | gemini3.6 | `Bot.tsx`、`BotStudio.tsx` 一行、`types.ts`、`bot.css`、测试 |
 | T4 | 落地与交付链 | `T4-landing-governance.md` | Claude（本会话） | rebase、issue、PR 拆分、全量回归、fresh-user gate |
 
-建议只是建议，派发给谁由用户决定。每个包顶部都写了范围、不许碰的文件、验收和汇报格式。
+建议只是建议，派发给谁由用户决定。
+第二轮（2026-09-14）追加 T1c。T1c 不从 6a223c7c 开分支，而是从任务分支当时的 HEAD 开，派发前先确认主 workspace 里的几何头像改动已提交。
+每个包顶部都写了范围、不许碰的文件、验收和汇报格式。
 
 评审分工：T1 的验收里有截图比对，需要能识图的模型。glm5.3 不能识图，只做代码侧评审（hex 计数、token 使用、diff 里是否混入行为改动、build 与测试结果）；截图的视觉评审由 Claude 做。
+
+## 分支目标（2026-09-14 起）
+
+owner 决定：`dev` / `main` 是 4.21.x 稳定安装线，不含 Bot；Bot 工作台是 5.0，集成分支是 `dev-pre`（从撤销前的 dev 065cf856 建立）。所有 Bot 包的 PR 指向 `dev-pre`，任务分支 `codex/stride-370e87ec37e741df` 也只合进 `dev-pre`。README 其它地方写的"→ dev"按此理解。
 
 ## 派发时给模型的开场话（直接复制）
 

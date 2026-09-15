@@ -466,7 +466,8 @@ def test_delegate_plan_creates_children_in_dependency_order_and_resumes_parent_o
         parent = runtime.get_task(task["id"])
         assert parent["status"] == "waiting" and parent["waitReason"] == "children"
         plan = parent["coordinatorPlan"]
-        assert plan["mode"] == "delegate" and plan["source"] == "model" and plan["status"] == "auto"
+        assert plan["mode"] == "delegate" and plan["source"] == "model" and plan["status"] == "running"
+        assert [(h["from"], h["to"]) for h in plan["history"]] == [(None, "auto"), ("auto", "running")]
         # Only the dependency-free step is dispatched first.
         assert len(parent["children"]) == 1
         first_child = runtime.get_task(parent["children"][0])
@@ -499,13 +500,27 @@ def test_planner_timeout_falls_back_to_keyword_plan_without_blocking(tmp_path):
     executor.plan = lambda prompt, bot, timeout=20.0: None
     try:
         target = make_bot(runtime)
-        task = runtime.create_task({"requestId": "fallback-task", "botId": target["id"], "prompt": "列出工作目录里的 txt 文件"})
+        task = runtime.create_task({"requestId": "fallback-task", "botId": target["id"], "prompt": "请找其它 Bot 列出工作目录里的 txt 文件"})
         launch(runtime, task["id"])
         view = runtime.get_task(task["id"])
         assert view["status"] == "running"
         assert view["coordinatorPlan"]["source"] == "fallback"
         assert view["coordinatorPlan"]["mode"] == "direct"
         assert view["executionMode"] == "direct"
+    finally:
+        runtime.close()
+
+
+def test_direct_first_simple_task_skips_throwaway_model_planner(tmp_path):
+    runtime, executor = planning_runtime(tmp_path, '{"mode":"delegate","steps":[]}')
+    try:
+        target = make_bot(runtime)
+        task = runtime.create_task({"requestId": "simple-direct", "botId": target["id"], "prompt": "整理这份文件并告诉我结果"})
+        launch(runtime, task["id"])
+        view = runtime.get_task(task["id"])
+        assert executor.plan_calls == 0
+        assert view["executionMode"] == "direct"
+        assert view["coordinatorPlan"]["source"] == "direct-first"
     finally:
         runtime.close()
 
@@ -586,7 +601,9 @@ def test_plan_approve_waits_for_confirmation_then_executes(tmp_path):
         decided = runtime.plan_action(task["id"], {"action": "approve"})
         assert decided["status"] == "waiting" and decided["waitReason"] == "children"
         assert len(decided["children"]) == 1
-        assert decided["coordinatorPlan"]["status"] == "approved"
+        assert decided["coordinatorPlan"]["status"] == "running"
+        assert [(h["from"], h["to"]) for h in decided["coordinatorPlan"]["history"]] == [
+            (None, "proposed"), ("proposed", "approved"), ("approved", "running")]
     finally:
         runtime.close()
 
@@ -629,7 +646,7 @@ def test_plan_reject_within_undo_window_cancels_children(tmp_path):
         task = runtime.create_task({"requestId": "undo-task", "botId": owner["id"], "prompt": "让 second 写 b.txt"})
         runtime.tick(); drain_launch(runtime)
         view = runtime.get_task(task["id"])
-        assert view["coordinatorPlan"]["status"] == "auto" and len(view["children"]) == 1
+        assert view["coordinatorPlan"]["status"] == "running" and len(view["children"]) == 1
         decided = runtime.plan_action(task["id"], {"action": "reject"})
         assert decided["coordinatorPlan"]["status"] == "rejected"
         assert decided["children"] == []
@@ -769,5 +786,586 @@ def test_bot_declared_failure_still_reports_as_a_result(tmp_path):
         assert message["content"] == "目标站点无法访问，未取得结果"
         row = peer_rows(runtime, owner, worker, child)[0]
         assert row["kind"] == "result" and row["artifacts"] == []
+    finally:
+        runtime.close()
+
+
+def enter_wait(runtime, task_id, payload):
+    """Drive one Bot turn that asks to wait, then let the session go idle."""
+    runtime.worker(task_id, payload)
+    runtime._observe(runtime._tasks[task_id], {"state": "idle", "alive": False, "events": [], "artifacts": []})
+    return runtime.get_task(task_id)
+
+
+def test_wait_without_a_question_completes_and_declines(tmp_path):
+    runtime, _ = make_runtime(tmp_path)
+    try:
+        target = make_bot(runtime)
+        task = runtime.create_task({"botId": target["id"], "prompt": "只等待，不要修改文件"})
+        launch(runtime, task["id"])
+        stored = enter_wait(runtime, task["id"], {"action": "wait", "reason": "等待子任务或用户"})
+        assert stored["status"] == "completed"
+        assert stored["waitDeclined"] is True
+        assert stored["result"] == "等待子任务或用户"
+        assert runtime.list_bots()[0]["pendingQuestion"] is None
+    finally:
+        runtime.close()
+
+
+class ScriptedExecutor(PlanningExecutor):
+    """Started tasks stay running until scripted to complete or fail."""
+
+    def __init__(self, plan_reply=None):
+        super().__init__(plan_reply)
+        self.outcomes = {}
+        self.cancelled = []
+
+    def snapshot(self, task):
+        outcome = self.outcomes.get(task["id"])
+        if outcome == "completed":
+            return {"state": "completed", "alive": False, "events": [
+                {"id": f"ans-{task['id']}", "kind": "assistant", "status": "done",
+                 "text": f"完成：{task['prompt'][:40]}"}], "artifacts": []}
+        if outcome == "failed":
+            return {"state": "error", "alive": False, "events": [
+                {"id": f"err-{task['id']}", "kind": "error", "status": "error",
+                 "text": "执行失败"}], "artifacts": []}
+        return {"state": "running", "alive": True, "events": [], "artifacts": []}
+
+    def cancel(self, task):
+        self.cancelled.append(task["id"])
+
+
+def scripted_runtime(tmp_path, max_concurrent=4):
+    executor = ScriptedExecutor()
+    runtime = BotRuntime(state_root=tmp_path, executor=executor, max_concurrent=max_concurrent)
+    runtime.configure_endpoint("http://127.0.0.1:8123/api/v1/bot-worker")
+    return runtime, executor
+
+
+def delegate_reply(*steps):
+    return json.dumps({
+        "mode": "delegate", "reason": "独立子目标", "merge": "owner",
+        "steps": [{"id": sid, "botId": bid, "goal": goal, "dependsOn": deps,
+                   "presetId": None, "onFailure": policy}
+                  for sid, bid, goal, deps, policy in steps],
+    })
+
+
+def restart_runtime(runtime, tmp_path, executor):
+    """Simulate a service restart: release the store lock, reload from disk."""
+    runtime._file_lock.close()
+    runtime._file_lock = None
+    restored = BotRuntime(state_root=tmp_path, executor=executor, max_concurrent=4)
+    restored.configure_endpoint("http://127.0.0.1:8123/api/v1/bot-worker")
+    return restored
+
+
+def test_multi_goal_shape_triggers_model_planner_without_collab_keywords(tmp_path):
+    runtime, executor = scripted_runtime(tmp_path)
+    try:
+        owner = make_bot(runtime, "owner", "workspace-a")
+        second = make_bot(runtime, "second", "workspace-b")
+        third = make_bot(runtime, "third", "workspace-c")
+        reply = delegate_reply(("s1", second["id"], "三句话介绍 git rebase", [], "retry"),
+                               ("s2", third["id"], "三句话介绍 git merge", [], "retry"))
+        executor.plan_reply = reply
+        # No collaboration keyword: only the multi-goal shape may trigger planning.
+        task = runtime.create_task({"requestId": "multi-goal", "botId": owner["id"],
+                                    "prompt": "分别给我：1）三句话介绍 git rebase；2）三句话介绍 git merge"})
+        assert task["collaborationRequested"] is False
+        runtime.tick(); drain_launch(runtime)
+        assert executor.plan_calls >= 1
+        parent = runtime.get_task(task["id"])
+        assert parent["status"] == "waiting" and parent["waitReason"] == "children"
+        assert len(parent["children"]) == 2
+        plan = parent["coordinatorPlan"]
+        assert plan["source"] == "model" and plan["status"] == "running"
+        steps = {step["id"]: step for step in plan["steps"]}
+        for child_id in parent["children"]:
+            executor.outcomes[child_id] = "completed"
+        pump(runtime)
+        executor.outcomes[task["id"]] = "completed"
+        pump(runtime)
+        pump(runtime)
+        parent = runtime.get_task(task["id"])
+        assert parent["status"] == "completed"
+        plan = parent["coordinatorPlan"]
+        assert plan["status"] == "done"
+        transitions = [(h["from"], h["to"]) for h in plan["history"]]
+        assert ("auto", "running") in transitions and ("running", "merging") in transitions and ("merging", "done") in transitions
+        steps = {step["id"]: step for step in plan["steps"]}
+        assert steps["s1"]["status"] == "done" and steps["s2"]["status"] == "done"
+        assert steps["s1"]["result"]["summary"] and steps["s2"]["result"]["summary"]
+        assert len(parent["childResults"]) == 2
+        assert all(row["summary"] for row in parent["childResults"])
+    finally:
+        runtime.close()
+
+
+def test_explicit_wait_question_enters_waiting_with_options(tmp_path):
+    runtime, _ = make_runtime(tmp_path)
+    try:
+        target = make_bot(runtime)
+        task = runtime.create_task({"botId": target["id"], "prompt": "整理报告"})
+        launch(runtime, task["id"])
+        stored = enter_wait(runtime, task["id"], {"action": "wait", "question": "报告要包含哪几个章节？",
+                                                  "options": ["摘要", "全文", "摘要+截图"]})
+        assert stored["status"] == "waiting" and stored["waitReason"] == "user"
+        assert stored["waitQuestion"] == "报告要包含哪几个章节？"
+        assert stored["waitOptions"] == ["摘要", "全文", "摘要+截图"]
+        assert stored["waitSince"]
+        assert runtime.list_bots()[0]["pendingQuestion"] == {
+            "taskId": task["id"], "question": "报告要包含哪几个章节？",
+            "options": ["摘要", "全文", "摘要+截图"], "since": stored["waitSince"]}
+    finally:
+        runtime.close()
+
+
+def test_single_goal_stays_direct_even_with_colon_and_digits(tmp_path):
+    runtime, executor = scripted_runtime(tmp_path)
+    try:
+        owner = make_bot(runtime, "owner", "workspace-a")
+        make_bot(runtime, "second", "workspace-b")
+        executor.plan_reply = '{"mode":"delegate","steps":[]}'
+        for prompt in ("用三句话解释什么是 git rebase", "列出当前目录的 txt 文件"):
+            task = runtime.create_task({"botId": owner["id"], "prompt": prompt})
+            runtime.tick(); drain_launch(runtime)
+            view = runtime.get_task(task["id"])
+            assert view["executionMode"] == "direct"
+            assert view["coordinatorPlan"]["source"] == "direct-first"
+            assert view["children"] == []
+            executor.outcomes[task["id"]] = "completed"
+            pump(runtime)
+        assert executor.plan_calls == 0
+    finally:
+        runtime.close()
+
+
+def test_wait_text_carries_question_and_quick_options(tmp_path):
+    runtime, _ = make_runtime(tmp_path)
+    try:
+        target = make_bot(runtime)
+        task = runtime.create_task({"botId": target["id"], "prompt": "同步内容"})
+        launch(runtime, task["id"])
+        stored = enter_wait(runtime, task["id"], {"action": "wait",
+                                                  "reason": "请确认同步范围。\n选项：只同步 网文1 | 两个站点都同步"})
+        assert stored["status"] == "waiting"
+        assert stored["waitQuestion"] == "请确认同步范围。"
+        assert stored["waitOptions"] == ["只同步 网文1", "两个站点都同步"]
+    finally:
+        runtime.close()
+
+
+def test_on_failure_skip_marks_step_and_cascades_dependents(tmp_path):
+    runtime, executor = scripted_runtime(tmp_path)
+    try:
+        owner = make_bot(runtime, "owner", "workspace-a")
+        second = make_bot(runtime, "second", "workspace-b")
+        third = make_bot(runtime, "third", "workspace-c")
+        reply = delegate_reply(("s1", second["id"], "写 b 文件", [], "skip"),
+                               ("s2", third["id"], "核对 b 文件", ["s1"], "skip"))
+        executor.plan_reply = reply
+        task = runtime.create_task({"requestId": "skip-policy", "botId": owner["id"], "prompt": "让 second 和 third 各做一步"})
+        runtime.tick(); drain_launch(runtime)
+        parent = runtime.get_task(task["id"])
+        assert len(parent["children"]) == 1  # s2 waits on s1
+        executor.outcomes[parent["children"][0]] = "failed"
+        pump(runtime)
+        pump(runtime)
+        executor.outcomes[task["id"]] = "completed"
+        pump(runtime)
+        parent = runtime.get_task(task["id"])
+        assert parent["status"] == "completed"
+        plan = parent["coordinatorPlan"]
+        steps = {step["id"]: step for step in plan["steps"]}
+        assert steps["s1"]["status"] == "skipped"
+        assert steps["s2"]["status"] == "skipped"  # dependency cascaded
+        assert plan["status"] == "done"  # nothing left: merge turn finishes the plan
+        assert len(parent["childResults"]) == 2
+        skipped = [row for row in parent["childResults"] if row["status"] == "skipped"]
+        assert len(skipped) == 2 and all(row["summary"] for row in skipped)
+    finally:
+        runtime.close()
+
+
+def test_wait_answer_resumes_and_dismiss_closes(tmp_path):
+    runtime, _ = make_runtime(tmp_path)
+    try:
+        target = make_bot(runtime)
+        answered = runtime.create_task({"botId": target["id"], "prompt": "同步内容"})
+        launch(runtime, answered["id"])
+        enter_wait(runtime, answered["id"], {"action": "wait", "question": "要同步到哪些站点？"})
+        resumed = runtime.wait_action(answered["id"], {"action": "answer", "text": "两个站点都同步"})
+        assert resumed["status"] == "queued"
+        assert runtime._tasks[answered["id"]]["resumeText"] == "两个站点都同步"
+        assert runtime.list_bots()[0]["pendingQuestion"] is None
+
+        dismissed = runtime.create_task({"botId": target["id"], "prompt": "等待确认"})
+        launch(runtime, dismissed["id"])
+        enter_wait(runtime, dismissed["id"], {"action": "wait", "question": "要现在发布吗？"})
+        closed = runtime.wait_action(dismissed["id"], {"action": "dismiss"})
+        assert closed["status"] == "completed"
+        assert closed["waitDismissed"] is True
+        assert closed["result"] == "等待已结束。"
+        assert runtime.list_bots()[0]["pendingQuestion"] is None
+    finally:
+        runtime.close()
+
+
+def test_on_failure_abort_fails_plan_and_parent_reports_the_failed_step(tmp_path):
+    runtime, executor = scripted_runtime(tmp_path)
+    try:
+        owner = make_bot(runtime, "owner", "workspace-a")
+        second = make_bot(runtime, "second", "workspace-b")
+        third = make_bot(runtime, "third", "workspace-c")
+        reply = delegate_reply(("s1", second["id"], "写 b 文件", [], "abort"),
+                               ("s2", third["id"], "写 c 文件", [], "abort"))
+        executor.plan_reply = reply
+        task = runtime.create_task({"requestId": "abort-policy", "botId": owner["id"], "prompt": "让 second 和 third 各写一个文件"})
+        runtime.tick(); drain_launch(runtime)
+        parent = runtime.get_task(task["id"])
+        assert len(parent["children"]) == 2
+        steps = {step["id"]: step for step in parent["coordinatorPlan"]["steps"]}
+        failed_child = steps["s1"]["taskId"]
+        executor.outcomes[failed_child] = "failed"
+        pump(runtime)
+        plan = runtime.get_task(task["id"])["coordinatorPlan"]
+        assert plan["status"] == "failed"
+        assert ("running", "failed") in [(h["from"], h["to"]) for h in plan["history"]]
+        assert plan["history"][-1]["by"] == "step:s1"
+        steps = {step["id"]: step for step in plan["steps"]}
+        assert steps["s1"]["status"] == "failed"
+        internal = runtime._tasks[task["id"]]
+        assert "步骤 s1" in internal.get("resumeText", "") or internal["status"] != "queued"
+        # The sibling child finishes late, after the abort; it must not resume twice.
+        executor.outcomes[steps["s2"]["taskId"]] = "completed"
+        executor.outcomes[task["id"]] = "completed"
+        pump(runtime)
+        pump(runtime)
+        parent = runtime.get_task(task["id"])
+        assert parent["status"] == "completed"
+        assert parent["coordinatorPlan"]["status"] == "failed"  # terminal: merge reply does not reopen
+        aborts = [m for m in runtime.list_messages(task["id"]) if "分工计划中止" in m["content"]]
+        assert len(aborts) == 1
+        pump(runtime)
+        assert len([m for m in runtime.list_messages(task["id"]) if "分工计划中止" in m["content"]]) == 1
+    finally:
+        runtime.close()
+
+
+def test_wait_action_rejects_tasks_that_are_not_waiting(tmp_path):
+    runtime, _ = make_runtime(tmp_path)
+    try:
+        target = make_bot(runtime)
+        task = runtime.create_task({"botId": target["id"], "prompt": "普通任务"})
+        with pytest.raises(WebError) as failure:
+            runtime.wait_action(task["id"], {"action": "dismiss"})
+        assert failure.value.code == "TASK_NOT_WAITING"
+    finally:
+        runtime.close()
+
+
+def test_retry_step_reopens_failed_plan_and_runs_to_done(tmp_path):
+    runtime, executor = scripted_runtime(tmp_path)
+    try:
+        owner = make_bot(runtime, "owner", "workspace-a")
+        second = make_bot(runtime, "second", "workspace-b")
+        reply = delegate_reply(("s1", second["id"], "写 b 文件", [], "retry"))
+        executor.plan_reply = reply
+        task = runtime.create_task({"requestId": "retry-policy", "botId": owner["id"], "prompt": "让 second 写 b 文件"})
+        runtime.tick(); drain_launch(runtime)
+        parent = runtime.get_task(task["id"])
+        old_child = parent["children"][0]
+        executor.outcomes[old_child] = "failed"
+        pump(runtime)
+        assert runtime.get_task(task["id"])["coordinatorPlan"]["status"] == "failed"
+        executor.outcomes[task["id"]] = "completed"
+        pump(runtime)
+        assert runtime.get_task(task["id"])["status"] == "completed"
+        # retry-step on a non-failed step is rejected with 4xx
+        with pytest.raises(WebError) as wrong:
+            runtime.plan_action(task["id"], {"action": "retry-step", "stepId": "s9"})
+        assert wrong.value.status == 400
+        # Fix the environment, then retry the failed step.
+        executor.outcomes.pop(old_child, None)
+        decided = runtime.plan_action(task["id"], {"action": "retry-step", "stepId": "s1"})
+        assert decided["coordinatorPlan"]["status"] == "running"
+        step = decided["coordinatorPlan"]["steps"][0]
+        assert step["status"] == "running" and step["taskId"] != old_child
+        assert decided["status"] == "waiting" and decided["waitReason"] == "children"
+        new_child = step["taskId"]
+        assert runtime.get_task(old_child)["status"] == "failed"  # first attempt kept as evidence
+        executor.outcomes[new_child] = "completed"
+        pump(runtime)
+        executor.outcomes[task["id"]] = "completed"
+        pump(runtime)
+        pump(runtime)
+        parent = runtime.get_task(task["id"])
+        assert parent["status"] == "completed"
+        plan = parent["coordinatorPlan"]
+        assert plan["status"] == "done"
+        assert plan["steps"][0]["status"] == "done"
+        assert ("failed", "running") in [(h["from"], h["to"]) for h in plan["history"]]
+    finally:
+        runtime.close()
+
+
+def test_user_wait_expires_after_seven_days(tmp_path):
+    runtime, _ = make_runtime(tmp_path)
+    try:
+        target = make_bot(runtime)
+        task = runtime.create_task({"botId": target["id"], "prompt": "等待授权"})
+        launch(runtime, task["id"])
+        enter_wait(runtime, task["id"], {"action": "wait", "question": "是否现在发布？"})
+        runtime._tasks[task["id"]]["waitSince"] = (datetime.now(timezone.utc) - timedelta(days=8)).isoformat()
+        runtime.tick()
+        stored = runtime.get_task(task["id"])
+        assert stored["status"] == "completed"
+        assert stored["result"] == "等待超时，已结束"
+        assert stored["waitDismissed"] is True
+        assert runtime.list_bots()[0]["pendingQuestion"] is None
+    finally:
+        runtime.close()
+
+
+def test_skip_step_on_pending_step_advances_dependents(tmp_path):
+    runtime, executor = scripted_runtime(tmp_path)
+    try:
+        owner = make_bot(runtime, "owner", "workspace-a")
+        second = make_bot(runtime, "second", "workspace-b")
+        third = make_bot(runtime, "third", "workspace-c")
+        reply = delegate_reply(("s1", second["id"], "写 b 文件", [], "skip"),
+                               ("s2", third["id"], "核对 b 文件", ["s1"], "abort"))
+        executor.plan_reply = reply
+        task = runtime.create_task({"requestId": "skip-step-action", "botId": owner["id"], "prompt": "让 second 和 third 各做一步"})
+        runtime.tick(); drain_launch(runtime)
+        parent = runtime.get_task(task["id"])
+        assert len(parent["children"]) == 1
+        # skip-step on a running step is rejected; on a pending one it cascades.
+        with pytest.raises(WebError) as wrong:
+            runtime.plan_action(task["id"], {"action": "skip-step", "stepId": "s1"})
+        assert wrong.value.status == 409
+        decided = runtime.plan_action(task["id"], {"action": "skip-step", "stepId": "s2"})
+        steps = {step["id"]: step for step in decided["coordinatorPlan"]["steps"]}
+        assert steps["s2"]["status"] == "skipped"
+        assert steps["s1"]["status"] == "running"  # untouched
+        executor2 = runtime.executor
+        executor2.outcomes = {parent["children"][0]: "completed", task["id"]: "completed"}
+        pump(runtime)
+        pump(runtime)
+        parent = runtime.get_task(task["id"])
+        assert parent["status"] == "completed"
+        assert parent["coordinatorPlan"]["status"] == "done"
+    finally:
+        runtime.close()
+
+
+def test_restart_backfills_real_questions_and_hides_dirty_waits(tmp_path):
+    runtime, _ = make_runtime(tmp_path)
+    target = make_bot(runtime)
+    dirty = runtime.create_task({"botId": target["id"], "prompt": "只等待，不改文件"})
+    good = runtime.create_task({"botId": target["id"], "prompt": "等确认再继续"})
+    for task, text in ((dirty, "继续等待用户或后续指令。"), (good, "要继续吗")):
+        runtime._tasks[task["id"]].update(status="waiting", waitReason="user",
+                                          waitSince="2026-09-01T00:00:00+00:00")
+        runtime._tasks[task["id"]].pop("waitQuestion", None)
+        runtime._messages[task["id"]] = [{"id": "m-" + task["id"], "taskId": task["id"], "type": "progress",
+                                          "content": text, "senderBotId": target["id"],
+                                          "createdAt": "2026-09-01T00:00:00+00:00"}]
+    runtime._persist()
+    runtime.close()
+
+    reloaded, _ = make_runtime(tmp_path)
+    try:
+        assert reloaded._tasks[dirty["id"]]["waitQuestion"] == ""
+        assert reloaded._tasks[good["id"]]["waitQuestion"] == "要继续吗"
+        pending = reloaded.list_bots()[0]["pendingQuestion"]
+        assert pending and pending["taskId"] == good["id"] and pending["question"] == "要继续吗"
+    finally:
+        reloaded.close()
+
+
+def test_plan_cancel_stops_running_children_and_resumes_parent(tmp_path):
+    runtime, executor = scripted_runtime(tmp_path)
+    try:
+        owner = make_bot(runtime, "owner", "workspace-a")
+        second = make_bot(runtime, "second", "workspace-b")
+        third = make_bot(runtime, "third", "workspace-c")
+        reply = delegate_reply(("s1", second["id"], "写 b 文件", [], "retry"),
+                               ("s2", third["id"], "写 c 文件", [], "retry"))
+        executor.plan_reply = reply
+        task = runtime.create_task({"requestId": "cancel-plan", "botId": owner["id"], "prompt": "让 second 和 third 各写一个文件"})
+        runtime.tick(); drain_launch(runtime)
+        runtime.tick(); drain_launch(runtime)  # children now running with live sessions
+        parent = runtime.get_task(task["id"])
+        assert len(parent["children"]) == 2 and parent["coordinatorPlan"]["status"] == "running"
+        decided = runtime.plan_action(task["id"], {"action": "cancel"})
+        assert decided["coordinatorPlan"]["status"] == "cancelled"
+        assert decided["status"] == "queued"
+        assert set(executor.cancelled) == set(parent["children"])
+        assert ("running", "cancelled") in [(h["from"], h["to"]) for h in decided["coordinatorPlan"]["history"]]
+        executor.outcomes[task["id"]] = "completed"
+        pump(runtime)
+        parent = runtime.get_task(task["id"])
+        assert parent["status"] == "completed"
+        assert parent["coordinatorPlan"]["status"] == "cancelled"
+        for child_id in decided["children"]:
+            child = runtime._tasks[child_id]
+            assert child["status"] in TERMINAL or child.get("cancelRequested")
+        with pytest.raises(WebError) as again:
+            runtime.plan_action(task["id"], {"action": "cancel"})
+        assert again.value.code == "PLAN_NOT_ACTIONABLE"
+    finally:
+        runtime.close()
+
+
+def test_restart_twice_out_of_order_completion_resumes_parent_once(tmp_path):
+    runtime, executor = scripted_runtime(tmp_path)
+    owner = make_bot(runtime, "owner", "workspace-a")
+    second = make_bot(runtime, "second", "workspace-b")
+    third = make_bot(runtime, "third", "workspace-c")
+    reply = delegate_reply(("s1", second["id"], "写 b 文件", [], "retry"),
+                           ("s2", third["id"], "写 c 文件", [], "retry"))
+    executor.plan = lambda prompt, bot, timeout=20.0: reply
+    task = runtime.create_task({"requestId": "restart-idem", "botId": owner["id"], "prompt": "让 second 和 third 各写一个文件"})
+    runtime.tick(); drain_launch(runtime)
+    parent = runtime.get_task(task["id"])
+    steps = {step["id"]: step for step in parent["coordinatorPlan"]["steps"]}
+    child_s1, child_s2 = steps["s1"]["taskId"], steps["s2"]["taskId"]
+    task_count = len(runtime._tasks)
+
+    # First restart: children still queued, nothing replanned or duplicated.
+    restored = restart_runtime(runtime, tmp_path, executor)
+    try:
+        restored.tick(); drain_launch(restored)
+        assert len(restored._tasks) == task_count
+        view = restored.get_task(task["id"])
+        assert view["status"] == "waiting" and len(view["children"]) == 2
+        # Out-of-order: s2 finishes while s1 is still running.
+        executor.outcomes[child_s2] = "completed"
+        pump(restored, 3)
+        view = restored.get_task(task["id"])
+        steps = {step["id"]: step for step in view["coordinatorPlan"]["steps"]}
+        assert steps["s2"]["status"] == "done" and steps["s1"]["status"] == "running"
+        assert view["status"] == "waiting"  # not resumed early
+
+        # Second restart: the running child is interrupted, not failed.
+        restored2 = restart_runtime(restored, tmp_path, executor)
+        try:
+            restored2.tick(); drain_launch(restored2)
+            assert len(restored2._tasks) == task_count  # no duplicate children
+            view = restored2.get_task(task["id"])
+            assert view["status"] == "waiting" and view["waitReason"] == "children"
+            steps = {step["id"]: step for step in view["coordinatorPlan"]["steps"]}
+            assert steps["s2"]["status"] == "done"
+            assert steps["s1"]["status"] == "running"  # waits for an explicit wake
+            assert restored2.get_task(child_s1)["status"] == "interrupted"
+            restored2.wake_task(child_s1)
+            executor.outcomes[child_s1] = "completed"
+            pump(restored2, 3)
+            executor.outcomes[task["id"]] = "completed"
+            pump(restored2, 3)
+            view = restored2.get_task(task["id"])
+            assert view["status"] == "completed"
+            assert view["coordinatorPlan"]["status"] == "done"
+            resumed = [m for m in restored2.list_messages(task["id"]) if m["content"] == "子任务已回传，自动唤醒发起 Bot。"]
+            assert len(resumed) == 1
+            pump(restored2, 3)
+            assert len([m for m in restored2.list_messages(task["id"]) if m["content"] == "子任务已回传，自动唤醒发起 Bot。"]) == 1
+            assert len(restored2._tasks) == task_count
+        finally:
+            restored2.close()
+    finally:
+        restored.close()
+        runtime.close()
+
+
+def test_restart_with_failed_step_aborts_once_and_keeps_evidence(tmp_path):
+    runtime, executor = scripted_runtime(tmp_path)
+    owner = make_bot(runtime, "owner", "workspace-a")
+    second = make_bot(runtime, "second", "workspace-b")
+    third = make_bot(runtime, "third", "workspace-c")
+    reply = delegate_reply(("s1", second["id"], "写 b 文件", [], "abort"),
+                           ("s2", third["id"], "写 c 文件", [], "abort"))
+    executor.plan = lambda prompt, bot, timeout=20.0: reply
+    task = runtime.create_task({"requestId": "restart-fail", "botId": owner["id"], "prompt": "让 second 和 third 各写一个文件"})
+    runtime.tick(); drain_launch(runtime)
+    parent = runtime.get_task(task["id"])
+    steps = {step["id"]: step for step in parent["coordinatorPlan"]["steps"]}
+    child_s1 = steps["s1"]["taskId"]
+    task_count = len(runtime._tasks)
+    restored = restart_runtime(runtime, tmp_path, executor)
+    try:
+        restored.tick(); drain_launch(restored)
+        executor.outcomes[child_s1] = "failed"
+        pump(restored, 3)
+        view = restored.get_task(task["id"])
+        assert view["coordinatorPlan"]["status"] == "failed"
+        assert view["status"] in {"queued", "starting", "running"}  # owner woken once to report the failure
+        assert view["waitReason"] != "children"
+        executor.outcomes[task["id"]] = "completed"
+        pump(restored, 3)
+        view = restored.get_task(task["id"])
+        assert view["status"] == "completed"
+        aborts = [m for m in restored.list_messages(task["id"]) if "分工计划中止" in m["content"]]
+        assert len(aborts) == 1
+        # Restarting again must not re-abort or resume the parent again.
+        restored2 = restart_runtime(restored, tmp_path, executor)
+        try:
+            pump(restored2, 3)
+            assert len([m for m in restored2.list_messages(task["id"]) if "分工计划中止" in m["content"]]) == 1
+            assert len(restored2._tasks) == task_count
+        finally:
+            restored2.close()
+    finally:
+        restored.close()
+        runtime.close()
+
+
+def test_second_wait_asks_the_new_question_not_the_previous_one(tmp_path):
+    runtime, _ = make_runtime(tmp_path)
+    try:
+        target = make_bot(runtime)
+        task = runtime.create_task({"botId": target["id"], "prompt": "分两步确认"})
+        launch(runtime, task["id"])
+        first = enter_wait(runtime, task["id"], {"action": "wait", "question": "先做哪一项？",
+                                                 "options": ["A", "B"]})
+        assert first["waitQuestion"] == "先做哪一项？" and first["waitOptions"] == ["A", "B"]
+
+        # 回答后字段必须清空，侧栏不再指着已答完的问题。
+        runtime.wait_action(task["id"], {"action": "answer", "text": "A"})
+        answered = runtime.get_task(task["id"])
+        assert answered["waitQuestion"] == "" and answered["waitOptions"] == []
+        assert answered["waitSince"] is None
+        assert runtime.list_bots()[0]["pendingQuestion"] is None
+
+        # 第二轮只给新问题，不带 options：不能复用上一轮的问题和选项。
+        launch(runtime, task["id"])
+        second = enter_wait(runtime, task["id"], {"action": "wait", "question": "要不要我顺手清理旧文件？"})
+        assert second["waitQuestion"] == "要不要我顺手清理旧文件？"
+        assert second["waitOptions"] == []
+        pending = runtime.list_bots()[0]["pendingQuestion"]
+        assert pending and pending["question"] == "要不要我顺手清理旧文件？"
+    finally:
+        runtime.close()
+
+
+def test_a_second_wait_without_a_question_does_not_reuse_the_first(tmp_path):
+    runtime, _ = make_runtime(tmp_path)
+    try:
+        target = make_bot(runtime)
+        task = runtime.create_task({"botId": target["id"], "prompt": "两轮等待"})
+        launch(runtime, task["id"])
+        first = enter_wait(runtime, task["id"], {"action": "wait", "question": "报告要几个章节？"})
+        assert first["status"] == "waiting"
+
+        runtime.wait_action(task["id"], {"action": "answer", "text": "三个"})
+        launch(runtime, task["id"])
+        second = enter_wait(runtime, task["id"], {"action": "wait", "reason": "等待子任务或用户"})
+        assert second["status"] == "completed"
+        assert second["waitDeclined"] is True
+        assert second["waitQuestion"] == ""
+        assert runtime.list_bots()[0]["pendingQuestion"] is None
     finally:
         runtime.close()

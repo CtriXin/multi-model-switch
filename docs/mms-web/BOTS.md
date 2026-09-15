@@ -19,15 +19,45 @@ v2 会保存结果原文并尝试提取结论、证据、改动、未完成事�
 
 Bot 可以从内部 worker 分发子任务。子任务完成后，结果消息回写父任务，父任务进入后续执行；分发链最多五层，不能沿同一链再次调用同一个 Bot。任务中的 `requestId` 用于幂等重试，相同 ID 对应不同内容会被拒绝。
 
-每个新任务都会保存一份轻量 `coordinatorPlan`：简单目标保持 direct，检测到明确协作意图时记录候选 Bot 和待确认的 delegate steps。它只提供可读的计划和执行上下文，不启动额外的 planner session，也不会把临时 worker 变成永久 Bot。排队任务按 `priority`（0–100，数值越大越先执行）排序，并在任务详情中显示当前等待资源原因。
+每个新任务都会保存一份轻量 `coordinatorPlan`：简单目标保持 direct，检测到明确协作意图时记录候选 Bot 和待确认的 delegate steps。普通 `direct-first` 请求直接进入当前 Bot 的持久会话，不启动额外 planner session；只有明确协作意图或显式选择 `plan-approve` 时才调用一次短 planner。它不会把临时 worker 变成永久 Bot。排队任务按 `priority`（0–100，数值越大越先执行）排序，并在任务详情中显示当前等待资源原因。
 
 ### Coordinator 计划层（2026-09-12，T2）
 
-计划从 Pi 提示词里拿出来，成为落库、可见、可执行的对象。任务启动前，`BotRuntime.plan_task` 用任务所属 Bot 自己的 preset 发一次短 planner 请求（用完即弃，结束后自动停止并归档，不常驻 planner session），输入是用户目标、可用 Bot 列表和该 Bot 的相关记忆摘要，要求输出严格 JSON（`mode` / `reason` / `steps[].botId/goal/dependsOn/presetId` / `merge`）。解析失败、模型不可用或超过 20 秒都退回关键词计划并标记 `source: "fallback"`，任何情况下不阻塞任务启动。
+计划从 Pi 提示词里拿出来，成为落库、可见、可执行的对象。需要规划时，`BotRuntime.plan_task` 用任务所属 Bot 自己的 preset 发一次短 planner 请求（用完即弃，结束后自动停止并归档，不常驻 planner session），输入是用户目标、可用 Bot 列表和该 Bot 的相关记忆摘要，要求输出严格 JSON（`mode` / `reason` / `steps[].botId/goal/dependsOn/presetId` / `merge`）。普通 `direct-first` 任务跳过这一步，直接使用持久会话；解析失败、模型不可用或超过 20 秒都退回关键词计划并标记 `source: "fallback"`，任何情况下不阻塞任务启动。
 
 `mode == "delegate"` 时由 runtime 而不是提示词执行计划：按 `dependsOn` 顺序为每个 step 创建子任务（沿用现有 dispatch 路径、五层深度和同链不重复守卫），父任务进入 `waiting/children`；子任务全部终态后父任务只恢复一次，恢复提示携带各子任务的 `outcome.summary`。step 可指定 `presetId` 覆盖目标 Bot 的模型，为空则沿用其 preset。重启后按已有子任务终态判断是否恢复，`taskId` 对账保证不重复创建子任务；子任务失败不自动重试，失败摘要交给 owner 决定。
 
 计划在聊天里以计划块可见（`BotPlan`）。Bot 设置项：`planner` = `model`（默认）/ `keywords` / `off`（off 时恒为 direct 单步）；`orchestrationPolicy` = `direct-first`（默认，计划生成后直接执行，30 秒内可在计划块撤回）/ `plan-approve`（先生成计划等用户确认）/ `off`（关闭自动分工）。`POST /api/v1/tasks/:id/plan` 接受 `approve` / `reject` / `replace`，replace 的计划按真实 Bot 名单重新校验。
+
+### 计划状态机（2026-09-15，T2b）
+
+触发在 direct-first 之上加了一道纯函数形状检查 `looks_multi_goal`：编号列表 ≥2 项（`1.` / `1）` / `①` / `- ` 开头的行或行内全角枚举）、`分别 / 同时 / 各自 / 一边…一边`、`@Bot名` 或提到 ≥2 个花名册里的 Bot 名，命中任一即为真。触发顺序：`orchestrationPolicy=off` → direct；`planner=off` → direct；显式协作信号或形状检查为真 → 走一次模型 planner（20 秒预算，roster 带每个 Bot 的描述和最近 3 次成功任务标题），失败退关键词计划，再失败 direct；其它一律 direct，不为单目标任务付出 planner 调用。
+
+计划级状态（每次迁移追加 `plan.history[]`，`{at, from, to, by}`，封顶 50 条）：
+
+| 当前 | 可迁移到 | 说明 |
+| --- | --- | --- |
+| proposed | approved / rejected / cancelled | 等用户确认 |
+| auto | running / rejected / cancelled | rejected 是 30 秒撤回 |
+| approved | running / rejected / cancelled | 同上 |
+| running | merging / failed / cancelled / rejected | failed 来自步骤 abort |
+| merging | done / failed / cancelled | owner 汇总轮 |
+| failed | running | 只能由 retry-step 重开 |
+| rejected / done / cancelled | （终态） | |
+
+步骤级状态：`pending → ready → running → done | failed | skipped`。旧数据里的 `dispatched` / `blocked` 读取时归一为 `running` / `skipped`。每步带 `onFailure`（默认 `retry`）：
+
+| 策略 | 失败后行为 |
+| --- | --- |
+| retry | 子任务先走 T3 的瞬态重试；预算用尽仍失败按 abort 处理 |
+| skip | 步骤标 `skipped`，依赖它的 pending 步骤级联跳过，计划继续 |
+| abort | 计划标 `failed`，其余 pending 步骤标 `skipped`，父任务恢复一次，只说明哪一步失败并询问要不要换人重来 |
+
+取消：`POST /tasks/:id/plan {"action":"cancel"}` 把计划标 `cancelled`，进行中的子任务走现有 stop，父任务恢复并告知用户。`retry-step`（仅 failed 步骤，重新创建子任务，计划 failed → running）和 `skip-step`（标 skipped 并推进）带 `stepId`。
+
+结果图：子任务终态时把结构化结果写进 `steps[].result`（`summary` ≤600 字，另有 `conclusion` / `evidence` / `artifacts[]` 就带），任务上同时存 `childResults[]`（与 `steps[].result` 同源）便于前端一次读取；恢复提示按步骤编号列出各步摘要，owner 的一次回复就是合并结论，合并完成计划进 `done`。
+
+重启与幂等：创建子任务前按 `(parentTaskId, planStepId)` 对账，已有就指回不重建；重启后对 running 的计划只做推进，不重发已完成步骤；父任务恢复有 `childrenChanged` / plan 终态 / `resumedAt` 多重保护，恰好一次。被重启打断（interrupted）的子任务不算计划失败，步骤保持 running，等显式唤醒、skip-step 或取消。
 
 Bot 之间还有独立的 `message`/`reply` mailbox。`dispatch` 用于有依赖的工作分工；`message` 用于通知、澄清和追问，不会伪装成用户消息。接收方空闲时自动投递，忙时排队；每条消息有 `queued`、`delivered`、`processed`、`waiting`、`failed` 回执。`reply MESSAGE_ID` 只能回复发给当前 Bot 的消息，连续自动往返超过 8 跳会暂停，避免 Bot 互相空转。
 
@@ -138,13 +168,25 @@ Bot 工作台采用聊天软件式界面：左侧是 `Bots` 列表，主区只�
 
 Bot 的默认回报是 1–3 句自然语言。文件路径、截图和其他证据只有在确实需要时才作为附件或简短补充出现。视觉参考保存在 `docs/mms-web/design/bot-chat-v2-reference.png`。
 
-### Pixel avatars
+### 几何头像
 
-每个 Bot 可从 10 个内置的 7×7 pixel avatar 模板中选择，并独立选择 6 种颜色。头像是 Bot 身份的一部分，保存在 Bot 配置中；旧 Bot 会根据自身 id 稳定地获得默认模板和颜色。
+每个 Bot 可从一行内的 10 个柔和几何图形中选择，并独立选择 6 种颜色：圆形、软团、
+椭圆、圆角方形、软三角、水滴、胶囊、圆菱、云朵和软六边。图形使用不对称圆角、
+轻微旋转和柔和边界，避免生硬的多边形；表情会放大并与嘴巴拉开距离，位置按 Bot
+identity 稳定生成，所以刷新不会跳变，新建的 Bot 又会自然产生不同性格。用户只选择
+图形和颜色，表情位置不单独暴露为配置项，并会留在当前形状的可读区域内。旧版本
+保存的其他头像 id 仍能兼容渲染，但不再出现在新建/编辑选择器里。
 
 ### 模型与通道
 
 Bot 编辑器复用 Pilot 的 `ModelPicker` / `ModelExplorer`：先从模型目录选模型，再在详情中选择实际通道；`Harness` 保持在路由信息中单独可见。Bot 最终保存的仍是精确 `presetId`，所以不会改变现有 MMS 启动解析链。
+
+### 与 Pilot 会话列表隔离
+
+Bot 仍复用 Pilot 的 Pi session runtime 来保留连续记忆，但启动时会持久化
+`owner=bot` 和 `botId`。Pilot 的 `/sessions` 列表会过滤这些 Bot session；旧版本
+已经产生的 Bot session 也会按 Bot 记录中的 `sessionId` 兼容过滤。Bot 任务详情仍可
+按 session id 读取，不会因为隐藏侧栏而丢失上下文。
 
 ## v2.3 失败重试与结果送达
 
@@ -169,3 +211,11 @@ Webhook 配置保存在 `state_root/bots/notify.json`，形状为 `{"webhooks": 
 `dispatch` 出去的子任务结束时，回传给发起方 Bot 的消息不再是模型原文：正文取该任务 `outcome.summary`（没有结构化结论时取原文前 200 字），并附 `artifacts: [{id, name, kind, taskId}]` 索引；本地绝对路径、sha256 和 session artifact id 只留在任务内部记录里，不进入回执正文。`GET /bots/:botId/communications` 的结果行返回同样的 `content` 与 `artifacts` 字段，前端未改动（`kind: "system"` 的行按通用消息标签显示）。
 
 运行状态不再冒充结果：任务被取消、进程中断，或 Pi 停止 / 报错导致 `failed` 时，投给对方的是一条 `system` 消息，正文为“<Bot 名> 的任务已中断，未产生结果”，归类为系统事件而不是结果；Bot 自己调用 `fail` 明确报告失败时仍按结果回传它的结论。Bot 提示词也要求向其他 Bot 回报时只写一句结论，证据和文件通过 `complete` 提交成果，不在正文贴路径或哈希。
+
+## v2.5 等待契约与记忆降噪
+
+任务进入 `waiting / waitReason=user` 必须携带一个真实问题：`waitQuestion`（必填非空）、`waitOptions`（可选，最多 4 条快捷回复）、`waitSince`。问题来源优先取 `wait` 工具的显式参数（`question` / `options`），没有时取最后一条 progress / assistant 文本，但必须通过 `looks_like_question`（含 `?`/`？`，或以“吗/哪/什么/是否/要不要/请确认/需要你…”等疑问或请求形式出现）。文本里单独一行 `选项：A | B` 会变成快捷回复。两者都拿不到问题时任务不进入等待，而是按 `completed` 收尾，结果就是那段文本，并在任务上记 `waitDeclined=true` 便于排查。
+
+`GET /api/v1/bots` 的每个 Bot 带派生字段 `pendingQuestion`：`{taskId, question, options, since} | null`，取该 Bot 最新一条带问题的 `waiting/user` 任务；`waitQuestion` 为空的旧记录不点亮它，因此历史脏数据不再让侧栏显示“等待你补充信息”却点不出问题。回复走 `POST /api/v1/tasks/:id/wait`，`{"action": "answer", "text": "..."}` 复用普通消息路径恢复任务（等价于在聊天里发一句话），`{"action": "dismiss"}` 直接把任务按 `completed` 收尾并记 `waitDismissed=true`；`waiting/user` 超过 7 天未回复会在 `tick` 中自动结束，结果文本为“等待超时，已结束”。启动加载时会把旧 `waiting/user` 记录补上 `waitSince`，并从进度文本回填 `waitQuestion`（套不出问题的置空）。
+
+记忆摘要只在任务有长期价值时写入：`outcome` 有结构化结论（`# 结论`）或 `changes`、任务有 artifacts、或结果文本 ≥ 120 字且不是“收到/明白/已发送/沟通完毕/无待办/先候着”这类确认。纯 peer 消息任务（有 mailbox 消息、无 artifacts、无结构化结论）一律不写，避免问候和收尾确认占满记忆。

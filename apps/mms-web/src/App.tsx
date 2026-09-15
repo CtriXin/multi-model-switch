@@ -206,6 +206,25 @@ export function resolveTheme(choice: string): "light" | "dark" {
   return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
+/** Determine whether the first-run guided tour is eligible to auto-start. */
+export function isGuideReady({
+  loading,
+  connected,
+  modelReady,
+  setupOpen,
+  settingsOpen,
+  page,
+}: {
+  loading: boolean;
+  connected: boolean;
+  modelReady: boolean;
+  setupOpen: boolean;
+  settingsOpen: boolean;
+  page: string;
+}): boolean {
+  return !loading && connected && modelReady && !setupOpen && !settingsOpen && page !== "bots";
+}
+
 export function App() {
   const [data, setData] = useState<Bootstrap>(empty);
   const [loading, setLoading] = useState(true);
@@ -700,7 +719,7 @@ export function App() {
       const inSettings = step === "connection" || step === "settings";
       setSettingsOpen(inSettings);
       if (inSettings) setGuideSettingsKey(old => old + 1);
-      if (step === "workspace" || step === "compose") {
+      if (page === "bots" || step === "workspace" || step === "compose") {
         setPage("new"); setSelectedId(""); setDetail(null); currentSelection.current = "";
         history.replaceState(null, "", location.pathname + location.search);
       }
@@ -712,6 +731,17 @@ export function App() {
     });
   }
   function startIntroduction() {
+    if (page === "bots") {
+      navigate("new", () => {
+        if (modelReady) { beginGuideStep("welcome"); return; }
+        requestNavigation(() => {
+          setGuideOpen(false); setGuideStep(null);
+          if (!data.services.length && data.capabilities.configure) { setSettingsOpen(false); setSetupOpen(true); }
+          else setSettingsOpen(true);
+        });
+      });
+      return;
+    }
     if (modelReady) { beginGuideStep("welcome"); return; }
     requestNavigation(() => {
       setGuideOpen(false); setGuideStep(null);
@@ -724,6 +754,10 @@ export function App() {
   }
   function guideNavigate(action: GuideAction) {
     const steps: Record<GuideAction, TourStep> = { settings: "settings", workspace: "workspace", model: "model", compose: "compose", materials: "materials", artifacts: "artifacts", runtime: "runtime" };
+    if (page === "bots") {
+      navigate("new", () => beginGuideStep(steps[action]));
+      return;
+    }
     beginGuideStep(steps[action]);
   }
   /** Open a new session with a task already written out.
@@ -1024,7 +1058,7 @@ export function App() {
     page === "session" && atBottom && !sessionError,
     connected && !statusesStale,
   );
-  const tour = guideStep && modelReady && !setupOpen ? <GuidedTour step={guideStep} move={beginGuideStep} close={() => setGuideStep(null)} help={() => requestNavigation(() => { setSettingsOpen(false); setGuideStep(null); setGuideOpen(true); })} example={guideExample} modelReady={data.presets.some(p => p.available)} configure={!!data.capabilities.configure} hasSession={page === "session" && !!detail} /> : null;
+  const tour = guideStep && modelReady && !setupOpen && page !== "bots" ? <GuidedTour step={guideStep} move={beginGuideStep} close={() => setGuideStep(null)} help={() => requestNavigation(() => { setSettingsOpen(false); setGuideStep(null); setGuideOpen(true); })} example={guideExample} modelReady={data.presets.some(p => p.available)} configure={!!data.capabilities.configure} hasSession={page === "session" && !!detail} /> : null;
   return (
     <div className="app-shell" data-page={page}>
       {navOpen && (
@@ -1637,7 +1671,7 @@ export function App() {
           </div>
           <div className="topbar-actions">
             <UpdateCenter ready={!loading && connected} open={updateOpen} setOpen={setUpdateOpen} onStatus={setUpdateStatus} />
-            <HelpGuide ready={!loading && connected && modelReady && !setupOpen && !settingsOpen} modelReady={modelReady} open={guideOpen} setOpen={(open) => { if (open) setGuideStep(null); setGuideOpen(open); }} hasSession={page === "session" && !!detail} navigate={guideNavigate} startTour={startIntroduction} startConnection={data.capabilities.configure ? () => requestNavigation(() => { setGuideOpen(false); setGuideStep(null); setSettingsOpen(false); setSetupOpen(true); }) : undefined} />
+            <HelpGuide ready={isGuideReady({ loading, connected, modelReady, setupOpen, settingsOpen, page })} modelReady={modelReady} open={guideOpen} setOpen={(open) => { if (open) setGuideStep(null); setGuideOpen(open); }} hasSession={page === "session" && !!detail} navigate={guideNavigate} startTour={startIntroduction} startConnection={data.capabilities.configure ? () => requestNavigation(() => { setGuideOpen(false); setGuideStep(null); setSettingsOpen(false); setSetupOpen(true); }) : undefined} />
             {detail && (
               <Status
                 session={detail.session}

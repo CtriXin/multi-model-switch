@@ -205,6 +205,7 @@ class _LiveSession:
         }
 
     def session_view(self) -> dict:
+        owner = str(self.meta.get("owner") or "web")
         view = {
             "id": self.meta["id"],
             "title": self.meta.get("title") or "",
@@ -217,7 +218,7 @@ class _LiveSession:
             "state": self.state,
             "activity": self.activity_view(),
             "updatedAt": self.updated_at,
-            "owner": "web",
+            "owner": owner,
             "archived": bool(self.meta.get("archived")),
             "cwd": self.meta.get("cwd", ""),
             "forkedFrom": self.meta.get("forkedFrom"),
@@ -229,6 +230,8 @@ class _LiveSession:
         # The list drops the read-only row for a session that is claimed here.
         if self.meta.get("piSessionId"):
             view["piSessionId"] = self.meta["piSessionId"]
+        if self.meta.get("botId"):
+            view["botId"] = self.meta["botId"]
         return view
 
     def detail_view(self) -> dict:
@@ -483,6 +486,42 @@ class SessionService(SessionActions, SessionSideQuestions):
                 with replay.lock:
                     return replay.detail_view()
             detail, live = self._do_launch(payload, request_id, op_payload)
+            with self._lock:
+                entry = self._requests.get(request_id)
+                if entry is not None:
+                    entry["sessionId"] = live.meta["id"]
+        return detail
+
+    def launch_bot(self, payload: dict, bot_id: str) -> dict:
+        """Launch a Bot-owned Pi session without exposing it as a Pilot chat.
+
+        Bot transcripts still use the same Pi/session machinery so the Bot can
+        resume its continuity, but their ownership is explicit and persisted.
+        The HTTP ``POST /sessions`` route never calls this internal seam.
+        """
+        if not isinstance(bot_id, str) or not bot_id.strip():
+            raise WebError("INVALID_REQUEST", "bot_id 必须是非空文本。", status=400)
+        return self._launch_owned(payload, owner="bot", bot_id=bot_id.strip())
+
+    def _launch_owned(self, payload: dict, *, owner: str, bot_id: str | None = None) -> dict:
+        """Internal launch path used by non-Pilot owners."""
+        self._require_open()
+        payload = self._object_payload(payload)
+        request_id = self._validate_request_id(payload.get("requestId"))
+        op_payload = {
+            "op": "launch",
+            "workspaceId": payload.get("workspaceId"),
+            "presetId": payload.get("presetId"),
+            "title": payload.get("title"),
+            "prompt": payload.get("prompt"),
+            "owner": owner,
+            "botId": bot_id,
+        }
+        with self._request_scope(request_id, op_payload) as replay:
+            if replay is not None:
+                with replay.lock:
+                    return replay.detail_view()
+            detail, live = self._do_launch(payload, request_id, op_payload, owner=owner, bot_id=bot_id)
             with self._lock:
                 entry = self._requests.get(request_id)
                 if entry is not None:
@@ -1034,7 +1073,8 @@ class SessionService(SessionActions, SessionSideQuestions):
 
     # -- internals: launch ----------------------------------------------
 
-    def _do_launch(self, payload: dict, request_id: str, op_payload: dict) -> tuple[dict, _LiveSession]:
+    def _do_launch(self, payload: dict, request_id: str, op_payload: dict, *,
+                   owner: str = "web", bot_id: str | None = None) -> tuple[dict, _LiveSession]:
         if not self.capabilities()["launch"]:
             raise WebError("CAPABILITY_UNAVAILABLE", "当前环境未启用真实 Pi 会话启动", status=409)
         if payload.get("thinkingLevel") is not None and payload["thinkingLevel"] not in ("off", "minimal", "low", "medium", "high", "xhigh", "max"):
@@ -1094,7 +1134,8 @@ class SessionService(SessionActions, SessionSideQuestions):
             title = _clip(str(prompt or "").strip() or "Pi 会话", 60)
 
         session_id = f"s-{uuid.uuid4().hex[:12]}"
-        meta = self._build_meta(session_id, harness, workspace_id, title, model_info, runtime)
+        meta = self._build_meta(session_id, harness, workspace_id, title, model_info, runtime,
+                                owner=owner, bot_id=bot_id)
         meta.update(cwd=cwd, presetId=preset_id)
         if runtime.get("_webConfigRoot"):
             meta["runtimeRoot"] = runtime["_webConfigRoot"]
@@ -1394,6 +1435,9 @@ class SessionService(SessionActions, SessionSideQuestions):
         title: str,
         model_info,
         runtime: dict,
+        *,
+        owner: str = "web",
+        bot_id: str | None = None,
     ) -> dict:
         if isinstance(model_info, dict):
             model_name = str(
@@ -1409,7 +1453,7 @@ class SessionService(SessionActions, SessionSideQuestions):
             model_name = str(runtime.get("model") or "")
         provider_name = str(runtime.get("name") or runtime.get("id") or "")
         channel = str(runtime.get("channel") or runtime.get("mode") or "default")
-        return {
+        meta = {
             "id": session_id,
             "title": title,
             "workspaceId": workspace_id,
@@ -1417,10 +1461,13 @@ class SessionService(SessionActions, SessionSideQuestions):
             "modelName": model_name,
             "providerName": provider_name,
             "channel": str(runtime.get("route_provider_id") or runtime.get("id") or channel),
-            "owner": "web",
+            "owner": owner,
             "createdAt": self._now(),
             "updatedAt": self._now(),
         }
+        if bot_id:
+            meta["botId"] = bot_id
+        return meta
 
     # -- persistence ------------------------------------------------------
 

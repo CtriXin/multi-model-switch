@@ -13,7 +13,7 @@ import re
 import threading
 import time
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -23,7 +23,9 @@ from .errors import WebError
 from .runtime import private_json
 from .bot_memory import BotMemoryStore, BotMemoryError
 from .bot_communications import BotCommunications
-from .bot_coordinator import plan_for, direct_plan, build_planner_prompt, parse_model_plan, sanitize_plan
+from .bot_coordinator import (plan_for, direct_plan, build_planner_prompt, parse_model_plan, sanitize_plan,
+                              looks_multi_goal, set_plan_status, transition_plan, transition_step,
+                              normalize_step_status)
 from . import bot_retry
 from .bot_notify import Notifier
 
@@ -33,9 +35,14 @@ PLANNER_MODES = {"model", "keywords", "off"}
 ORCHESTRATION_POLICIES = {"direct-first", "plan-approve", "off"}
 MAX_TASKS = 2000
 MAX_MESSAGES = 500
-PIXEL_AVATAR_IDS = ("round", "cat", "puff", "cube", "leaf", "ghost", "rocket", "star", "bean", "bot")
+PIXEL_AVATAR_IDS = ("round", "cat", "puff", "cube", "leaf", "ghost", "rocket", "star", "bean", "bot",
+                    "diamond", "hex", "ticket", "wave", "shield", "gem", "orbit", "sun")
 PIXEL_AVATAR_COLORS = ("#b9a5ff", "#ff9f91", "#73dfc7", "#ffd77d", "#8bb8ff", "#f18bd5")
-_COLLABORATION_HINTS = ("找", "派给", "分派", "协作", "并行", "让.*bot", "让.*同事", "请.*检查")
+_COLLABORATION_HINTS = (
+    "找", "派给", "分派", "协作", "并行", "让.*bot", "让.*同事", "请.*检查",
+    r"让\s+(?!我|你|他|它|我们|自己)[A-Za-z0-9_-]{1,40}\s",
+    r"让\s*(?!我|你|他|它|我们|自己)[\u4e00-\u9fff]{1,8}(?:帮|写|检查|处理|做|整理|核对|各)",
+)
 
 
 def now():
@@ -116,6 +123,75 @@ def peer_report(*, state, message, bot_name, outcome, system_failure=False):
     return "result", str(summary or message or "")[:200]
 
 
+# A waiting task must own a real question: a bare "waiting" status with
+# nothing to answer is what left the sidebar pointing at an empty chat.
+_QUESTION_ENDINGS = ("吗", "么", "呢", "对不对", "好不好", "有没有", "是不是")
+_QUESTION_MARKERS = (
+    # Question words may be followed by a noun (“哪些章节”), so they are
+    # matched inside the tail rather than only at its end.
+    "哪", "什么", "怎么", "怎样", "如何", "是否", "要不要", "能不能", "可不可以",
+    "为什么", "多少", "多久",
+    "请确认", "请提供", "请补充", "请说明", "请选择", "请告诉我", "请回复",
+    # A second-person request also tells the user what to answer;
+    # "需要你确认预算" is a question-shaped wait even without "？".
+    "需要你", "需要您", "请你", "请您", "等你确认", "由你决定", "由你确认",
+    "你确认", "你提供", "你补充", "你决定",
+)
+_TRIVIAL_TOKENS = ("收到", "明白", "已发送", "沟通完毕", "无待办", "先候着")
+_WAIT_OPTIONS = re.compile(r"^\s*(?:选项|可选项)\s*[:：]\s*(.+)$")
+MAX_WAIT_OPTIONS = 4
+TRIVIAL_RESULT_CHARS = 120
+
+
+def looks_like_question(text) -> bool:
+    """Whether a Bot turn actually asks the user something.
+
+    Used before entering ``waiting/user`` and when folding unreadable legacy
+    records: a question mark anywhere, a question-shaped ending, or an
+    explicit question form such as “是否…” / “请确认…”.
+    """
+    raw = str(text or "")
+    if not raw.strip():
+        return False
+    if "?" in raw or "？" in raw:
+        return True
+    # A real model often asks first and explains afterwards, so every line and
+    # sentence is checked, not only the tail of the whole message.
+    for segment in re.split(r"[\n。!！.]+", raw):
+        tail = " ".join(segment.split()).rstrip("~～ ")[-60:]
+        if not tail:
+            continue
+        if tail.endswith(_QUESTION_ENDINGS):
+            return True
+        if any(marker in tail for marker in _QUESTION_MARKERS):
+            return True
+    return False
+
+
+def is_trivial_result(text) -> bool:
+    """A short acknowledgement or greeting is not worth a memory digest."""
+    value = " ".join(str(text or "").split())
+    if len(value) < TRIVIAL_RESULT_CHARS:
+        return True
+    return any(token in value for token in _TRIVIAL_TOKENS)
+
+
+def parse_wait_text(text) -> tuple[str, list[str]]:
+    """Split a wait message into (question, quick options).
+
+    ``选项：A | B`` becomes quick replies; every other line stays the question.
+    """
+    question_lines: list[str] = []
+    options: list[str] = []
+    for line in str(text or "").splitlines():
+        match = _WAIT_OPTIONS.match(line)
+        if match and not options:
+            options = [part.strip()[:200] for part in re.split(r"[|｜、,，]", match.group(1)) if part.strip()][:MAX_WAIT_OPTIONS]
+            continue
+        question_lines.append(line)
+    return "\n".join(question_lines).strip(), options
+
+
 class BotRuntime(BotCommunications):
     def __init__(self, *, state_root: Path, executor, computer=None, max_concurrent=3):
         self.root = Path(state_root) / "bots"
@@ -166,6 +242,7 @@ class BotRuntime(BotCommunications):
                 bot.setdefault("compactAtPercent", 70)
                 bot.setdefault("orchestrationPolicy", "direct-first")
                 bot.setdefault("planner", "model")
+            self._migrate_wait_contracts()
         except (OSError, ValueError, KeyError, TypeError):
             self._load_error = "Bot 记录无法读取，原文件已保留；请检查记录后再写入。"
 
@@ -311,7 +388,10 @@ class BotRuntime(BotCommunications):
 
     def list_bots(self):
         with self._lock:
-            return deepcopy(list(self._bots.values()))
+            bots = deepcopy(list(self._bots.values()))
+            for bot in bots:
+                bot["pendingQuestion"] = self._pending_question(bot["id"])
+            return bots
 
     def update_bot(self, bot_id, payload):
         with self._lock:
@@ -604,6 +684,115 @@ class BotRuntime(BotCommunications):
         view["settings"] = settings
         return view
 
+    def _pending_question(self, bot_id):
+        """The latest answered-question contract for a Bot, or None.
+
+        A ``waiting/user`` row without a question is legacy dirty data; it
+        stays out so the sidebar never points at an empty chat.
+        """
+        rows = [task for task in self._tasks.values()
+                if task["botId"] == bot_id and task["status"] == "waiting"
+                and task.get("waitReason") == "user" and str(task.get("waitQuestion") or "").strip()]
+        if not rows:
+            return None
+        task = max(rows, key=lambda item: str(item.get("waitSince") or item.get("updatedAt") or ""))
+        return {"taskId": task["id"], "question": str(task["waitQuestion"]).strip(),
+                "options": list(task.get("waitOptions") or []),
+                "since": task.get("waitSince") or task.get("updatedAt")}
+
+    def _migrate_wait_contracts(self):
+        """Backfill older ``waiting/user`` rows so dirty data stops lighting up."""
+        for task in self._tasks.values():
+            if task["status"] != "waiting" or task.get("waitReason") != "user":
+                continue
+            task.setdefault("waitSince", task.get("updatedAt") or task.get("createdAt") or now())
+            task.setdefault("waitOptions", [])
+            if task.get("waitQuestion"):
+                continue
+            question, options = parse_wait_text(self._last_wait_text(task))
+            if question and looks_like_question(question):
+                task["waitQuestion"] = question[:2000]
+                if options and not task["waitOptions"]:
+                    task["waitOptions"] = options
+            else:
+                task["waitQuestion"] = ""
+
+    def _last_wait_text(self, task):
+        """The most recent user-facing text, used when no explicit question came."""
+        rows = [row for row in self._messages.get(task["id"], [])
+                if row.get("type") in {"progress", "message"} and str(row.get("content") or "").strip()]
+        # Prefer this turn, so a question asked two rounds ago cannot be reused
+        # as if the Bot had just asked it again.
+        rows = [row for row in rows if row.get("turn") == task.get("turn")] or rows
+        return str(rows[-1]["content"]).strip() if rows else ""
+
+    def _record_wait_request(self, task, payload):
+        """Explicit question/options from the wait tool; text stays the fallback."""
+        # Every round starts from scratch: a stale question from an earlier
+        # wait must never be shown as the one the Bot is asking now.
+        question = str(payload.get("question") or "").strip()
+        task["waitQuestion"] = question[:2000] if question else ""
+        options = payload.get("options")
+        task["waitOptions"] = ([str(item).strip()[:200] for item in options if str(item).strip()][:MAX_WAIT_OPTIONS]
+                               if isinstance(options, list) else [])
+        task["waitRequested"] = True
+
+    def _enter_user_wait(self, task):
+        """Enter ``waiting/user`` only with a real question.
+
+        Without one the turn is closed as completed and ``waitDeclined`` is
+        recorded for diagnosis, so the sidebar never points at an empty chat.
+        """
+        text = str(task.get("waitQuestion") or "").strip() or self._last_wait_text(task)
+        question, options = parse_wait_text(text)
+        if not question or not looks_like_question(question):
+            task["waitDeclined"] = True
+            task["waitRequested"] = False
+            self._finish(task, "completed", question or text or "本轮没有需要用户补充的问题。")
+            return False
+        task.update(status="waiting", waitReason="user", token="", waitQuestion=question[:2000],
+                    waitOptions=(list(task.get("waitOptions") or []) or options)[:MAX_WAIT_OPTIONS],
+                    waitSince=now())
+        self._bot(task["botId"])["status"] = "idle"
+        self._notify(task, "task.waiting", "input", question)
+        return True
+
+    def wait_action(self, task_id, payload):
+        """Answer or dismiss a ``waiting/user`` task from the Web UI.
+
+        ``answer`` reuses the ordinary message path, so the reply resumes the
+        same task; ``dismiss`` closes it as completed without a session turn.
+        """
+        with self._lock:
+            task = self._task(task_id)
+            if task["status"] != "waiting" or task.get("waitReason") != "user":
+                raise WebError("TASK_NOT_WAITING", "这条任务现在不在等用户回复。", 409)
+            action = str((payload or {}).get("action") or "").strip()
+            if action == "answer":
+                text = text_field(payload, "text", 32000, True)
+                task["waitAnsweredAt"] = now()
+                task.update(waitQuestion="", waitOptions=[], waitSince=None)
+                return self.add_message(task_id, {"content": text})
+            if action == "dismiss":
+                task["waitDismissed"] = True
+                self._finish(task, "completed", "等待已结束。")
+                self._persist()
+                return self._view(task)
+            raise WebError("INVALID_REQUEST", "action 必须是 answer 或 dismiss。", 400)
+
+    def _should_remember_task(self, task, message):
+        """Only a task with a durable outcome is worth a memory digest."""
+        outcome = task.get("outcome") if isinstance(task.get("outcome"), dict) else {}
+        summary = str(outcome.get("summary") or "").strip()
+        # ``summary`` falls back to the raw text; only an explicit 结论 section
+        # counts as a structured conclusion here.
+        structured = (bool(summary) and summary != str(outcome.get("raw") or "").strip()) \
+            or bool(str(outcome.get("changes") or "").strip())
+        artifacts = bool(self._artifacts.get(task["id"]))
+        if task.get("deliveryMessageIds") and not artifacts and not structured:
+            return False
+        return structured or artifacts or not is_trivial_result(message)
+
     def wake_task(self, task_id, payload=None):
         with self._lock:
             task = self._task(task_id)
@@ -714,7 +903,11 @@ class BotRuntime(BotCommunications):
                 state = "failed"
                 system_failure = True
         task.pop("retry", None)
-        task.update(status=state, updatedAt=now(), completedAt=now(), token="", waitReason=None)
+        task.update(status=state, updatedAt=now(), completedAt=now(), token="", waitReason=None,
+                    waitQuestion="", waitOptions=[], waitSince=None)
+        plan = task.get("coordinatorPlan")
+        if plan and plan.get("status") in {"auto", "approved", "running", "merging"}:
+            self._settle_plan_on_finish(plan, state)
         self._mailbox_receipt(task, "processed" if state == "completed" else "failed")
         if state == "completed":
             task["result"] = message
@@ -727,7 +920,7 @@ class BotRuntime(BotCommunications):
         if state == "completed":
             try:
                 bot = self._bot(task["botId"])
-                if bot.get("memoryEnabled", True):
+                if bot.get("memoryEnabled", True) and self._should_remember_task(task, message):
                     digest = f"任务 {task['id']}：{task.get('prompt','')[:600]}\n结果：{message[:1200]}"
                     self.memory.remember(task["botId"], digest, kind="task", source="task", task_id=task["id"])
             except Exception:
@@ -742,6 +935,10 @@ class BotRuntime(BotCommunications):
             self._message(parent["id"], report_type, report_text, task["botId"], childTaskId=task["id"],
                           artifacts=self._peer_artifacts(task) if state == "completed" else [])
             parent["childrenChanged"] = True
+            parent_plan = parent.get("coordinatorPlan") or {}
+            if parent_plan.get("mode") == "delegate" and parent_plan.get("steps"):
+                if self._sync_plan_steps(parent, parent_plan) and parent_plan.get("status") in {"done", "failed", "cancelled"}:
+                    parent["childResults"] = self._child_results(parent, parent_plan)
         if state in {"completed", "failed"}:
             self._notify(task, "task.completed" if state == "completed" else "task.failed")
 
@@ -764,17 +961,77 @@ class BotRuntime(BotCommunications):
         if any(c["status"] not in TERMINAL for c in children):
             return False
         plan = task.get("coordinatorPlan") or {}
+        if plan.get("mode") == "delegate" and plan.get("status") in {"done", "failed", "cancelled", "rejected"}:
+            return False
         if task.get("planResolved") and plan.get("mode") == "delegate":
-            # A pending step is still waiting on a sibling dependency; the
-            # parent resumes only when the plan has nothing left to dispatch.
-            if any(step.get("status") == "pending" for step in plan.get("steps", [])):
+            # A step that is still pending/ready/running has work left; the
+            # parent resumes only when the plan has nothing more to dispatch.
+            if any(normalize_step_status(step.get("status")) in {"pending", "ready", "running"}
+                   for step in plan.get("steps", [])):
                 return False
-        replies = "\n\n".join(
-            f"{c['id']} [{c['status']}] " + str((c.get("outcome") or {}).get("summary") or c.get("result") or c.get("error") or "")
-            for c in children)
-        task.update(status="queued", waitReason=None, childrenChanged=False, resumeText="子任务均已回传，请检查成果并总结。\n" + replies)
-        self._message(task["id"], "system", "子任务已回传，自动唤醒发起 Bot。")
+        self._queue_parent_merge(task, plan)
         return True
+
+    def _step_result(self, step, child):
+        """Structured per-step result: summary plus whatever the child has."""
+        outcome = child.get("outcome") or {}
+        summary = str(outcome.get("summary") or child.get("result") or child.get("error") or "")[:600]
+        result = {"summary": summary}
+        if outcome.get("summary"):
+            result["conclusion"] = str(outcome["summary"])[:4000]
+        if outcome.get("evidence"):
+            result["evidence"] = str(outcome["evidence"])[:4000]
+        artifacts = [{"taskId": child["id"], "url": item.get("url"), "label": item.get("name", "")}
+                     for item in self._artifacts.get(child["id"], []) if item.get("url")][:20]
+        if artifacts:
+            result["artifacts"] = artifacts
+        return result
+
+    def _child_results(self, task, plan):
+        """Task-level mirror of steps[].result so the frontend reads it once."""
+        rows = []
+        seen = set()
+        if plan.get("mode") == "delegate":
+            for step in plan.get("steps", []):
+                task_id = step.get("taskId")
+                if task_id:
+                    seen.add(task_id)
+                result = step.get("result") or {}
+                row = {"stepId": step.get("id"), "botId": step.get("botId"), "taskId": task_id,
+                       "status": normalize_step_status(step.get("status")),
+                       "summary": str(result.get("summary") or step.get("error") or "")[:600]}
+                if result.get("evidence"):
+                    row["evidence"] = result["evidence"]
+                if result.get("artifacts"):
+                    row["artifacts"] = result["artifacts"]
+                rows.append(row)
+        for child_id in task.get("children", []):
+            if child_id in seen or child_id not in self._tasks:
+                continue
+            child = self._tasks[child_id]
+            outcome = child.get("outcome") or {}
+            rows.append({"taskId": child_id, "botId": child.get("botId"), "status": child.get("status"),
+                         "summary": str(outcome.get("summary") or child.get("result") or child.get("error") or "")[:600]})
+        return rows
+
+    def _queue_parent_merge(self, task, plan):
+        """Queue the owner's merge turn with per-step summaries. Runs once per
+        generation of children; planExecutedAt/resumedAt/childrenChanged and
+        the plan-terminal guard keep restarts from resuming twice."""
+        child_results = self._child_results(task, plan)
+        lines = []
+        for index, row in enumerate(child_results, 1):
+            name = str((self._bots.get(row.get("botId") or "") or {}).get("name") or row.get("botId") or "")
+            label = row.get("stepId") or row.get("taskId")
+            lines.append(f"{index}. [{label} · {name} · {row.get('status')}] {row.get('summary') or '（无摘要）'}")
+        if task.get("planResolved") and plan.get("mode") == "delegate":
+            transition_plan(plan, "merging", by="system")
+            task["coordinatorPlan"] = plan
+        task["childResults"] = child_results
+        task["resumedAt"] = now()
+        task.update(status="queued", waitReason=None, childrenChanged=False,
+                    resumeText="子任务均已回传，请检查成果并总结。\n" + "\n".join(lines))
+        self._message(task["id"], "system", "子任务已回传，自动唤醒发起 Bot。")
 
     def plan_task(self, task, bot):
         """Decide and persist the durable plan before a task's session starts.
@@ -792,8 +1049,12 @@ class BotRuntime(BotCommunications):
             planner = bot.get("planner", "model")
             policy = bot.get("orchestrationPolicy", "direct-first")
             bots_snapshot = deepcopy(list(self._bots.values()))
+            # direct-first stays cheap: only an explicit collaboration signal
+            # or a multi-goal shape pays for the throwaway model planner.
+            wants_plan = bool(live.get("collaborationRequested")) or looks_multi_goal(
+                prompt, bots_snapshot, owner_id=bot.get("id"))
         memory_summary = ""
-        if planner == "model" and policy != "off" and bot.get("memoryEnabled", True):
+        if planner == "model" and policy != "off" and wants_plan and bot.get("memoryEnabled", True):
             try:
                 notes = self.memory.get(bot["id"], query=prompt).get("notes", [])
                 memory_summary = "\n".join(str(note.get("content") or "") for note in notes[:5])[:2000]
@@ -801,13 +1062,16 @@ class BotRuntime(BotCommunications):
                 memory_summary = ""
         if planner == "off" or policy == "off":
             plan = direct_plan(bot, "已按设置关闭自动分工，由当前 Bot 直接完成。", "off")
+        elif not wants_plan:
+            plan = direct_plan(bot, "普通任务由当前 Bot 直接完成。", "direct-first")
         elif planner == "keywords" or not hasattr(self.executor, "plan"):
             plan = plan_for(prompt, bot, bots_snapshot)
             plan["source"] = "keywords"
         else:
             plan = None
             try:
-                reply = self.executor.plan(build_planner_prompt(prompt, bot, bots_snapshot, memory_summary), bot)
+                history = self._recent_task_titles(bots_snapshot, exclude=bot.get("id"))
+                reply = self.executor.plan(build_planner_prompt(prompt, bot, bots_snapshot, memory_summary, history), bot)
                 if reply:
                     plan = parse_model_plan(reply, bot, bots_snapshot)
             except Exception:
@@ -815,7 +1079,7 @@ class BotRuntime(BotCommunications):
             if plan is None:
                 plan = plan_for(prompt, bot, bots_snapshot)
                 plan["source"] = "fallback"
-        plan["status"] = "proposed" if plan["mode"] == "delegate" and policy == "plan-approve" else "auto"
+        set_plan_status(plan, "proposed" if plan["mode"] == "delegate" and policy == "plan-approve" else "auto")
         with self._lock:
             live = self._task(task["id"])
             if live.get("planResolved"):
@@ -825,83 +1089,245 @@ class BotRuntime(BotCommunications):
             self._persist()
             return deepcopy(plan)
 
+    def _recent_task_titles(self, bots, exclude=None):
+        """Up to three recent completed task titles per Bot, for the planner."""
+        wanted = {bot.get("id") for bot in bots if bot.get("id") and bot.get("id") != exclude}
+        history = {bot_id: [] for bot_id in wanted}
+        with self._lock:
+            completed = [t for t in self._tasks.values()
+                         if t.get("botId") in wanted and t.get("status") == "completed"]
+        completed.sort(key=lambda t: str(t.get("completedAt") or ""), reverse=True)
+        for task in completed:
+            titles = history[task["botId"]]
+            if len(titles) >= 3:
+                continue
+            title = str(task.get("prompt") or "").strip().splitlines()[0][:60] if task.get("prompt") else ""
+            if title:
+                titles.append(title)
+        return history
+
     def _advance_plan(self, task):
         """Dispatch plan steps whose dependencies are done. Never recreates a
-        step that already has a taskId; reconciles with existing children so a
-        restart cannot duplicate a dispatched step. Returns changed."""
+        step that already has a taskId; reconciles by (parentTaskId, step.id)
+        so a restart cannot duplicate a dispatched step. Returns changed."""
         plan = task.get("coordinatorPlan") or {}
         if plan.get("mode") != "delegate" or not task.get("planResolved"):
             return False
         steps = plan.get("steps") or []
         by_id = {step.get("id"): step for step in steps}
-        changed = False
-        children = [self._tasks[c] for c in task.get("children", []) if c in self._tasks]
-        for step in steps:
-            if step.get("taskId"):
-                child = self._tasks.get(step["taskId"])
-                if child and child["status"] in TERMINAL:
-                    state = "done" if child["status"] == "completed" else "failed"
-                    if step.get("status") != state:
-                        step["status"] = state
-                        changed = True
-                continue
-            match = next((c for c in children if c["botId"] == step.get("botId") and c.get("prompt") == step.get("goal")), None)
-            if match:
-                step["taskId"] = match["id"]
-                step["status"] = "dispatched" if match["status"] not in TERMINAL else ("done" if match["status"] == "completed" else "failed")
+        changed = self._sync_plan_steps(task, plan)
+        # Phase 2: per-step failure policy while the plan is still active.
+        if plan.get("status") in {"auto", "approved", "running"}:
+            for step in steps:
+                if step.get("status") != "failed" or step.get("policyApplied"):
+                    continue
+                step["policyApplied"] = True
+                policy = step.get("onFailure") or "retry"
                 changed = True
+                if policy == "skip":
+                    step["status"] = "skipped"
+                    self._skip_dependents(steps, by_id, step["id"])
+                    continue
+                # retry: the child already spent its T3 retry budget before
+                # reaching a terminal state, so an exhausted retry is abort.
+                for other in steps:
+                    if other is not step and other.get("status") in {"pending", "ready"}:
+                        other["status"] = "skipped"
+                        other["result"] = {"summary": "计划中止，本步骤未执行。"}
+                transition_plan(plan, "failed", by=f"step:{step['id']}")
+                self._resume_plan_failure(task, plan, step)
+                return True
+        # Phase 3: a step whose dependency was skipped can never run.
         for step in steps:
             if step.get("status") == "pending" and any(
-                    by_id.get(dep, {}).get("status") in {"failed", "blocked"} for dep in step.get("dependsOn", [])):
-                step["status"] = "blocked"
+                    by_id.get(dep, {}).get("status") == "skipped" for dep in step.get("dependsOn", [])):
+                step["status"] = "skipped"
+                step["result"] = {"summary": "前置步骤被跳过，本步骤未执行。"}
                 changed = True
-        for step in steps:
-            if step.get("status") != "pending":
-                continue
-            if any(by_id.get(dep, {}).get("status") != "done" for dep in step.get("dependsOn", [])):
-                continue
-            try:
-                child = self.create_task({"botId": step["botId"], "prompt": step["goal"], "parentTaskId": task["id"],
-                                          "requestId": f"plan:{task['id']}:{step['id']}"})
-            except WebError as exc:
-                step["status"] = "failed"
-                step["error"] = exc.message
+        # Phase 4: dispatch ready steps (pending -> ready -> running).
+        if plan.get("status") == "running":
+            for step in steps:
+                if step.get("status") not in {"pending", "ready"}:
+                    continue
+                # A skipped prerequisite is settled, not pending: otherwise a
+                # dependent step waits forever after skip-step.
+                if any(normalize_step_status(by_id.get(dep, {}).get("status")) not in {"done", "skipped"}
+                       for dep in step.get("dependsOn", [])):
+                    continue
+                step["status"] = "ready"
+                attempt = step.get("attempts", 1)
+                try:
+                    child = self.create_task({"botId": step["botId"], "prompt": step["goal"], "parentTaskId": task["id"],
+                                              "requestId": f"plan:{task['id']}:{step['id']}:{attempt}"})
+                except WebError as exc:
+                    step["status"] = "failed"
+                    step["error"] = exc.message
+                    changed = True
+                    continue
+                step["taskId"] = child["id"]
+                step["status"] = "running"
+                self._tasks[child["id"]]["planStepId"] = step["id"]
+                if step.get("presetId"):
+                    self._tasks[child["id"]]["presetIdOverride"] = step["presetId"]
                 changed = True
-                continue
-            step["taskId"] = child["id"]
-            step["status"] = "dispatched"
-            if step.get("presetId"):
-                self._tasks[child["id"]]["presetIdOverride"] = step["presetId"]
-            changed = True
         if changed:
             task["updatedAt"] = now()
         return changed
 
+    def _sync_plan_steps(self, task, plan):
+        """Phase 1 of plan advance: normalize legacy statuses, link steps to
+        children, and sync terminal child outcomes into step status +
+        structured result. Also called from _finish so a child that finishes
+        after an abort/cancel still updates the result graph."""
+        steps = plan.get("steps") or []
+        changed = False
+        children = [self._tasks[c] for c in task.get("children", []) if c in self._tasks]
+        for step in steps:
+            normalized = normalize_step_status(step.get("status"))
+            if normalized != step.get("status"):
+                step["status"] = normalized
+                changed = True
+            child = self._tasks.get(step.get("taskId") or "")
+            if child is None:
+                # Reconcile by (parentTaskId, step.id): a live child always
+                # links back; a terminal one only explains a step already
+                # recorded as running, so a retried step gets a fresh child.
+                match = next((c for c in children
+                              if c.get("planStepId") == step.get("id") and c["status"] not in TERMINAL), None)
+                if match is None and step["status"] == "running":
+                    match = next((c for c in children if c.get("planStepId") == step.get("id")), None) or \
+                            next((c for c in children if c["botId"] == step.get("botId") and c.get("prompt") == step.get("goal")), None)
+                if match:
+                    step["taskId"] = match["id"]
+                    child = match
+                    changed = True
+            if child is None:
+                continue
+            if child["status"] not in TERMINAL:
+                if step["status"] in {"pending", "ready"}:
+                    step["status"] = "running"
+                    changed = True
+                continue
+            if step["status"] in {"done", "failed", "skipped"}:
+                continue
+            if child["status"] == "completed":
+                step["status"] = "done"
+                step["result"] = self._step_result(step, child)
+                changed = True
+            elif child["status"] == "interrupted":
+                # A restart or stop interrupted the child. It is not a plan
+                # failure: the step waits for an explicit wake, skip or retry.
+                step["status"] = "running"
+                changed = True
+            else:
+                step["status"] = "failed"
+                step["error"] = str(child.get("error") or "子任务未成功结束。")[:500]
+                step["result"] = self._step_result(step, child)
+                changed = True
+        return changed
+
+    def _skip_dependents(self, steps, by_id, skipped_id):
+        """Cascade: pending steps depending on a skipped step never run."""
+        frontier = {skipped_id}
+        while frontier:
+            newly = set()
+            for step in steps:
+                if step.get("status") in {"pending", "ready"} and frontier & set(step.get("dependsOn", [])):
+                    step["status"] = "skipped"
+                    step["result"] = {"summary": "前置步骤被跳过，本步骤未执行。"}
+                    newly.add(step["id"])
+            frontier = newly
+
+    def _resume_plan_failure(self, task, plan, failed_step):
+        """abort: wake the owner once to report which step failed."""
+        name = str((self._bots.get(failed_step.get("botId") or "") or {}).get("name") or failed_step.get("botId") or "")
+        reason = str(failed_step.get("error") or "")
+        task["childResults"] = self._child_results(task, plan)
+        task["resumedAt"] = now()
+        task.update(status="queued", waitReason=None, childrenChanged=False,
+                    resumeText=f"分工计划已中止：步骤 {failed_step['id']}（{name}）失败。{reason} "
+                               "请用一两句话告诉用户哪一步失败、可能原因，并询问要不要换模型或换人重试；"
+                               "不要重复创建已失败的子任务。")
+        self._message(task["id"], "system", f"分工计划中止：{name} 执行的步骤失败。")
+
+    def _settle_plan_on_finish(self, plan, state):
+        """Plan mirror of the owner task's own terminal state."""
+        steps = plan.get("steps") or []
+        if plan.get("mode") == "direct" and steps:
+            # The owner does a direct plan's only step itself, so nothing else
+            # would ever move it off "pending".
+            if state == "completed":
+                steps[0]["status"] = "done"
+            elif state in {"failed", "interrupted"}:
+                steps[0]["status"] = "failed"
+        if plan.get("mode") == "delegate" and any(
+                normalize_step_status(step.get("status")) in {"pending", "ready", "running"} for step in steps):
+            return  # Children still active; the plan settles at the merge turn.
+        if state == "completed":
+            for target in ("running", "merging", "done"):
+                if plan.get("status") == target:
+                    continue
+                transition_plan(plan, target, by="system")
+        elif state in {"failed", "interrupted"}:
+            for target in ("running", "failed"):
+                if plan.get("status") == target:
+                    continue
+                transition_plan(plan, target, by="system")
+        elif state == "cancelled":
+            transition_plan(plan, "cancelled", by="user")
+
+    def _settle_plan_after_action(self, task, plan):
+        """After retry-step/skip-step: wait for active steps or resume merge."""
+        steps = plan.get("steps") or []
+        active = any(normalize_step_status(step.get("status")) in {"pending", "ready", "running"}
+                     for step in steps)
+        if active:
+            if task["status"] in TERMINAL:
+                task.update(status="waiting", waitReason="children", completedAt=None,
+                            acceptedAt=None, error=None, updatedAt=now())
+            return
+        task["childrenChanged"] = True
+        if self._resume_children(task):
+            return
+        # Nothing left to wait for (all steps done/skipped without children):
+        # queue the merge turn directly.
+        self._queue_parent_merge(task, plan)
+
     def plan_action(self, task_id, payload):
-        """User decision on a visible plan: approve, reject or replace."""
+        """User decision on a visible plan: approve, reject, replace, cancel,
+        or per-step retry-step/skip-step."""
         action = payload.get("action")
-        if action not in {"approve", "reject", "replace"}:
-            raise WebError("INVALID_REQUEST", "计划操作必须是 approve、reject 或 replace。", 400)
+        if action not in {"approve", "reject", "replace", "cancel", "retry-step", "skip-step"}:
+            raise WebError("INVALID_REQUEST", "计划操作必须是 approve、reject、replace、cancel、retry-step 或 skip-step。", 400)
         with self._lock:
             task = self._task(task_id)
             plan = task.get("coordinatorPlan") or {}
             if not task.get("planResolved") or plan.get("mode") != "delegate":
                 raise WebError("PLAN_NOT_ACTIONABLE", "这个任务没有可操作的协作计划。", 409)
             status = plan.get("status")
-            if status in {"rejected"}:
+            if status in {"rejected", "done", "cancelled"}:
                 raise WebError("PLAN_NOT_ACTIONABLE", "计划已处理，不能重复操作。", 409)
+            if action == "retry-step":
+                return self._plan_retry_step(task, plan, payload)
+            if action == "skip-step":
+                return self._plan_skip_step(task, plan, payload)
+            if action == "cancel":
+                return self._plan_cancel(task, plan)
+            if status == "failed" and action != "reject":
+                raise WebError("PLAN_NOT_ACTIONABLE", "计划已中止，只能用 retry-step 或 skip-step 处理失败步骤。", 409)
             if action == "replace":
                 candidate = sanitize_plan(payload.get("plan"), self._bot(task["botId"]), list(self._bots.values()), "user")
                 if not candidate:
                     raise WebError("INVALID_PLAN", "替换计划无效：子任务必须指向其它已存在的 Bot 并带有明确目标。", 400)
                 if status != "proposed":
                     raise WebError("PLAN_NOT_ACTIONABLE", "计划已开始执行，请先撤回再替换。", 409)
+                set_plan_status(candidate, "proposed", by="user")
                 task["coordinatorPlan"] = candidate
                 plan = candidate
             if action == "reject":
                 if status == "proposed":
                     pass
-                elif status in {"auto", "approved"}:
+                elif status in {"auto", "approved", "running"}:
                     decided = parse_time(task.get("planExecutedAt") or task.get("planDecidedAt"))
                     elapsed = (datetime.now(timezone.utc) - datetime.fromisoformat(decided)).total_seconds() if decided else PLAN_UNDO_SECONDS + 1
                     if elapsed > PLAN_UNDO_SECONDS:
@@ -910,14 +1336,18 @@ class BotRuntime(BotCommunications):
                         if self._tasks.get(child_id) and self._tasks[child_id]["status"] not in TERMINAL:
                             self.cancel_task(child_id)
                     task.update(children=[], childrenChanged=False)
-                plan.update(mode="direct", status="rejected")
+                else:
+                    raise WebError("PLAN_NOT_ACTIONABLE", "当前状态不能撤回计划。", 409)
+                transition_plan(plan, "rejected", by="user")
+                plan["mode"] = "direct"
                 task.update(coordinatorPlan=plan, executionMode="direct", status="queued", waitReason=None,
                             acceptedAt=None, updatedAt=now(),
                             resumeText="用户拒绝了分工计划，请由你自己直接完成任务；不要重复创建已取消的子任务。")
                 self._message(task_id, "system", "已拒绝分工计划，由当前 Bot 直接执行。")
                 self._persist()
                 return self._view(task)
-            plan["status"] = "approved"
+            transition_plan(plan, "approved", by="user")
+            transition_plan(plan, "running", by="system")
             task["coordinatorPlan"] = plan
             self._advance_plan(task)
             task["planExecutedAt"] = now()
@@ -931,6 +1361,80 @@ class BotRuntime(BotCommunications):
                             resumeText="计划中没有可执行的子任务，请由你自己直接完成任务。")
             self._persist()
             return self._view(task)
+
+    def _plan_step(self, plan, payload):
+        step_id = str(payload.get("stepId") or "")
+        step = next((s for s in plan.get("steps", []) if s.get("id") == step_id), None)
+        if not step:
+            raise WebError("INVALID_REQUEST", "找不到这个计划步骤。", 400)
+        step["status"] = normalize_step_status(step.get("status"))
+        return step
+
+    def _plan_retry_step(self, task, plan, payload):
+        """Re-dispatch a failed step: failed -> ready -> running, plan reopens."""
+        step = self._plan_step(plan, payload)
+        if step.get("status") != "failed":
+            raise WebError("PLAN_NOT_ACTIONABLE", "只有失败的步骤可以重试。", 409)
+        if plan.get("status") == "failed":
+            transition_plan(plan, "running", by="user")
+        if plan.get("status") != "running":
+            raise WebError("PLAN_NOT_ACTIONABLE", "当前状态不能重试步骤。", 409)
+        transition_step(step, "ready")
+        step["taskId"] = None
+        step["attempts"] = step.get("attempts", 1) + 1
+        step.pop("error", None)
+        step.pop("result", None)
+        step.pop("policyApplied", None)
+        task["coordinatorPlan"] = plan
+        self._advance_plan(task)
+        task["planExecutedAt"] = task.get("planExecutedAt") or now()
+        self._settle_plan_after_action(task, plan)
+        self._message(task["id"], "system", f"已重新派发步骤 {step['id']}。")
+        self._persist()
+        return self._view(task)
+
+    def _plan_skip_step(self, task, plan, payload):
+        """Mark a step skipped and let the rest of the plan move on."""
+        step = self._plan_step(plan, payload)
+        if step.get("status") not in {"pending", "ready", "failed"}:
+            raise WebError("PLAN_NOT_ACTIONABLE", "只有未开始或失败的步骤可以跳过。", 409)
+        if plan.get("status") not in {"running", "failed"}:
+            raise WebError("PLAN_NOT_ACTIONABLE", "当前状态不能跳过步骤。", 409)
+        transition_step(step, "skipped")
+        step["policyApplied"] = True
+        step["result"] = {"summary": "用户跳过了这个步骤。"}
+        by_id = {s.get("id"): s for s in plan.get("steps", [])}
+        self._skip_dependents(plan.get("steps", []), by_id, step["id"])
+        if plan.get("status") == "failed" and not any(
+                normalize_step_status(s.get("status")) in {"pending", "ready", "running"} for s in plan.get("steps", [])):
+            transition_plan(plan, "running", by="user")
+        task["coordinatorPlan"] = plan
+        self._settle_plan_after_action(task, plan)
+        self._message(task["id"], "system", f"已跳过步骤 {step['id']}。")
+        self._persist()
+        return self._view(task)
+
+    def _plan_cancel(self, task, plan):
+        """Cancel the whole plan: stop running children, wake the owner once."""
+        if plan.get("status") not in {"proposed", "auto", "approved", "running"}:
+            raise WebError("PLAN_NOT_ACTIONABLE", "当前状态不能取消计划。", 409)
+        transition_plan(plan, "cancelled", by="user")
+        for step in plan.get("steps", []):
+            if normalize_step_status(step.get("status")) in {"pending", "ready"}:
+                step["status"] = "skipped"
+                step["result"] = {"summary": "计划已取消，本步骤未执行。"}
+        for child_id in list(task.get("children", [])):
+            if self._tasks.get(child_id) and self._tasks[child_id]["status"] not in TERMINAL:
+                self.cancel_task(child_id)
+        task["childResults"] = self._child_results(task, plan)
+        task["resumedAt"] = now()
+        task.update(coordinatorPlan=plan, status="queued", waitReason=None, childrenChanged=False,
+                    acceptedAt=None, updatedAt=now(),
+                    resumeText="用户取消了分工计划；进行中的子任务已停止。请直接告诉用户计划已取消，"
+                               "不要重复创建已取消的子任务。")
+        self._message(task["id"], "system", "分工计划已取消。")
+        self._persist()
+        return self._view(task)
 
     def _loop(self):
         while not self._stop.is_set():
@@ -983,6 +1487,19 @@ class BotRuntime(BotCommunications):
                         task.update(status="queued", runAt=None)
                         self._message(task["id"], "system", "到达计划时间，自动唤醒。")
                         changed = True
+                if task["status"] == "waiting" and task.get("waitReason") == "user" and task.get("waitSince"):
+                    # A question nobody answered for a week is not a pending
+                    # conversation any more; close it instead of glowing forever.
+                    try:
+                        stale = datetime.fromisoformat(task["waitSince"]) <= datetime.now(timezone.utc) - timedelta(days=7)
+                    except (TypeError, ValueError):
+                        stale = False
+                    if stale:
+                        task["waitDismissed"] = True
+                        self._message(task["id"], "system", "等待超过 7 天，已自动结束。")
+                        self._finish(task, "completed", "等待超时，已结束")
+                        changed = True
+                        continue
                 if task["status"] == "waiting" and task.get("waitReason") == "children":
                     changed = self._advance_plan(task) or changed
                     changed = self._resume_children(task) or changed
@@ -1040,13 +1557,34 @@ class BotRuntime(BotCommunications):
             # planning failure must never block the task itself.
             if not task.get("planResolved"):
                 try:
-                    self.plan_task(task, bot)
+                    # Keep direct-first lightweight: a normal request should
+                    # use the Bot's persistent session immediately. The
+                    # throwaway model planner is reserved for an explicit
+                    # collaboration request, a multi-goal shaped prompt, or an
+                    # opt-in approval policy.
+                    with self._lock:
+                        peek = self._task(task["id"])
+                        multi_goal = looks_multi_goal(peek["prompt"], list(self._bots.values()), owner_id=bot.get("id"))
+                    if (bot.get("planner", "model") == "model"
+                            and bot.get("orchestrationPolicy", "direct-first") == "direct-first"
+                            and not task.get("collaborationRequested")
+                            and not multi_goal):
+                        with self._lock:
+                            live = self._task(task["id"])
+                            if not live.get("planResolved"):
+                                plan = direct_plan(bot, "普通任务由当前 Bot 直接完成。", "direct-first")
+                                set_plan_status(plan, "auto")
+                                live.update(coordinatorPlan=plan, executionMode="direct",
+                                            planResolved=True, planDecidedAt=now(), updatedAt=now())
+                                self._persist()
+                    else:
+                        self.plan_task(task, bot)
                 except Exception:
                     with self._lock:
                         live = self._task(task["id"])
                         if not live.get("planResolved"):
                             plan = direct_plan(bot, "计划判定失败，由当前 Bot 直接完成。", "fallback")
-                            plan["status"] = "auto"
+                            set_plan_status(plan, "auto")
                             live.update(coordinatorPlan=plan, executionMode="direct",
                                         planResolved=True, planDecidedAt=now())
                             self._persist()
@@ -1063,6 +1601,8 @@ class BotRuntime(BotCommunications):
                         self._message(live["id"], "system", "分工计划已生成，等待你确认后开始。")
                         self._persist()
                         return
+                    live_plan = live["coordinatorPlan"]
+                    transition_plan(live_plan, "running", by="system")
                     self._advance_plan(live)
                     live["planExecutedAt"] = now()
                     if live.get("children"):
@@ -1071,6 +1611,7 @@ class BotRuntime(BotCommunications):
                         self._persist()
                         return
                     # No step could be dispatched: the owner carries on directly.
+                    live_plan["mode"] = "direct"
                     live["executionMode"] = "direct"
                     self._persist()
                 task = deepcopy(live)
@@ -1099,6 +1640,9 @@ class BotRuntime(BotCommunications):
                 live.update(outcome)
                 live.pop("retry", None)
                 live["status"] = "running"
+                live_plan = live.get("coordinatorPlan")
+                if live_plan and live_plan.get("mode") == "direct" and live_plan.get("status") == "auto":
+                    transition_plan(live_plan, "running", by="system")
                 self._mailbox_receipt(live, "delivered")
                 self._bot(bot["id"])["sessionId"] = outcome["sessionId"]
                 self._message(task["id"], "progress", "Pi 已接收任务。", bot["id"])
@@ -1210,27 +1754,26 @@ class BotRuntime(BotCommunications):
             elif task.get("inbox"):
                 task.update(status="queued", waitReason=None, resumeText="\n".join(task.pop("inbox")))
                 self._bot(task["botId"])["status"] = "idle"
-            elif any(self._task(c)["status"] not in TERMINAL for c in task.get("children", [])):
-                task.update(status="waiting", waitReason="children")
-                self._bot(task["botId"])["status"] = "idle"
-            elif self._resume_children(task):
-                self._bot(task["botId"])["status"] = "idle"
-            elif task.get("waitRequested"):
-                task.update(status="waiting", waitReason="user", token="")
-                self._bot(task["botId"])["status"] = "idle"
-                reason = next((m.get("content") for m in reversed(self._messages.get(task["id"], []))
-                               if m.get("type") == "progress"), "")
-                self._notify(task, "task.waiting", "input", reason or "Bot 在等你的输入。")
             else:
-                bad = any(e.get("status") == "error" for e in snapshot.get("events", []) if e.get("kind") == "user")
-                if bad:
-                    self._finish(task, "failed", "Pi 未确认接收任务，请查看会话。", system_failure=True)
+                plan = task.get("coordinatorPlan") or {}
+                plan_settled = plan.get("mode") == "delegate" and plan.get("status") in {"done", "failed", "cancelled", "rejected"}
+                if not plan_settled and any(self._task(c)["status"] not in TERMINAL for c in task.get("children", [])):
+                    task.update(status="waiting", waitReason="children")
+                    self._bot(task["botId"])["status"] = "idle"
+                elif self._resume_children(task):
+                    self._bot(task["botId"])["status"] = "idle"
+                elif task.get("waitRequested"):
+                    self._enter_user_wait(task)
                 else:
-                    answers = [e["text"] for e in snapshot.get("events", []) if e.get("kind") == "assistant" and e.get("text")]
-                    if task.get("declaredResult") or answers:
-                        self._finish(task, "completed", task.get("declaredResult") or answers[-1])
+                    bad = any(e.get("status") == "error" for e in snapshot.get("events", []) if e.get("kind") == "user")
+                    if bad:
+                        self._finish(task, "failed", "Pi 未确认接收任务，请查看会话。", system_failure=True)
                     else:
-                        self._finish(task, "failed", "本轮结束但没有收到结果。", system_failure=True)
+                        answers = [e["text"] for e in snapshot.get("events", []) if e.get("kind") == "assistant" and e.get("text")]
+                        if task.get("declaredResult") or answers:
+                            self._finish(task, "completed", task.get("declaredResult") or answers[-1])
+                        else:
+                            self._finish(task, "failed", "本轮结束但没有收到结果。", system_failure=True)
             changed = True
         if changed:
             task["updatedAt"] = now()
@@ -1370,7 +1913,7 @@ class BotRuntime(BotCommunications):
                 elif action == "fail":
                     live["declaredError"] = content or "Bot 报告执行失败。"
                 else:
-                    live["waitRequested"] = True
+                    self._record_wait_request(live, payload)
                 self._message(task_id, "progress", content or "等待后续结果。", task["botId"])
                 self._persist()
             return {"ok": True, "taskId": task_id, "message": "已记录，最终状态以 Pi 本轮结束为准。"}

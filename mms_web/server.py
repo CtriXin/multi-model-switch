@@ -156,7 +156,28 @@ class WebApplication:
         The caller decides, so the page's own switch takes effect on its next
         read with no restart and no server-side preference to keep in sync.
         """
-        own = self._sessions().list_sessions() if self.sessions else []
+        # Bot transcripts use the same Pi session service for continuity, but
+        # they are owned by the Bot workspace rather than Pilot's chat list.
+        # Keep them addressable by id for Bot task details while preventing
+        # their rows from leaking into the Pilot sidebar.
+        bot_session_ids = set()
+        # Existing Bot records created before the owner marker was introduced
+        # still point at sessions persisted as ``owner=web``. Use the durable
+        # Bot record as a one-time compatibility filter so those old rows also
+        # disappear from Pilot's sidebar after the service reloads.
+        try:
+            bot_session_ids = {
+                str(bot.get("sessionId")) for bot in self.bots.list_bots()
+                if bot.get("sessionId")
+            }
+            bot_session_ids.update(
+                str(task.get("sessionId")) for task in self.bots.list_tasks()
+                if task.get("sessionId")
+            )
+        except Exception:
+            bot_session_ids = set()
+        own = [s for s in (self._sessions().list_sessions() if self.sessions else [])
+               if s.get("owner") != "bot" and str(s.get("id") or "") not in bot_session_ids]
         if not include_cli:
             return own
         # A session resumed here owns its Pi session, so drop the read-only
@@ -429,6 +450,8 @@ class WebApplication:
             task_id, action = parts[1:]
             if action in {"wake", "cancel", "accept"}:
                 return getattr(self.bots, action + "_task")(task_id)
+            if action == "wait":
+                return self.bots.wait_action(task_id, payload)
             if action == "plan":
                 return self.bots.plan_action(task_id, payload)
             if action == "messages":

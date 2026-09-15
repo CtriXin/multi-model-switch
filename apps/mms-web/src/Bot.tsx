@@ -1,6 +1,7 @@
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, FormEvent, ReactNode } from "react";
 import { RichText } from "./components";
+import { formatDate, formatCompactTime, kindLabel } from "./BotCommunications";
 import type { BotCommunication } from "./BotCommunications";
 import { BotArtifactPreview } from "./BotArtifactPreview";
 import {
@@ -32,7 +33,14 @@ import {
 } from "lucide-react";
 import { BotPlan } from "./BotPlan";
 import { previewType } from "./bot-artifact-preview";
-import type { BotTaskPlan, Preset } from "./types";
+import type { BotChildResult, BotTaskPlan, Preset } from "./types";
+import {
+  suggestBotName,
+  looksLikeStandingInstruction,
+  parsePreset,
+  buildPreset,
+} from "./bot-presets";
+import type { OnboardingAnswers, ParsedPreset } from "./bot-presets";
 import "./bot.css";
 
 export type BotStatus = "idle" | "busy" | "paused";
@@ -86,6 +94,7 @@ export interface BotTask {
   createdAt: string;
   updatedAt: string;
   outcome?: BotOutcome | null;
+  childResults?: BotChildResult[];
 }
 export interface BotOutcome {
   summary: string;
@@ -128,18 +137,156 @@ export type BotAction = (
   payload: BotDispatchPayload,
 ) => Promise<BotDispatchResult | void> | BotDispatchResult | void;
 
+export interface BotAvatarShapeDef {
+  path: string;
+  faceY: number;
+  eyeDx?: number;
+  eyeRadius?: number;
+  blushDx?: number;
+  mouth?: "default" | "cat";
+  wink?: boolean;
+  extra?: { d: string; fill: string };
+}
+
+export const ORGANIC_SMILE_AVATARS: Record<string, BotAvatarShapeDef> = {
+  round: {
+    path: "M 16 3 C 23.18 3 29 8.82 29 16 C 29 23.18 23.18 29 16 29 C 8.82 29 3 23.18 3 16 C 3 8.82 8.82 3 16 3 Z",
+    faceY: 16.2,
+    eyeDx: 5.2,
+    eyeRadius: 1.25,
+    blushDx: 8.0,
+  },
+  cat: {
+    path: "M 16 5.5 C 18.5 5.5 20.2 4.2 21.8 3.2 C 23.2 2.3 24.8 2.5 25.5 4.0 C 26.2 5.5 25.8 7.5 25.2 9.5 C 27.8 11.8 29.0 14.5 29.0 17.5 C 29.0 23.8 23.2 29.0 16.0 29.0 C 8.8 29.0 3.0 23.8 3.0 17.5 C 3.0 14.5 4.2 11.8 6.8 9.5 C 6.2 7.5 5.8 5.5 6.5 4.0 C 7.2 2.5 8.8 2.3 10.2 3.2 C 11.8 4.2 13.5 5.5 16 5.5 Z",
+    faceY: 17.8,
+    eyeDx: 5.2,
+    eyeRadius: 1.25,
+    blushDx: 8.2,
+    mouth: "cat",
+  },
+  cube: {
+    path: "M 12 3.5 L 20 3.5 C 25.5 3.5 28.5 6.5 28.5 12 L 28.5 20 C 28.5 25.5 25.5 28.5 20 28.5 L 12 28.5 C 6.5 28.5 3.5 25.5 3.5 20 L 3.5 12 C 3.5 6.5 6.5 3.5 12 3.5 Z",
+    faceY: 16.0,
+    eyeDx: 5.2,
+    eyeRadius: 1.25,
+    blushDx: 8.0,
+  },
+  bean: {
+    path: "M 11 8.5 L 21 8.5 C 25.5 8.5 29 11.8 29 16 C 29 20.2 25.5 23.5 21 23.5 L 11 23.5 C 6.5 23.5 3 20.2 3 16 C 3 11.8 6.5 8.5 11 8.5 Z",
+    faceY: 16.0,
+    eyeDx: 5.0,
+    eyeRadius: 1.25,
+    blushDx: 7.8,
+  },
+  rocket: {
+    path: "M 16 3.8 C 18.2 3.8 19.8 5.2 21.0 7.4 L 26.8 19.8 C 28.2 22.8 26.8 27.5 23.5 27.5 L 8.5 27.5 C 5.2 27.5 3.8 22.8 5.2 19.8 L 11.0 7.4 C 12.2 5.2 13.8 3.8 16 3.8 Z",
+    faceY: 18.2,
+    eyeDx: 4.8,
+    eyeRadius: 1.25,
+    blushDx: 7.6,
+    wink: true,
+  },
+  sprout: {
+    path: "M 16 7.0 C 22.6 7.0 28.0 12.0 28.0 18.0 C 28.0 24.2 22.6 29.0 16 29.0 C 9.4 29.0 4.0 24.2 4.0 18.0 C 4.0 12.0 9.4 7.0 16 7.0 Z",
+    faceY: 18.0,
+    eyeDx: 5.0,
+    eyeRadius: 1.25,
+    blushDx: 7.8,
+    extra: {
+      d: "M 16 7.0 C 16 4.5 18.2 2.6 20.8 2.6 C 22.2 2.6 22.8 3.5 22.0 4.8 C 20.8 6.5 18.4 6.9 16 7.0 Z",
+      fill: "#34d399",
+    },
+  },
+  puff: {
+    path: "M 8.5 26.5 C 4.5 26.5 2.0 23.5 2.0 19.5 C 2.0 16.0 4.5 13.2 8.0 12.6 C 8.5 7.2 12.8 3.0 18.0 3.0 C 23.0 3.0 27.0 6.8 27.8 11.5 C 29.8 12.2 31.5 14.2 31.5 16.8 C 31.5 19.5 29.8 21.8 27.5 22.5 C 28.0 23.5 28.0 24.8 27.2 25.6 C 26.2 26.5 24.5 26.5 22.5 26.5 Z",
+    faceY: 17.5,
+    eyeDx: 5.0,
+    eyeRadius: 1.25,
+    blushDx: 7.8,
+  },
+  leaf: {
+    path: "M 16 3.0 C 17.0 3.0 18.2 4.8 19.3 7.0 L 26.0 17.5 C 27.8 20.2 28.2 22.0 28.2 23.5 C 28.2 27.0 22.8 29.0 16 29.0 C 9.2 29.0 3.8 27.0 3.8 23.5 C 3.8 22.0 4.2 20.2 6.0 17.5 L 12.7 7.0 C 13.8 4.8 15.0 3.0 16 3.0 Z",
+    faceY: 18.2,
+    eyeDx: 4.8,
+    eyeRadius: 1.25,
+    blushDx: 7.6,
+  },
+  star: {
+    path: "M 16 3.5 C 17.5 3.5 19.2 8.5 21.0 10.5 C 23.2 11.0 28.5 12.0 28.5 14.2 C 28.5 16.5 24.8 19.2 23.8 21.2 C 24.5 23.5 25.5 28.5 23.5 28.5 C 21.8 28.5 18.2 25.2 16 25.2 C 13.8 25.2 10.2 28.5 8.5 28.5 C 6.5 28.5 7.5 23.5 8.2 21.2 C 7.2 19.2 3.5 16.5 3.5 14.2 C 3.5 12.0 8.8 11.0 11.0 10.5 C 12.8 8.5 14.5 3.5 16 3.5 Z",
+    faceY: 16.2,
+    eyeDx: 4.8,
+    eyeRadius: 1.25,
+    blushDx: 7.6,
+  },
+  ghost: {
+    path: "M 16 3.5 C 22.8 3.5 27.5 8.5 27.5 15.5 L 27.5 24.5 C 27.5 26.8 25.0 27.8 23.2 26.2 C 21.2 24.5 19.5 24.5 17.5 26.2 C 15.5 27.8 13.5 27.8 11.5 26.2 C 9.5 24.5 7.8 24.5 5.8 26.2 C 4.0 27.8 1.5 26.8 1.5 24.5 L 1.5 15.5 C 1.5 8.5 6.2 3.5 16 3.5 Z",
+    faceY: 15.8,
+    eyeDx: 5.0,
+    eyeRadius: 1.25,
+    blushDx: 7.8,
+  },
+};
+
+export const GROK_AVATAR_SHAPES = ORGANIC_SMILE_AVATARS;
+
+const ORGANIC_AVATAR_ALIASES: Record<string, string> = {
+  circle: "round",
+  blob: "cat",
+  squircle: "cube",
+  capsule: "bean",
+  triangle: "rocket",
+  hexagon: "sprout",
+  cloud: "puff",
+  drop: "leaf",
+  star: "star",
+  ghost: "ghost",
+};
+
 export const PIXEL_AVATARS = [
-  { id: "round", label: "圆团", rows: ["..###..", ".#####.", "#######", "##o#o##", "#######", ".#####.", "..###.."] },
-  { id: "cat", label: "小猫", rows: ["#...#..", "##.##..", ".#####.", "##o.o##", "#######", ".#####.", "..###.."] },
-  { id: "puff", label: "蓬蓬", rows: ["..##...", ".#####.", "#######", "##o#o##", "#######", ".#####.", "...##.."] },
-  { id: "cube", label: "方方", rows: ["#######", "#######", "##o#o##", "#######", "#######", "##...##", "#######"] },
-  { id: "leaf", label: "叶子", rows: ["....#..", "...##..", "..###..", ".#####.", "#######", "..###..", "...#..."] },
-  { id: "ghost", label: "幽灵", rows: ["..###..", ".#####.", "#######", "##o#o##", "#######", "##.#.##", "#.#.#.#"] },
-  { id: "rocket", label: "火箭", rows: ["...#...", "..###..", ".#####.", "##o#o##", "#######", "..###..", ".#.#.#."] },
-  { id: "star", label: "星星", rows: ["...#...", "..###..", "#######", ".##o##.", "#######", "..###..", ".#...#."] },
-  { id: "bean", label: "豆豆", rows: ["..####.", ".######", "#######", "##o#o##", "#######", ".#####.", "..###.."] },
-  { id: "bot", label: "机器人", rows: [".#...#.", ".#####.", "#######", "##o#o##", "#######", ".#####.", "#.#.#.#"] },
+  { id: "round", label: "圆圆", shape: "round" },
+  { id: "cat", label: "萌猫", shape: "cat" },
+  { id: "cube", label: "方糖", shape: "cube" },
+  { id: "bean", label: "海豹", shape: "bean" },
+  { id: "rocket", label: "饭团", shape: "rocket" },
+  { id: "sprout", label: "芽宝", shape: "sprout" },
+  { id: "puff", label: "朵云", shape: "puff" },
+  { id: "leaf", label: "水滴", shape: "leaf" },
+  { id: "star", label: "萌星", shape: "star" },
+  { id: "ghost", label: "幽灵", shape: "ghost" },
 ] as const;
+
+// Saved Bots from earlier builds can still refer to a removed preset. Keep
+// those ids renderable, while keeping the picker focused on the softer core set.
+const LEGACY_AVATAR_SHAPES: Record<string, string> = {
+  round: "round",
+  circle: "round",
+  blob: "cat",
+  cat: "cat",
+  cube: "cube",
+  squircle: "cube",
+  bean: "bean",
+  capsule: "bean",
+  rocket: "rocket",
+  triangle: "rocket",
+  hex: "sprout",
+  hexagon: "sprout",
+  sprout: "sprout",
+  bot: "cube",
+  puff: "puff",
+  cloud: "puff",
+  leaf: "leaf",
+  drop: "leaf",
+  diamond: "cube",
+  star: "star",
+  ticket: "bean",
+  wave: "leaf",
+  shield: "sprout",
+  gem: "leaf",
+  orbit: "round",
+  sun: "round",
+  ghost: "ghost",
+  oval: "bean",
+};
 
 export const PIXEL_AVATAR_COLORS = [
   "#b9a5ff",
@@ -176,24 +323,85 @@ export function PixelAvatar({
   seed = "",
   className = "bot-avatar",
   active = false,
+  selected = false,
 }: {
   avatarId?: string;
   color?: string;
   seed?: string;
   className?: string;
   active?: boolean;
+  selected?: boolean;
 }) {
   const seedValue = [...seed].reduce((sum, char) => sum + char.charCodeAt(0), 0);
-  const avatar = PIXEL_AVATARS.find((item) => item.id === avatarId) || PIXEL_AVATARS[seedValue % PIXEL_AVATARS.length];
+  const selectedAvatar = PIXEL_AVATARS.find((item) => item.id === avatarId);
+  const avatar = selectedAvatar || PIXEL_AVATARS[seedValue % PIXEL_AVATARS.length];
   const avatarColor = color || PIXEL_AVATAR_COLORS[seedValue % PIXEL_AVATAR_COLORS.length];
   const effectiveColor = resolveAvatarColor(avatarColor);
+  const rawShape = avatar.shape || LEGACY_AVATAR_SHAPES[avatarId || ""] || "round";
+  const shape = ORGANIC_AVATAR_ALIASES[rawShape] || rawShape;
+  const shapeDef = ORGANIC_SMILE_AVATARS[shape] || ORGANIC_SMILE_AVATARS.round;
+  const id = avatar.id;
+
+  const fy = shapeDef.faceY;
+  const edx = shapeDef.eyeDx ?? 5.0;
+  const er = shapeDef.eyeRadius ?? 1.25;
+  const bdx = shapeDef.blushDx ?? 7.8;
+  const e1_x = 16.0 - edx;
+  const e2_x = 16.0 + edx;
+  const eye_y = fy - 1.2;
+  const mouth_y = fy + 1.8;
+  const b1_x = 16.0 - bdx;
+  const b2_x = 16.0 + bdx;
+  const blush_y = fy + 1.0;
+
   return (
-    <span className={`${className} pixel-avatar${active ? " is-active" : ""}`} style={{ "--pixel-color": effectiveColor } as CSSProperties} aria-hidden="true">
-      <span className="pixel-avatar-grid">
-        {avatar.rows.flatMap((row, rowIndex) => [...row].map((cell, cellIndex) => (
-          <i className={`pixel-cell pixel-${cell}`} key={`${rowIndex}-${cellIndex}`} />
-        )))}
-      </span>
+    <span
+      className={`${className} pixel-avatar avatar-id-${id} avatar-shape-${shape}${active ? " is-active" : ""}${selected ? " is-selected" : ""}`}
+      style={{ "--pixel-color": effectiveColor } as CSSProperties}
+      aria-hidden="true"
+    >
+      <svg
+        viewBox="0 0 32 32"
+        className="bot-avatar-svg grok-avatar-svg"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <path d={shapeDef.path} fill="currentColor" />
+        {shapeDef.extra && (
+          <path d={shapeDef.extra.d} fill={shapeDef.extra.fill} />
+        )}
+        <circle cx={e1_x} cy={eye_y} r={er} fill="#ffffff" />
+        {shapeDef.wink ? (
+          <path
+            d={`M ${e2_x - 1.3} ${eye_y} Q ${e2_x} ${eye_y - 1.2} ${e2_x + 1.3} ${eye_y}`}
+            fill="none"
+            stroke="#ffffff"
+            strokeWidth="1.15"
+            strokeLinecap="round"
+          />
+        ) : (
+          <circle cx={e2_x} cy={eye_y} r={er} fill="#ffffff" />
+        )}
+        {shapeDef.mouth === "cat" ? (
+          <path
+            d={`M 13.9 ${mouth_y} Q 15.0 ${mouth_y + 1.2} 16.0 ${mouth_y} Q 17.0 ${mouth_y + 1.2} 18.1 ${mouth_y}`}
+            fill="none"
+            stroke="#ffffff"
+            strokeWidth="1.1"
+            strokeLinecap="round"
+          />
+        ) : (
+          <path
+            d={`M 14.7 ${mouth_y} Q 16.0 ${mouth_y + 1.4} 17.3 ${mouth_y}`}
+            fill="none"
+            stroke="#ffffff"
+            strokeWidth="1.1"
+            strokeLinecap="round"
+          />
+        )}
+        <circle cx={b1_x} cy={blush_y} r={1.4} fill="rgba(255, 115, 140, 0.45)" />
+        <circle cx={b2_x} cy={blush_y} r={1.4} fill="rgba(255, 115, 140, 0.45)" />
+      </svg>
     </span>
   );
 }
@@ -291,7 +499,13 @@ export function BotCard({
         </span>
         <span className="bot-card-copy">
           <span className="bot-card-title">
-            <strong title={bot.name}>{bot.name}</strong>
+            {bot.name === "新 Bot" && !bot.systemPrompt ? (
+              <strong className="bot-name-unnamed" title="未命名（去聊天区完成）">
+                未命名
+              </strong>
+            ) : (
+              <strong title={bot.name}>{bot.name}</strong>
+            )}
           </span>
           {secondLine && (
             <span className="bot-card-description" title={secondLine}>
@@ -1092,7 +1306,9 @@ export function AutoWakeControl({
   );
 }
 
-type OnboardingAnswers = { focus?: string; style?: string; autonomy?: string };
+export type { OnboardingAnswers, ParsedPreset };
+export { suggestBotName, looksLikeStandingInstruction, parsePreset, buildPreset };
+
 const onboardingQuestions = [
   { key: "focus", title: "你最想让我先帮你处理哪一类事？", options: ["工作与项目", "资料整理与写作", "生活安排", "都可以，按事情判断"] },
   { key: "style", title: "你希望我怎么回报？", options: ["只说结论", "结论加关键依据", "需要时再展开"] },
@@ -1100,41 +1316,61 @@ const onboardingQuestions = [
 ] as const;
 
 function readOnboardingAnswers(prompt: string): OnboardingAnswers {
-  const normalized = prompt.replace(/\\n/g, "\n");
-  const read = (label: string) => normalized.split("\n").find((line) => line.startsWith("- " + label + "："))?.split("：").slice(1).join("：").trim();
-  return { focus: read("主要帮我处理"), style: read("回报方式"), autonomy: read("执行方式") };
+  return parsePreset(prompt).answers;
 }
 
-function onboardingPrompt(answers: OnboardingAnswers) {
-  return [
-    "这是创建时确认的工作预设，请持续遵守：",
-    answers.focus ? "- 主要帮我处理：" + answers.focus : "",
-    answers.style ? "- 回报方式：" + answers.style : "",
-    answers.autonomy ? "- 执行方式：" + answers.autonomy : "",
-    "- 结果优先，过程保持安静；遇到无法安全判断的关键分歧时再询问。",
-  ].filter(Boolean).join("\n");
+function onboardingPrompt(answers: OnboardingAnswers, rules: string[] = [], other = "") {
+  return buildPreset({ answers, rules, other });
 }
 
 function BotOnboarding({
   bot,
   answers,
+  existingNames = [],
   busy,
   disabled,
   error,
   onAnswer,
   onEditAnswer,
   onComplete,
+  onCancel,
 }: {
   bot: BotDefinition;
   answers: OnboardingAnswers;
+  existingNames?: string[];
   busy: boolean;
   disabled: boolean;
   error?: string;
   onAnswer: (key: keyof OnboardingAnswers, value: string) => void;
   onEditAnswer?: (key: keyof OnboardingAnswers) => void;
-  onComplete: () => Promise<void>;
+  onComplete: (finalName: string) => Promise<void>;
+  onCancel?: () => void;
 }) {
   const allAnswered = Boolean(answers.focus && answers.style && answers.autonomy);
+  const isNewBot = !bot.name || !bot.name.trim() || bot.name === "未命名" || (bot.name === "新 Bot" && !bot.systemPrompt);
+  const hasCustomName = !isNewBot;
+  const suggestedName = suggestBotName(answers, existingNames);
+  const [nameInput, setNameInput] = useState(hasCustomName ? bot.name : suggestedName);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (allAnswered) {
+      if (!hasCustomName) {
+        setNameInput(suggestedName);
+      }
+      const timer = setTimeout(() => {
+        nameInputRef.current?.focus();
+        nameInputRef.current?.select();
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [allAnswered, answers.focus, suggestedName, hasCustomName]);
+
+  const handleFinish = () => {
+    const finalName = nameInput.trim() || (hasCustomName ? bot.name : suggestedName);
+    void onComplete(finalName);
+  };
+
   return (
     <div className="bot-chat-message bot-chat-onboarding" aria-label="工作预设向导">
       <PixelAvatar
@@ -1146,8 +1382,18 @@ function BotOnboarding({
       <div className="bot-onboarding-content">
         <div className="bot-onboarding-greeting">
           <p>
-            嗨，我是 <strong>{bot.name}</strong>。告诉我几个你的偏好，之后我会作为默认工作方式：
+            嗨，我是 <strong>{isNewBot ? "你的新协作者" : bot.name}</strong>。告诉我几个你的偏好，之后我会作为默认工作方式：
           </p>
+          {onCancel && (
+            <button
+              type="button"
+              className="bot-onboarding-cancel"
+              onClick={onCancel}
+              aria-label="取消预设编辑"
+            >
+              取消
+            </button>
+          )}
         </div>
         <div className="bot-onboarding-questions">
           {onboardingQuestions.map((q) => {
@@ -1174,23 +1420,71 @@ function BotOnboarding({
               </div>
             );
           })}
+          {allAnswered && (
+            <div className="bot-onboarding-question-block bot-onboarding-name-block">
+              <span className="bot-onboarding-question-title">我叫什么？</span>
+              <div className="bot-onboarding-name-row">
+                <input
+                  ref={nameInputRef}
+                  type="text"
+                  className="bot-onboarding-name-input"
+                  value={nameInput}
+                  placeholder={suggestedName}
+                  disabled={disabled || busy}
+                  onChange={(e) => setNameInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleFinish();
+                    }
+                  }}
+                />
+                <button
+                  className="bot-primary-button"
+                  type="button"
+                  disabled={disabled || busy}
+                  onClick={handleFinish}
+                >
+                  {busy ? "正在保存…" : "确认并开始对话"}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
-        {allAnswered && (
-          <div className="bot-onboarding-actions">
-            <button
-              className="bot-primary-button"
-              type="button"
-              disabled={disabled || busy}
-              onClick={() => void onComplete()}
-            >
-              {busy ? "正在保存…" : "保存为工作预设"}
-            </button>
-          </div>
-        )}
         {error && <p className="bot-inline-error" role="alert">{error}</p>}
       </div>
     </div>
   );
+}
+
+function getChainedParentTaskId(
+  task: BotTask,
+  allTasks: BotTask[],
+  allComms: BotCommunication[],
+  visited: Set<string> = new Set(),
+): string | null {
+  if (!task.senderBotId) return null;
+  // A reply chain can loop back on itself; stop instead of recursing forever.
+  if (visited.has(task.id)) return null;
+  visited.add(task.id);
+  const related = allComms.filter((c) => c.deliveryTaskId === task.id || c.taskId === task.id);
+  for (const c of related) {
+    if (c.replyTo) {
+      const parentComm = allComms.find((p) => p.id === c.replyTo);
+      if (parentComm) {
+        const candidateId = parentComm.taskId || parentComm.deliveryTaskId;
+        if (candidateId && candidateId !== task.id) {
+          const candTask = allTasks.find((t) => t.id === candidateId);
+          if (candTask) {
+            if (!candTask.senderBotId || candTask.senderBotId === candTask.botId) return candTask.id;
+            const ancestor = getChainedParentTaskId(candTask, allTasks, allComms, visited);
+            if (ancestor) return ancestor;
+          }
+        }
+      }
+    }
+  }
+  return null;
 }
 
 export function BotChat({
@@ -1235,7 +1529,21 @@ export function BotChat({
   communications?: BotCommunication[];
   onOpenCommunications?: (peerBotId?: string) => void;
   presets?: Preset[];
-  onUpdateBot?: (botId: string, patch: Partial<Pick<BotDefinition, "name" | "presetId" | "systemPrompt" | "description">>) => Promise<void>;
+  onUpdateBot?: (
+    botId: string,
+    patch: Partial<
+      Pick<
+        BotDefinition,
+        | "name"
+        | "presetId"
+        | "systemPrompt"
+        | "description"
+        | "avatarId"
+        | "avatarColor"
+        | "wakeEnabled"
+      >
+    >,
+  ) => Promise<void>;
   onExit?: () => void;
   disabled?: boolean;
   enterToSend?: boolean;
@@ -1250,6 +1558,116 @@ export function BotChat({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [previewArtifact, setPreviewArtifact] = useState<BotArtifact | null>(null);
+
+  // 头部原地编辑名字
+  const [editingName, setEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState("");
+  const [savingName, setSavingName] = useState(false);
+  const nameEditInputRef = useRef<HTMLInputElement>(null);
+
+  // 头部原地编辑描述
+  const [editingDesc, setEditingDesc] = useState(false);
+  const [descInput, setDescInput] = useState("");
+  const [savingDesc, setSavingDesc] = useState(false);
+  const descEditInputRef = useRef<HTMLInputElement>(null);
+
+  // 头部内联错误
+  const [headerError, setHeaderError] = useState("");
+
+  // 长期约定反馈与自动提议忽略集合
+  const [ruleFeedback, setRuleFeedback] = useState<Record<string, string>>({});
+  const [dismissedSuggestions, setDismissedSuggestions] = useState<Set<string>>(new Set());
+
+  // 预设编辑器中的规则列表
+  const [editingRules, setEditingRules] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (editingName) {
+      nameEditInputRef.current?.focus();
+      nameEditInputRef.current?.select();
+    }
+  }, [editingName]);
+
+  useEffect(() => {
+    if (editingDesc) {
+      descEditInputRef.current?.focus();
+      descEditInputRef.current?.select();
+    }
+  }, [editingDesc]);
+
+  async function handleSaveName() {
+    if (!bot || !onUpdateBot) return;
+    const trimmed = nameInput.trim();
+    if (!trimmed || trimmed === bot.name) {
+      setEditingName(false);
+      setNameInput(bot.name);
+      return;
+    }
+    setSavingName(true);
+    setHeaderError("");
+    try {
+      await onUpdateBot(bot.id, { name: trimmed });
+      setEditingName(false);
+    } catch (err) {
+      setHeaderError(err instanceof Error ? err.message : "修改名字失败");
+    } finally {
+      setSavingName(false);
+    }
+  }
+
+  async function handleSaveDesc() {
+    if (!bot || !onUpdateBot) return;
+    const trimmed = descInput.trim();
+    const nextDesc = trimmed || "随时可以接活";
+    if (nextDesc === (bot.description || "随时可以接活")) {
+      setEditingDesc(false);
+      return;
+    }
+    setSavingDesc(true);
+    setHeaderError("");
+    try {
+      await onUpdateBot(bot.id, { description: nextDesc });
+      setEditingDesc(false);
+    } catch (err) {
+      setHeaderError(err instanceof Error ? err.message : "修改描述失败");
+    } finally {
+      setSavingDesc(false);
+    }
+  }
+
+  async function handleSaveAsRule(text: string, msgKey: string) {
+    if (!bot || !onUpdateBot) return;
+    const cleanText = text.trim().slice(0, 200);
+    if (!cleanText) return;
+
+    const parsed = parsePreset(bot.systemPrompt || "");
+    if (parsed.rules.includes(cleanText)) {
+      setRuleFeedback((prev) => ({ ...prev, [msgKey]: "已存在该约定" }));
+      setTimeout(() => setRuleFeedback((prev) => ({ ...prev, [msgKey]: "" })), 3000);
+      return;
+    }
+    if (parsed.rules.length >= 12) {
+      setRuleFeedback((prev) => ({ ...prev, [msgKey]: "约定已满，先去预设里删几条" }));
+      setTimeout(() => setRuleFeedback((prev) => ({ ...prev, [msgKey]: "" })), 4000);
+      return;
+    }
+
+    const nextRules = [...parsed.rules, cleanText];
+    const nextPrompt = buildPreset({
+      answers: parsed.answers,
+      rules: nextRules,
+      other: parsed.other,
+    });
+
+    try {
+      await onUpdateBot(bot.id, { systemPrompt: nextPrompt });
+      setRuleFeedback((prev) => ({ ...prev, [msgKey]: "已记为长期约定" }));
+      setTimeout(() => setRuleFeedback((prev) => ({ ...prev, [msgKey]: "" })), 3000);
+    } catch (err) {
+      setRuleFeedback((prev) => ({ ...prev, [msgKey]: "保存约定失败" }));
+      setTimeout(() => setRuleFeedback((prev) => ({ ...prev, [msgKey]: "" })), 3000);
+    }
+  }
 
   function selectSchedulePreset(preset: "1h" | "tonight" | "tomorrow") {
     const now = new Date();
@@ -1331,6 +1749,19 @@ export function BotChat({
     setSettingNotice("");
   }, [bot?.id]);
   useEffect(() => {
+    if (!onboardingEditing) return;
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      // Renaming owns Escape while its input has focus, so one press only
+      // cancels the rename instead of also closing the preset editor.
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && active.classList.contains("bot-chat-title-input")) return;
+      setOnboardingEditing(false);
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onboardingEditing]);
+  useEffect(() => {
     const stream = streamRef.current;
     if (stream && followLatest.current) stream.scrollTop = stream.scrollHeight;
   }, [bot?.id, tasks, events, artifacts]);
@@ -1355,9 +1786,32 @@ export function BotChat({
     const readable = cleanTranscriptText(content);
     return readable ? [{ ...event, content: readable }] : [];
   });
-  const conversationTasks = tasks
-    .filter((item) => item.botId === bot?.id)
-    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const conversationTasks = useMemo(() => {
+    return tasks
+      .filter((item) => item.botId === bot?.id)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }, [tasks, bot?.id]);
+
+  const absorbedTasksByParent = useMemo(() => {
+    const map = new Map<string, BotTask[]>();
+    for (const t of conversationTasks) {
+      const parentId = getChainedParentTaskId(t, conversationTasks, communications);
+      if (parentId) {
+        const list = map.get(parentId) || [];
+        list.push(t);
+        map.set(parentId, list);
+      }
+    }
+    return map;
+  }, [conversationTasks, communications]);
+
+  const rootConversationTasks = useMemo(() => {
+    const absorbedIds = new Set<string>();
+    for (const list of absorbedTasksByParent.values()) {
+      for (const t of list) absorbedIds.add(t.id);
+    }
+    return conversationTasks.filter((t) => !absorbedIds.has(t.id));
+  }, [conversationTasks, absorbedTasksByParent]);
   const onboardingMode = Boolean(bot && (!bot.systemPrompt.trim() || bot.systemPrompt.includes("这是创建时确认的工作预设")));
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -1405,19 +1859,172 @@ export function BotChat({
     <section className="bot-chat-shell" aria-label="Bot 对话窗口">
       <header className="bot-chat-header">
         <div className="bot-chat-identity">
-          <PixelAvatar
-            className="bot-chat-avatar"
-            avatarId={bot?.avatarId}
-            color={bot?.avatarColor}
-            seed={bot?.id}
-            active={bot?.status === "busy"}
-          />
+          <div className="bot-chat-avatar-wrap">
+            <button
+              type="button"
+              className="bot-chat-avatar-btn"
+              popoverTarget="bot-chat-avatar-popover"
+              title="更换头像与颜色"
+              aria-label="更换头像与颜色"
+              disabled={!bot}
+              onClick={(e) => {
+                const rect = e.currentTarget.getBoundingClientRect();
+                const popover = document.getElementById("bot-chat-avatar-popover");
+                if (popover) {
+                  const popoverWidth = 280;
+                  const left = Math.max(16, Math.min(rect.left, window.innerWidth - popoverWidth - 16));
+                  popover.style.top = `${rect.bottom + 8}px`;
+                  popover.style.left = `${left}px`;
+                }
+              }}
+            >
+              <PixelAvatar
+                className="bot-chat-avatar"
+                avatarId={bot?.avatarId}
+                color={bot?.avatarColor}
+                seed={bot?.id}
+                active={bot?.status === "busy"}
+              />
+            </button>
+            {bot && onUpdateBot && (
+              <div
+                id="bot-chat-avatar-popover"
+                popover="auto"
+                className="bot-avatar-popover"
+              >
+                <div className="bot-avatar-picker-title">选择图形与颜色</div>
+                <div className="bot-avatar-options">
+                  {PIXEL_AVATARS.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={`bot-avatar-option${bot.avatarId === item.id ? " is-selected" : ""}`}
+                      onClick={() => void onUpdateBot(bot.id, { avatarId: item.id })}
+                      title={item.label}
+                      aria-label={item.label}
+                      aria-pressed={bot.avatarId === item.id}
+                    >
+                      <PixelAvatar
+                        avatarId={item.id}
+                        color={bot.avatarColor}
+                        seed={item.id}
+                        className="pixel-avatar-mini"
+                        selected={bot.avatarId === item.id}
+                      />
+                    </button>
+                  ))}
+                </div>
+                <div className="bot-color-options" aria-label="选择头像颜色">
+                  {PIXEL_AVATAR_COLORS.map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      className={`bot-color-option${bot.avatarColor === c ? " is-selected" : ""}`}
+                      style={{ background: c }}
+                      onClick={() => void onUpdateBot(bot.id, { avatarColor: c })}
+                      aria-label={`颜色 ${c}`}
+                      aria-pressed={bot.avatarColor === c}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
           <div className="bot-chat-title-group">
             <div className="bot-chat-title-row">
-              <h1>{bot?.name || "选择一个 Bot"}</h1>
+              {editingName && bot ? (
+                <div className="bot-chat-title-edit-wrap">
+                  <input
+                    ref={nameEditInputRef}
+                    type="text"
+                    className="bot-chat-title-input"
+                    value={nameInput}
+                    disabled={savingName}
+                    onChange={(e) => setNameInput(e.target.value)}
+                    onBlur={() => void handleSaveName()}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        void handleSaveName();
+                      } else if (e.key === "Escape") {
+                        e.preventDefault();
+                        setEditingName(false);
+                        setNameInput(bot.name);
+                      }
+                    }}
+                  />
+                  {savingName && <LoaderCircle size={14} className="bot-spin" />}
+                </div>
+              ) : (
+                <h1
+                  className={bot ? "bot-inline-editable" : ""}
+                  role={bot ? "button" : undefined}
+                  tabIndex={bot ? 0 : -1}
+                  onClick={() => {
+                    if (!bot) return;
+                    setNameInput(bot.name);
+                    setEditingName(true);
+                  }}
+                  onKeyDown={(e) => {
+                    if (bot && e.key === "Enter") {
+                      setNameInput(bot.name);
+                      setEditingName(true);
+                    }
+                  }}
+                  title={bot ? "点击修改名字" : undefined}
+                >
+                  {bot?.name || "选择一个 Bot"}
+                </h1>
+              )}
               {bot && <BotStatusBadge status={bot.status} />}
             </div>
-            <p>{bot?.description || "随时可以接活"}</p>
+            {editingDesc && bot ? (
+              <div className="bot-chat-desc-edit-wrap">
+                <input
+                  ref={descEditInputRef}
+                  type="text"
+                  maxLength={1000}
+                  className="bot-chat-desc-input"
+                  value={descInput}
+                  placeholder="随时可以接活"
+                  disabled={savingDesc}
+                  onChange={(e) => setDescInput(e.target.value)}
+                  onBlur={() => void handleSaveDesc()}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      void handleSaveDesc();
+                    } else if (e.key === "Escape") {
+                      e.preventDefault();
+                      setEditingDesc(false);
+                      setDescInput(bot.description || "");
+                    }
+                  }}
+                />
+                {savingDesc && <LoaderCircle size={12} className="bot-spin" />}
+              </div>
+            ) : (
+              <p
+                className={bot ? "bot-inline-editable" : ""}
+                role={bot ? "button" : undefined}
+                tabIndex={bot ? 0 : -1}
+                onClick={() => {
+                  if (!bot) return;
+                  setDescInput(bot.description && bot.description !== "随时可以接活" ? bot.description : "");
+                  setEditingDesc(true);
+                }}
+                onKeyDown={(e) => {
+                  if (bot && e.key === "Enter") {
+                    setDescInput(bot.description && bot.description !== "随时可以接活" ? bot.description : "");
+                    setEditingDesc(true);
+                  }
+                }}
+                title={bot ? "点击修改描述" : undefined}
+              >
+                {bot?.description || "随时可以接活"}
+              </p>
+            )}
+            {headerError && <span className="bot-inline-error">{headerError}</span>}
           </div>
         </div>
         <div className="bot-chat-header-actions">
@@ -1428,7 +2035,23 @@ export function BotChat({
             </button>
           )}
           {bot && onboardingDone && onUpdateBot && (
-            <button className="bot-quiet-button" type="button" onClick={() => setOnboardingEditing(true)} aria-label="调整工作预设" title="工作预设">
+            <button
+              className={"bot-quiet-button" + (onboardingEditing ? " is-active" : "")}
+              type="button"
+              onClick={() => {
+                if (onboardingEditing) {
+                  setOnboardingEditing(false);
+                } else {
+                  const parsed = parsePreset(bot.systemPrompt || "");
+                  setEditingRules(parsed.rules);
+                  setOnboarding(parsed.answers);
+                  setOnboardingEditing(true);
+                }
+              }}
+              aria-label="调整工作预设"
+              aria-pressed={onboardingEditing}
+              title="工作预设"
+            >
               <Settings2 size={14} />
               <span>预设</span>
             </button>
@@ -1464,37 +2087,86 @@ export function BotChat({
               <h2>可以开始了</h2>
               <p>把目标告诉 {bot.name}，它会在自己的运行环境中执行。</p>
               {onboarding.focus && onboarding.style && onboarding.autonomy && (
-                <button className="bot-onboarding-edit" type="button" onClick={() => setOnboardingEditing(true)}>调整工作预设</button>
+                <button
+                  className="bot-onboarding-edit"
+                  type="button"
+                  onClick={() => {
+                    const parsed = parsePreset(bot.systemPrompt || "");
+                    setEditingRules(parsed.rules);
+                    setOnboarding(parsed.answers);
+                    setOnboardingEditing(true);
+                  }}
+                >
+                  调整工作预设
+                </button>
               )}
             </div>
           ) : (
-            <BotOnboarding
-              bot={bot}
-              answers={onboarding}
-              busy={onboardingBusy}
-              disabled={disabled || !onUpdateBot}
-              error={onboardingError}
-              onAnswer={(key, value) => {
-                const next = { ...onboarding, [key]: value };
-                setOnboarding(next);
-              }}
-              onEditAnswer={(key) => setOnboarding((current) => ({ ...current, [key]: undefined }))}
-              onComplete={async () => {
-                if (!onUpdateBot || !onboarding.focus || !onboarding.style || !onboarding.autonomy) return;
-                setOnboardingBusy(true);
-                setOnboardingError("");
-                try {
-                  const prompt = onboardingPrompt(onboarding);
-                  await onUpdateBot(bot.id, { systemPrompt: prompt });
-                  setOnboardingDone(true);
-                  setOnboardingEditing(false);
-                } catch (cause) {
-                  setOnboardingError(cause instanceof Error ? cause.message : "工作预设保存失败，请重试。");
-                } finally {
-                  setOnboardingBusy(false);
-                }
-              }}
-            />
+            <div className="bot-onboarding-wrapper">
+              <BotOnboarding
+                bot={bot}
+                answers={onboarding}
+                existingNames={bots.map((b) => b.name)}
+                busy={onboardingBusy}
+                disabled={!onUpdateBot}
+                error={onboardingError}
+                onAnswer={(key, value) => {
+                  const next = { ...onboarding, [key]: value };
+                  setOnboarding(next);
+                }}
+                onEditAnswer={(key) => setOnboarding((current) => ({ ...current, [key]: undefined }))}
+                onCancel={onboardingEditing ? () => setOnboardingEditing(false) : undefined}
+                onComplete={async (finalName) => {
+                  if (!onUpdateBot || !onboarding.focus || !onboarding.style || !onboarding.autonomy) return;
+                  setOnboardingBusy(true);
+                  setOnboardingError("");
+                  try {
+                    const parsed = parsePreset(bot.systemPrompt || "");
+                    const prompt = buildPreset({
+                      answers: onboarding,
+                      rules: onboardingEditing ? editingRules : parsed.rules,
+                      other: parsed.other,
+                    });
+                    const patch: { name?: string; systemPrompt: string } = { systemPrompt: prompt };
+                    if (finalName && finalName.trim() && finalName.trim() !== bot.name) {
+                      patch.name = finalName.trim();
+                    }
+                    await onUpdateBot(bot.id, patch);
+                    setOnboardingDone(true);
+                    setOnboardingEditing(false);
+                  } catch (cause) {
+                    setOnboardingError(cause instanceof Error ? cause.message : "工作预设保存失败，请重试。");
+                  } finally {
+                    setOnboardingBusy(false);
+                  }
+                }}
+              />
+              {onboardingEditing && (
+                <div className="bot-onboarding-rules-editor">
+                  <span className="bot-onboarding-question-title">补充约定（{editingRules.length}/12）</span>
+                  {editingRules.length === 0 ? (
+                    <p className="bot-onboarding-rules-empty">暂无补充约定，可在聊天中悬停消息点击「记为约定」添加。</p>
+                  ) : (
+                    <ul className="bot-onboarding-rules-list">
+                      {editingRules.map((rule, idx) => (
+                        <li key={idx} className="bot-onboarding-rule-item">
+                          <span className="bot-onboarding-rule-text">{rule}</span>
+                          <button
+                            type="button"
+                            className="bot-rule-delete-btn"
+                            onClick={() => setEditingRules((prev) => prev.filter((_, i) => i !== idx))}
+                            title="删除此约定"
+                            aria-label="删除此约定"
+                          >
+                            <X size={13} />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </div>
           )
         )}
         {settingNotice && bot && (
@@ -1503,20 +2175,23 @@ export function BotChat({
             <RichText text={settingNotice} />
           </div>
         )}
-        {bot && conversationTasks.map((conversationTask) => {
+        {bot && rootConversationTasks.map((conversationTask) => {
+          const absorbed = absorbedTasksByParent.get(conversationTask.id) || [];
+          const allTaskIds = [conversationTask.id, ...absorbed.map((t) => t.id)];
+
           const taskCommunications = communications.filter(
             (message) =>
-              message.taskId === conversationTask.id ||
-              message.deliveryTaskId === conversationTask.id,
+              allTaskIds.includes(message.taskId || "") ||
+              allTaskIds.includes(message.deliveryTaskId || ""),
           );
           const communicationGroups = [...new Set(taskCommunications.map((message) => {
             return message.senderBotId === bot.id ? message.recipientBotId : message.senderBotId;
           }))]
             .map((peerId) => ({
               peerId,
-              messages: taskCommunications.filter(
-                (message) => message.senderBotId === peerId || message.recipientBotId === peerId,
-              ),
+              messages: taskCommunications
+                .filter((message) => message.senderBotId === peerId || message.recipientBotId === peerId)
+                .sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
             }))
             .filter((group) => group.peerId && group.messages.length);
           const taskSender = conversationTask.senderBotId
@@ -1526,18 +2201,67 @@ export function BotChat({
           const initialInstruction = taskEvents.find(
             (event) => event.taskId === conversationTask.id && event.type === "instruction",
           );
+
+          const isPeerExplanation = (text: string) => {
+            const value = text.trim();
+            return /(?:已向.+发送|已向.+说|协作者.+打招呼)/i.test(value)
+              || /已与\s*.+?\s*完成双向消息/.test(value);
+          };
+
+          const isPeerRelatedEvent = (event: BotEvent) => {
+            if (event.type === "handoff") return true;
+            const content = event.content.trim();
+            if (/(?:已分发给|已分发子任务|已向.+发送|已向.+说|子任务.*已回传|子任务.*完成|消息已排队投递|双向消息完成|已回复.+[：“"]|协作者.*打招呼)/i.test(content)) {
+              return true;
+            }
+            // Merely naming a peer is not a peer event: ordinary narration
+            // that mentions another bot belongs in the main chat.
+            return false;
+          };
+
           const conversationEvents = taskEvents.filter(
             (event) =>
-              event.taskId === conversationTask.id &&
+              allTaskIds.includes(event.taskId || "") &&
+              !isPeerRelatedEvent(event) &&
               !(event.id === initialInstruction?.id && event.content === conversationTask.prompt.trim()) &&
               !(["completed", "failed", "cancelled", "interrupted"].includes(conversationTask.status) && !["error", "instruction"].includes(event.type)),
           );
           const conversationArtifacts = artifacts.filter(
-            (artifact) => artifact.taskId === conversationTask.id,
+            (artifact) => allTaskIds.includes(artifact.taskId || ""),
           );
-          const resultText =
-            conversationTask.outcome?.summary?.trim() ||
-            cleanTranscriptText(conversationTask.result || "");
+
+          const getExplanationsForPeer = (peerName: string) => {
+            const lines = new Set<string>();
+            for (const tid of allTaskIds) {
+              const rawEvents = events.filter((e) => e.taskId === tid);
+              for (const e of rawEvents) {
+                if (isPeerExplanation(e.content) && (!peerName || e.content.includes(peerName))) {
+                  lines.add(e.content.trim());
+                }
+              }
+              const t = tasks.find((item) => item.id === tid);
+              if (t?.result && isPeerExplanation(t.result) && (!peerName || t.result.includes(peerName))) {
+                lines.add(t.result.trim());
+              }
+            }
+            return Array.from(lines);
+          };
+
+          const latestTaskWithResult = [conversationTask, ...absorbed]
+            .slice()
+            .reverse()
+            .find((t) => t.outcome?.summary?.trim() || (t.result && !isPeerExplanation(t.result)));
+
+          let resultText = "";
+          if (latestTaskWithResult) {
+            resultText =
+              latestTaskWithResult.outcome?.summary?.trim() ||
+              cleanTranscriptText(latestTaskWithResult.result || "");
+          } else if (conversationTask.result) {
+            resultText =
+              conversationTask.outcome?.summary?.trim() ||
+              cleanTranscriptText(conversationTask.result || "");
+          }
           return (
           <Fragment key={conversationTask.id}>
             <div className={`bot-chat-message ${taskFromBot ? "bot-chat-event bot-chat-event-handoff" : "bot-chat-user"}`}>
@@ -1550,7 +2274,53 @@ export function BotChat({
                 />
               )}
               <RichText text={conversationTask.prompt} />
+              {!taskFromBot && bot && onUpdateBot && (
+                <div className="bot-bubble-actions">
+                  <button
+                    type="button"
+                    className="bot-bubble-action-btn"
+                    onClick={() => void handleSaveAsRule(conversationTask.prompt, conversationTask.id)}
+                    title="记为长期约定"
+                    aria-label="记为长期约定"
+                  >
+                    记为约定
+                  </button>
+                </div>
+              )}
+              {ruleFeedback[conversationTask.id] && (
+                <div className="bot-rule-saved-notice">
+                  {ruleFeedback[conversationTask.id]}
+                </div>
+              )}
             </div>
+            {!taskFromBot &&
+              looksLikeStandingInstruction(conversationTask.prompt) &&
+              ["completed", "failed", "cancelled", "interrupted"].includes(conversationTask.status) &&
+              !dismissedSuggestions.has(conversationTask.id) &&
+              !parsePreset(bot?.systemPrompt || "").rules.includes(conversationTask.prompt.trim().slice(0, 200)) && (
+                <div className="bot-standing-suggestion">
+                  <span>要把这句记为长期约定吗？</span>
+                  <button
+                    type="button"
+                    className="bot-standing-btn"
+                    onClick={() => {
+                      void handleSaveAsRule(conversationTask.prompt, conversationTask.id);
+                      setDismissedSuggestions((prev) => new Set(prev).add(conversationTask.id));
+                    }}
+                  >
+                    记住
+                  </button>
+                  <button
+                    type="button"
+                    className="bot-standing-btn-dismiss"
+                    onClick={() => {
+                      setDismissedSuggestions((prev) => new Set(prev).add(conversationTask.id));
+                    }}
+                  >
+                    不用
+                  </button>
+                </div>
+            )}
             <BotPlan task={conversationTask} bots={bots} />
             {conversationEvents.map((event) => event.type === "instruction" ? (
               <div className={`bot-chat-message ${event.senderBotId && event.senderBotId !== bot.id ? "bot-chat-event bot-chat-event-handoff" : "bot-chat-user"}`} key={event.id}>
@@ -1563,6 +2333,24 @@ export function BotChat({
                   />
                 )}
                 <RichText text={event.content} />
+                {!event.senderBotId && bot && onUpdateBot && (
+                  <div className="bot-bubble-actions">
+                    <button
+                      type="button"
+                      className="bot-bubble-action-btn"
+                      onClick={() => void handleSaveAsRule(event.content, event.id)}
+                      title="记为长期约定"
+                      aria-label="记为长期约定"
+                    >
+                      记为约定
+                    </button>
+                  </div>
+                )}
+                {ruleFeedback[event.id] && (
+                  <div className="bot-rule-saved-notice">
+                    {ruleFeedback[event.id]}
+                  </div>
+                )}
               </div>
             ) : (
               <div
@@ -1583,20 +2371,19 @@ export function BotChat({
             ))}
             {communicationGroups.map((group) => {
               const peer = bots.find((item) => item.id === group.peerId);
-              if (!peer || !onOpenCommunications) return null;
-              const sent = group.messages.some((message) => message.senderBotId === bot.id);
+              if (!peer) return null;
+              const explanations = getExplanationsForPeer(peer.name);
               return (
-                <button
-                  className="bot-communications-marker"
+                <BotPeerThread
                   key={`${conversationTask.id}-${peer.id}`}
-                  type="button"
-                  onClick={() => onOpenCommunications(peer.id)}
-                  aria-label={`${sent ? "已发消息给" : "消息来自"} ${peer.name}，${group.messages.length}条消息往来`}
-                >
-                  <MessageSquare size={13} />
-                  <span>{sent ? `已发消息给 ${peer.name}` : `消息来自 ${peer.name}`}</span>
-                  <small>· {group.messages.length}条消息往来</small>
-                </button>
+                  task={conversationTask}
+                  peer={peer}
+                  messages={group.messages}
+                  bots={bots}
+                  currentBot={bot}
+                  onOpenCommunications={onOpenCommunications}
+                  explanations={explanations}
+                />
               );
             })}
             {conversationTask.waitReason && (
@@ -1919,3 +2706,107 @@ export function BotChat({
 export function BotWorkspace({ children }: { children?: ReactNode }) {
   return <div className="bot-workspace">{children}</div>;
 }
+
+export function BotPeerThread({
+  task,
+  peer,
+  messages,
+  bots,
+  currentBot,
+  onOpenCommunications,
+  explanations = [],
+}: {
+  task: BotTask;
+  peer: BotDefinition;
+  messages: BotCommunication[];
+  bots: BotDefinition[];
+  currentBot: BotDefinition;
+  onOpenCommunications?: (peerId: string) => void;
+  explanations?: string[];
+}) {
+  const latestMessage = messages[messages.length - 1];
+  const count = messages.length;
+
+  return (
+    <details className="bot-peer-thread">
+      <summary className="bot-peer-thread-summary">
+        <span className="bot-peer-thread-summary-main">
+          <MessageSquare size={13} className="bot-peer-thread-icon" />
+          <span>与 {peer.name} 的往来 · {count} 条</span>
+        </span>
+        <span className="bot-peer-thread-summary-side">
+          {latestMessage && (
+            <time className="bot-peer-thread-time" dateTime={latestMessage.createdAt}>
+              {formatCompactTime(latestMessage.createdAt)}
+            </time>
+          )}
+          {onOpenCommunications && (
+            <button
+              type="button"
+              className="bot-peer-thread-link"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onOpenCommunications(peer.id);
+              }}
+            >
+              在协作面板查看
+            </button>
+          )}
+        </span>
+      </summary>
+      <div className="bot-peer-thread-body">
+        <div className="bot-peer-thread-messages">
+          {messages.map((message) => {
+            const sender = bots.find((b) => b.id === message.senderBotId);
+            const fromCurrent = message.senderBotId === currentBot.id;
+            return (
+              <div
+                key={message.id}
+                className={`bot-peer-thread-message ${fromCurrent ? "from-current" : "from-peer"}`}
+              >
+                <div className="bot-peer-thread-message-meta">
+                  <PixelAvatar
+                    className="bot-peer-thread-avatar"
+                    avatarId={fromCurrent ? currentBot.avatarId : sender?.avatarId}
+                    color={fromCurrent ? currentBot.avatarColor : sender?.avatarColor}
+                    seed={fromCurrent ? currentBot.id : sender?.id}
+                  />
+                  <span className="bot-peer-thread-author">
+                    {fromCurrent ? currentBot.name : sender?.name || "Bot"}
+                  </span>
+                  <span className="bot-peer-thread-sep">·</span>
+                  <span className={`bot-peer-thread-kind is-${message.kind}`}>
+                    {kindLabel(message.kind)}
+                  </span>
+                  <span className="bot-peer-thread-sep">·</span>
+                  <time className="bot-peer-thread-time" dateTime={message.createdAt}>
+                    {formatDate(message.createdAt)}
+                  </time>
+                </div>
+                <div className="bot-peer-thread-content">
+                  <RichText text={message.content} repair />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        {explanations.length > 0 && (
+          <div className="bot-peer-thread-explanation">
+            <div className="bot-peer-thread-explanation-header">
+              <span className="bot-peer-thread-explanation-badge">Bot 的说明</span>
+            </div>
+            <div className="bot-peer-thread-explanation-body">
+              {explanations.map((text, idx) => (
+                <div key={idx} className="bot-peer-thread-explanation-item">
+                  <RichText text={text} repair />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </details>
+  );
+}
+

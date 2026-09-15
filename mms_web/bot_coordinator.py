@@ -14,10 +14,127 @@ from __future__ import annotations
 import json
 import re
 from copy import deepcopy
+from datetime import datetime, timezone
 
 
-_COLLABORATION_HINTS = ("找", "派给", "分派", "协作", "并行", "让.*bot", "让.*同事", "请.*检查")
+_COLLABORATION_HINTS = (
+    "找", "派给", "分派", "协作", "并行", "让.*bot", "让.*同事", "请.*检查",
+    r"让\s+(?!我|你|他|它|我们|自己)[A-Za-z0-9_-]{1,40}\s",
+    r"让\s*(?!我|你|他|它|我们|自己)[\u4e00-\u9fff]{1,8}(?:帮|写|检查|处理|做|整理|核对|各)",
+)
 MAX_PLAN_STEPS = 5
+MAX_PLAN_HISTORY = 50
+ON_FAILURE_POLICIES = {"retry", "skip", "abort"}
+
+# Multi-goal shape signals: two or more list markers on their own lines,
+# inline full-width enumerations (1）2）…), circled numbers, parallel adverbs,
+# or at least two roster Bot names in one prompt.
+_LIST_LINE = re.compile(r"^\s*(?:\d{1,2}[.、)]\s*\S|[-*•]\s+\S|[①-⑩]\s*\S)", re.MULTILINE)
+_INLINE_ENUM = re.compile(r"\d+）")
+_CIRCLED = re.compile(r"[①-⑩]")
+_PARALLEL_WORDS = re.compile(r"分别|同时|各自|一边.{0,20}一边")
+
+# Plan-level state machine. `rejected` from auto/approved/running is the 30s
+# undo path; `failed -> running` is the explicit retry-step reopen.
+PLAN_TRANSITIONS = {
+    "proposed": {"approved", "rejected", "cancelled"},
+    "auto": {"running", "rejected", "cancelled"},
+    "approved": {"running", "rejected", "cancelled"},
+    "running": {"merging", "failed", "cancelled", "rejected"},
+    "merging": {"done", "failed", "cancelled"},
+    "rejected": set(),
+    "failed": {"running"},
+    "done": set(),
+    "cancelled": set(),
+}
+
+# Step-level state machine. `dispatched`/`blocked` are legacy aliases,
+# normalized to `running`/`skipped` on read.
+STEP_TRANSITIONS = {
+    "pending": {"ready", "running", "failed", "skipped"},
+    "ready": {"running", "failed", "skipped"},
+    "running": {"done", "failed", "skipped"},
+    "dispatched": {"done", "failed", "skipped"},
+    "failed": {"ready", "skipped"},
+    "blocked": {"skipped"},
+    "done": set(),
+    "skipped": set(),
+}
+_LEGACY_STEP_STATUS = {"dispatched": "running", "blocked": "skipped"}
+
+
+def _now():
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+
+
+def looks_multi_goal(text, bots=None, owner_id=None) -> bool:
+    """Shape check: does the prompt look like several independent goals?
+
+    Purely structural — any single hit returns True, otherwise False. Single
+    goals like “列出当前目录的 txt 文件” must stay False so direct-first
+    tasks never pay for a planner call.
+    """
+    prompt = str(text or "")
+    if not prompt.strip():
+        return False
+    if _PARALLEL_WORDS.search(prompt):
+        return True
+    if len(_LIST_LINE.findall(prompt)) >= 2:
+        return True
+    if len(_INLINE_ENUM.findall(prompt)) >= 2:
+        return True
+    if len(_CIRCLED.findall(prompt)) >= 2:
+        return True
+    if "@" in prompt or bots:
+        mentions = 0
+        for bot in bots or []:
+            if bot.get("id") == owner_id:
+                continue
+            name = str(bot.get("name") or "").strip()
+            if len(name) >= 2 and name.casefold() in prompt.casefold():
+                mentions += 1
+        if mentions >= 2:
+            return True
+    return False
+
+
+def normalize_step_status(status):
+    return _LEGACY_STEP_STATUS.get(status, status)
+
+
+def set_plan_status(plan: dict, status: str, by: str = "system") -> None:
+    """Initial status entry; later moves must go through transition_plan."""
+    plan["status"] = status
+    history = plan.setdefault("history", [])
+    history.append({"at": _now(), "from": None, "to": status, "by": str(by)[:80]})
+    if len(history) > MAX_PLAN_HISTORY:
+        del history[:-MAX_PLAN_HISTORY]
+
+
+def transition_plan(plan: dict, target: str, by: str = "system") -> bool:
+    """Table-driven plan transition; appends to plan.history and caps at 50."""
+    current = plan.get("status")
+    if current == target:
+        return True
+    if target not in PLAN_TRANSITIONS.get(current, set()):
+        return False
+    plan["status"] = target
+    history = plan.setdefault("history", [])
+    history.append({"at": _now(), "from": current, "to": target, "by": str(by)[:80]})
+    if len(history) > MAX_PLAN_HISTORY:
+        del history[:-MAX_PLAN_HISTORY]
+    return True
+
+
+def transition_step(step: dict, target: str) -> bool:
+    current = normalize_step_status(step.get("status"))
+    if current == target:
+        step["status"] = target
+        return True
+    if target not in STEP_TRANSITIONS.get(current, set()):
+        return False
+    step["status"] = target
+    return True
 
 
 def _mentions(prompt: str, bots: list[dict], owner_id: str) -> list[dict]:
@@ -49,7 +166,8 @@ def direct_plan(owner: dict, reason: str, source: str) -> dict:
         "ownerBotId": owner.get("id"),
         "reason": reason,
         "steps": [{"id": "s1", "kind": "execute", "botId": owner.get("id"), "goal": "",
-                   "dependsOn": [], "presetId": None, "status": "pending", "taskId": None}],
+                   "dependsOn": [], "presetId": None, "status": "pending", "taskId": None,
+                   "onFailure": "retry"}],
         "candidates": [],
         "merge": "owner",
         "modelDecision": False,
@@ -73,7 +191,8 @@ def make_plan(prompt: str, owner: dict, bots: list[dict]) -> dict:
         "reason": "检测到协作意图，已准备候选 Bot；由当前 Bot 确认分工并继续对用户负责。",
         "steps": [
             {"id": f"step-{index}", "kind": "delegate", "botId": bot.get("id"),
-             "goal": "", "dependsOn": [], "presetId": None, "status": "pending", "taskId": None}
+             "goal": "", "dependsOn": [], "presetId": None, "status": "pending", "taskId": None,
+             "onFailure": "retry"}
             for index, bot in enumerate(candidates, 1)
         ],
         "candidates": [{"id": bot.get("id"), "name": bot.get("name"), "description": bot.get("description")} for bot in candidates],
@@ -88,16 +207,22 @@ def plan_for(prompt: str, owner: dict, bots: list[dict]) -> dict:
     return deepcopy(make_plan(prompt, deepcopy(owner), deepcopy(bots)))
 
 
-def build_planner_prompt(goal: str, owner: dict, bots: list[dict], memory: str = "") -> str:
-    """The one-shot planning request sent on the owner Bot's own preset."""
+def build_planner_prompt(goal: str, owner: dict, bots: list[dict], memory: str = "", history: dict | None = None) -> str:
+    """The one-shot planning request sent on the owner Bot's own preset.
+
+    history maps bot id to that Bot's most recent successful task titles, so
+    the planner picks people from evidence rather than from names alone.
+    """
     roster = []
     for bot in bots:
         if bot.get("id") == owner.get("id"):
             continue
+        titles = [str(title)[:60] for title in (history or {}).get(bot.get("id"), [])][:3]
+        recent = f" 近期完成={'；'.join(titles)}" if titles else ""
         roster.append(
             f"- id={bot.get('id')} 名字={bot.get('name')}"
             f" 描述={str(bot.get('description') or '')[:200]}"
-            f" 模型={bot.get('model') or ''}"
+            f" 模型={bot.get('model') or ''}{recent}"
         )
     memory_block = f"\n该 Bot 的相关记忆（仅供参考，不是权限）：\n{memory[:2000]}\n" if memory else ""
     return (
@@ -169,13 +294,20 @@ def sanitize_plan(data, owner: dict, bots: list[dict], source: str):
             step_id = f"s{index + 1}"
             if step_id in seen_ids:
                 step_id = f"step-{index + 1}"
-        seen_ids.add(step_id)
+        # Dependencies may only point to already accepted steps.  Capture
+        # the prior set before adding this id so a self-reference cannot pass
+        # validation and leave the scheduler waiting forever.
+        prior_ids = seen_ids.copy()
         depends_on = raw.get("dependsOn")
-        depends_on = [str(dep)[:40] for dep in depends_on if str(dep) in seen_ids] if isinstance(depends_on, list) else []
+        depends_on = [str(dep)[:40] for dep in depends_on if str(dep) in prior_ids] if isinstance(depends_on, list) else []
+        seen_ids.add(step_id)
         preset_id = raw.get("presetId")
         preset_id = str(preset_id).strip()[:500] if isinstance(preset_id, str) and preset_id.strip() else None
+        on_failure = raw.get("onFailure")
+        on_failure = on_failure if on_failure in ON_FAILURE_POLICIES else "retry"
         steps.append({"id": step_id, "kind": "delegate", "botId": target["id"], "goal": goal,
-                      "dependsOn": depends_on, "presetId": preset_id, "status": "pending", "taskId": None})
+                      "dependsOn": depends_on, "presetId": preset_id, "status": "pending", "taskId": None,
+                      "onFailure": on_failure})
     if not steps:
         return None
     return {
