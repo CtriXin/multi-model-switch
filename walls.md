@@ -737,3 +737,48 @@ T2c 跟进（UI 整理建议）:
 未完成 / 遗留: 无。T3d-ui 全部需求均已实现并通过端到端视觉与单元测试验收。代码保持未提交状态。
 耗时: 约 45 分钟 · 归因: [AGENT]
 
+## 2026-09-15 15:42 SGT · gemini-3.6 · 370e87ec37e741df
+需求:执行 T2c 工单（计划块视觉整理，docs/mms-web/bot-work/T2c-plan-block-visual.md）。
+包:T2c
+分支 / worktree:`bot/T2c-plan-visual` · `/Users/xin/.local/share/stride/tasks/370e87ec37e741df/wt-T2c`（从 c5c12e7c 创建，未提交、未 push）
+处置:
+1. `apps/mms-web/src/BotPlan.tsx`:
+   - 导出 `getPlanStatusTier(status)`，对计划状态标签分为三档：active（进行中：running / merging）、muted（完成：done）、warning（异常：failed / cancelled / proposed / rejected）；
+   - 导出 `formatPlanTimeline(history)`，格式化时间线为 `auto → running 10:58 → merging 11:02 → failed 11:03`，只显示时间不显示日期；
+   - 重构 `StepRow`：
+     - Bot 名字放入 `.bot-plan-step-bot-name`，固定 min-width（76px，移动端 60px），`white-space: nowrap` 与 `text-overflow: ellipsis`，彻底消除竖排逐字折行；
+     - 目标与摘要分两行：第一行为 `.bot-plan-step-goal`（主色），第二行为 `.bot-plan-step-summary`（次级颜色）；超过两行使用 `-webkit-line-clamp: 2` 折叠，超长文本提供「展开 / 收起」轻量切换按钮；
+     - failed 步骤的「重试 / 跳过」按钮移入行尾 `.bot-plan-step-trailing`，与右侧状态文本及左侧状态点基线对齐，不再随 goal 文本长度漂移；
+   - `<details>` 展开块中无论是否有依赖/模型均展示单行 `时间线：{timeline}`；
+2. `apps/mms-web/src/bot-plan.css`:
+   - 增加三档状态标签样式（`.bot-plan-tag-active`, `.bot-plan-tag-muted`, `.bot-plan-tag-warning`），使用现有 `--accent`, `--line`, `--bot-amber` 等 Token，0 新增 Hex；
+   - 增加两行排版、单行 Bot 名、行尾操作列及 400px 移动端响应式样式；
+   - Hex 总数严格保持 12。
+3. `apps/mms-web/DESIGN.md`:
+   - 追加「7. Coordinator 计划块视觉规范（T2c）」一节。
+
+改动文件（git diff --stat）:
+```text
+ apps/mms-web/DESIGN.md        |  12 ++++
+ apps/mms-web/src/BotPlan.tsx  | 144 ++++++++++++++++++++++++++++++++-------
+ apps/mms-web/src/bot-plan.css | 154 ++++++++++++++++++++++++++++++++++++++----
+ 3 files changed, 272 insertions(+), 38 deletions(-)
+ 新增: docs/mms-web/design/t2c/ (2 张验收截图)
+```
+
+测试命令与结果:
+- `npx tsc --noEmit -p apps/mms-web`: 0 错误。
+- `node --test apps/mms-web/tests/*.test.mjs`: 93 passed, 0 failed。
+- `grep -roh '#[0-9a-fA-F]\{3,6\}' apps/mms-web/src/bot*.css | wc -l`: 严格为 12。
+- `npm run build --workspace @mms/web`: 成功（tsc + vite 构建通过）。
+
+实时验证（独立实例端口 61706，state-root /tmp/bot-verify-T2c，未碰 60824）:
+- 构造三步协同验收计划（s1 done 带长摘要、s2 failed 规约失败、s3 skipped 跳过）：
+- 验收 1（桌面端 1280x800）: 计划头展示 warning 档「已中止」标签，三步 Bot 名字「验收助手乙/丙」单行横排不换行，第一步两行展示带「展开」按钮且状态为绿点「已完成」，第二步为红点与行尾对齐的「[重试] [跳过] 失败」，第三步为灰点「已跳过」；展开 `<details>` 展示单行时间线 `auto → running 10:58 → merging 11:02 → failed 11:03` 与前置依赖。
+  截图: `docs/mms-web/design/t2c/t2c_1_plan_desktop.png`
+- 验收 2（400px 移动端）: 400px 视口下单列流式对齐良好，无横向溢出，名字、按钮与文本层次分明。
+  截图: `docs/mms-web/design/t2c/t2c_2_plan_narrow_400px.png`
+
+未完成 / 遗留: 无。T2c 全部 5 项视觉整理与验收均 100% 完成。代码保持未提交状态。
+耗时: 约 35 分钟 · 归因: [AGENT]
+
