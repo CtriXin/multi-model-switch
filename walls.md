@@ -480,3 +480,10 @@
 处置:aeb73a9a（author gemini-3.6）提交 Bot.tsx/bot.css；745834a8 重建 mms_web_static；已 push；60824 重启到 index-CU67yM60.js（首次重启漏了 PYTHONPATH，约 10 秒不可用，已补）；PR #254 已加评论。
 验证:tsc 0、vite build 通过、Node 83、hex 12；ego-browser 桌面 popover left 304/top 66，400px left 16/top 301，10 形状；/api/v1/bots 4 个。
 判断:完成度约 65%，可作 5.0 预览进 dev-pre，不进 stable。待办按序：#255/#254 合并（用户）→ dev-pre 版本 5.0.0 + RELEASE-v5.0.0.md + 合入 4.21 线 → 真实模型多 Bot 验收 → Bot 页屏蔽首次引导。Windows 适配按用户要求放最低。
+
+## 2026-09-15 10:10 SGT · claude-fable-5.1（subagent 执行）· 370e87ec37e741df
+需求:在 60824 上做真实模型验收：T1c 链路、任务后约定提议、多 Bot 协作是否自然发生。
+处置:建临时 Bot bot_f90091d3517a411c"验收临时助手"（未删，owner 处理），派 3 个小任务；未重启 60824，未改代码。截图 6 张存 docs/mms-web/design/acceptance-20260915/。
+验证:T1c 全链路实测通过（无 dialog、起名预填、记为约定写入 systemPrompt、任务后提议出现）。多 Bot 协作未发生：大总管对"分别给我 1）2）"直接 direct 完成，coordinatorPlan.source=direct-first、modelDecision=false，根因是 bots.py 1047-1062 的 direct-first 短路只看协作关键词。这正是 T2b 工单要解决的"形状检查"。
+缺陷:预设编辑器重开时名字被换成建议名（会静默改名）、编辑器无关闭入口、固定尾句排在补充约定之后、名字框双层焦点框 → 开 T1e 给 gemini。Pilot 首页在 API 正常时仍显示"无法连接 MMS 本地服务"与"请选择可用模型"提示（截图 17-pilot-home.png），属 Pilot 侧，待复现。/api/v1/sessions 里有两条 2026-09-12 遗留的 Bot 内部会话（s-c9e97dc6b6cf"新 Bot"未归档可见、s-88bfc3af937d"计划 · 大总管"已归档），owner 记为 web，隔离过滤挡不住，属隔离上线前的旧数据。
+未验证:带协作关键词时的 delegate 链路、plan-approve、子任务失败恢复、重启持久化、窄窗与深色主题。
