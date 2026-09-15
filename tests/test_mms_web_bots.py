@@ -4,7 +4,8 @@ import time
 
 import pytest
 
-from mms_web.bots import BotRuntime, collaboration_requested, parse_outcome
+from mms_web.bots import (BotRuntime, collaboration_requested, is_trivial_result,
+                        looks_like_question, parse_outcome, parse_wait_text)
 from mms_web.errors import WebError
 
 
@@ -342,5 +343,121 @@ def test_artifact_content_rejects_bare_path_outside_private_screenshots(tmp_path
         with pytest.raises(WebError) as failure:
             rt.artifact_content(task["id"], artifact["id"])
         assert failure.value.code == "ARTIFACT_FORBIDDEN"
+    finally:
+        rt.close()
+
+
+@pytest.mark.parametrize("text", [
+    "你希望我优先处理哪一项？",
+    "需要我把结果发到邮箱吗",
+    "请确认是否继续",
+    "报告里要包含哪些章节",
+    "下一步做什么",
+    "是否需要我重跑一次",
+])
+def test_looks_like_question_accepts_real_questions(text):
+    assert looks_like_question(text) is True
+
+
+@pytest.mark.parametrize("text", [
+    "等待子任务或用户",
+    "继续等待用户或后续指令。",
+    "已确认收到并让我候着，无需再回复。",
+    "本轮没有任何文件改动，继续挂起。",
+    "已完成，结果在工作目录。",
+    "",
+])
+def test_looks_like_question_rejects_statements(text):
+    assert looks_like_question(text) is False
+
+
+@pytest.mark.parametrize("text", [
+    "收到",
+    "明白，先候着",
+    "已发送给相关同事，沟通完毕。",
+    "无待办，本轮先到这里。",
+])
+def test_is_trivial_result_marks_short_or_acknowledged_text(text):
+    assert is_trivial_result(text) is True
+
+
+@pytest.mark.parametrize("text", [
+    '本次核对覆盖了全部三类记录，逐条比对了 2026-09 的变更，结论是无需回滚；相关文件与截图已随成果提交，后续只需按既定节奏观察一天再复核一次。相关记录和证据都已放在同一份成果里，方便后续核对与交接。相关记录和证据都已放在同一份成果里，方便后续核对与交接。相关记录和证据都已放在同一份成果里，方便后续核对与交接。',
+    '巡检完成：三个站点的主流程都可达，延迟分别落在预期区间；异常日志里只有一条历史噪声，已记录并标注来源，无需在今天处理。为了让下一位同事接手顺利，我把每个站点的入口、账号位置和最近的变更都写进了同一份记录。相关记录和证据都已放在同一份成果里，方便后续核对与交接。相关记录和证据都已放在同一份成果里，方便后续核对与交接。',
+    '整理结果：需求清单拆成五个可执行项，其中四项可直接开工；剩下的一项依赖账号权限，已标注负责人和下一步的确认方式。另外把风险项按影响面排序，最高的一项建议在本周内先做一次小范围验证，再决定是否全量。相关记录和证据都已放在同一份成果里，方便后续核对与交接。相关记录和证据都已放在同一份成果里，方便后续核对与交接。',
+    '对账完成：两份导出文件的差异集中在两条历史记录，均已核对来源，没有出现新的不一致；相关证据文件已经随成果一起提交备查。如果下周还有新的导出，可以直接用同一套流程再跑一遍，不需要重新配置。相关记录和证据都已放在同一份成果里，方便后续核对与交接。相关记录和证据都已放在同一份成果里，方便后续核对与交接。',
+])
+
+
+def test_is_trivial_result_keeps_real_work(text):
+    assert is_trivial_result(text) is False
+
+
+def test_parse_wait_text_splits_question_and_quick_options():
+    question, options = parse_wait_text("请确认发布范围？\n选项：只同步 网文1 | 两个站点都同步")
+    assert question == "请确认发布范围？"
+    assert options == ["只同步 网文1", "两个站点都同步"]
+
+
+def finish_task(rt, bot_id, message, prompt="任务", **task_fields):
+    task = rt.create_task({"botId": bot_id, "prompt": prompt})
+    rt._tasks[task["id"]].update(status="running", **task_fields)
+    rt._finish(rt._tasks[task["id"]], "completed", message)
+    return [note for note in rt.memory.get(bot_id)["notes"] if note["kind"] == "task"]
+
+
+def test_memory_skips_greetings_and_acknowledgements(tmp_path):
+    rt = runtime(tmp_path)
+    try:
+        worker = bot(rt)
+        notes = finish_task(rt, worker["id"], "收到，好的。", prompt="跟大总管打招呼")
+        assert notes == []
+    finally:
+        rt.close()
+
+
+def test_memory_keeps_a_structured_conclusion(tmp_path):
+    rt = runtime(tmp_path)
+    try:
+        worker = bot(rt)
+        notes = finish_task(rt, worker["id"], "# 结论\n区域 A 的发布状态已确认。", prompt="检查发布状态")
+        assert len(notes) == 1
+    finally:
+        rt.close()
+
+
+def test_memory_keeps_a_task_with_artifacts(tmp_path):
+    rt = runtime(tmp_path)
+    try:
+        worker = bot(rt)
+        task = rt.create_task({"botId": worker["id"], "prompt": "写文件"})
+        rt._tasks[task["id"]]["status"] = "running"
+        rt._artifacts[task["id"]].append({"id": "artifact_1", "name": "b.txt", "kind": "file"})
+        rt._finish(rt._tasks[task["id"]], "completed", "好了。")
+        assert len([n for n in rt.memory.get(worker["id"])["notes"] if n["kind"] == "task"]) == 1
+    finally:
+        rt.close()
+
+
+def test_memory_keeps_a_long_non_trivial_result(tmp_path):
+    rt = runtime(tmp_path)
+    try:
+        worker = bot(rt)
+        message = '本次核对覆盖了全部三类记录，逐条比对了 2026-09 的变更，结论是无需回滚；相关文件与截图已随成果提交，后续只需按既定节奏观察一天再复核一次。相关记录和证据都已放在同一份成果里，方便后续核对与交接。相关记录和证据都已放在同一份成果里，方便后续核对与交接。相关记录和证据都已放在同一份成果里，方便后续核对与交接。'
+        notes = finish_task(rt, worker["id"], message, prompt="核对记录")
+        assert len(notes) == 1
+    finally:
+        rt.close()
+
+
+def test_memory_skips_pure_peer_message_tasks(tmp_path):
+    rt = runtime(tmp_path)
+    try:
+        worker = bot(rt)
+        message = ("调度员发来一条问候，我回复了当前进度；本轮没有任何文件改动，"
+                   "也没有新的产物或结论，继续等待后续消息即可。")
+        notes = finish_task(rt, worker["id"], message, prompt="处理同事消息",
+                            deliveryMessageIds=["comm_1"])
+        assert notes == []
     finally:
         rt.close()

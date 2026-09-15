@@ -431,6 +431,8 @@ class WebApplication:
             task_id, action = parts[1:]
             if action in {"wake", "cancel", "accept"}:
                 return getattr(self.bots, action + "_task")(task_id)
+            if action == "wait":
+                return self.bots.wait_action(task_id, payload)
             if action == "plan":
                 return self.bots.plan_action(task_id, payload)
             if action == "messages":
