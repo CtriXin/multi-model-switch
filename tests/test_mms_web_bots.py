@@ -564,3 +564,61 @@ def test_looks_like_question_scans_the_whole_text(text):
 ])
 def test_looks_like_question_still_rejects_multi_sentence_statements(text):
     assert looks_like_question(text) is False
+
+
+def test_retry_step_runs_when_its_prerequisite_was_skipped(tmp_path):
+    executor = ScriptedPlanExecutor()
+    rt = runtime(tmp_path, executor, max_concurrent=4)
+    try:
+        owner = bot(rt, "总控", "ws-owner")
+        writer = bot(rt, "写手", "ws-writer")
+        checker = bot(rt, "检查员", "ws-checker")
+        executor.plan_reply = json.dumps({
+            "mode": "delegate", "reason": "两步", "merge": "owner",
+            "steps": [{"id": "s1", "botId": writer["id"], "goal": "写 b 文件", "dependsOn": [], "onFailure": "skip"},
+                      {"id": "s2", "botId": checker["id"], "goal": "核对 b 文件", "dependsOn": ["s1"], "onFailure": "retry"}]})
+        task = rt.create_task({"requestId": "skip-dep", "botId": owner["id"], "prompt": "让写手和检查员各做一步"})
+        rt.tick(); drain_launch(rt)
+
+        # 一个跳过的前置 + 一个失败的后继：持久化的计划可以是这个形状
+        # （例如用户先跳过前置、后继在更早的一轮已经失败）。
+        plan = rt._tasks[task["id"]]["coordinatorPlan"]
+        steps = {step["id"]: step for step in plan["steps"]}
+        steps["s1"].update(status="skipped", result={"summary": "用户跳过了这个步骤。"}, policyApplied=True)
+        steps["s2"].update(status="failed", error="核对失败", taskId=None)
+        plan["status"] = "failed"
+
+        after = rt.plan_action(task["id"], {"action": "retry-step", "stepId": "s2"})
+        retried = {step["id"]: step for step in after["coordinatorPlan"]["steps"]}["s2"]
+        # 前置是 skipped 也算已结算：这一步必须真的派发出去，而不是卡在 ready。
+        assert retried["status"] == "running", retried
+        assert retried["taskId"]
+    finally:
+        rt.close()
+
+
+def test_a_direct_plan_marks_its_only_step_done_when_the_task_finishes(tmp_path):
+    executor = ScriptedPlanExecutor()
+    rt = runtime(tmp_path, executor)
+    try:
+        worker = bot(rt, "独立工")
+        done = rt.create_task({"botId": worker["id"], "prompt": "用三句话解释什么是 git rebase"})
+        rt.tick(); drain_launch(rt)
+        executor.outcomes[done["id"]] = "completed"
+        pump_runtime(rt)
+        view = rt.get_task(done["id"])
+        assert view["status"] == "completed"
+        assert view["coordinatorPlan"]["mode"] == "direct"
+        # 这一步是 Bot 自己做的，没有别的地方会把它挪出 pending。
+        assert view["coordinatorPlan"]["steps"][0]["status"] == "done"
+
+        failed = rt.create_task({"botId": worker["id"], "prompt": "列出当前目录的 txt 文件"})
+        rt.tick(); drain_launch(rt)
+        executor.outcomes[failed["id"]] = "failed"
+        pump_runtime(rt)
+        view = rt.get_task(failed["id"])
+        assert view["status"] == "failed"
+        assert view["coordinatorPlan"]["mode"] == "direct"
+        assert view["coordinatorPlan"]["steps"][0]["status"] == "failed"
+    finally:
+        rt.close()

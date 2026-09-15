@@ -1149,7 +1149,10 @@ class BotRuntime(BotCommunications):
             for step in steps:
                 if step.get("status") not in {"pending", "ready"}:
                     continue
-                if any(by_id.get(dep, {}).get("status") != "done" for dep in step.get("dependsOn", [])):
+                # A skipped prerequisite is settled, not pending: otherwise a
+                # dependent step waits forever after skip-step.
+                if any(normalize_step_status(by_id.get(dep, {}).get("status")) not in {"done", "skipped"}
+                       for dep in step.get("dependsOn", [])):
                     continue
                 step["status"] = "ready"
                 attempt = step.get("attempts", 1)
@@ -1250,6 +1253,13 @@ class BotRuntime(BotCommunications):
     def _settle_plan_on_finish(self, plan, state):
         """Plan mirror of the owner task's own terminal state."""
         steps = plan.get("steps") or []
+        if plan.get("mode") == "direct" and steps:
+            # The owner does a direct plan's only step itself, so nothing else
+            # would ever move it off "pending".
+            if state == "completed":
+                steps[0]["status"] = "done"
+            elif state in {"failed", "interrupted"}:
+                steps[0]["status"] = "failed"
         if plan.get("mode") == "delegate" and any(
                 normalize_step_status(step.get("status")) in {"pending", "ready", "running"} for step in steps):
             return  # Children still active; the plan settles at the merge turn.

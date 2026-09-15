@@ -33,7 +33,7 @@ import {
 } from "lucide-react";
 import { BotPlan } from "./BotPlan";
 import { previewType } from "./bot-artifact-preview";
-import type { BotTaskPlan, Preset } from "./types";
+import type { BotChildResult, BotTaskPlan, Preset } from "./types";
 import {
   suggestBotName,
   looksLikeStandingInstruction,
@@ -94,6 +94,7 @@ export interface BotTask {
   createdAt: string;
   updatedAt: string;
   outcome?: BotOutcome | null;
+  childResults?: BotChildResult[];
 }
 export interface BotOutcome {
   summary: string;

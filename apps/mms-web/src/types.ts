@@ -346,6 +346,8 @@ export interface BotPlanStep {
   error?: string;
   onFailure?: "retry" | "skip" | "abort";
   result?: BotPlanStepResult;
+  policyApplied?: boolean;
+  attempts?: number;
 }
 export type BotPlanStatus =
   | "proposed"
