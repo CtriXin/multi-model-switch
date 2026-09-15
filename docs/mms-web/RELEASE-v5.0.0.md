@@ -2,9 +2,9 @@
 
 ## 升级须知
 
-本版本走 `dev-pre` 预览通道，不是 Stable。5.0 的边界是 Bot 工作台；`dev` / `main` 继续维护 `4.21.z` 稳定线，两条线在 owner 宣布 5.0 发布前不合并。
+本版本走 `dev-pre` 预览通道，不是 Stable。5.0 的边界是 Bot 工作台；`dev` / `main` 继续维护 `4.22.z` 稳定线，两条线在 owner 宣布 5.0 发布前不合并。
 
-内容由两部分组成：`dev-pre` 上的 Bot 工作台，加上 v4.21.1–v4.21.14 的全部 Windows 修复。配置根仍是 `~/.config/mms-next`，无需迁移；已有 config、session 和 OAuth 不受影响。
+内容由两部分组成：`dev-pre` 上的 Bot 工作台，加上 v4.21.1–v4.21.14 的全部 Windows 修复，以及 v4.22.1 的版本一致性修复。配置根仍是 `~/.config/mms-next`，无需迁移；已有 config、session 和 OAuth 不受影响。
 
 Bot 工作台的功能验证在 macOS 上进行。**Windows 上的 Bot 工作台没有做过验收**，本版本合入的 Windows 修复只覆盖 Pilot、Pi 启动与会话链路，不构成对 Bot 工作台的 Windows 支持声明。
 
@@ -30,7 +30,7 @@ Bot 工作台的功能验证在 macOS 上进行。**Windows 上的 Bot 工作台
 
 ## 包含的 4.21.x Windows 修复
 
-合入 `v4.21.14`，即 v4.21.1 到 v4.21.14 的全部修复：
+合入 `v4.22.1`，包含 v4.21.1 到 v4.21.14 的全部修复，以及 v4.22.1 的版本元数据修复：
 
 - Pi 启动：允许更慢的启动握手；RPC 管道在 launcher 中保持传递；Pi 的 bash 不可用时改用 PowerShell。
 - 会话历史：Pi 历史按 UTF-8 读取，GBK 系统不再出现乱码或轮询中断。
@@ -45,7 +45,7 @@ Bot 工作台的功能验证在 macOS 上进行。**Windows 上的 Bot 工作台
 
 同时带入 README 的 Windows Native Preview 从零安装步骤、`docs/mms-web/WINDOWS-CONTRIBUTING.md` 与 `WINDOWS-PI-FIX-HANDOFF.md`。
 
-细节以 `RELEASE-v4.21.0.md`、`RELEASE-v4.21.1.md`、`RELEASE-v4.21.14.md` 与对应提交为准。
+细节以 `RELEASE-v4.21.0.md`、`RELEASE-v4.21.1.md`、`RELEASE-v4.21.14.md`、`RELEASE-v4.22.1.md` 与对应提交为准。
 
 ## 验证边界
 
