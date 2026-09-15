@@ -13,7 +13,7 @@ import re
 import threading
 import time
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -121,6 +121,68 @@ def peer_report(*, state, message, bot_name, outcome, system_failure=False):
     return "result", str(summary or message or "")[:200]
 
 
+# A waiting task must own a real question: a bare "waiting" status with
+# nothing to answer is what left the sidebar pointing at an empty chat.
+_QUESTION_ENDINGS = ("吗", "么", "呢", "对不对", "好不好", "有没有", "是不是")
+_QUESTION_MARKERS = (
+    # Question words may be followed by a noun (“哪些章节”), so they are
+    # matched inside the tail rather than only at its end.
+    "哪", "什么", "怎么", "怎样", "如何", "是否", "要不要", "能不能", "可不可以",
+    "为什么", "多少", "多久",
+    "请确认", "请提供", "请补充", "请说明", "请选择", "请告诉我", "请回复",
+    # A second-person request also tells the user what to answer;
+    # "需要你确认预算" is a question-shaped wait even without "？".
+    "需要你", "需要您", "请你", "请您", "等你确认", "由你决定", "由你确认",
+    "你确认", "你提供", "你补充", "你决定",
+)
+_TRIVIAL_TOKENS = ("收到", "明白", "已发送", "沟通完毕", "无待办", "先候着")
+_WAIT_OPTIONS = re.compile(r"^\s*(?:选项|可选项)\s*[:：]\s*(.+)$")
+MAX_WAIT_OPTIONS = 4
+TRIVIAL_RESULT_CHARS = 120
+
+
+def looks_like_question(text) -> bool:
+    """Whether a Bot turn actually asks the user something.
+
+    Used before entering ``waiting/user`` and when folding unreadable legacy
+    records: a question mark anywhere, a question-shaped ending, or an
+    explicit question form such as “是否…” / “请确认…”.
+    """
+    value = " ".join(str(text or "").split()).strip()
+    if not value:
+        return False
+    if "?" in value or "？" in value:
+        return True
+    tail = value.rstrip("。!！.~～ ")[-60:]
+    if tail.endswith(_QUESTION_ENDINGS):
+        return True
+    return any(marker in tail for marker in _QUESTION_MARKERS)
+
+
+def is_trivial_result(text) -> bool:
+    """A short acknowledgement or greeting is not worth a memory digest."""
+    value = " ".join(str(text or "").split())
+    if len(value) < TRIVIAL_RESULT_CHARS:
+        return True
+    return any(token in value for token in _TRIVIAL_TOKENS)
+
+
+def parse_wait_text(text) -> tuple[str, list[str]]:
+    """Split a wait message into (question, quick options).
+
+    ``选项：A | B`` becomes quick replies; every other line stays the question.
+    """
+    question_lines: list[str] = []
+    options: list[str] = []
+    for line in str(text or "").splitlines():
+        match = _WAIT_OPTIONS.match(line)
+        if match and not options:
+            options = [part.strip()[:200] for part in re.split(r"[|｜、,，]", match.group(1)) if part.strip()][:MAX_WAIT_OPTIONS]
+            continue
+        question_lines.append(line)
+    return "\n".join(question_lines).strip(), options
+
+
 class BotRuntime(BotCommunications):
     def __init__(self, *, state_root: Path, executor, computer=None, max_concurrent=3):
         self.root = Path(state_root) / "bots"
@@ -171,6 +233,7 @@ class BotRuntime(BotCommunications):
                 bot.setdefault("compactAtPercent", 70)
                 bot.setdefault("orchestrationPolicy", "direct-first")
                 bot.setdefault("planner", "model")
+            self._migrate_wait_contracts()
         except (OSError, ValueError, KeyError, TypeError):
             self._load_error = "Bot 记录无法读取，原文件已保留；请检查记录后再写入。"
 
@@ -316,7 +379,10 @@ class BotRuntime(BotCommunications):
 
     def list_bots(self):
         with self._lock:
-            return deepcopy(list(self._bots.values()))
+            bots = deepcopy(list(self._bots.values()))
+            for bot in bots:
+                bot["pendingQuestion"] = self._pending_question(bot["id"])
+            return bots
 
     def update_bot(self, bot_id, payload):
         with self._lock:
@@ -609,6 +675,110 @@ class BotRuntime(BotCommunications):
         view["settings"] = settings
         return view
 
+    def _pending_question(self, bot_id):
+        """The latest answered-question contract for a Bot, or None.
+
+        A ``waiting/user`` row without a question is legacy dirty data; it
+        stays out so the sidebar never points at an empty chat.
+        """
+        rows = [task for task in self._tasks.values()
+                if task["botId"] == bot_id and task["status"] == "waiting"
+                and task.get("waitReason") == "user" and str(task.get("waitQuestion") or "").strip()]
+        if not rows:
+            return None
+        task = max(rows, key=lambda item: str(item.get("waitSince") or item.get("updatedAt") or ""))
+        return {"taskId": task["id"], "question": str(task["waitQuestion"]).strip(),
+                "options": list(task.get("waitOptions") or []),
+                "since": task.get("waitSince") or task.get("updatedAt")}
+
+    def _migrate_wait_contracts(self):
+        """Backfill older ``waiting/user`` rows so dirty data stops lighting up."""
+        for task in self._tasks.values():
+            if task["status"] != "waiting" or task.get("waitReason") != "user":
+                continue
+            task.setdefault("waitSince", task.get("updatedAt") or task.get("createdAt") or now())
+            task.setdefault("waitOptions", [])
+            if task.get("waitQuestion"):
+                continue
+            question, options = parse_wait_text(self._last_wait_text(task))
+            if question and looks_like_question(question):
+                task["waitQuestion"] = question[:2000]
+                if options and not task["waitOptions"]:
+                    task["waitOptions"] = options
+            else:
+                task["waitQuestion"] = ""
+
+    def _last_wait_text(self, task):
+        """The most recent user-facing text, used when no explicit question came."""
+        rows = [row for row in self._messages.get(task["id"], [])
+                if row.get("type") in {"progress", "message"} and str(row.get("content") or "").strip()]
+        return str(rows[-1]["content"]).strip() if rows else ""
+
+    def _record_wait_request(self, task, payload):
+        """Explicit question/options from the wait tool; text stays the fallback."""
+        question = str(payload.get("question") or "").strip()
+        if question:
+            task["waitQuestion"] = question[:2000]
+        options = payload.get("options")
+        if isinstance(options, list):
+            task["waitOptions"] = [str(item).strip()[:200] for item in options if str(item).strip()][:MAX_WAIT_OPTIONS]
+        task["waitRequested"] = True
+
+    def _enter_user_wait(self, task):
+        """Enter ``waiting/user`` only with a real question.
+
+        Without one the turn is closed as completed and ``waitDeclined`` is
+        recorded for diagnosis, so the sidebar never points at an empty chat.
+        """
+        text = str(task.get("waitQuestion") or "").strip() or self._last_wait_text(task)
+        question, options = parse_wait_text(text)
+        if not question or not looks_like_question(question):
+            task["waitDeclined"] = True
+            task["waitRequested"] = False
+            self._finish(task, "completed", question or text or "本轮没有需要用户补充的问题。")
+            return False
+        task.update(status="waiting", waitReason="user", token="", waitQuestion=question[:2000],
+                    waitOptions=(list(task.get("waitOptions") or []) or options)[:MAX_WAIT_OPTIONS],
+                    waitSince=now())
+        self._bot(task["botId"])["status"] = "idle"
+        self._notify(task, "task.waiting", "input", question)
+        return True
+
+    def wait_action(self, task_id, payload):
+        """Answer or dismiss a ``waiting/user`` task from the Web UI.
+
+        ``answer`` reuses the ordinary message path, so the reply resumes the
+        same task; ``dismiss`` closes it as completed without a session turn.
+        """
+        with self._lock:
+            task = self._task(task_id)
+            if task["status"] != "waiting" or task.get("waitReason") != "user":
+                raise WebError("TASK_NOT_WAITING", "这条任务现在不在等用户回复。", 409)
+            action = str((payload or {}).get("action") or "").strip()
+            if action == "answer":
+                text = text_field(payload, "text", 32000, True)
+                task["waitAnsweredAt"] = now()
+                return self.add_message(task_id, {"content": text})
+            if action == "dismiss":
+                task["waitDismissed"] = True
+                self._finish(task, "completed", "等待已结束。")
+                self._persist()
+                return self._view(task)
+            raise WebError("INVALID_REQUEST", "action 必须是 answer 或 dismiss。", 400)
+
+    def _should_remember_task(self, task, message):
+        """Only a task with a durable outcome is worth a memory digest."""
+        outcome = task.get("outcome") if isinstance(task.get("outcome"), dict) else {}
+        summary = str(outcome.get("summary") or "").strip()
+        # ``summary`` falls back to the raw text; only an explicit 结论 section
+        # counts as a structured conclusion here.
+        structured = (bool(summary) and summary != str(outcome.get("raw") or "").strip()) \
+            or bool(str(outcome.get("changes") or "").strip())
+        artifacts = bool(self._artifacts.get(task["id"]))
+        if task.get("deliveryMessageIds") and not artifacts and not structured:
+            return False
+        return structured or artifacts or not is_trivial_result(message)
+
     def wake_task(self, task_id, payload=None):
         with self._lock:
             task = self._task(task_id)
@@ -732,7 +902,7 @@ class BotRuntime(BotCommunications):
         if state == "completed":
             try:
                 bot = self._bot(task["botId"])
-                if bot.get("memoryEnabled", True):
+                if bot.get("memoryEnabled", True) and self._should_remember_task(task, message):
                     digest = f"任务 {task['id']}：{task.get('prompt','')[:600]}\n结果：{message[:1200]}"
                     self.memory.remember(task["botId"], digest, kind="task", source="task", task_id=task["id"])
             except Exception:
@@ -988,6 +1158,19 @@ class BotRuntime(BotCommunications):
                         task.update(status="queued", runAt=None)
                         self._message(task["id"], "system", "到达计划时间，自动唤醒。")
                         changed = True
+                if task["status"] == "waiting" and task.get("waitReason") == "user" and task.get("waitSince"):
+                    # A question nobody answered for a week is not a pending
+                    # conversation any more; close it instead of glowing forever.
+                    try:
+                        stale = datetime.fromisoformat(task["waitSince"]) <= datetime.now(timezone.utc) - timedelta(days=7)
+                    except (TypeError, ValueError):
+                        stale = False
+                    if stale:
+                        task["waitDismissed"] = True
+                        self._message(task["id"], "system", "等待超过 7 天，已自动结束。")
+                        self._finish(task, "completed", "等待超时，已结束")
+                        changed = True
+                        continue
                 if task["status"] == "waiting" and task.get("waitReason") == "children":
                     changed = self._advance_plan(task) or changed
                     changed = self._resume_children(task) or changed
@@ -1237,11 +1420,7 @@ class BotRuntime(BotCommunications):
             elif self._resume_children(task):
                 self._bot(task["botId"])["status"] = "idle"
             elif task.get("waitRequested"):
-                task.update(status="waiting", waitReason="user", token="")
-                self._bot(task["botId"])["status"] = "idle"
-                reason = next((m.get("content") for m in reversed(self._messages.get(task["id"], []))
-                               if m.get("type") == "progress"), "")
-                self._notify(task, "task.waiting", "input", reason or "Bot 在等你的输入。")
+                self._enter_user_wait(task)
             else:
                 bad = any(e.get("status") == "error" for e in snapshot.get("events", []) if e.get("kind") == "user")
                 if bad:
@@ -1391,7 +1570,7 @@ class BotRuntime(BotCommunications):
                 elif action == "fail":
                     live["declaredError"] = content or "Bot 报告执行失败。"
                 else:
-                    live["waitRequested"] = True
+                    self._record_wait_request(live, payload)
                 self._message(task_id, "progress", content or "等待后续结果。", task["botId"])
                 self._persist()
             return {"ok": True, "taskId": task_id, "message": "已记录，最终状态以 Pi 本轮结束为准。"}

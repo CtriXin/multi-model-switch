@@ -575,7 +575,6 @@
     - Esc 键关闭: `file:///Users/xin/.gemini/antigravity-cli/brain/f414fd9d-ced5-4da4-b1a2-7608e91ec350/t1e_2c_esc_closes.png`
   - 验收项 3（单一焦点边框，无双层 outline）: `file:///Users/xin/.gemini/antigravity-cli/brain/f414fd9d-ced5-4da4-b1a2-7608e91ec350/t1e_3_single_focus_outline.png`。
 未完成 / 未验证: 无。全部 4 处修正均已验证通过，代码保持未提交状态。
-
 ## 2026-09-15 11:55 SGT · deepseek-v4-flash · 370e87ec37e741df
 需求:承接 T3d 后端（等待契约 + 记忆降噪）：waiting/user 必须带真实问题，旧脏数据不再点亮侧栏；无产出任务不写记忆。
 处置:`bots.py` 新增纯函数 `looks_like_question` / `is_trivial_result` / `parse_wait_text`，以及新方法 `_pending_question`、`_migrate_wait_contracts`、`_last_wait_text`、`_record_wait_request`、`_enter_user_wait`、`wait_action`、`_should_remember_task`。等待入口改为只带问题才进 `waiting/user`（字段 `waitQuestion`/`waitOptions`/`waitSince`），显式 `question`/`options` 优先，其次取最后一条 progress/assistant 文本并要求像问题（`?`/`？` 或 疑问/请求形式：哪/什么/是否/要不要/请确认/需要你…），`选项：A | B` 单独一行解析成快捷回复；两者都没有时按 completed 收尾并记 `waitDeclined`。`list_bots` 给每个 Bot 派生 `pendingQuestion`（只认带问题的 waiting/user，取 waitSince 最新）。`tick` 对超过 7 天的 waiting/user 自动完成并写“等待超时，已结束”；`_load` 启动迁移回填 `waitSince` 并从旧文本套问题（套不出置 `waitQuestion=""`）。`server.py` 增加 `POST /api/v1/tasks/:id/wait`（answer 复用消息路径恢复任务 / dismiss 按 completed 收尾并记 `waitDismissed`）。记忆 digest 只在有结构化结论（`# 结论`）或 `changes`、有 artifacts、或结果 ≥120 字且非“收到/明白/已发送/沟通完毕/无待办/先候着”时写入，纯 peer 消息任务（有 deliveryMessageIds、无 artifacts、无结构化结论）一律不写。`bot_executor.py` 提示词把 wait 从“原因”改成“要问用户的问题”，并说明可用“选项：A | B”给快捷回复；`docs/mms-web/BOTS.md` 追加 v2.5 一节。

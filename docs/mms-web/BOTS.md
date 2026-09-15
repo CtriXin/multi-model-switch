@@ -181,3 +181,11 @@ Webhook 配置保存在 `state_root/bots/notify.json`，形状为 `{"webhooks": 
 `dispatch` 出去的子任务结束时，回传给发起方 Bot 的消息不再是模型原文：正文取该任务 `outcome.summary`（没有结构化结论时取原文前 200 字），并附 `artifacts: [{id, name, kind, taskId}]` 索引；本地绝对路径、sha256 和 session artifact id 只留在任务内部记录里，不进入回执正文。`GET /bots/:botId/communications` 的结果行返回同样的 `content` 与 `artifacts` 字段，前端未改动（`kind: "system"` 的行按通用消息标签显示）。
 
 运行状态不再冒充结果：任务被取消、进程中断，或 Pi 停止 / 报错导致 `failed` 时，投给对方的是一条 `system` 消息，正文为“<Bot 名> 的任务已中断，未产生结果”，归类为系统事件而不是结果；Bot 自己调用 `fail` 明确报告失败时仍按结果回传它的结论。Bot 提示词也要求向其他 Bot 回报时只写一句结论，证据和文件通过 `complete` 提交成果，不在正文贴路径或哈希。
+
+## v2.5 等待契约与记忆降噪
+
+任务进入 `waiting / waitReason=user` 必须携带一个真实问题：`waitQuestion`（必填非空）、`waitOptions`（可选，最多 4 条快捷回复）、`waitSince`。问题来源优先取 `wait` 工具的显式参数（`question` / `options`），没有时取最后一条 progress / assistant 文本，但必须通过 `looks_like_question`（含 `?`/`？`，或以“吗/哪/什么/是否/要不要/请确认/需要你…”等疑问或请求形式出现）。文本里单独一行 `选项：A | B` 会变成快捷回复。两者都拿不到问题时任务不进入等待，而是按 `completed` 收尾，结果就是那段文本，并在任务上记 `waitDeclined=true` 便于排查。
+
+`GET /api/v1/bots` 的每个 Bot 带派生字段 `pendingQuestion`：`{taskId, question, options, since} | null`，取该 Bot 最新一条带问题的 `waiting/user` 任务；`waitQuestion` 为空的旧记录不点亮它，因此历史脏数据不再让侧栏显示“等待你补充信息”却点不出问题。回复走 `POST /api/v1/tasks/:id/wait`，`{"action": "answer", "text": "..."}` 复用普通消息路径恢复任务（等价于在聊天里发一句话），`{"action": "dismiss"}` 直接把任务按 `completed` 收尾并记 `waitDismissed=true`；`waiting/user` 超过 7 天未回复会在 `tick` 中自动结束，结果文本为“等待超时，已结束”。启动加载时会把旧 `waiting/user` 记录补上 `waitSince`，并从进度文本回填 `waitQuestion`（套不出问题的置空）。
+
+记忆摘要只在任务有长期价值时写入：`outcome` 有结构化结论（`# 结论`）或 `changes`、任务有 artifacts、或结果文本 ≥ 120 字且不是“收到/明白/已发送/沟通完毕/无待办/先候着”这类确认。纯 peer 消息任务（有 mailbox 消息、无 artifacts、无结构化结论）一律不写，避免问候和收尾确认占满记忆。

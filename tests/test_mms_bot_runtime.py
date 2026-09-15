@@ -785,3 +785,138 @@ def test_bot_declared_failure_still_reports_as_a_result(tmp_path):
         assert row["kind"] == "result" and row["artifacts"] == []
     finally:
         runtime.close()
+
+
+def enter_wait(runtime, task_id, payload):
+    """Drive one Bot turn that asks to wait, then let the session go idle."""
+    runtime.worker(task_id, payload)
+    runtime._observe(runtime._tasks[task_id], {"state": "idle", "alive": False, "events": [], "artifacts": []})
+    return runtime.get_task(task_id)
+
+
+def test_wait_without_a_question_completes_and_declines(tmp_path):
+    runtime, _ = make_runtime(tmp_path)
+    try:
+        target = make_bot(runtime)
+        task = runtime.create_task({"botId": target["id"], "prompt": "只等待，不要修改文件"})
+        launch(runtime, task["id"])
+        stored = enter_wait(runtime, task["id"], {"action": "wait", "reason": "等待子任务或用户"})
+        assert stored["status"] == "completed"
+        assert stored["waitDeclined"] is True
+        assert stored["result"] == "等待子任务或用户"
+        assert runtime.list_bots()[0]["pendingQuestion"] is None
+    finally:
+        runtime.close()
+
+
+def test_explicit_wait_question_enters_waiting_with_options(tmp_path):
+    runtime, _ = make_runtime(tmp_path)
+    try:
+        target = make_bot(runtime)
+        task = runtime.create_task({"botId": target["id"], "prompt": "整理报告"})
+        launch(runtime, task["id"])
+        stored = enter_wait(runtime, task["id"], {"action": "wait", "question": "报告要包含哪几个章节？",
+                                                  "options": ["摘要", "全文", "摘要+截图"]})
+        assert stored["status"] == "waiting" and stored["waitReason"] == "user"
+        assert stored["waitQuestion"] == "报告要包含哪几个章节？"
+        assert stored["waitOptions"] == ["摘要", "全文", "摘要+截图"]
+        assert stored["waitSince"]
+        assert runtime.list_bots()[0]["pendingQuestion"] == {
+            "taskId": task["id"], "question": "报告要包含哪几个章节？",
+            "options": ["摘要", "全文", "摘要+截图"], "since": stored["waitSince"]}
+    finally:
+        runtime.close()
+
+
+def test_wait_text_carries_question_and_quick_options(tmp_path):
+    runtime, _ = make_runtime(tmp_path)
+    try:
+        target = make_bot(runtime)
+        task = runtime.create_task({"botId": target["id"], "prompt": "同步内容"})
+        launch(runtime, task["id"])
+        stored = enter_wait(runtime, task["id"], {"action": "wait",
+                                                  "reason": "请确认同步范围。\n选项：只同步 网文1 | 两个站点都同步"})
+        assert stored["status"] == "waiting"
+        assert stored["waitQuestion"] == "请确认同步范围。"
+        assert stored["waitOptions"] == ["只同步 网文1", "两个站点都同步"]
+    finally:
+        runtime.close()
+
+
+def test_wait_answer_resumes_and_dismiss_closes(tmp_path):
+    runtime, _ = make_runtime(tmp_path)
+    try:
+        target = make_bot(runtime)
+        answered = runtime.create_task({"botId": target["id"], "prompt": "同步内容"})
+        launch(runtime, answered["id"])
+        enter_wait(runtime, answered["id"], {"action": "wait", "question": "要同步到哪些站点？"})
+        resumed = runtime.wait_action(answered["id"], {"action": "answer", "text": "两个站点都同步"})
+        assert resumed["status"] == "queued"
+        assert runtime._tasks[answered["id"]]["resumeText"] == "两个站点都同步"
+        assert runtime.list_bots()[0]["pendingQuestion"] is None
+
+        dismissed = runtime.create_task({"botId": target["id"], "prompt": "等待确认"})
+        launch(runtime, dismissed["id"])
+        enter_wait(runtime, dismissed["id"], {"action": "wait", "question": "要现在发布吗？"})
+        closed = runtime.wait_action(dismissed["id"], {"action": "dismiss"})
+        assert closed["status"] == "completed"
+        assert closed["waitDismissed"] is True
+        assert closed["result"] == "等待已结束。"
+        assert runtime.list_bots()[0]["pendingQuestion"] is None
+    finally:
+        runtime.close()
+
+
+def test_wait_action_rejects_tasks_that_are_not_waiting(tmp_path):
+    runtime, _ = make_runtime(tmp_path)
+    try:
+        target = make_bot(runtime)
+        task = runtime.create_task({"botId": target["id"], "prompt": "普通任务"})
+        with pytest.raises(WebError) as failure:
+            runtime.wait_action(task["id"], {"action": "dismiss"})
+        assert failure.value.code == "TASK_NOT_WAITING"
+    finally:
+        runtime.close()
+
+
+def test_user_wait_expires_after_seven_days(tmp_path):
+    runtime, _ = make_runtime(tmp_path)
+    try:
+        target = make_bot(runtime)
+        task = runtime.create_task({"botId": target["id"], "prompt": "等待授权"})
+        launch(runtime, task["id"])
+        enter_wait(runtime, task["id"], {"action": "wait", "question": "是否现在发布？"})
+        runtime._tasks[task["id"]]["waitSince"] = (datetime.now(timezone.utc) - timedelta(days=8)).isoformat()
+        runtime.tick()
+        stored = runtime.get_task(task["id"])
+        assert stored["status"] == "completed"
+        assert stored["result"] == "等待超时，已结束"
+        assert stored["waitDismissed"] is True
+        assert runtime.list_bots()[0]["pendingQuestion"] is None
+    finally:
+        runtime.close()
+
+
+def test_restart_backfills_real_questions_and_hides_dirty_waits(tmp_path):
+    runtime, _ = make_runtime(tmp_path)
+    target = make_bot(runtime)
+    dirty = runtime.create_task({"botId": target["id"], "prompt": "只等待，不改文件"})
+    good = runtime.create_task({"botId": target["id"], "prompt": "等确认再继续"})
+    for task, text in ((dirty, "继续等待用户或后续指令。"), (good, "要继续吗")):
+        runtime._tasks[task["id"]].update(status="waiting", waitReason="user",
+                                          waitSince="2026-09-01T00:00:00+00:00")
+        runtime._tasks[task["id"]].pop("waitQuestion", None)
+        runtime._messages[task["id"]] = [{"id": "m-" + task["id"], "taskId": task["id"], "type": "progress",
+                                          "content": text, "senderBotId": target["id"],
+                                          "createdAt": "2026-09-01T00:00:00+00:00"}]
+    runtime._persist()
+    runtime.close()
+
+    reloaded, _ = make_runtime(tmp_path)
+    try:
+        assert reloaded._tasks[dirty["id"]]["waitQuestion"] == ""
+        assert reloaded._tasks[good["id"]]["waitQuestion"] == "要继续吗"
+        pending = reloaded.list_bots()[0]["pendingQuestion"]
+        assert pending and pending["taskId"] == good["id"] and pending["question"] == "要继续吗"
+    finally:
+        reloaded.close()
