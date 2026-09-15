@@ -955,3 +955,52 @@ T2c 跟进（UI 整理建议）:
 - 端口保持 61705，未碰 60824。
 - 未执行 git commit、未 push。
 耗时: 约 35 分钟 · 归因: [AGENT]
+
+## 2026-09-15 22:02 +08 · claude-fable-5.1（subagent 执行）· 370e87ec37e741df
+
+T1f 落地（对话式引导 + 工作预设面板）。
+
+验收结论：9 条中 8 条直接通过，1 条部分通过并已修。
+
+发现并修复的两个真实副作用：
+1. 跳过向导（点 × 或选 E）时写入的是空的预设标题行，落进 systemPrompt 就是一段脏 prompt；
+   而且它被 parsePreset 解析成空 answers，面板保存后向导判定为「没做过」而复活。
+   改为写入真实默认约定 `SKIPPED_WIZARD_PROMPT`，parsePreset 落到 other，buildPreset 往返不丢，
+   getPresetSummary 对它返回 null，侧栏不会把默认约定当摘要。
+2. 保存成功提示的 effect 依赖漏了，切换 Bot 时上一个 Bot 的「工作预设已保存」会残留在新面板上。
+另补：恢复 T1c 的两处说明注释；向导选项补齐 value 与 label 对齐，避免写入值与展示不一致。
+
+选项精简：value 与 label 对齐后，面板把 WIZARD_POOL 里所有同 writes 的题目池化，
+汇报方式与推进方式各有 4 道分支题，于是各池化出 16 个芯片，还混进别的工作重点的措辞。
+改为按当前 focus 沿 q_start 的 next 链推导对应分支（visited 防环，不硬编码 focus -> 题目 id），
+focus 取不到或不认识时回退 q_start.next("B") 那条链；当前已保存的值不在收窄后的选项里时
+追加到末尾并去重，仍渲染成选中的芯片而不是掉进「自定义」输入框。
+推导逻辑放在 bot-presets.ts 并 export，便于 node test 覆盖。
+落地后每字段芯片数：工作重点 4（不变）、汇报方式 4（16 -> 4）、推进方式 4（16 -> 4）。
+
+门禁真实数字：
+- `npx tsc --noEmit -p apps/mms-web`: 0 错误（exit 0，无输出）。
+- `node --test apps/mms-web/tests/*.test.mjs`: tests 113 / pass 113 / fail 0（新增 2 条推导断言）。
+- `grep -o '#[0-9a-fA-F]\{3,8\}' apps/mms-web/src/bot*.css | sort -u | wc -l`: 12。
+- `npm run build --workspace @mms/web`: 成功，index-Xe9IzfBo.js 786.72 kB / index-BQc-MtQj.css 219.63 kB。
+- `python3 -m pytest tests/test_mms_web_bots.py tests/test_bot_memory.py -q`: 58 passed。
+- `python3 scripts/ci_pytest_regression.py --base origin/dev`: base 63 failing of 2490、
+  head 63 failing of 2642，No test that passes on the base commit fails here（exit 0）。
+- `python3 scripts/regression_fresh_user_gate.py`（完整版，单独跑）: 677 passed in 140.29s，
+  fresh-user regression: PASS（exit 0）。
+
+落地的 4 个提交：
+1. `feat(web): 对话式引导与工作预设面板`（author Antigravity <gemini-3.6@google.com>，含 Claude 回修 4 点）
+2. `fix(web): 预设面板只显示当前工作重点对应的选项`
+3. `build(web): package T1f`（scripts/build_mms_web_release.py --skip-install 重建 mms_web_static）
+4. `docs(walls): record the T1f landing`
+
+验证实例：60824 按原参数重启（state-root workspace/.stride-output/live/state、
+config-root ~/.config/mms-next），static-root 换成 wt-T1f/mms_web_static，
+服务端返回 index-Xe9IzfBo.js，与新产物一致。
+
+环境与约束守卫：
+- 未 merge 任何 PR，未动 mms_core/mms_launchers/mms_tui/mms_bridge 等高风险文件。
+- 未写真实 ~/.config/mms* 配置；未 stash/reset/checkout 丢弃任何改动。
+- 只 stage 明确列出的路径，未跟踪的 node_modules 符号链接未进任何提交。
+耗时: 约 40 分钟 · 归因: [AGENT]
