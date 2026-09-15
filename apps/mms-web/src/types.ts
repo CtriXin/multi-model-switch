@@ -386,3 +386,18 @@ export interface BotChildResult {
   evidence?: string;
   artifacts?: Array<{ taskId: string; url?: string; label?: string }>;
 }
+
+/** Bot pending question awaiting user reply (T3d / T3d-ui). */
+export interface BotPendingQuestion {
+  taskId: string;
+  question: string;
+  options: string[];
+  since?: string;
+}
+
+/** Wait-state fields attached to a waiting Bot task (T3d / T3d-ui). */
+export interface BotWaitFields {
+  waitQuestion?: string;
+  waitOptions?: string[];
+  waitSince?: string;
+}
