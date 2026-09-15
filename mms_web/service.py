@@ -11,6 +11,7 @@ from `lsof`/`ps` or `netstat`/CIM, never from a pid file that could go stale.
 """
 from __future__ import annotations
 
+import base64
 import http.client
 import json
 import os
@@ -19,9 +20,13 @@ import signal
 import subprocess
 import sys
 import time
+import uuid
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
-VERBS = ("status", "url", "start", "stop", "restart")
+VERBS = ("status", "url", "start", "stop", "restart", "doctor")
 HELP_FLAGS = ("help", "-h", "--help")
 DEFAULT_PORT_BASE = 8765
 PORT_SEARCH_LIMIT = 20
@@ -98,12 +103,14 @@ def help_text(command: str | None = None) -> str:
         ("url", "只打印当前实例的地址，方便复制"),
         ("stop", "请当前实例退出；加 --all 停掉本机全部 Pilot"),
         ("restart", "先停再起"),
+        ("doctor", "自动检查并验证 Pilot、本地 API 和会话详情"),
     ])
     examples = _rows([
         (f"{name} start --open", "后台启动并打开浏览器"),
         (f"{name} url", "拿地址"),
         (f"{name} status", "分不清哪个实例是自己的时候看这个"),
         (f"{name} stop", "收工"),
+        (f"{name} doctor", "自检；没有 Pilot 时自动启动"),
         (f"{name} --open", "前台启动，日志直接打在终端"),
     ])
     options = _rows([
@@ -114,6 +121,7 @@ def help_text(command: str | None = None) -> str:
         ("--listen loopback|lan|all", "仅本次启动的访问范围；不给就用设置里的开关"),
         ("--hostname HOST", "额外允许的访问域名，可重复"),
         ("--json", "让上面五个命令输出 JSON"),
+        ("--model-smoke", "doctor 专用：实际发送一条短模型请求，可能消耗额度"),
     ])
     return (
         f"MMS Pilot {VERSION} — 在浏览器里用 MMS 的模型、通道和会话\n\n"
@@ -140,6 +148,54 @@ def source_root() -> Path:
 def _is_windows() -> bool:
     """One seam for every Windows branch, so each can be tested on any host."""
     return os.name == "nt"
+
+
+def _windows_console_codepages() -> list[str]:
+    """OEM/ANSI codepages console tools actually emit; empty off Windows.
+
+    ``locale.getpreferredencoding(False)`` is unusable here: PYTHONUTF8=1 (set
+    by the installer/CI) makes it answer "utf-8" while netstat and
+    powershell.exe still write the machine codepage (cp936 on a Chinese
+    system). Ask the Win32 API directly instead.
+    """
+    if os.name != "nt":
+        return []
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        pages = []
+        for getter in (kernel32.GetOEMCP, kernel32.GetACP):
+            try:
+                page = int(getter())
+            except (TypeError, ValueError):
+                continue
+            if page:
+                pages.append(f"cp{page}")
+        return pages
+    except (AttributeError, OSError):
+        return []
+
+
+def _decode_windows_command_output(data) -> str:
+    """Decode console-tool output that can never crash the lifecycle path.
+
+    Only netstat's ASCII protocol/port/PID fields are consumed. Localized
+    headings may use an OEM/ANSI codepage, even under PYTHONUTF8=1.
+    Unicode process command lines use a separate Base64/UTF-8 contract.
+    """
+    if isinstance(data, str):
+        return data
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    for encoding in _windows_console_codepages():
+        try:
+            return data.decode(encoding, errors="replace")
+        except LookupError:
+            continue
+    return data.decode("utf-8", errors="replace")
 
 
 def state_identity(path) -> str:
@@ -179,8 +235,9 @@ def _probe(port: int, timeout: float = 0.4):
 def _listening_pids(port: int) -> list[int]:
     try:
         if _is_windows():
-            out = subprocess.run(["netstat", "-ano", "-p", "TCP"],
-                                 capture_output=True, text=True, timeout=5).stdout
+            raw = subprocess.run(["netstat", "-ano", "-p", "TCP"],
+                                 capture_output=True, timeout=5).stdout
+            out = _decode_windows_command_output(raw)
             pids = []
             for line in out.splitlines():
                 fields = line.split()
@@ -203,13 +260,20 @@ def _listening_pids(port: int) -> list[int]:
 def _command_line(pid: int) -> list[str]:
     try:
         if _is_windows():
-            command = "$p=Get-CimInstance Win32_Process -Filter 'ProcessId=%s'; if ($p) { $p.CommandLine }" % pid
-            out = subprocess.run(["powershell.exe", "-NoProfile", "-Command", command],
-                                 capture_output=True, text=True, timeout=5).stdout.strip()
+            # Transport Unicode through ASCII: Windows PowerShell's console
+            # codepage can differ from both Python's locale and the system ACP.
+            command = (
+                "$p=Get-CimInstance Win32_Process -Filter 'ProcessId=%s'; "
+                "if ($p) { [Convert]::ToBase64String("
+                "[Text.Encoding]::UTF8.GetBytes($p.CommandLine)) }"
+            ) % pid
+            raw = subprocess.run(["powershell.exe", "-NoProfile", "-Command", command],
+                                 capture_output=True, timeout=5).stdout
+            out = base64.b64decode(raw.strip(), validate=True).decode("utf-8").strip()
         else:
             out = subprocess.run(["ps", "-o", "command=", "-p", str(pid)],
                                  capture_output=True, text=True, timeout=5).stdout.strip()
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, ValueError):
         return []
     return _split_command_line(out)
 
@@ -339,6 +403,160 @@ def _print_status(instances: list[dict], state_root: Path, as_json: bool) -> Non
         print("● 当前实例。停止：mms web stop；重启：mms web restart")
 
 
+def _doctor_request(base_url: str, path: str, timeout: float = 8.0) -> tuple[bool, object]:
+    """Read one local Pilot API endpoint without depending on shell encoding."""
+    request = urllib.request.Request(base_url.rstrip("/") + path,
+                                     headers={"Accept": "application/json"})
+    try:
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(request, timeout=timeout) as response:
+            raw = response.read()
+        return True, json.loads(raw.decode("utf-8", errors="replace"))
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError, ValueError) as error:
+        detail = str(error)
+        if isinstance(error, urllib.error.HTTPError):
+            try:
+                body = error.read().decode("utf-8", errors="replace")
+                detail = f"HTTP {error.code}: {body[:500]}"
+            except OSError:
+                detail = f"HTTP {error.code}"
+        return False, detail
+
+
+def _doctor_post(base_url: str, path: str, payload: dict, csrf_token: str,
+                 timeout: float = 12.0) -> tuple[bool, object]:
+    request = urllib.request.Request(
+        base_url.rstrip("/") + path,
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={"Accept": "application/json", "Content-Type": "application/json",
+                 "X-MMS-CSRF": csrf_token}, method="POST")
+    try:
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(request, timeout=timeout) as response:
+            return True, json.loads(response.read().decode("utf-8", errors="replace"))
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError, ValueError) as error:
+        detail = str(error)
+        if isinstance(error, urllib.error.HTTPError):
+            try:
+                detail = f"HTTP {error.code}: {error.read().decode('utf-8', errors='replace')[:500]}"
+            except OSError:
+                detail = f"HTTP {error.code}"
+        return False, detail
+
+
+def doctor(*, state_root: Path, port_base: int, limit: int, restart: bool = False,
+           as_json: bool = False, model_smoke: bool = False) -> int:
+    """Self-check the Windows lifecycle without changing config or credentials."""
+    if restart:
+        stop(state_root=state_root, port_base=port_base, limit=limit, everyone=False, quiet=True)
+    started = False
+    try:
+        instance = _mine(discover(port_base, limit, state_root))
+        if instance is None:
+            instance = start(state_root=state_root, port_base=port_base, limit=limit,
+                             open_browser=False, quiet=True)
+            started = True
+    except (SystemExit, OSError) as error:
+        result = {"ok": False, "started": started, "error": str(error),
+                  "stateRoot": str(state_root),
+                  "log": str(state_root / "logs" / "mms-web.log")}
+        if as_json:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        else:
+            print("FAIL Pilot 启动：" + str(error))
+            print("日志：" + result["log"])
+        return 1
+
+    base_url = f"http://127.0.0.1:{instance['port']}"
+    checks: list[dict] = []
+
+    def check(name: str, path: str, predicate=None):
+        ok, payload = _doctor_request(base_url, path)
+        passed = ok and (predicate(payload) if predicate else True)
+        checks.append({"name": name, "path": path, "ok": passed,
+                       **({"detail": payload} if not passed else {})})
+        return passed, payload
+
+    bootstrap_ok, bootstrap = check(
+        "bootstrap", "/api/v1/bootstrap",
+        lambda value: isinstance(value, dict) and value.get("version") == "1" and isinstance(value.get("capabilities"), dict),
+    )
+    sessions_ok, sessions = check(
+        "sessions", "/api/v1/sessions",
+        lambda value: isinstance(value, dict) and isinstance(value.get("sessions"), list),
+    )
+    rows = sessions.get("sessions", []) if isinstance(sessions, dict) else []
+    detail_rows = [row for row in rows[:3] if isinstance(row, dict) and row.get("id")]
+    if detail_rows:
+        detail_ok, _ = check("session-detail", "/api/v1/sessions/" + urllib.parse.quote(str(detail_rows[0]["id"]), safe=""),
+                             lambda value: isinstance(value, dict) and isinstance(value.get("session"), dict))
+    else:
+        detail_ok = True
+        checks.append({"name": "session-detail", "ok": True, "skipped": True,
+                       "detail": "没有可读取的历史会话"})
+
+    if model_smoke:
+        preset = next((p for p in (bootstrap.get("presets", []) if isinstance(bootstrap, dict) else [])
+                       if isinstance(p, dict) and p.get("available") and p.get("harness") == "pi"), None)
+        workspace = next((w for w in (bootstrap.get("workspaces", []) if isinstance(bootstrap, dict) else [])
+                          if isinstance(w, dict) and w.get("id")), None)
+        csrf = str(bootstrap.get("csrfToken") or "") if isinstance(bootstrap, dict) else ""
+        smoke_ok = False
+        smoke_detail: object = "没有可用的 Pi preset 或工作文件夹"
+        if preset and workspace and csrf:
+            payload = {"requestId": "mms-doctor-" + uuid.uuid4().hex,
+                       "workspaceId": workspace["id"], "presetId": preset["id"],
+                       "title": "MMS doctor smoke", "prompt": "请只回复 OK。"}
+            posted, created = _doctor_post(base_url, "/api/v1/sessions", payload, csrf)
+            session_id = (created.get("session", {}).get("id") if isinstance(created, dict) else None)
+            if posted and session_id:
+                deadline = time.monotonic() + 30
+                while time.monotonic() < deadline:
+                    ok, detail = _doctor_request(base_url, "/api/v1/sessions/" + urllib.parse.quote(str(session_id), safe=""))
+                    if not ok:
+                        smoke_detail = detail
+                        break
+                    state = str(detail.get("session", {}).get("state") or "") if isinstance(detail, dict) else ""
+                    if state in {"completed", "error", "stopped"}:
+                        smoke_ok = state == "completed"
+                        smoke_detail = "state=" + state
+                        break
+                    time.sleep(1)
+                else:
+                    smoke_detail = "30 秒内没有收到完成状态"
+            elif not posted:
+                smoke_detail = created
+            else:
+                smoke_detail = "创建会话没有返回 session.id"
+        checks.append({"name": "model-smoke", "ok": smoke_ok,
+                       **({"detail": smoke_detail} if not smoke_ok else {})})
+
+    launch = bootstrap.get("capabilities", {}).get("launch") if isinstance(bootstrap, dict) else None
+    launch_reason = bootstrap.get("capabilities", {}).get("launchReason") if isinstance(bootstrap, dict) else ""
+    launch_ok = bool(launch)
+    checks.append({"name": "launch-capability", "ok": launch_ok,
+                   **({"detail": launch_reason or "会话启动能力未就绪"} if not launch_ok else {})})
+    result = {"ok": all(item["ok"] for item in checks), "started": started,
+              "instance": instance, "checks": checks,
+              "launch": launch, "launchReason": launch_reason,
+              "log": str(state_root / "logs" / "mms-web.log")}
+    if as_json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        print(f"MMS doctor：{'PASS' if result['ok'] else 'FAIL'}")
+        print(f"Pilot：{base_url}  v{instance.get('version') or '?'}  pid {instance.get('pid') or '?'}")
+        for item in checks:
+            status = "PASS" if item["ok"] else "FAIL"
+            suffix = "（跳过：无历史会话）" if item.get("skipped") else ""
+            print(f"{status} {item['name']}{suffix}")
+            if not item["ok"]:
+                print(f"  {item.get('detail')}")
+        if launch is False:
+            print("FAIL launch：" + str(launch_reason or "会话启动能力未就绪"))
+        print("日志：" + result["log"])
+    return 0 if result["ok"] else 1
+
+
 def start(*, state_root: Path, port_base: int, limit: int, open_browser: bool,
           extra_args: list[str] | None = None, quiet: bool = False) -> dict:
     """Return the running instance, starting one detached when there is none."""
@@ -438,6 +656,8 @@ def run(verb: str, argv: list[str]) -> int:
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--open", action="store_true", help="start/restart: open the browser afterwards")
     parser.add_argument("--all", action="store_true", help="stop: every Pilot on this machine, not only this state root")
+    parser.add_argument("--restart", action="store_true", help="doctor: restart this Pilot before checking it")
+    parser.add_argument("--model-smoke", action="store_true", help="doctor: send one short model request (may consume provider quota)")
     args = parser.parse_args(argv)
     state_root = args.state_root.expanduser().resolve()
     extra = ["--config-root", str(args.config_root.expanduser())] if args.config_root else []
@@ -471,5 +691,8 @@ def run(verb: str, argv: list[str]) -> int:
         if args.json:
             print(json.dumps(mine, ensure_ascii=False))
         return 0
+    if verb == "doctor":
+        return doctor(state_root=state_root, port_base=args.port, limit=limit,
+                      restart=args.restart, as_json=args.json, model_smoke=args.model_smoke)
     parser.error(f"unknown verb {verb}")
     return 2
