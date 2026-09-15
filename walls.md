@@ -677,3 +677,9 @@ T2c 跟进（UI 整理建议）:
 偏差:fresh-user gate 第一次跑报 `tests/test_install_script_paths.py::test_installer_does_not_reuse_another_homes_web_instance` 失败（拿到端口 18933，期望 18931）。定位为端口争用而非合并回归:该文件与 `install.sh` 与 `origin/dev-pre` 逐字节一致；同一用例在 dev-pre worktree 通过；单独重跑在同一 worktree 时而通过时而失败；当时本机有两个并发全量 pytest（本次后台 ci_pytest_regression 与另一 subagent 在 .worktrees/dev-no-bot 的同名脚本）同时用 port_base=18930。等本次后台跑完后重跑 gate 即全绿 677 passed。
 未完成/未验证:未 merge 任何 PR（按约束）。draft #261 的冲突状态只做记录，未修。Windows 未验证。60824 只做重启后的冒烟（静态包 hash、/api/v1/bots、版本号），没有跑真实模型多 Bot 协作验收。前端无真实浏览器回归。另一 subagent 在 dev 上重做的"撤销 Bot" PR 与本次无关，未触碰。
 耗时:约 35 分钟 · 归因:[AGENT]
+
+## 2026-09-15 14:40 SGT · claude-fable-5.1（subagent 执行）· 370e87ec37e741df
+需求:owner 选 A：dev/main 保持 4.21.x 不含 Bot；dev 已因 #256 到 4.21.14 且带 Bot，#255 冲突作废。
+处置:从 origin/dev 9b69c38a 重做分支 claude/dev-4.21-no-bot：revert -m 1 0d9a7ffa、去 Bot 测试断言、RELEASE_CHANNELS 规则、补 RELEASE-v4.21.12/14 说明、重建无 Bot 静态包。PR #262 → dev，#255 已关闭指向 #262。撤销同时移除了同一合并带入的 Pilot"运行环境"设置页与 update/history，已核实无 tag 含它们、4.21.14 已发布静态包本就不含，属源码对齐产物；若 4.21 线要保留需另开 PR 挑回。
+验证:pytest windows/updates/release/install 171 passed/1 skipped；Node 55；tsc 0；gate PASS 675；ci_pytest_regression --base origin/dev 无新增失败；规则检查 bot 文件与 page=bots 全为空。
+未完成:Windows 真机未验证；#262 待 owner 合并。
