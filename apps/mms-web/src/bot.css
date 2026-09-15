@@ -577,6 +577,7 @@
 }
 
 .bot-chat-avatar-btn {
+  anchor-name: --bot-chat-avatar-btn;
   background: none;
   border: none;
   padding: 0;
@@ -601,9 +602,10 @@
 .bot-avatar-popover {
   position: fixed;
   inset: unset;
-  top: 68px;
-  left: 24px;
-  margin: 0;
+  position-anchor: --bot-chat-avatar-btn;
+  top: anchor(bottom);
+  left: anchor(left);
+  margin-top: 8px;
   border: 1px solid var(--line);
   border-radius: 14px;
   background: var(--surface);
@@ -618,6 +620,23 @@
 
 .bot-avatar-popover::backdrop {
   background: transparent;
+}
+
+.bot-avatar-popover .bot-avatar-options {
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px 6px;
+}
+
+.bot-avatar-popover .bot-avatar-option {
+  height: 48px;
+  padding: 2px;
+  border-radius: 12px;
+}
+
+.bot-avatar-popover .bot-avatar-option .pixel-avatar-mini {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
 }
 
 .bot-avatar-picker-title {

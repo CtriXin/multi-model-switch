@@ -209,6 +209,20 @@ export const ORGANIC_SMILE_AVATARS: Record<string, BotAvatarShapeDef> = {
     eyeRadius: 1.25,
     blushDx: 7.6,
   },
+  star: {
+    path: "M 16 3.5 C 17.5 3.5 19.2 8.5 21.0 10.5 C 23.2 11.0 28.5 12.0 28.5 14.2 C 28.5 16.5 24.8 19.2 23.8 21.2 C 24.5 23.5 25.5 28.5 23.5 28.5 C 21.8 28.5 18.2 25.2 16 25.2 C 13.8 25.2 10.2 28.5 8.5 28.5 C 6.5 28.5 7.5 23.5 8.2 21.2 C 7.2 19.2 3.5 16.5 3.5 14.2 C 3.5 12.0 8.8 11.0 11.0 10.5 C 12.8 8.5 14.5 3.5 16 3.5 Z",
+    faceY: 16.2,
+    eyeDx: 4.8,
+    eyeRadius: 1.25,
+    blushDx: 7.6,
+  },
+  ghost: {
+    path: "M 16 3.5 C 22.8 3.5 27.5 8.5 27.5 15.5 L 27.5 24.5 C 27.5 26.8 25.0 27.8 23.2 26.2 C 21.2 24.5 19.5 24.5 17.5 26.2 C 15.5 27.8 13.5 27.8 11.5 26.2 C 9.5 24.5 7.8 24.5 5.8 26.2 C 4.0 27.8 1.5 26.8 1.5 24.5 L 1.5 15.5 C 1.5 8.5 6.2 3.5 16 3.5 Z",
+    faceY: 15.8,
+    eyeDx: 5.0,
+    eyeRadius: 1.25,
+    blushDx: 7.8,
+  },
 };
 
 export const GROK_AVATAR_SHAPES = ORGANIC_SMILE_AVATARS;
@@ -222,6 +236,8 @@ const ORGANIC_AVATAR_ALIASES: Record<string, string> = {
   hexagon: "sprout",
   cloud: "puff",
   drop: "leaf",
+  star: "star",
+  ghost: "ghost",
 };
 
 export const PIXEL_AVATARS = [
@@ -233,6 +249,8 @@ export const PIXEL_AVATARS = [
   { id: "sprout", label: "芽宝", shape: "sprout" },
   { id: "puff", label: "朵云", shape: "puff" },
   { id: "leaf", label: "水滴", shape: "leaf" },
+  { id: "star", label: "萌星", shape: "star" },
+  { id: "ghost", label: "幽灵", shape: "ghost" },
 ] as const;
 
 // Saved Bots from earlier builds can still refer to a removed preset. Keep
@@ -257,14 +275,14 @@ const LEGACY_AVATAR_SHAPES: Record<string, string> = {
   leaf: "leaf",
   drop: "leaf",
   diamond: "cube",
-  star: "cat",
+  star: "star",
   ticket: "bean",
   wave: "leaf",
   shield: "sprout",
   gem: "leaf",
   orbit: "round",
   sun: "round",
-  ghost: "puff",
+  ghost: "ghost",
   oval: "bean",
 };
 
@@ -1765,6 +1783,16 @@ export function BotChat({
               title="更换头像与颜色"
               aria-label="更换头像与颜色"
               disabled={!bot}
+              onClick={(e) => {
+                const rect = e.currentTarget.getBoundingClientRect();
+                const popover = document.getElementById("bot-chat-avatar-popover");
+                if (popover) {
+                  const popoverWidth = 280;
+                  const left = Math.max(16, Math.min(rect.left, window.innerWidth - popoverWidth - 16));
+                  popover.style.top = `${rect.bottom + 8}px`;
+                  popover.style.left = `${left}px`;
+                }
+              }}
             >
               <PixelAvatar
                 className="bot-chat-avatar"
