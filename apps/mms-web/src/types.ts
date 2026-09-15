@@ -394,10 +394,3 @@ export interface BotPendingQuestion {
   options: string[];
   since?: string;
 }
-
-/** Wait-state fields attached to a waiting Bot task (T3d / T3d-ui). */
-export interface BotWaitFields {
-  waitQuestion?: string;
-  waitOptions?: string[];
-  waitSince?: string;
-}
