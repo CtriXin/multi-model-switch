@@ -6,9 +6,9 @@
 - 当前 owner：Windows 上负责复现、修复和验收的 Pi/CLI agent
 - 交接方：Codex，model `gpt-6`，session `01a08f66-2a8a-7841-b4b6-6e28a33c178a`
 - task：`855b1bed42aa43bb`
-- 当前 release：`v4.21.12`
-- Git commit：`cc502916`
-- GitHub Release：<https://github.com/CtriXin/multi-model-switch/releases/tag/v4.21.12>
+- 当前 release：`v4.21.14`（包含 Windows Pilot 修复和新手安装/贡献说明）
+- 已验证基线 commit：`cc502916`
+- Windows 安装验证基线：`v4.21.12`
 
 ## 用户目标
 
@@ -18,7 +18,7 @@
 
 Windows 启动 Pi 前会清理旧 session。旧实现用 POSIX `os.kill(pid, 0)` 检查 PID，Windows 会在这里抛出 `OSError: [WinError 11] 试图加载格式不正确的程序。`，因此 Pi 尚未真正启动。
 
-`v4.21.12` 已在 `mms_launchers.py` 增加 Windows Win32 `OpenProcess` / `GetExitCodeProcess` 存活检查；POSIX 仍使用原来的 `os.kill(pid, 0)`。已增加 `tests/test_windows_session_guard.py`。
+`v4.21.12` 已在 `mms_launchers.py` 增加 Windows Win32 `OpenProcess` / `GetExitCodeProcess` 存活检查；POSIX 仍使用原来的 `os.kill(pid, 0)`。Windows 用户已在该版本完成 acceptance。后续源代码收编还包括 artifact preview、共享 `fd/rg`、skills 路径和 traceback 日志修复，已随 `v4.21.14` 发布。
 
 本修复不改变 model routing、Bot API、调度、session/config root、真实 credentials 或 OAuth。
 
@@ -39,14 +39,14 @@ Windows 启动 Pi 前会清理旧 session。旧实现用 POSIX `os.kill(pid, 0)`
 ## 用户先执行的安装命令
 
 ```powershell
-$script = Join-Path $env:TEMP 'mms-install-v4.21.12.ps1'
+$script = Join-Path $env:TEMP 'mms-install-v4.21.14.ps1'
 
 Invoke-WebRequest -UseBasicParsing `
-  -Uri 'https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.21.12/packages/mms-install/bin/install.ps1' `
+  -Uri 'https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.21.14/packages/mms-install/bin/install.ps1' `
   -OutFile $script
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File $script -Ref v4.21.12
+  -File $script -Ref v4.21.14
 ```
 
 安装完成后新开 PowerShell，确认 web：
@@ -61,7 +61,7 @@ mms web status --json
 确认 Pi CLI 启动路径：
 
 ```powershell
-$mms = "$env:LOCALAPPDATA\MMS\versions\v4.21.12\mms"
+$mms = "$env:LOCALAPPDATA\MMS\versions\v4.21.14\mms"
 $python = "$env:LOCALAPPDATA\MMS\.venv\Scripts\python.exe"
 & $python $mms pi
 ```
