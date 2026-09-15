@@ -2308,7 +2308,12 @@ export function BotChat({
                     </span>
                   )}
                 </div>
-              ) : !legacyDismissedTaskIds.includes(conversationTask.id) ? (
+              ) : !legacyDismissedTaskIds.includes(conversationTask.id) &&
+                  !(conversationTask.waitQuestion && bot?.pendingQuestion?.taskId === conversationTask.id) ? (
+                // A task that carries a question is already prompted by the
+                // question card above the composer; repeating "等待你补充信息"
+                // here would ask the same thing twice. Older tasks without a
+                // question keep the original notice.
                 <div className="bot-chat-notice">
                   <Timer size={13} />
                   <span>{waitReasonLabel(conversationTask.waitReason)}</span>
@@ -2394,7 +2399,11 @@ export function BotChat({
               </button>
             )}
           {(task.status === "waiting" || task.status === "scheduled") &&
-            onWake && (
+            onWake &&
+            // While the question card is asking about this very task, waking it
+            // without an answer would only drop it back into the same wait, so
+            // the card's 回复 / 选项 / 结束等待 are the single prompt here.
+            !(task.waitQuestion && bot?.pendingQuestion?.taskId === task.id) && (
               <button
                 type="button"
                 className="bot-chat-secondary"

@@ -49,3 +49,30 @@ test("the in-flight label tells the user the dismiss is running", () => {
     /legacyDismissingTaskId === conversationTask\.id \? "正在结束…" : "结束等待"/,
   );
 });
+
+test("a task with a question card does not also show the old wait notice", () => {
+  const anchor = source.indexOf('<div className="bot-chat-notice">');
+  assert.ok(anchor > 0, "the plain wait notice should still exist for older tasks");
+  const guard = source.slice(Math.max(0, anchor - 500), anchor);
+  assert.match(
+    guard,
+    /!\(conversationTask\.waitQuestion && bot\?\.pendingQuestion\?\.taskId === conversationTask\.id\)/,
+  );
+});
+
+test("the old wait notice is kept for a waiting task without a question", () => {
+  // The guard only subtracts the question-card case; the legacy branch and the
+  // notice itself are untouched.
+  assert.match(source, /!legacyDismissedTaskIds\.includes\(conversationTask\.id\) &&/);
+  assert.match(source, /waitReasonLabel\(conversationTask\.waitReason\)/);
+});
+
+test("唤醒 is not offered next to the question card for the same task", () => {
+  const anchor = source.indexOf('{task.status === "scheduled" ? "立即唤醒" : "唤醒"}');
+  assert.ok(anchor > 0, "the wake button should still exist");
+  const guard = source.slice(Math.max(0, anchor - 700), anchor);
+  assert.match(
+    guard,
+    /!\(task\.waitQuestion && bot\?\.pendingQuestion\?\.taskId === task\.id\)/,
+  );
+});
