@@ -493,3 +493,31 @@
 处置:worktree wt-v5 分支 claude/dev-pre-5.0（起点 90287459）：合入 v4.21.12 再 v4.21.14，cherry-pick RELEASE_CHANNELS 规则与 4.21.12/4.21.14 说明，版本 5.0.0，新增 RELEASE-v5.0.0.md，重建静态包。draft PR #261 → dev-pre，依赖 #254 先合。受保护文件只有 mms_launchers.py 经 merge 带入 +48/-5。
 验证:compileall 通过；focused+windows+updates 147 passed/1 skipped；Node 83；tsc 0；fresh-user gate PASS 676；ci_pytest_regression base 63/2551 vs head 63/2578 无新增失败。
 未验证:Windows acceptance 未在本分支跑；Windows 上 Bot 未验收（已写进发布说明的验证边界）。
+
+## 2026-09-15 12:15 SGT · kimi-k3 · 370e87ec37e741df
+需求:T2b 工单 —— Coordinator 成为真正的自动计划层：形状检查触发、计划状态机、结果图、重启幂等（docs/mms-web/bot-work/T2b-planner-state-machine.md）。
+处置:
+1. worktree wt-T2b、分支 bot/T2b-planner，起点 37da66c1（任务分支 HEAD）。
+2. bot_coordinator.py：新增 looks_multi_goal（编号列表≥2/分别同时各自一边一边/@或≥2 Bot 名）、表驱动 PLAN_TRANSITIONS/STEP_TRANSITIONS + transition_plan/transition_step/set_plan_status（history 封顶 50）、legacy dispatched/blocked 归一、onFailure 默认 retry、build_planner_prompt 带 roster 最近 3 次成功任务标题。
+3. bots.py：_launch/plan_task 触发顺序（off→direct；无信号→direct；信号→planner 20s→关键词→direct）；_advance_plan 拆出 _sync_plan_steps（(parentTaskId, planStepId) 对账、terminal 子任务回写 step.result、interrupted 不判负等显式唤醒）、onFailure skip/abort 策略与级联跳过、_resume_plan_failure 中止恢复一次、_queue_parent_merge 按步骤编号生成 resumeText + childResults + resumedAt、_finish 调 _settle_plan_on_finish（direct 计划同样 auto→running→merging→done/failed/cancelled）、_observe 在 plan 终态后不再退回 waiting/children、plan_action 扩 cancel/retry-step/skip-step（retry 重开 failed→running 并 attempts 后缀重建子任务）。
+4. 前端：types.ts 加 ready/running/skipped/history/result/onFailure/childResults；BotPlan.tsx 最小接线（状态标签、step.result.summary、failed 步重试/跳过按钮、running 计划取消按钮，沿用现有 class）。
+5. server.py / bot_executor.py 实际无需改动；未碰 Bot.tsx/css/bot_notify/bot_memory/sessions。
+验证:
+- compileall 通过；focused pytest 113 passed（基线 95 只增不减；工单"150"为文档期预期，实测基线 95）；Node 83 pass；tsc 0 error；vite build 成功。
+- 真实链路（61800 独立实例，/tmp/bot-verify-T2b，未碰 60824，三 Bot deepseek-v4-flash）：
+  · 多目标"分别给我：1）rebase；2）merge" → looks_multi_goal 触发 model planner，乙/丙各领一步，A 一条合并结论，history auto→running→merging→done，steps[].result.summary 非空。
+  · 单目标"用三句话解释 git rebase" → direct-first 无子任务。
+  · 失败路径：plan-approve 下把丙 preset 改不存在模型 → s2 failed、plan running→failed（by step:s2）、A 恢复说明"分工里 s2（验收助手丙）失败"；修好 preset 后 retry-step → failed→running→merging→done。UI 流程复验一轮（cherry-pick/stash）。
+- 截图与脱敏 JSON：docs/mms-web/design/t2b/（ui-plan-proposed-approve / ui-plan-failed-retry-skip / ui-plan-done-with-step-results / ui-plan-block-closeup + accept2/3/4 三份 JSON）。
+- 回归报告：.ai/regression-reports/2026-09-15-t2b-planner-state-machine.md。
+未完成/未验证:
+- "取消计划"按钮（running 态）真实链路未截到（窗口只有几秒）；cancel 路径有单测 test_plan_cancel_stops_running_children_and_resumes_parent。
+- 验收中误建一个 "x" 垃圾任务，已当场 cancel（/tmp 验证实例数据，不影响代码）。
+- wt-T2b/node_modules 是指向主 workspace 的 symlink（构建测试用），不应提交。
+- 改动未提交、未 push、未 merge，等用户批准。
+T2c 跟进（UI 整理建议）:
+1. 步骤行里 Bot 名字竖排逐字换行（验收助手乙/丙占 3 行），行高被撑大，需要给 .bot-plan-step-goal strong  nowrap 或调整列宽。
+2. step.goal 与 result.summary 连排显示偏挤，长文本截断后信息密度低，可考虑摘要折叠。
+3. failed 步骤的"重试/跳过"按钮挤在 goal 文本流内，位置随文本长度漂移，建议固定到状态列旁。
+4. 计划头新增的状态标签（待确认/执行中/汇总中/已完成/已中止/已取消）只用了通用 bot-plan-tag 样式，视觉层级未区分。
+耗时:约 2.5 小时 · 归因:[AGENT]

@@ -318,8 +318,22 @@ export interface BotNotifyConfig {
   timeoutSeconds?: number;
 }
 
-/** Coordinator plan attached to a Bot task (T2). */
-export type BotPlanStepStatus = "pending" | "dispatched" | "done" | "failed" | "blocked";
+/** Coordinator plan attached to a Bot task (T2/T2b). */
+export type BotPlanStepStatus =
+  | "pending"
+  | "ready"
+  | "running"
+  | "done"
+  | "failed"
+  | "skipped"
+  | "dispatched" // legacy alias of running
+  | "blocked"; // legacy alias of skipped
+export interface BotPlanStepResult {
+  summary: string;
+  conclusion?: string;
+  evidence?: string;
+  artifacts?: Array<{ taskId: string; url?: string; label?: string }>;
+}
 export interface BotPlanStep {
   id: string;
   kind: "execute" | "delegate" | string;
@@ -330,8 +344,25 @@ export interface BotPlanStep {
   status: BotPlanStepStatus | string;
   taskId?: string | null;
   error?: string;
+  onFailure?: "retry" | "skip" | "abort";
+  result?: BotPlanStepResult;
 }
-export type BotPlanStatus = "proposed" | "auto" | "approved" | "rejected";
+export type BotPlanStatus =
+  | "proposed"
+  | "auto"
+  | "approved"
+  | "rejected"
+  | "running"
+  | "merging"
+  | "done"
+  | "failed"
+  | "cancelled";
+export interface BotPlanHistoryEntry {
+  at: string;
+  from: string | null;
+  to: string;
+  by: string;
+}
 export interface BotTaskPlan {
   version?: number;
   mode: "direct" | "delegate";
@@ -339,7 +370,17 @@ export interface BotTaskPlan {
   steps?: BotPlanStep[];
   candidates?: Array<{ id: string; name: string; description?: string }>;
   merge?: string;
-  source?: "model" | "keywords" | "fallback" | "off" | "user";
+  source?: "model" | "keywords" | "fallback" | "off" | "user" | "direct-first";
   status?: BotPlanStatus;
+  history?: BotPlanHistoryEntry[];
   modelDecision?: boolean;
+}
+export interface BotChildResult {
+  stepId?: string;
+  botId?: string;
+  taskId?: string | null;
+  status?: string;
+  summary: string;
+  evidence?: string;
+  artifacts?: Array<{ taskId: string; url?: string; label?: string }>;
 }
