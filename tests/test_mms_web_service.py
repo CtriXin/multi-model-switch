@@ -169,3 +169,25 @@ def test_the_help_lists_every_verb_that_can_be_dispatched():
     for verb in VERBS:
         assert f"\n  {verb}" in text, verb
     assert "logs/mms-web.log" in text
+
+
+def test_doctor_checks_bootstrap_sessions_and_detail_without_network(home, monkeypatch, capsys):
+    from mms_web import service
+
+    instance = {"port": 9876, "version": "test", "pid": 1, "url": "http://127.0.0.1:9876"}
+    monkeypatch.setattr(service, "_mine", lambda rows: instance)
+    monkeypatch.setattr(service, "discover", lambda *args: [instance])
+    calls = []
+
+    def fake_request(base, path, timeout=8.0):
+        calls.append(path)
+        if path == "/api/v1/bootstrap":
+            return True, {"version": "1", "capabilities": {"launch": True}}
+        if path == "/api/v1/sessions":
+            return True, {"sessions": [{"id": "session/1"}]}
+        return True, {"session": {"id": "session/1"}}
+
+    monkeypatch.setattr(service, "_doctor_request", fake_request)
+    assert service.doctor(state_root=home / "state", port_base=9876, limit=1) == 0
+    assert calls == ["/api/v1/bootstrap", "/api/v1/sessions", "/api/v1/sessions/session%2F1"]
+    assert "MMS doctor：PASS" in capsys.readouterr().out

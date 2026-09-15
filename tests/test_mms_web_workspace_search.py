@@ -31,3 +31,23 @@ def test_search_still_finds_known_and_explicit_paths_without_zoxide(tmp_path, mo
     assert search_workspaces(catalog, {'query': str(folder)})['workspaces'][0]['path'] == str(folder)
     assert search_workspaces(catalog, {'query': 'not found'})['workspaces'] == []
     with pytest.raises(WebError): search_workspaces(catalog, {'query': 'bad\x00query'})
+
+
+def test_windows_drive_path_is_accepted(monkeypatch, tmp_path):
+    folder = tmp_path / 'Downloads'; folder.mkdir()
+    # A drive-letter path is syntactically recognized even on this POSIX test
+    # host; the resolver then simply ignores the nonexistent Windows path.
+    catalog = SimpleNamespace(_workspaces=lambda: [])
+    assert search_workspaces(catalog, {'query': 'C:\\Users\\Admin\\Downloads'})['workspaces'] == []
+
+
+def test_windows_home_search_finds_downloads(monkeypatch, tmp_path):
+    folder = tmp_path / 'Downloads'; folder.mkdir()
+    catalog = SimpleNamespace(_workspaces=lambda: [])
+    monkeypatch.setattr('mms_web.workspace_search._windows_platform', lambda: True)
+    monkeypatch.setattr('mms_web.workspace_search.real_home', lambda: tmp_path)
+    monkeypatch.setattr('mms_web.workspace_search.shutil.which', lambda _: None)
+    monkeypatch.setattr('mms_web.workspace_search.os.access', lambda *_: False)
+    monkeypatch.setattr('mms_web.workspace_search._spotlight_directories', lambda *_: ([], True))
+    monkeypatch.setattr('mms_web.workspace_search._scan_directories', lambda *args, **kwargs: ([folder], True))
+    assert search_workspaces(catalog, {'query': 'download'})['workspaces'][0]['path'] == str(folder.resolve())
