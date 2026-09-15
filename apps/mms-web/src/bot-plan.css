@@ -154,7 +154,10 @@
   gap: 6px;
   flex: none;
   margin-left: auto;
-  margin-top: 1px;
+  /* The status dot sits 7px down and is 6px tall, so its centre is 10px from
+     the top of the row. Pinning this box to a 20px line and centring inside it
+     puts the 重试/跳过 buttons and the status text on that same 10px centre. */
+  min-height: 20px;
 }
 .bot-plan-step-btns {
   display: flex;
@@ -163,7 +166,10 @@
 }
 .bot-plan-step-btn {
   font-size: 0.6875rem;
-  padding: 2px 8px;
+  /* border-box: 20px is the whole button, matching the trailing line box. */
+  height: 20px;
+  padding: 0 8px;
+  line-height: 1;
   border-radius: 6px;
 }
 .bot-plan-step-status {
