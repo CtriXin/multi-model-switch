@@ -216,3 +216,35 @@ user events: ['只读任务，不要写入或修改任何文件。逐个读取 n
 - 时长是分钟级，不是合同里写的 1 小时。验证的是「运行中不受打断」，不是长时运行的稳定性。
 - 主任务**等待审批**时发旁问，仍然只有 backend 测试覆盖，没有真实审批场景的端到端证据。
 - 仍然只在 MiniMax-M2.7 + newapi 这一条 Anthropic 路由上跑过。
+
+---
+
+# 补充四：独立复核与最小补充（2026-09-14，Asia/Singapore）
+
+- 复核对象：分支 `codex/pilot-btw-closeout`（worktree `~/.codex/worktrees/8796/multi-model-switch`）。结论与差距表见 `docs/mms-web/HANDOFF-BTW.md`。
+- 该分支不可运行：`mms_web/server.py` import 了本分支没有的 `remote_access`/`cli_sessions`/`ui_preferences`（K3 cherry-pick 整文件带入），`tests/test_mms_web_btw_backend.py::test_http_routing_for_side_questions` 与 `test_mms_web_btw_contract.py` 两条 HTTP 测试 ImportError；其余 45 条通过。其 `/btw` 源码与 `origin/dev` 逐字相同，dev 已含本报告补充三。
+- 补充落在 `claude/pilot-btw-closeout-dev`（基于 `origin/dev` 065cf856）：
+  - `mms_web/sessions.py`：`lastEventAt`（transcript 写入）与 `heartbeatAt`（driver 原生回调）分离并持久化。
+  - `mms_web/side_questions.py` / `side_question_model.py`：completion 快照加入最近 ≤6 轮 user/assistant 文本摘录，行上记录 `contextScope`，system prompt 说明摘录可能截断。
+  - 新测试：`tests/test_mms_web_btw_context.py`（4）、`tests/test_mms_web_session_heartbeat.py`（2）。
+
+## 执行验证
+
+```text
+python3 -m pytest tests/test_mms_web_btw_context.py tests/test_mms_web_session_heartbeat.py \
+  tests/test_mms_web_btw_backend.py tests/test_mms_web_btw_route_model.py \
+  tests/test_mms_web_btw_contract.py tests/test_mms_web_sessions_service.py -q
+75 passed
+
+python3 -m pytest tests/ -q -k mms_web
+570 passed, 2 xfailed, 4 subtests passed（修正新测试断言前失败 1 条，均为本次新测试）
+
+python3 scripts/regression_fresh_user_gate.py --quick
+[gate] fresh-user regression: PASS（139 passed）
+```
+
+## 未验证
+
+- 未启动真实 Pi 会话；`recentTurns` 对真实模型回答质量的影响没有真实 smoke。
+- 前端未改、bundle 未重建：`contextScope` 与 `heartbeatAt` 只在 API 上可见。
+- 默认完整 fresh-user gate 未跑，push 前需补。

@@ -21,6 +21,25 @@ export type SideQuestionStatus =
  *  always read; `completion` is the read-only sidecar model. */
 export type SideQuestionSource = "state" | "completion";
 
+/** Who actually answered. `pi-extension` is the fork's /btw extension inside
+ *  the Pi process (native context, one /btw prompt); `host` is the Pilot
+ *  sidecar: either no extension was detected, or the native attempt fell
+ *  back. Server rows created before T2b may lack the field. */
+export type SideQuestionRunner = "host" | "pi-extension";
+
+/** What the answer was allowed to see. The extension reports its branch
+ *  scope (mode/entries/chars/truncated/leafId); the host sidecar reports its
+ *  recent-turn excerpt (recentTurns/totalTurns/truncated). */
+export interface SideQuestionContextScope {
+  mode?: string;
+  entries?: number;
+  chars?: number;
+  truncated?: boolean;
+  leafId?: string;
+  recentTurns?: number;
+  totalTurns?: number;
+}
+
 export interface SideQuestionRoute {
   modelName?: string;
   providerName?: string;
@@ -36,6 +55,9 @@ export interface SideQuestion {
   status: SideQuestionStatus;
   answer: string | null;
   source: SideQuestionSource;
+  runner?: SideQuestionRunner;
+  contextScope?: SideQuestionContextScope | null;
+  fallbackReason?: string | null;
   contextRevision?: string;
   routeSnapshot?: SideQuestionRoute;
   usage?: Record<string, unknown> | null;
@@ -131,7 +153,28 @@ export function defaultExpanded(row: SideQuestion, newest = false): boolean {
 }
 
 export function sourceLabel(row: SideQuestion): string {
-  return row.source === "state" ? "Pilot 状态" : "只读旁问模型";
+  if (row.source === "state") return "Pilot 状态";
+  return row.runner === "pi-extension" ? "Pi 扩展" : "只读旁问模型";
+}
+
+/** One readable line for what the answer was allowed to see. Empty when the
+ *  runner did not report a scope; never guesses. */
+export function contextScopeLine(row: SideQuestion): string {
+  const scope = row.contextScope;
+  if (!scope) return "";
+  if (typeof scope.entries === "number" && typeof scope.recentTurns !== "number") {
+    const parts = [`主会话分支 ${scope.entries} 条`];
+    if (scope.truncated) parts.push("已截断");
+    return parts.join(" · ");
+  }
+  if (typeof scope.recentTurns === "number") {
+    const parts = [`最近 ${scope.recentTurns} 轮`];
+    if (typeof scope.totalTurns === "number" && scope.totalTurns > scope.recentTurns)
+      parts.push(`共 ${scope.totalTurns} 轮`);
+    if (scope.truncated) parts.push("已截断");
+    return parts.join(" · ");
+  }
+  return "";
 }
 
 export type SideQuestionTone =

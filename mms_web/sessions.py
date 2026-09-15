@@ -91,6 +91,12 @@ class _DriverSink:
             return
         self._service._apply_process_exited(self._session, exit_code, stderr_tail)
 
+    def side_question_event(self, payload: dict) -> None:
+        """One extension BTW_EVENT; mapped onto side-question rows only."""
+        if not self.active:
+            return
+        self._service._apply_side_question_event(self._session, payload)
+
 
 class _LiveSession:
     def __init__(self, meta: dict, state_root: Path | None = None) -> None:
@@ -128,7 +134,23 @@ class _LiveSession:
         # /btw side questions live beside the transcript, never in events.
         self.side_questions: dict[str, dict] = {}
         self.btw_idem: dict[str, str] = {}
+        # Holds a possibly-cut secret suffix while extension deltas stream in,
+        # mirroring stream_tails for the main transcript.
+        self.btw_stream_tails: dict[str, str] = {}
+        # Native /btw wiring, memory only: a restart of the Pi process ends
+        # the extension's runs, so a persisted map would only misroute events.
+        # native event id -> host row id; host row id -> pending question.
+        self.btw_native_map: dict[str, str] = {}
+        self.btw_native_pending: dict[str, dict] = {}
         self.updated_at = meta.get("updatedAt") or _now_iso()
+        # Two read-only liveness markers for Pilot and /btw, neither of them
+        # progress. `last_event_at` is the last transcript write, whichever
+        # side wrote it; `native_at` is the last callback the driver delivered
+        # from the Pi process (event, activity, state, approval, exit), so it
+        # moves only when the process itself said something. Nothing here is
+        # extrapolated from a clock or a percentage.
+        self.last_event_at: str = self.updated_at
+        self.native_at: str | None = None
         from .artifact_history import ArtifactHistory
         self.artifact_history = ArtifactHistory(state_root, meta, self.secrets) if state_root else None
 
@@ -155,6 +177,7 @@ class _LiveSession:
         self.events.append(event)
         self._trim_events()
         self.updated_at = now()
+        self.last_event_at = self.updated_at
         return event
 
     def upsert_event(self, fields: dict, now: Callable[[], str]) -> dict:
@@ -174,6 +197,7 @@ class _LiveSession:
         # Last write wins as the event's end time; the reply duration reads it.
         existing["updatedAt"] = now()
         self.updated_at = now()
+        self.last_event_at = self.updated_at
         return existing
 
     def _trim_events(self) -> None:
@@ -218,6 +242,8 @@ class _LiveSession:
             "state": self.state,
             "activity": self.activity_view(),
             "updatedAt": self.updated_at,
+            "lastEventAt": self.last_event_at,
+            "heartbeatAt": self.native_at,
             "owner": owner,
             "archived": bool(self.meta.get("archived")),
             "cwd": self.meta.get("cwd", ""),
@@ -226,6 +252,10 @@ class _LiveSession:
         }
         if self.meta.get("summary"):
             view["summary"] = self.meta["summary"]
+        # Whether the fork's /btw extension answered this session's side
+        # questions natively; the host sidecar path is the fallback, not the
+        # default, whenever this is true.
+        view["btwNative"] = bool(self.meta.get("btwNative"))
         # The Pi session this one continues, if it was adopted from a terminal.
         # The list drops the read-only row for a session that is claimed here.
         if self.meta.get("piSessionId"):
@@ -314,6 +344,8 @@ class _LiveSession:
             "events": self.events,
             "approvals": self.approvals,
             "requestLog": self.request_log,
+            "lastEventAt": self.last_event_at,
+            "heartbeatAt": self.native_at,
             "sideQuestions": list(self.side_questions.values()),
             "btwIdem": self.btw_idem,
             "lastSequence": self.last_sequence,
@@ -640,6 +672,7 @@ class SessionService(SessionActions, SessionSideQuestions):
         except (DriverClosedError, RpcTimeoutError):
             driver.close(graceful_timeout=0.5)
             raise WebError("LAUNCH_FAILED", "MMS 未能启动所选模型，请检查本机 Pi 和模型服务。", 502)
+        self._probe_btw_native(live)
         if effort:
             from .launch_options import set_thinking
             try:
@@ -892,6 +925,7 @@ class SessionService(SessionActions, SessionSideQuestions):
         except (DriverClosedError, RpcTimeoutError):
             driver.close(graceful_timeout=0.5)
             raise WebError("RESUME_FAILED", "恢复会话失败，请检查本机运行环境。", 502)
+        self._probe_btw_native(session)
         effort = session.meta.get("controlSettings", {}).get("thinking")
         if effort:
             from .launch_options import set_thinking
@@ -1197,9 +1231,38 @@ class SessionService(SessionActions, SessionSideQuestions):
                 context["state"] = "uncertain" if exc.code in {"RPC_TIMEOUT", "RPC_UNCONFIRMED"} else "failed"
                 event["status"] = "failed"
                 live.append_event({"kind": "notice", "text": exc.message, "status": "error"}, self._now)
+        # After the opening prompt (if any), and off the launch critical path:
+        # the probe must never displace the first message a fresh process
+        # receives, nor delay the launch answer while the first turn streams.
+        threading.Thread(
+            target=self._probe_btw_native, args=(live,), daemon=True,
+            name=f"mms-btw-probe-{session_id}",
+        ).start()
         with live.lock:
             live.persist(self._state_dir)
             return live.detail_view(), live
+
+    def _probe_btw_native(self, session) -> None:
+        """Detect the native /btw extension once the driver answers RPC.
+
+        ``btw`` alone is not enough: the upstream package registers it too
+        but has no headless mode, so the fork is only assumed when
+        ``btw:cancel`` is registered beside it. A failed probe leaves the
+        flag unset — a session without the extension simply stays on the
+        host sidecar path, it is never blocked or faked.
+        """
+        driver = session.driver
+        if driver is None:
+            return
+        try:
+            commands = driver.get_commands(timeout=5.0)
+        except Exception:
+            commands = []  # this process answers nothing: no native, no block
+        names = {str(item.get("name") or "") for item in commands}
+        native = {"btw", "btw:cancel"} <= names
+        with session.lock:
+            session.meta["btwNative"] = native
+            session.persist(self._state_dir)
 
     def _spawn_driver(self, plan, sink: _DriverSink):
         if self._driver_factory is not None:
@@ -1244,6 +1307,7 @@ class SessionService(SessionActions, SessionSideQuestions):
         if not isinstance(fields, dict):
             return
         with session.lock:
+            session.native_at = self._now()
             if isinstance(fields.get("nativeContext"), dict):
                 session.meta["contextEvidence"] = redact(fields["nativeContext"], session.secrets)
                 session.persist(self._state_dir)
@@ -1316,6 +1380,7 @@ class SessionService(SessionActions, SessionSideQuestions):
 
     def _apply_proto_state(self, session: _LiveSession, state: str) -> None:
         with session.lock:
+            session.native_at = self._now()
             if state not in _PROTO_STATES:
                 return
             if not session.alive():
@@ -1336,6 +1401,7 @@ class SessionService(SessionActions, SessionSideQuestions):
         if phase not in {"running", "thinking", "responding", "tool", "compacting", "retrying", "error", "stopped", "idle"}:
             return
         with session.lock:
+            session.native_at = self._now()
             if session.finalized or session.state in _FINAL_STATES:
                 return
             value = {"phase": phase, **{key: str(details[key])[:120] for key in ("eventId", "toolName") if details.get(key)}}
@@ -1350,6 +1416,7 @@ class SessionService(SessionActions, SessionSideQuestions):
 
     def _apply_approval_pending(self, session: _LiveSession, approval_id: str, method: str, title: str) -> None:
         with session.lock:
+            session.native_at = self._now()
             session.approvals[approval_id] = {"method": method, "title": title}
             if session.alive():
                 session.state = "waiting"
@@ -1358,6 +1425,7 @@ class SessionService(SessionActions, SessionSideQuestions):
 
     def _apply_approval_resolved(self, session: _LiveSession, approval_id: str, decision: str) -> None:
         with session.lock:
+            session.native_at = self._now()
             session.approvals.pop(approval_id, None)
             if not session.approvals and session.alive():
                 session.state = "running"
@@ -1366,6 +1434,7 @@ class SessionService(SessionActions, SessionSideQuestions):
 
     def _apply_process_exited(self, session: _LiveSession, exit_code: int, stderr_tail: str) -> None:
         with session.lock:
+            session.native_at = self._now()
             session.approvals.clear()
             session.finalized = True
             if session.stop_requested:
@@ -1521,6 +1590,9 @@ class SessionService(SessionActions, SessionSideQuestions):
                 if isinstance(v, str) and v in live.side_questions
             }
             live.updated_at = str(payload.get("updatedAt") or _now_iso())
+            live.last_event_at = str(payload.get("lastEventAt") or live.updated_at)
+            saved_native = payload.get("heartbeatAt")
+            live.native_at = str(saved_native) if isinstance(saved_native, str) and saved_native else None
             state = str(payload.get("state") or "")
             if state in _FINAL_STATES:
                 live.state = state
