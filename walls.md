@@ -488,6 +488,45 @@
 缺陷:预设编辑器重开时名字被换成建议名（会静默改名）、编辑器无关闭入口、固定尾句排在补充约定之后、名字框双层焦点框 → 开 T1e 给 gemini。Pilot 首页在 API 正常时仍显示"无法连接 MMS 本地服务"与"请选择可用模型"提示（截图 17-pilot-home.png），属 Pilot 侧，待复现。/api/v1/sessions 里有两条 2026-09-12 遗留的 Bot 内部会话（s-c9e97dc6b6cf"新 Bot"未归档可见、s-88bfc3af937d"计划 · 大总管"已归档），owner 记为 web，隔离过滤挡不住，属隔离上线前的旧数据。
 未验证:带协作关键词时的 delegate 链路、plan-approve、子任务失败恢复、重启持久化、窄窗与深色主题。
 
+## 2026-09-15 10:55 SGT · gemini-3.6 · 370e87ec37e741df
+包: T1d · Bot 页不弹 Pilot 首次引导
+分支 / worktree: bot/T1d-guide-on-bots / wt-T1d
+需求: 解决全新 state 下打开 #page=bots 时，Pilot 首次引导（“第一次用 AI？1/7”）叠在 Bot 工作台上的问题：
+  1. page === "bots" 时不自动开始引导，不标记已看过；回到 Pilot 会话页时引导照常首次弹出。
+  2. 引导进行中点击侧栏 "Bot 工作台" 入口，引导立即关闭，无残留高亮与报错。
+  3. 在 Bot 页触发帮助并点击“开始介绍”/“带我一步步操作”，先切回 Pilot 新会话页再从 welcome 步骤开始。
+  4. 保持其它页面引导行为、7步顺序、服务端 tourSeen 持久化完全不变。
+处置:
+  1. `apps/mms-web/src/App.tsx`:
+     - 抽离并导出纯函数 `isGuideReady({ loading, connected, modelReady, setupOpen, settingsOpen, page })`，严格限定 `page !== "bots"`。
+     - 在 `HelpGuide` 组件处传入 `ready={isGuideReady(...)}`，确保 Bot 页面不触发自动引导。
+     - 在 `tour` 挂载条件中加入 `page !== "bots"` 守卫，彻底隔绝 Bot 页面下 GuidedTour 渲染。
+     - 在 `startIntroduction()`、`beginGuideStep()` 与 `guideNavigate()` 中，统一处理 `if (page === "bots")` 时自动跳转回 Pilot 新会话页（`navigate("new", ...)`），确保引导始终在 Pilot 页面展示。
+  2. `apps/mms-web/src/HelpGuide.tsx`:
+     - 使用 `useRef` 固化 `startTourRef`，`useEffect` 依赖收敛为 `[ready]`，避免闭包与组件重新渲染导致的无效取消或重复触发。
+  3. 新增 `apps/mms-web/tests/guided-tour-bots.test.mjs`:
+     - 覆盖 `isGuideReady` 页面判断、路由导航关闭引导、Bot 页面启动引导回退 Pilot，以及 `HelpGuide` 自动启动守卫。
+改动文件:
+```text
+ apps/mms-web/src/App.tsx       | 40 +++++++++++++++++++++++++++++++++++++---
+ apps/mms-web/src/HelpGuide.tsx |  6 ++++--
+ 2 files changed, 41 insertions(+), 5 deletions(-)
+```
+测试:
+  - TypeScript 类型检查: `npx tsc --noEmit -p apps/mms-web`（0 错误）。
+  - 前端全量单元测试: `node --test apps/mms-web/tests/*.test.mjs`（87 passed, 0 failed, 含新增的 4 个断言）。
+  - 前端构建打包: `npm run build --workspace @mms/web`（Vite build 成功通过）。
+  - 后端聚焦测试: `PYTHONPATH=. python3 -m pytest -q tests/test_mms_web_bots.py tests/test_mms_bot_runtime.py tests/test_mms_bot_transport.py tests/test_mms_bot_client.py tests/test_mms_bot_computer.py tests/test_bot_memory.py tests/test_mms_bot_coordinator.py`（95 passed，高于基线 72）。
+实时验证:
+  - 独立端口: 61700（空 state-root `/tmp/bot-verify-T1d`，不碰 60824）。
+  - 验证页面: `#page=bots` 与 Pilot 新会话页。
+  - 验收截图路径:
+    1. 新 state 打开 `#page=bots`（无引导）: `file:///Users/xin/.gemini/antigravity-cli/brain/f414fd9d-ced5-4da4-b1a2-7608e91ec350/t1d_1_bots_page_no_tour.png`
+    2. 同一 state 点击返回 Pilot（引导 1/7 正常弹出）: `file:///Users/xin/.gemini/antigravity-cli/brain/f414fd9d-ced5-4da4-b1a2-7608e91ec350/t1d_2_back_to_pilot_tour_pop.png`
+    3. 引导进行到 2/7 时点击侧栏 "Bot 工作台" 入口（引导立即关闭，Bot 界面正常无残留）: `file:///Users/xin/.gemini/antigravity-cli/brain/f414fd9d-ced5-4da4-b1a2-7608e91ec350/t1d_3_enter_bots_closes_tour.png`
+    4. Bot 页面点 "?" 帮助抽屉中的“带我一步步操作”（切回 Pilot 新会话页并展示 welcome）: `file:///Users/xin/.gemini/antigravity-cli/brain/f414fd9d-ced5-4da4-b1a2-7608e91ec350/t1d_4_bots_help_to_pilot_welcome.png`
+未完成 / 未验证: 无。全部 4 项验收项均通过实机自动化与视觉验证，代码严格保持未提交（uncommitted）状态。
+
 ## 2026-09-15 11:00 SGT · claude-fable-5.1（subagent 执行）· 370e87ec37e741df
 需求:准备 5.0.0 预览分支，基线 v4.21.14，只到准备阶段。
 处置:worktree wt-v5 分支 claude/dev-pre-5.0（起点 90287459）：合入 v4.21.12 再 v4.21.14，cherry-pick RELEASE_CHANNELS 规则与 4.21.12/4.21.14 说明，版本 5.0.0，新增 RELEASE-v5.0.0.md，重建静态包。draft PR #261 → dev-pre，依赖 #254 先合。受保护文件只有 mms_launchers.py 经 merge 带入 +48/-5。
