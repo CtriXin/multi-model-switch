@@ -168,5 +168,17 @@ Bot 页面呈现为自然对话交互，弱化后台管理控制台痕迹。Bot 
   - 消息流按 `taskId` 分段聚合，最新任务位于最上方；段头提取用户任务首句（截断 60 字符）与日期；跨天插入日期分隔线。
   - 消息类型明确区分：`result` 标记「结果」标签且超 6 行自动折叠，`dispatch` 标记「任务」，`message` 标记「消息」。
 
+### 7. Coordinator 计划块视觉规范（T2c）
+- **步骤行 Bot 名字单行不换行**：给 Bot 名字列赋予最小宽度（76px，移动端 60px）并设置 `white-space: nowrap` 与 `text-overflow: ellipsis`，彻底消除垂直逐字折行撑大行高的视觉缺陷。
+- **目标与成果两行分立**：步骤第一行为 `step.goal`（`var(--ink)` 主色），第二行通过次级弱化色（`var(--muted)`）展示 `result.summary`；summary 超过 2 行使用 `-webkit-line-clamp: 2` 自动截断折叠，提供「展开 / 收起」轻量交互按钮查看全文。
+- **操作按钮行尾固定**：将 failed 步骤的「重试 / 跳过」操作按钮从目标文字流末尾脱离，固定至行尾操作列，与右侧状态文字及左侧状态圆点严格垂直对齐，不再随文本长度漂移。
+- **三档状态标签视觉体系**：
+  - 进行中（`running` / `merging`）：使用 `var(--accent)` 强调色；
+  - 完成（`done`）：使用 `var(--muted)` 弱化灰色；
+  - 异常与待确认（`failed` / `cancelled` / `proposed` / `rejected`）：使用 `var(--bot-amber)` 警告色系；
+  - 全局遵守 Token 约束，0 新增 Hex。
+- **`<details>` 执行时间线**：在计划块展开详情内增加单行时间线（格式如 `auto → running 10:58 → merging 11:02 → done 11:03`），仅显示时间不显示日期，直观呈现计划状态变迁历程。
+
+
 
 
