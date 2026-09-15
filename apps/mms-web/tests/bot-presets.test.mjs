@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   suggestBotName,
   looksLikeStandingInstruction,
@@ -154,3 +155,15 @@ test("parsePreset and buildPreset support new footer order and maintain backward
   assert.ok(footerIdx < rulesIdx, "固定尾句必须排在向导答案之后、补充约定之前");
 });
 
+
+test("the preset editor lets the rename input keep Escape to itself", () => {
+  const source = readFileSync(new URL("../src/Bot.tsx", import.meta.url), "utf8");
+  const start = source.indexOf("if (!onboardingEditing) return;");
+  assert.ok(start > 0, "找不到预设编辑器的 Esc 监听");
+  const handler = source.slice(start, source.indexOf("window.removeEventListener", start));
+  assert.ok(handler.includes("bot-chat-title-input"), "编辑器的 Esc 监听必须认出改名输入框");
+  assert.ok(
+    handler.indexOf("bot-chat-title-input") < handler.indexOf("setOnboardingEditing(false)"),
+    "命中改名输入框时必须先返回，不再关闭预设编辑器",
+  );
+});

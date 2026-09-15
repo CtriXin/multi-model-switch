@@ -1746,9 +1746,12 @@ export function BotChat({
   useEffect(() => {
     if (!onboardingEditing) return;
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setOnboardingEditing(false);
-      }
+      if (event.key !== "Escape") return;
+      // Renaming owns Escape while its input has focus, so one press only
+      // cancels the rename instead of also closing the preset editor.
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && active.classList.contains("bot-chat-title-input")) return;
+      setOnboardingEditing(false);
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
