@@ -223,12 +223,16 @@ reasoning_effort = "high"     # low | medium | high | xhigh
 nsr_mode = "enable"           # enable | disable
 agent_pack = "none"           # none | ecc | omc
 bypass = true                 # true | false
+pi_btw = true                 # true | false; MMS-bundled Pi /btw side-question extension
 
 [launch.cli.codex]
 reasoning_effort = "high"
 
 [launch.cli.claude]
 agent_pack = "ecc"
+
+[launch.cli.pi]
+pi_btw = true
 
 [launch.cli.agy]
 
@@ -3461,6 +3465,10 @@ def _sanitize_launch_preferences(payload):
     bypass = _pref_bool(payload.get("bypass"))
     if bypass is not None:
         result["bypass"] = bypass
+    # pi only: whether MMS injects its bundled @ctrixin/pi-btw extension.
+    pi_btw = _pref_bool(payload.get("pi_btw"))
+    if pi_btw is not None:
+        result["pi_btw"] = pi_btw
 
     agent_pack = _pref_agent_pack(payload.get("agent_pack"))
     if not agent_pack and _pref_enable_disable(payload.get("omc_mode")) == "enable":
@@ -15110,7 +15118,7 @@ def _display_preferences_help():
     console.print(f"  {command} config human-gate")
     console.print("\n[bold]Allowed keys:[/bold]")
     console.print("  launch.disabled_clis: hide/disable MMS launch targets such as pi or agy")
-    console.print("  launch.defaults: thinking_mode, reasoning_effort, nsr_mode, agent_pack, bypass")
+    console.print("  launch.defaults: thinking_mode, reasoning_effort, nsr_mode, agent_pack, bypass, pi_btw")
     console.print("  launch.cli.<claude|codex|opencode|pi|agy>: same launch keys")
     console.print("  session_surfaces.disabled: skills, mcp, hooks")
     console.print("  assets: managed_enabled, managed_root")
