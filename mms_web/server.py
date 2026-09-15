@@ -8,6 +8,7 @@ import mimetypes
 import secrets
 import os
 import threading
+import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlsplit, parse_qs
@@ -632,6 +633,9 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
             if isinstance(exc, WebError):
                 self._json(exc.status, {"error": {"code": exc.code, "message": exc.message}})
             else:
+                # Keep the user-facing response generic, but leave a traceback
+                # in the service log so Windows-only failures are diagnosable.
+                traceback.print_exc()
                 self._json(500, {"error": {"code": "INTERNAL_ERROR",
                                          "message": "本地服务暂时无法完成操作。请检查服务状态。"}})
 

@@ -1509,11 +1509,20 @@ def _pi_link_shared_agent_bin(agent_dir):
         if os.path.islink(link_path) or os.path.exists(link_path):
             return
         os.makedirs(agent_dir, exist_ok=True)
-        try:
-            os.symlink(shared_bin, link_path)
-        except OSError:
-            # Symlink failed (e.g. cross-device): leave pi to manage its own bin.
-            return
+        if os.name == "nt":
+            junction = getattr(os, "junction", None)
+            if callable(junction):
+                junction(shared_bin, link_path)
+            else:
+                import _winapi
+
+                _winapi.CreateJunction(shared_bin, link_path)
+        else:
+            try:
+                os.symlink(shared_bin, link_path)
+            except OSError:
+                # Symlink failed (e.g. cross-device): leave pi to manage its own bin.
+                return
     except Exception:
         return
 
