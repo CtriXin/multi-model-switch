@@ -64,6 +64,8 @@ export function HelpGuide({ ready, modelReady, open, setOpen, hasSession, naviga
       setLoadingUpdates(false);
     }
   };
+  const startTourRef = useRef(startTour);
+  startTourRef.current = startTour;
   useEffect(() => {
     if (!ready || attempted.current) return;
     attempted.current = true;
@@ -79,10 +81,10 @@ export function HelpGuide({ ready, modelReady, open, setOpen, hasSession, naviga
       if (seenOnServer) { markSeen(false); return; }
       markSeen(true);
       if (seenLocally) return;
-      startTour();
+      startTourRef.current();
     })();
     return () => { cancelled = true; };
-  }, [ready, startTour]);
+  }, [ready]);
   useEffect(() => {
     if (!open) return;
     returnFocus.current = document.activeElement as HTMLElement;
