@@ -808,3 +808,199 @@ T2c 跟进（UI 整理建议）:
 - 60824 用主 workspace 新静态包重启，`/` 与 `/api/v1/bots` 均确认。
 
 未完成 / 未验证:本次 4 处修正只做了类型检查、单元测试与反证，没有在浏览器里逐条回看（提问卡与计划块的视觉此前已由 gemini 验收）；完整 `regression_fresh_user_gate.py`（非 quick）与 `ci_pytest_regression.py` 未跑。T3d-ui / T2c 目前只在任务分支，dev-pre 未包含，转正式需另开任务分支 → dev-pre 的 PR。`wt-T1f` 未动。
+
+## 2026-09-15 16:25 +08 · gemini-3.6 · 370e87ec37e741df
+任务:T1f · 向导改成对话，预设看得见
+分支 / worktree:`bot/T1f-wizard` · `/Users/xin/.local/share/stride/tasks/370e87ec37e741df/wt-T1f`（从 c5c12e7c 创建，未提交、未 push、未 merge）
+处置:
+1. `apps/mms-web/src/bot-presets.ts`:
+   - 定义 `WizardOption`、`WizardQuestion`、`WizardAnswerEntry` 接口。
+   - 实现 `WIZARD_POOL`（包含 9 道问题，每题选项含 A-E，末项 E 均为“先聊聊再说”；起始题为主要工作，按分支跳转工作汇报/日常提醒/研究调研/写作沟通等下一题，最多 3 题）。
+   - 实现并导出纯函数 `runWizard(answersList)`（返回 `{ nextQuestion, preset }`，支持分支跳转、选项直选、自由文本输入、E 退出）。
+   - 实现并导出 `getPresetSummary(answers)`（生成形如 `"工作与项目 · 只说结论 · 直接做"` 的单行摘要，`extra` 字段不进摘要）。
+   - `parsePreset` 与 `buildPreset` 增强支持“了解到的偏好：”段落，与 `answers.extra` 互通且去重，保持老 Bot 的 systemPrompt 往返兼容。
+2. `apps/mms-web/src/BotPresetPanel.tsx`:
+   - 新增工作预设抽屉面板，与“记忆”、“协作”并列作为右侧面板。
+   - 展示并可修改：核心工作方式（工作重点、汇报方式、推进方式）、了解到的偏好（键值对列表，可删可改可新增）、补充约定列表（搬迁 T1e 编辑器，支持单条删除和新增，上限 12 条，每条最多 200 字，自动去重）。
+   - 提供“保存预设”按钮，保存成功提供状态反馈，改完 GET 读回完全一致。
+3. `apps/mms-web/src/Bot.tsx`:
+   - 侧栏卡片第二行：优先读取 `getPresetSummary`，无预设时展示描述，彻底不再显示最后一条模型回复。
+   - 头部描述为空时，使用预设摘要作为副标题顶上，不再显示硬编码的“随时可以接活”。
+   - 头部操作区提供“预设”按钮，点击打开 `BotPresetPanel` 右侧抽屉面板；保留 Esc 监听且改名输入框独占 Esc。
+   - 重构向导为对话式呈现 `BotConversationalWizard`：
+     - 第一条 Bot 气泡："你好，我是刚建好的助手。"
+     - 逐题以卡片展示（标题、右上角 × 跳过按钮、A 到 E 选项行含字母徽标/主标签/说明 hint、底部自由回答输入框按 Enter 发送）。
+     - 用户选择后显示为右侧用户气泡，Bot 计算分支发出下一题。
+     - 支持全局 A-E 键直选。
+     - 选项 E“先聊聊再说”直接退出向导进入起名阶段，且不生成预设段落。
+     - 向导完成时 Bot 发送“好，记住了。”并进入起名卡片；起名确认后保存，将三句话以内的偏好摘要通过记忆接口存一条 fact（来源 user）。
+4. `apps/mms-web/src/BotStudio.tsx`: 对齐通知卡片第二行取值逻辑，优先读取预设摘要。
+5. `apps/mms-web/src/bot.css`:
+   - 新增对话向导卡片、选项行徽标、自由输入行、工作预设面板样式。
+   - 严格遵守 CSS 变量体系，全局 hex 出现次数严格保持 12（0 新增 hex）。
+6. `apps/mms-web/tests/bot-presets.test.mjs`:
+   - 补充完善单测，覆盖 `runWizard` 4 条分支跳转、选项 E 即时退出、自由文本输入写入 extra、`getPresetSummary` 格式化、`parsePreset`/`buildPreset` 带 extra 偏好往返等。
+7. `apps/mms-web/DESIGN.md`: 追加第 8 节《对话式向导与预设面板（T1f）》设计规范。
+
+改动文件（git diff --stat）:
+```text
+ apps/mms-web/DESIGN.md                  |  14 +
+ apps/mms-web/src/Bot.tsx                | 469 ++++++++++++++++++++------------
+ apps/mms-web/src/BotStudio.tsx          |   3 +-
+ apps/mms-web/src/bot-presets.ts         | 317 +++++++++++++++++++--
+ apps/mms-web/src/bot.css                | 256 +++++++++++++++++
+ apps/mms-web/tests/bot-presets.test.mjs | 139 ++++++++++
+ 6 files changed, 999 insertions(+), 199 deletions(-)
+ 新增未跟踪:
+ apps/mms-web/src/BotPresetPanel.tsx
+ docs/mms-web/design/t1f/ (6 张验收截图)
+```
+
+测试命令与结果:
+- `npx tsc --noEmit -p apps/mms-web`: 0 错误。
+- `node --test apps/mms-web/tests/*.test.mjs`: 98 passed, 0 failed（门禁 ≥ 94）。
+- `PYTHONPATH=. python3 -m pytest -q tests/test_mms_web_bots.py tests/test_mms_bot_runtime.py tests/test_mms_bot_transport.py tests/test_mms_bot_client.py tests/test_mms_bot_computer.py tests/test_bot_memory.py tests/test_mms_bot_coordinator.py tests/test_mms_bot_retry.py tests/test_mms_bot_notify.py`: 202 passed in 17.16s。
+- `npm run build --workspace @mms/web`: 成功（tsc + vite 构建通过）。
+- Hex 门禁: `grep -roh '#[0-9a-fA-F]\{3,6\}' apps/mms-web/src/bot*.css | wc -l` 严格为 12。
+
+实时验证（独立实例端口 61705，state-root /tmp/bot-verify-T1f，未碰 60824）:
+- 验收 1（向导第 1 题）: 全新 state 创建 Bot，看到问候气泡"你好，我是刚建好的助手。"及第 1 题卡片"你最希望我主要帮你做什么？"与 A-E 选项行及底部自由输入框。
+  截图: `docs/mms-web/design/t1f/t1f_1_step1_greeting_and_question.png`
+- 验收 2（键盘 A 直选进入第 2 题）: 按键盘 A 选中"工作与项目"，右侧生成用户气泡，下一题动态分支为汇报方式"这类事你一般希望我怎么汇报？"。
+  截图: `docs/mms-web/design/t1f/t1f_2_step2_work_report.png`
+- 验收 3（第 2 题选 A 进第 3 题）: 按键盘 A 选中"只说结论"，下一题分支为推进方式"要是我拿不准，是先做还是先问你？"。
+  截图: `docs/mms-web/design/t1f/t1f_3_step3_work_autonomy.png`
+- 验收 4（第 3 题自由输入与起名卡片）: 在底部输入框自由打字"关键修改先问我，其余自主推进"按回车提交，Bot 回复"好，记住了。"，紧接起名卡片自动建议"项目助手"。
+  截图: `docs/mms-web/design/t1f/t1f_4_naming_card.png`
+- 验收 5（完成向导与预设摘要）: 点击确认并开始对话，侧栏卡片第二行及头部描述均显示预设摘要"工作与项目 · 只说结论 · 关键修改先问我，其余自主推进"，GET /api/v1/bots 确认 systemPrompt 含工作预设与了解到的偏好，记忆接口确认多出 1 条 fact。
+  截图: `docs/mms-web/design/t1f/t1f_5_finished_summary_sidebar_header.png`
+- 验收 6（工作预设面板查看与修改）: 点击头部预设按钮在右侧展开"工作预设"抽屉面板，修改汇报方式为"结论加关键依据"，添加补充约定"所有输出默认使用简体中文与 Markdown"并保存，GET /api/v1/bots 读回完全一致。
+  截图: `docs/mms-web/design/t1f/t1f_6_preset_panel_opened.png`
+- 验收 7（选 E 先聊聊再说）: 新建第 2 个 Bot，第一题按键盘 E 选"先聊聊再说"，直接进入起名阶段，完成后 GET /api/v1/bots 确认 systemPrompt 为空，不产生偏好段落。
+  截图: `docs/mms-web/design/t1f/t1f_8_quit_with_E_no_preset.png`
+
+未完成 / 遗留: 无。T1f 全部需求均已实现并通过端到端视觉与单元测试验收。代码保持未提交状态。
+耗时: 约 45 分钟 · 归因: [AGENT]
+
+## 2026-09-15 18:50 +08 · gemini-3.6 · 370e87ec37e741df
+任务: T1f 验收回修（必修 3 条 + 工单项 4-9 条）
+分支 / worktree: `bot/T1f-wizard` · `/Users/xin/.local/share/stride/tasks/370e87ec37e741df/wt-T1f`（解冲突合并 codex/stride-370e87ec37e741df，未提交、未 push）
+
+逐条对照清单与处置:
+1. 必修 1 - 偏好单键持久化，删除后不复活：
+   - 修复：`runWizard` 和 `parsePreset` 保证 `answers.extra` 只使用单一键（题库题使用 `q_<id>` 作为唯一主键，自定义项保留其文本键）。
+   - `BotPresetPanel` 删除时精准删除该主键，`buildPreset` 不再保留或复活历史已删除键。
+   - 补单测：`apps/mms-web/tests/bot-presets.test.mjs` 中新增测试验证偏好单键持久化与删除后往返不复活。
+   - 验证：界面删除“只要不破坏现有逻辑就直接做”后保存，GET /api/v1/bots 读回完全一致，偏好项已被彻底清除。
+2. 必修 2 - 跳过向导持久化，重开直接进聊天：
+   - 修复：点右上角 ×（`onSkip`）或选 E（“先聊聊再说”）时，向导自动写入空 `了解到的偏好：\n` 标记并异步持久化。
+   - `onboardingDone` 判定逻辑升级：若 `systemPrompt` 包含“了解到的偏好：”标记，直接标记向导已完成。
+   - 验证：Bot 跳过向导后重新打开或刷新页面，直接进入聊天状态，不再反复弹出向导。
+3. 必修 3 - 预设面板 focus / style / autonomy 芯片与自定义：
+   - 修复：移除原先 4 个写死选项，动态从 `WIZARD_POOL` 的 12 道题目选项中聚合所有可选标签（日常事务与提醒、工作与项目、查询与研究、写作与沟通；只说结论、详细过程加依据、温和提醒、专业严谨；直接做、拿不准先问我、所有操作先确认等）。
+   - 增加“自定义”芯片与输入框：若当前预设值不在题库选项内（例如向导自由输入产生的偏好），自动以自定义模式显示并选中，支持自由编辑修改。
+4. 项 4 - 首题选项顺序与 D 值一致：
+   - 修复：题库起始题首题选项顺序严格调整为 A 日常事务与提醒 / B 工作与项目 / C 查询与研究 / D 写作与沟通 / E 先聊聊再说；D 项的 value 与 label 保持严格一致（"写作与沟通"）。单测覆盖 PASS。
+5. 项 5 - 自由回答只进 extra，不重复写 focus/style/autonomy：
+   - 修复：`runWizard` 中针对自由输入（free input）只写入 `answers.extra[q.id]`，不给 `answers[q.writes]` 赋值，杜绝 systemPrompt 中同一句话重复出现两次。单测覆盖 PASS。
+6. 项 6 - 题库补齐至 12 题：
+   - 修复：`WIZARD_POOL` 题目扩充至 12 题，包含起始、日常、工作、研究、写作各条分支的提醒习惯、汇报方式、推进自主度、调研依据、写作语气与受众等。单测覆盖 PASS。
+7. 项 7 - 侧栏第二行调用扩展后的 `getBotSecondLine`，还原 `BotStudio.tsx:939`：
+   - 修复：在 `bot-visual-system.ts` 扩展 `getBotSecondLine`，支持 `pendingQuestion` 显示“等你回复”，预设摘要优先于描述，空描述兜底；`Bot.tsx` 侧栏直接调用该共享函数。
+   - `BotStudio.tsx:939` 恢复为原状未读通知卡逻辑。更新 `bot-visual-system.test.mjs`，8 个测试全 PASS。
+8. 项 8 - 头部与侧栏描述统一：
+   - 修复：头部与侧栏卡片对 `description === "随时可以接活"` 均视为空描述，统一使用预设摘要作为副标题/第二行显示。
+9. 项 9 - 清理死代码，放回注释：
+   - 修复：清理 `Bot.tsx` 中未使用的历史变量（`onboardingQuestions`、`onboardingPrompt`、`editingRules`、`onboardingMode`），规范 `BotPresetPanel.tsx` 引用；完整放回 `bot-presets.ts` 头部被移除的 T1c/T1e 说明注释。
+
+改动文件（git diff --stat）:
+```text
+ apps/mms-web/DESIGN.md                        |  13 +
+ apps/mms-web/src/Bot.tsx                      | 474 ++++++++++++++++----------
+ apps/mms-web/src/bot-presets.ts               | 338 +++++++++++++++++-
+ apps/mms-web/src/bot-visual-system.ts         |  35 +-
+ apps/mms-web/src/bot.css                      | 256 ++++++++++++++
+ apps/mms-web/tests/bot-presets.test.mjs       | 173 ++++++++++
+ apps/mms-web/tests/bot-visual-system.test.mjs |  28 +-
+ walls.md                                      | 147 ++++++++
+ 8 files changed, 1246 insertions(+), 218 deletions(-)
+新增未跟踪:
+ apps/mms-web/src/BotPresetPanel.tsx
+ docs/mms-web/design/t1f/ (全套 8 张验收截图)
+```
+
+测试命令与结果:
+- `../workspace/node_modules/.bin/tsc --noEmit -p apps/mms-web`: 0 错误通过。
+- `node --test apps/mms-web/tests/*.test.mjs`: 111 passed, 0 failed（已合入 T3d-ui/T2c 新增单测，全量 111 项全绿）。
+- `grep -o '#[0-9a-fA-F]\{3,8\}' apps/mms-web/src/bot*.css | sort -u | wc -l`: 严格为 12。
+- `npm run build --workspace @mms/web`: TypeScript + Vite build 成功通过。
+- `PYTHONPATH=. python3 -m pytest -q tests/test_mms_web_bots.py tests/test_mms_bot_runtime.py tests/test_mms_bot_transport.py tests/test_mms_bot_client.py tests/test_mms_bot_computer.py tests/test_bot_memory.py tests/test_mms_bot_coordinator.py tests/test_mms_bot_retry.py tests/test_mms_bot_notify.py`: 202 passed in 16.91s。
+
+验收补测截图（保存在 docs/mms-web/design/t1f/ 及 artifacts/）：
+1. 补测 1（删偏好后保存，GET 读回一致）:
+   - 截图路径: `docs/mms-web/design/t1f/t1f_7_delete_extra_saved.png`
+   - 内容：删除“只要不破坏现有逻辑就直接做”后点击保存，面板只保留核心三项和补充约定，API 读回 systemPrompt 确认该偏好已彻底清除，不再复活。
+2. 补测 2（跳过向导的 Bot 重开直接进聊天）:
+   - 截图路径: `docs/mms-web/design/t1f/t1f_8_skipped_wizard_reopen_chat.png`
+   - 内容：点击右上角 × 跳过向导后，重选/重开该 Bot 直接进入聊天页面，不再重弹向导。
+3. 全套流程截图备查:
+   - `docs/mms-web/design/t1f/t1f_1_step1_greeting_and_question.png`（问候与首题）
+   - `docs/mms-web/design/t1f/t1f_2_step2_work_report.png`（分支第 2 题汇报方式）
+   - `docs/mms-web/design/t1f/t1f_3_step3_work_autonomy.png`（分支第 3 题推进方式）
+   - `docs/mms-web/design/t1f/t1f_4_naming_card.png`（自由输入与起名建议卡）
+   - `docs/mms-web/design/t1f/t1f_5_finished_summary_sidebar_header.png`（完成向导后预设摘要与侧栏卡片）
+   - `docs/mms-web/design/t1f/t1f_6_preset_panel_opened.png`（工作预设抽屉面板）
+
+环境与约束守卫:
+- 端口保持 61705，未碰 60824。
+- 未执行 git commit、未 push。
+耗时: 约 35 分钟 · 归因: [AGENT]
+
+## 2026-09-15 22:02 +08 · claude-fable-5.1（subagent 执行）· 370e87ec37e741df
+
+T1f 落地（对话式引导 + 工作预设面板）。
+
+验收结论：9 条中 8 条直接通过，1 条部分通过并已修。
+
+发现并修复的两个真实副作用：
+1. 跳过向导（点 × 或选 E）时写入的是空的预设标题行，落进 systemPrompt 就是一段脏 prompt；
+   而且它被 parsePreset 解析成空 answers，面板保存后向导判定为「没做过」而复活。
+   改为写入真实默认约定 `SKIPPED_WIZARD_PROMPT`，parsePreset 落到 other，buildPreset 往返不丢，
+   getPresetSummary 对它返回 null，侧栏不会把默认约定当摘要。
+2. 保存成功提示的 effect 依赖漏了，切换 Bot 时上一个 Bot 的「工作预设已保存」会残留在新面板上。
+另补：恢复 T1c 的两处说明注释；向导选项补齐 value 与 label 对齐，避免写入值与展示不一致。
+
+选项精简：value 与 label 对齐后，面板把 WIZARD_POOL 里所有同 writes 的题目池化，
+汇报方式与推进方式各有 4 道分支题，于是各池化出 16 个芯片，还混进别的工作重点的措辞。
+改为按当前 focus 沿 q_start 的 next 链推导对应分支（visited 防环，不硬编码 focus -> 题目 id），
+focus 取不到或不认识时回退 q_start.next("B") 那条链；当前已保存的值不在收窄后的选项里时
+追加到末尾并去重，仍渲染成选中的芯片而不是掉进「自定义」输入框。
+推导逻辑放在 bot-presets.ts 并 export，便于 node test 覆盖。
+落地后每字段芯片数：工作重点 4（不变）、汇报方式 4（16 -> 4）、推进方式 4（16 -> 4）。
+
+门禁真实数字：
+- `npx tsc --noEmit -p apps/mms-web`: 0 错误（exit 0，无输出）。
+- `node --test apps/mms-web/tests/*.test.mjs`: tests 113 / pass 113 / fail 0（新增 2 条推导断言）。
+- `grep -o '#[0-9a-fA-F]\{3,8\}' apps/mms-web/src/bot*.css | sort -u | wc -l`: 12。
+- `npm run build --workspace @mms/web`: 成功，index-Xe9IzfBo.js 786.72 kB / index-BQc-MtQj.css 219.63 kB。
+- `python3 -m pytest tests/test_mms_web_bots.py tests/test_bot_memory.py -q`: 58 passed。
+- `python3 scripts/ci_pytest_regression.py --base origin/dev`: base 63 failing of 2490、
+  head 63 failing of 2642，No test that passes on the base commit fails here（exit 0）。
+- `python3 scripts/regression_fresh_user_gate.py`（完整版，单独跑）: 677 passed in 140.29s，
+  fresh-user regression: PASS（exit 0）。
+
+落地的 4 个提交：
+1. `feat(web): 对话式引导与工作预设面板`（author Antigravity <gemini-3.6@google.com>，含 Claude 回修 4 点）
+2. `fix(web): 预设面板只显示当前工作重点对应的选项`
+3. `build(web): package T1f`（scripts/build_mms_web_release.py --skip-install 重建 mms_web_static）
+4. `docs(walls): record the T1f landing`
+
+验证实例：60824 按原参数重启（state-root workspace/.stride-output/live/state、
+config-root ~/.config/mms-next），static-root 换成 wt-T1f/mms_web_static，
+服务端返回 index-Xe9IzfBo.js，与新产物一致。
+
+环境与约束守卫：
+- 未 merge 任何 PR，未动 mms_core/mms_launchers/mms_tui/mms_bridge 等高风险文件。
+- 未写真实 ~/.config/mms* 配置；未 stash/reset/checkout 丢弃任何改动。
+- 只 stage 明确列出的路径，未跟踪的 node_modules 符号链接未进任何提交。
+耗时: 约 40 分钟 · 归因: [AGENT]

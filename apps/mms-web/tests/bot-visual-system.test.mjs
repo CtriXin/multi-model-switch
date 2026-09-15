@@ -64,7 +64,16 @@ test("getBotSecondLine follows strict priority order and returns null when empty
   const waitTask = { botId: "bot-1", prompt: "待确认任务", status: "waiting", waitReason: "needs_approval" };
   assert.equal(getBotSecondLine(bot, undefined, [runningTask, waitTask], refNow), "正在处理用户请求");
 
-  // 2. waitReason priority
+  // 2. pendingQuestion / waitReason priority
+  // 2a. bot.pendingQuestion -> "等你回复"
+  const botWithQuestion = { ...bot, pendingQuestion: { taskId: "t1", question: "要继续吗？" } };
+  assert.equal(getBotSecondLine(botWithQuestion, undefined, [], refNow), "等你回复");
+
+  // 2b. waitingTask waitReason="user" -> "等你回复"
+  const waitUserTask = { botId: "bot-1", prompt: "提问任务", status: "waiting", waitReason: "user" };
+  assert.equal(getBotSecondLine(bot, undefined, [waitUserTask], refNow), "等你回复");
+
+  // 2c. waitingTask other waitReason -> label
   assert.equal(getBotSecondLine(bot, undefined, [waitTask], refNow), "等待你在会话中确认");
 
   // 3. Next schedule priority ("明天 09:00 · 任务前 12 字")
@@ -76,17 +85,26 @@ test("getBotSecondLine follows strict priority order and returns null when empty
   };
   assert.equal(getBotSecondLine(bot, undefined, [scheduledTask], refNow), "明天 09:00 · 超长定时任务名称用来测试");
 
-  // 4. outcome.summary priority
+  // 4. Preset summary priority (不再显示模型最后一条回复/outcome.summary)
+  const botWithPreset = {
+    id: "bot-p",
+    status: "idle",
+    description: "默认描述",
+    systemPrompt: "这是创建时确认的工作预设，请持续遵守：\n- 主要帮我处理：工作与项目\n- 回报方式：只说结论\n- 执行方式：能直接做就直接做\n- 结果优先，过程保持安静；遇到无法安全判断的关键分歧时再询问。",
+  };
   const finishedTask = {
-    botId: "bot-1",
+    botId: "bot-p",
     prompt: "已完成任务",
     status: "completed",
     outcome: { summary: "成功生成了报告并交付" },
   };
-  assert.equal(getBotSecondLine(bot, undefined, [finishedTask], refNow), "成功生成了报告并交付");
+  // 预设摘要优先于描述，且不显示 finishedTask outcome
+  assert.equal(getBotSecondLine(botWithPreset, undefined, [finishedTask], refNow), "工作与项目 · 只说结论 · 能直接做就直接做");
 
-  // 5. description
+  // 5. description priority (排除 "随时可以接活")
   assert.equal(getBotSecondLine(bot, undefined, [], refNow), "默认描述");
+  const readyBot = { id: "bot-ready", status: "idle", description: "随时可以接活" };
+  assert.equal(getBotSecondLine(readyBot, undefined, [], refNow), null);
 
   // 6. null when none exist (no description, no tasks)
   const emptyBot = { id: "bot-2", status: "idle", description: "" };
