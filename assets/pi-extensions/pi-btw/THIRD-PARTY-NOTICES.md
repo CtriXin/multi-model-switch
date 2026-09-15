@@ -1,6 +1,6 @@
 # Third-party code inside `index.ts`
 
-`index.ts` is the esbuild output of `@ctrixin/pi-btw` — a fork of
+`index.ts` is the esbuild output of `@ctrixin-dev/pi-btw` — a fork of
 `@narumitw/pi-btw` (see `NOTICE` for provenance and `LICENSE` for the
 MIT terms). Besides the fork itself it inlines these runtime
 dependencies, because the vendored file has no node_modules to resolve at:

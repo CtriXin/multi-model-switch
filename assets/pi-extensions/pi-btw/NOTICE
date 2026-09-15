@@ -1,6 +1,6 @@
 # NOTICE — fork provenance
 
-`@ctrixin/pi-btw` is a fork of `@narumitw/pi-btw` (MIT), maintained by CtriXin.
+`@ctrixin-dev/pi-btw` is a fork of `@narumitw/pi-btw` (MIT), maintained by CtriXin.
 The upstream MIT `LICENSE` and its original copyright notice (`Copyright (c) 2026 narumiruna`) are
 retained unchanged in [`LICENSE`](./LICENSE). All upstream code stays under the MIT license; the
 modifications made in this fork are distributed under the same MIT terms.
