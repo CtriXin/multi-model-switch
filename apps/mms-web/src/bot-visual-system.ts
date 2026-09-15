@@ -108,10 +108,14 @@ export interface BotSummaryTask {
   result?: string | null;
 }
 
+import { parsePreset, getPresetSummary } from "./bot-presets.ts";
+
 export interface BotSummaryBot {
   id: string;
   status: BotStatus;
   description?: string;
+  systemPrompt?: string;
+  pendingQuestion?: { taskId?: string; question?: string; options?: string[]; since?: string } | null;
 }
 
 export function getBotSecondLine(
@@ -129,10 +133,17 @@ export function getBotSecondLine(
     return runningTask.prompt.trim();
   }
 
-  // 2. waitReason
+  // 2. pendingQuestion / waitReason（有 pendingQuestion 显示"等你回复"，其次预设摘要，再描述）
   const waitingTask = botTasks.find((t) => Boolean(t.waitReason) || t.status === "waiting")
     || (task && (Boolean(task.waitReason) || task.status === "waiting") ? task : undefined);
+
+  if (bot.pendingQuestion && (bot.pendingQuestion.question || bot.pendingQuestion.taskId)) {
+    return "等你回复";
+  }
   if (waitingTask?.waitReason?.trim()) {
+    if (waitingTask.waitReason === "user") {
+      return "等你回复";
+    }
     return waitReasonLabel(waitingTask.waitReason) || waitingTask.waitReason.trim();
   }
 
@@ -145,20 +156,18 @@ export function getBotSecondLine(
     return snippet ? `${timeLabel} · ${snippet}` : timeLabel;
   }
 
-  // 4. 上次 outcome.summary
-  const finishedTasks = botTasks
-    .filter((t) => Boolean(t.outcome?.summary?.trim()))
-    .sort((a, b) => (b.updatedAt || b.createdAt || "").localeCompare(a.updatedAt || a.createdAt || ""));
-  if (finishedTasks.length > 0 && finishedTasks[0].outcome?.summary?.trim()) {
-    return finishedTasks[0].outcome.summary.trim();
-  }
-  if (task?.outcome?.summary?.trim()) {
-    return task.outcome.summary.trim();
+  // 4. 预设摘要（Bot 有向导预设时显示摘要；不再显示模型最后一条回复）
+  if (bot.systemPrompt) {
+    const summary = getPresetSummary(parsePreset(bot.systemPrompt).answers);
+    if (summary) {
+      return summary;
+    }
   }
 
-  // 5. description
-  if (bot.description?.trim()) {
-    return bot.description.trim();
+  // 5. description（头部把 description === "随时可以接活" 当空，侧栏卡片两处统一）
+  const desc = bot.description?.trim();
+  if (desc && desc !== "随时可以接活") {
+    return desc;
   }
 
   // 6. 如果没有则不渲染第二行，单行垂直居中。禁止 "MMS Bot" 占位。

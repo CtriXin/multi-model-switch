@@ -34,14 +34,24 @@ import {
 import { BotPlan } from "./BotPlan";
 import { previewType } from "./bot-artifact-preview";
 import type { BotChildResult, BotPendingQuestion, BotTaskPlan, Preset } from "./types";
-import { request } from "./api";
+import { isPreview, mutate, request } from "./api";
+import { BotPresetPanel } from "./BotPresetPanel";
 import {
   suggestBotName,
   looksLikeStandingInstruction,
   parsePreset,
   buildPreset,
+  runWizard,
+  getPresetSummary,
+  WIZARD_POOL,
+  SKIPPED_WIZARD_PROMPT,
 } from "./bot-presets";
-import type { OnboardingAnswers, ParsedPreset } from "./bot-presets";
+import type {
+  OnboardingAnswers,
+  ParsedPreset,
+  WizardAnswerEntry,
+  WizardQuestion,
+} from "./bot-presets";
 import "./bot.css";
 
 export type BotStatus = "idle" | "busy" | "paused";
@@ -1123,53 +1133,41 @@ export function AutoWakeControl({
 export type { OnboardingAnswers, ParsedPreset };
 export { suggestBotName, looksLikeStandingInstruction, parsePreset, buildPreset };
 
-const onboardingQuestions = [
-  { key: "focus", title: "你最想让我先帮你处理哪一类事？", options: ["工作与项目", "资料整理与写作", "生活安排", "都可以，按事情判断"] },
-  { key: "style", title: "你希望我怎么回报？", options: ["只说结论", "结论加关键依据", "需要时再展开"] },
-  { key: "autonomy", title: "平时我应该怎么推进？", options: ["能直接做就直接做", "先给我一个简短计划", "涉及外部操作先问我"] },
-] as const;
-
 function readOnboardingAnswers(prompt: string): OnboardingAnswers {
   return parsePreset(prompt).answers;
 }
 
-function onboardingPrompt(answers: OnboardingAnswers, rules: string[] = [], other = "") {
-  return buildPreset({ answers, rules, other });
-}
-
-function BotOnboarding({
+function BotConversationalWizard({
   bot,
-  answers,
   existingNames = [],
   busy,
   disabled,
   error,
-  onAnswer,
-  onEditAnswer,
   onComplete,
-  onCancel,
+  onSkip,
 }: {
   bot: BotDefinition;
-  answers: OnboardingAnswers;
   existingNames?: string[];
   busy: boolean;
   disabled: boolean;
   error?: string;
-  onAnswer: (key: keyof OnboardingAnswers, value: string) => void;
-  onEditAnswer?: (key: keyof OnboardingAnswers) => void;
-  onComplete: (finalName: string) => Promise<void>;
-  onCancel?: () => void;
+  onComplete: (finalName: string, prompt: string, fact?: string | null) => Promise<void>;
+  onSkip: () => void;
 }) {
-  const allAnswered = Boolean(answers.focus && answers.style && answers.autonomy);
-  const isNewBot = !bot.name || !bot.name.trim() || bot.name === "未命名" || (bot.name === "新 Bot" && !bot.systemPrompt);
-  const hasCustomName = !isNewBot;
-  const suggestedName = suggestBotName(answers, existingNames);
-  const [nameInput, setNameInput] = useState(hasCustomName ? bot.name : suggestedName);
+  const [answersList, setAnswersList] = useState<WizardAnswerEntry[]>([]);
+  const [freeInput, setFreeInput] = useState("");
   const nameInputRef = useRef<HTMLInputElement>(null);
 
+  const { nextQuestion, preset } = useMemo(() => runWizard(answersList), [answersList]);
+  const isFinished = nextQuestion === null;
+
+  const isNewBot = !bot.name || !bot.name.trim() || bot.name === "未命名" || (bot.name === "新 Bot" && !bot.systemPrompt);
+  const suggestedName = useMemo(() => suggestBotName(preset.answers, existingNames), [preset.answers, existingNames]);
+  const [nameInput, setNameInput] = useState(isNewBot ? "" : bot.name);
+
   useEffect(() => {
-    if (allAnswered) {
-      if (!hasCustomName) {
+    if (isFinished) {
+      if (isNewBot && !nameInput) {
         setNameInput(suggestedName);
       }
       const timer = setTimeout(() => {
@@ -1178,64 +1176,186 @@ function BotOnboarding({
       }, 50);
       return () => clearTimeout(timer);
     }
-  }, [allAnswered, answers.focus, suggestedName, hasCustomName]);
+  }, [isFinished, isNewBot, suggestedName]);
 
-  const handleFinish = () => {
-    const finalName = nameInput.trim() || (hasCustomName ? bot.name : suggestedName);
-    void onComplete(finalName);
+  // 键盘快捷键监听 A-E
+  useEffect(() => {
+    if (isFinished || disabled || busy || !nextQuestion) return;
+
+    function handleKeyDown(e: KeyboardEvent) {
+      const active = document.activeElement;
+      if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) {
+        return;
+      }
+      const key = e.key.toUpperCase();
+      if (["A", "B", "C", "D", "E"].includes(key)) {
+        const opt = nextQuestion?.options.find((o) => o.key === key);
+        if (opt) {
+          e.preventDefault();
+          chooseOption(opt.key);
+        }
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isFinished, disabled, busy, nextQuestion]);
+
+  const chooseOption = (key: string) => {
+    if (!nextQuestion) return;
+    setAnswersList((prev) => [...prev, { questionId: nextQuestion.id, optionKey: key }]);
+    setFreeInput("");
+  };
+
+  const handleFreeSubmit = () => {
+    const text = freeInput.trim();
+    if (!text || !nextQuestion) return;
+    setAnswersList((prev) => [...prev, { questionId: nextQuestion.id, text }]);
+    setFreeInput("");
+  };
+
+  const handleFinish = async () => {
+    const finalName = nameInput.trim() || (isNewBot ? suggestedName : bot.name);
+    // 判断是否以 E 退出或无任何有效偏好
+    const quitAtFirst = answersList.length === 1 && answersList[0].optionKey === "E";
+    const hasPreferences = !quitAtFirst && Boolean(
+      preset.answers.focus ||
+      preset.answers.style ||
+      preset.answers.autonomy ||
+      (preset.answers.extra && Object.keys(preset.answers.extra).length > 0)
+    );
+
+    const prompt = hasPreferences ? buildPreset({ answers: preset.answers, rules: [], other: "" }) : SKIPPED_WIZARD_PROMPT;
+    let fact: string | null = null;
+    if (hasPreferences) {
+      const parts: string[] = [];
+      if (preset.answers.focus) parts.push(`主要偏好处理${preset.answers.focus}`);
+      if (preset.answers.style) parts.push(`希望以“${preset.answers.style}”的方式汇报`);
+      if (preset.answers.autonomy) parts.push(`推进方式偏好“${preset.answers.autonomy}”`);
+      if (preset.answers.extra) {
+        for (const [k, v] of Object.entries(preset.answers.extra)) {
+          const q = WIZARD_POOL[k];
+          const displayLabel = q ? q.shortLabel : k;
+          if (v && !parts.some((p) => p.includes(v))) {
+            parts.push(`${displayLabel}偏好“${v}”`);
+          }
+        }
+      }
+      if (parts.length > 0) {
+        fact = `工作偏好：${parts.slice(0, 3).join("；")}。`;
+      }
+    }
+    await onComplete(finalName, prompt, fact);
   };
 
   return (
-    <div className="bot-chat-message bot-chat-onboarding" aria-label="工作预设向导">
-      <PixelAvatar
-        className="bot-chat-event-avatar"
-        avatarId={bot.avatarId}
-        color={bot.avatarColor}
-        seed={bot.id}
-      />
-      <div className="bot-onboarding-content">
-        <div className="bot-onboarding-greeting">
-          <p>
-            嗨，我是 <strong>{isNewBot ? "你的新协作者" : bot.name}</strong>。告诉我几个你的偏好，之后我会作为默认工作方式：
-          </p>
-          {onCancel && (
-            <button
-              type="button"
-              className="bot-onboarding-cancel"
-              onClick={onCancel}
-              aria-label="取消预设编辑"
-            >
-              取消
-            </button>
-          )}
+    <div className="bot-conversational-wizard" aria-label="工作预设向导">
+      {/* 初始问候语 */}
+      <div className="bot-chat-message bot-chat-event bot-wizard-greeting">
+        <PixelAvatar className="bot-chat-event-avatar" avatarId={bot.avatarId} color={bot.avatarColor} seed={bot.id} />
+        <div className="bot-chat-bubble bot-chat-bubble-system">
+          <p>你好，我是刚建好的助手。</p>
         </div>
-        <div className="bot-onboarding-questions">
-          {onboardingQuestions.map((q) => {
-            const selectedValue = answers[q.key];
-            return (
-              <div className="bot-onboarding-question-block" key={q.key}>
-                <span className="bot-onboarding-question-title">{q.title}</span>
-                <div className="bot-onboarding-chips">
-                  {q.options.map((opt) => {
-                    const isSelected = selectedValue === opt;
-                    return (
-                      <button
-                        key={opt}
-                        type="button"
-                        className={`bot-onboarding-chip${isSelected ? " is-selected" : ""}`}
-                        disabled={disabled || busy}
-                        onClick={() => onAnswer(q.key, opt)}
-                      >
-                        {opt}
-                      </button>
-                    );
-                  })}
+      </div>
+
+      {/* 已完成的问答轮次 */}
+      {answersList.map((entry, idx) => {
+        const q = WIZARD_POOL[entry.questionId];
+        const chosenOpt = q?.options.find((o) => o.key === entry.optionKey);
+        const userText = entry.text || chosenOpt?.label || entry.optionKey || "";
+        return (
+          <Fragment key={idx}>
+            {q && (
+              <div className="bot-chat-message bot-chat-event bot-wizard-history-question">
+                <PixelAvatar className="bot-chat-event-avatar" avatarId={bot.avatarId} color={bot.avatarColor} seed={bot.id} />
+                <div className="bot-chat-bubble bot-chat-bubble-system">
+                  <p>{q.ask}</p>
                 </div>
               </div>
-            );
-          })}
-          {allAnswered && (
-            <div className="bot-onboarding-question-block bot-onboarding-name-block">
+            )}
+            <div className="bot-chat-message bot-chat-user bot-wizard-history-answer">
+              <div className="bot-chat-bubble bot-chat-bubble-user">
+                <p>{userText}</p>
+              </div>
+            </div>
+          </Fragment>
+        );
+      })}
+
+      {/* 当前提问卡片 */}
+      {!isFinished && nextQuestion && (
+        <div className="bot-chat-message bot-chat-event bot-wizard-active-step">
+          <PixelAvatar className="bot-chat-event-avatar" avatarId={bot.avatarId} color={bot.avatarColor} seed={bot.id} />
+          <div className="bot-wizard-card">
+            <div className="bot-wizard-card-header">
+              <h3 className="bot-wizard-question-title">{nextQuestion.ask}</h3>
+              <button
+                type="button"
+                className="bot-wizard-skip-btn"
+                onClick={onSkip}
+                title="跳过向导"
+                aria-label="跳过向导"
+              >
+                <X size={15} />
+              </button>
+            </div>
+            <div className="bot-wizard-options-list">
+              {nextQuestion.options.map((opt) => (
+                <button
+                  key={opt.key}
+                  type="button"
+                  className="bot-wizard-option-row"
+                  disabled={disabled || busy}
+                  onClick={() => chooseOption(opt.key)}
+                >
+                  <span className="bot-wizard-option-badge">{opt.key}</span>
+                  <div className="bot-wizard-option-text">
+                    <span className="bot-wizard-option-label">{opt.label}</span>
+                    {opt.hint && <span className="bot-wizard-option-hint">{opt.hint}</span>}
+                  </div>
+                </button>
+              ))}
+            </div>
+            <div className="bot-wizard-free-input-row">
+              <input
+                type="text"
+                className="bot-wizard-free-input"
+                placeholder="输入你自己的回答…"
+                value={freeInput}
+                disabled={disabled || busy}
+                onChange={(e) => setFreeInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleFreeSubmit();
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="bot-secondary-button bot-wizard-free-submit"
+                disabled={disabled || busy || !freeInput.trim()}
+                onClick={handleFreeSubmit}
+              >
+                发送
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 提问完成，起名阶段 */}
+      {isFinished && (
+        <>
+          <div className="bot-chat-message bot-chat-event bot-wizard-memorized">
+            <PixelAvatar className="bot-chat-event-avatar" avatarId={bot.avatarId} color={bot.avatarColor} seed={bot.id} />
+            <div className="bot-chat-bubble bot-chat-bubble-system">
+              <p>好，记住了。</p>
+            </div>
+          </div>
+          <div className="bot-chat-message bot-chat-event bot-wizard-naming-step">
+            <PixelAvatar className="bot-chat-event-avatar" avatarId={bot.avatarId} color={bot.avatarColor} seed={bot.id} />
+            <div className="bot-wizard-card bot-onboarding-name-block">
               <span className="bot-onboarding-question-title">我叫什么？</span>
               <div className="bot-onboarding-name-row">
                 <input
@@ -1263,10 +1383,11 @@ function BotOnboarding({
                 </button>
               </div>
             </div>
-          )}
-        </div>
-        {error && <p className="bot-inline-error" role="alert">{error}</p>}
-      </div>
+          </div>
+        </>
+      )}
+
+      {error && <p className="bot-inline-error" role="alert">{error}</p>}
     </div>
   );
 }
@@ -1391,9 +1512,6 @@ export function BotChat({
   // 长期约定反馈与自动提议忽略集合
   const [ruleFeedback, setRuleFeedback] = useState<Record<string, string>>({});
   const [dismissedSuggestions, setDismissedSuggestions] = useState<Set<string>>(new Set());
-
-  // 预设编辑器中的规则列表
-  const [editingRules, setEditingRules] = useState<string[]>([]);
 
   // 等你回复（T3d-ui）
   const [dismissedPendingTaskIds, setDismissedPendingTaskIds] = useState<string[]>([]);
@@ -1615,11 +1733,29 @@ export function BotChat({
   const [settingNotice, setSettingNotice] = useState("");
   const streamRef = useRef<HTMLDivElement>(null);
   const followLatest = useRef(true);
+
+  const currentPresetSummary = useMemo(() => {
+    return bot?.systemPrompt ? getPresetSummary(parsePreset(bot.systemPrompt).answers) : null;
+  }, [bot?.systemPrompt]);
+
+  const displayedDescription = useMemo(() => {
+    if (bot?.description && bot.description.trim() && bot.description !== "随时可以接活") {
+      return bot.description.trim();
+    }
+    return currentPresetSummary || "";
+  }, [bot?.description, currentPresetSummary]);
+
   useEffect(() => {
     followLatest.current = true;
     setOnboarding(bot?.systemPrompt ? readOnboardingAnswers(bot.systemPrompt) : {});
-    const saved = bot?.systemPrompt ? readOnboardingAnswers(bot.systemPrompt) : {};
-    setOnboardingDone(Boolean(saved.focus && saved.style && saved.autonomy));
+    const parsed = bot?.systemPrompt ? parsePreset(bot.systemPrompt) : null;
+    const hasPreset = Boolean(
+      parsed &&
+      (parsed.answers.focus || parsed.answers.style || parsed.answers.autonomy || (parsed.answers.extra && Object.keys(parsed.answers.extra).length > 0))
+    );
+    const hasTasks = tasks.some((t) => t.botId === bot?.id);
+    const hasCustomPrompt = Boolean(bot?.systemPrompt && bot.systemPrompt.trim());
+    setOnboardingDone(hasPreset || hasTasks || hasCustomPrompt);
     setOnboardingEditing(false);
     setOnboardingError("");
     setSettingNotice("");
@@ -1688,7 +1824,7 @@ export function BotChat({
     }
     return conversationTasks.filter((t) => !absorbedIds.has(t.id));
   }, [conversationTasks, absorbedTasksByParent]);
-  const onboardingMode = Boolean(bot && (!bot.systemPrompt.trim() || bot.systemPrompt.includes("这是创建时确认的工作预设")));
+
   async function submit(event: FormEvent) {
     event.preventDefault();
     const content = value.trim();
@@ -1738,7 +1874,8 @@ export function BotChat({
     }
   }
   return (
-    <section className="bot-chat-shell" aria-label="Bot 对话窗口">
+    <>
+      <section className="bot-chat-shell" aria-label="Bot 对话窗口">
       <header className="bot-chat-header">
         <div className="bot-chat-identity">
           <div className="bot-chat-avatar-wrap">
@@ -1908,7 +2045,7 @@ export function BotChat({
                 }}
                 title={bot ? "点击修改描述" : undefined}
               >
-                {bot?.description || "随时可以接活"}
+                {displayedDescription}
               </p>
             )}
             {headerError && <span className="bot-inline-error">{headerError}</span>}
@@ -1921,19 +2058,12 @@ export function BotChat({
               <span>记忆</span>
             </button>
           )}
-          {bot && onboardingDone && onUpdateBot && (
+          {bot && onUpdateBot && (
             <button
               className={"bot-quiet-button" + (onboardingEditing ? " is-active" : "")}
               type="button"
               onClick={() => {
-                if (onboardingEditing) {
-                  setOnboardingEditing(false);
-                } else {
-                  const parsed = parsePreset(bot.systemPrompt || "");
-                  setEditingRules(parsed.rules);
-                  setOnboarding(parsed.answers);
-                  setOnboardingEditing(true);
-                }
+                setOnboardingEditing((prev) => !prev);
               }}
               aria-label="调整工作预设"
               aria-pressed={onboardingEditing}
@@ -1967,94 +2097,58 @@ export function BotChat({
             <p>左侧列表里的 Bot 会在这里执行任务并回传结果。</p>
           </div>
         )}
-        {bot && ((onboardingMode && !onboardingDone) || onboardingEditing) && (
-          (!onboardingMode || (onboardingDone && !onboardingEditing)) ? (
-            <div className="bot-chat-empty">
-              <BotIcon size={30} />
-              <h2>可以开始了</h2>
-              <p>把目标告诉 {bot.name}，它会在自己的运行环境中执行。</p>
-              {onboarding.focus && onboarding.style && onboarding.autonomy && (
-                <button
-                  className="bot-onboarding-edit"
-                  type="button"
-                  onClick={() => {
-                    const parsed = parsePreset(bot.systemPrompt || "");
-                    setEditingRules(parsed.rules);
-                    setOnboarding(parsed.answers);
-                    setOnboardingEditing(true);
-                  }}
-                >
-                  调整工作预设
-                </button>
-              )}
-            </div>
-          ) : (
-            <div className="bot-onboarding-wrapper">
-              <BotOnboarding
-                bot={bot}
-                answers={onboarding}
-                existingNames={bots.map((b) => b.name)}
-                busy={onboardingBusy}
-                disabled={!onUpdateBot}
-                error={onboardingError}
-                onAnswer={(key, value) => {
-                  const next = { ...onboarding, [key]: value };
-                  setOnboarding(next);
-                }}
-                onEditAnswer={(key) => setOnboarding((current) => ({ ...current, [key]: undefined }))}
-                onCancel={onboardingEditing ? () => setOnboardingEditing(false) : undefined}
-                onComplete={async (finalName) => {
-                  if (!onUpdateBot || !onboarding.focus || !onboarding.style || !onboarding.autonomy) return;
-                  setOnboardingBusy(true);
-                  setOnboardingError("");
+        {bot && !onboardingDone && conversationTasks.length === 0 && (
+          <BotConversationalWizard
+            bot={bot}
+            existingNames={bots.map((b) => b.name)}
+            busy={onboardingBusy}
+            disabled={!onUpdateBot}
+            error={onboardingError}
+            onComplete={async (finalName, prompt, fact) => {
+              if (!onUpdateBot) return;
+              setOnboardingBusy(true);
+              setOnboardingError("");
+              try {
+                const patch: { name?: string; systemPrompt: string } = { systemPrompt: prompt };
+                if (finalName && finalName.trim() && finalName.trim() !== bot.name) {
+                  patch.name = finalName.trim();
+                }
+                await onUpdateBot(bot.id, patch);
+                if (fact && !isPreview) {
                   try {
-                    const parsed = parsePreset(bot.systemPrompt || "");
-                    const prompt = buildPreset({
-                      answers: onboarding,
-                      rules: onboardingEditing ? editingRules : parsed.rules,
-                      other: parsed.other,
+                    await mutate(`/bots/${encodeURIComponent(bot.id)}/memory`, {
+                      action: "remember",
+                      content: fact,
                     });
-                    const patch: { name?: string; systemPrompt: string } = { systemPrompt: prompt };
-                    if (finalName && finalName.trim() && finalName.trim() !== bot.name) {
-                      patch.name = finalName.trim();
-                    }
-                    await onUpdateBot(bot.id, patch);
-                    setOnboardingDone(true);
-                    setOnboardingEditing(false);
-                  } catch (cause) {
-                    setOnboardingError(cause instanceof Error ? cause.message : "工作预设保存失败，请重试。");
-                  } finally {
-                    setOnboardingBusy(false);
+                  } catch (e) {
+                    console.warn("写入偏好记忆失败", e);
                   }
-                }}
-              />
-              {onboardingEditing && (
-                <div className="bot-onboarding-rules-editor">
-                  <span className="bot-onboarding-question-title">补充约定（{editingRules.length}/12）</span>
-                  {editingRules.length === 0 ? (
-                    <p className="bot-onboarding-rules-empty">暂无补充约定，可在聊天中悬停消息点击「记为约定」添加。</p>
-                  ) : (
-                    <ul className="bot-onboarding-rules-list">
-                      {editingRules.map((rule, idx) => (
-                        <li key={idx} className="bot-onboarding-rule-item">
-                          <span className="bot-onboarding-rule-text">{rule}</span>
-                          <button
-                            type="button"
-                            className="bot-rule-delete-btn"
-                            onClick={() => setEditingRules((prev) => prev.filter((_, i) => i !== idx))}
-                            title="删除此约定"
-                            aria-label="删除此约定"
-                          >
-                            <X size={13} />
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              )}
-            </div>
-          )
+                }
+                setOnboardingDone(true);
+              } catch (cause) {
+                setOnboardingError(cause instanceof Error ? cause.message : "工作预设保存失败，请重试。");
+              } finally {
+                setOnboardingBusy(false);
+              }
+            }}
+            onSkip={async () => {
+              if (onUpdateBot) {
+                try {
+                  await onUpdateBot(bot.id, { systemPrompt: SKIPPED_WIZARD_PROMPT });
+                } catch (e) {
+                  console.warn("跳过向导持久化失败", e);
+                }
+              }
+              setOnboardingDone(true);
+            }}
+          />
+        )}
+        {bot && onboardingDone && conversationTasks.length === 0 && (
+          <div className="bot-chat-empty">
+            <BotIcon size={30} />
+            <h2>可以开始了</h2>
+            <p>把目标告诉 {bot.name}，它会在自己的运行环境中执行。</p>
+          </div>
         )}
         {settingNotice && bot && (
           <div className="bot-chat-message bot-chat-event bot-chat-final bot-settings-notice">
@@ -2688,6 +2782,15 @@ export function BotChat({
         </form>
       </div>
     </section>
+    {bot && onboardingEditing && (
+      <BotPresetPanel
+        bot={bot}
+        onClose={() => setOnboardingEditing(false)}
+        onUpdateBot={onUpdateBot}
+        preview={isPreview}
+      />
+    )}
+    </>
   );
 }
 export function BotWorkspace({ children }: { children?: ReactNode }) {
