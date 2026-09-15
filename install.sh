@@ -2888,8 +2888,12 @@ if [ -x "$BIN_DIR/mms" ]; then
         DID_LAUNCH=1
     fi
 
-    if [ "$PREVIEW_CHANNEL_INSTALL" -eq 0 ] && [ "$DID_LAUNCH" -eq 0 ] && [ "$LAUNCH_AFTER_INSTALL" -eq 0 ]; then
-        echo "  $(t "在 MMS Web 里添加 provider 和 API Key，就可以开始对话。" "Add a provider and API key in MMS Web, then start a conversation.")"
+    if [ "$DID_LAUNCH" -eq 0 ] && [ "$LAUNCH_AFTER_INSTALL" -eq 0 ]; then
+        if [ "$PREVIEW_CHANNEL_INSTALL" -eq 1 ]; then
+            echo "  $(t "Pilot 会打开用于添加 provider 和 API Key；如果没有自动打开，运行:" "Pilot will open so you can add a provider and API key; if it does not open, run:") $NEXT_MMF_CMD web start --open"
+        else
+            echo "  $(t "在 MMS Web 里添加 provider 和 API Key，就可以开始对话。" "Add a provider and API key in MMS Web, then start a conversation.")"
+        fi
         echo "  $(t "排查安装问题:" "To diagnose the install:") bash install.sh --check"
         offer_mms_web
     fi

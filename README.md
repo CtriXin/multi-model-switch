@@ -115,6 +115,8 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 
 升级同样是重新粘贴这一条命令，但如果 Pilot 正在运行，安装器会暂停并拒绝，不会替你关闭它：请先在 Pilot 页面里点“更新”，或者执行 `mms web stop`（本机有多个实例用 `mms web stop --all`）退出后再重新执行安装命令。跨配置根的版本会在 Pilot 更新中心明确要求先执行这条安装命令；它不会自动删除或移动旧 `~/.config/mms`，因为那里可能还有 gateway/session 运行数据。
 
+> `install.sh` 是 macOS/Linux 的安装器；Windows 请使用上面的 PowerShell 安装方式。`--channel dev` 会安装 `dev` 分支当前内容，版本号可能低于 Stable，这是预览分支的正常语义；只想安装已发布版本请使用 Stable 命令或固定 `--ref vX.Y.Z`。
+
 <details>
 <summary>其他安装方式</summary>
 
