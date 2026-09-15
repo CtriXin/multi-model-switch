@@ -22,6 +22,13 @@ This file is the shared rule source for Codex, Claude, and other coding agents i
 - NSR Stop/compact, Map auto-index and CodeGraph auto-index hooks are retired. Keep explicit tools available; do not reinstall automatic registrations or delete user markers/indexes.
 - Existing MMS session registrations may use shared wrappers. Retired wrappers remain no-op compatibility entries; do not rewrite generated MMS configs to clean them up.
 
+## User-Machine Repairs And Contributions
+
+- For a user's machine-specific MMS bug, follow `docs/mms-web/WINDOWS-CONTRIBUTING.md` (the report and contribution flow also applies to other platforms).
+- Diagnose on the affected machine and keep one repair report with the exact baseline, full patch including new files, automated checks, user acceptance, and rollback. Installed-version hot patches are temporary until collected into source.
+- After local validation, ask whether the user has a GitHub account and wants to submit publicly. Help beginners prepare a fork/branch/PR; without an account or Git, provide a redacted report and patch/source bundle for a maintainer.
+- Authentication stays with the user. Show the exact files and text before public submission; do not upload credentials, raw sessions, or private configuration.
+
 ## Commit Identity
 
 For every agent-created commit, follow:

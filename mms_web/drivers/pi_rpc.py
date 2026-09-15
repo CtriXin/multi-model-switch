@@ -360,11 +360,36 @@ class PiRpcDriver:
                     line = line[:-1]
                 if not line.strip():
                     continue
-                self._handle_line(line.decode("utf-8", "replace"))
+                # A sink callback writes session state and may fail transiently
+                # (for example while a Windows file is briefly locked). That
+                # must not be treated as Pi stdout EOF: the child can still be
+                # alive and will continue emitting the RPC lifecycle. Isolate
+                # each event so one persistence/rendering failure does not
+                # finalize an otherwise healthy session.
+                try:
+                    self._handle_line(line.decode("utf-8", "replace"))
+                except Exception as exc:
+                    self._record_event_error(exc)
         except Exception:
             pass
         finally:
             self._on_stdout_eof()
+
+    def _record_event_error(self, exc: Exception) -> None:
+        detail = f"{type(exc).__name__}: {_clip(str(exc), 400)}"
+        self._stderr_tail = (self._stderr_tail + "\nRPC event handling error: " + detail)[-_STDERR_TAIL_BYTES:]
+        try:
+            self._sink.upsert_event(
+                {
+                    "id": f"n-rpc-{uuid.uuid4().hex[:12]}",
+                    "kind": "notice",
+                    "title": "RPC 事件处理异常",
+                    "text": "Pi 仍在运行，但有一条事件未能写入会话；后续事件会继续接收。",
+                }
+            )
+        except Exception:
+            # Reporting must never become another reader-thread failure.
+            pass
 
     def _stderr_loop(self) -> None:
         stream = self._proc.stderr

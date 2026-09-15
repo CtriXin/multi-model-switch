@@ -6,6 +6,8 @@ MMS Pilot 把 MMF 日常使用的模型、通道、effort、工作文件夹和 P
 
 支持 macOS、Linux；Windows Native 当前为 Preview。Windows 请从 GitHub Release 的固定 tag 下载并运行 `packages/mms-install/bin/install.ps1`（PowerShell 5.1/7、Python 3.11+、Node 18.17+）；当前公开 npm installer 仍只声明 macOS/Linux，不能把 `npx @ctrixin/mms` 当作 Windows 入口。新 PowerShell 窗口需重新加载 PATH；WSL2 仍是 fallback。Windows Native 尚未达到 Stable，Edge/Chrome CDP、Pi 生命周期和升级保护需按平台 acceptance matrix 验证。
 
+第一次使用 Windows 请直接看 [Windows 人话安装与自助修复](WINDOWS-CONTRIBUTING.md)：里面从打开 PowerShell、安装 Python/Node、加入 `PATH` 写起，也说明了没有可依赖的 MMS TUI 时如何启动 Pi，以及如何把独立问题交给本地 AI 修复并提交。
+
 安装程序会准备 Python 3.11+、兼容的 Node.js 和 Pi，已有 CLI 保留，缺失的 Claude/Codex/OpenCode 会自动补装。发布包自带编译好的页面，使用者不需要构建 Web。
 
 复制这一条命令到终端：
@@ -187,7 +189,3 @@ v4.7.0 起，点输入框旁的 Skills，默认显示五个内置用途：把想
 ### 检查真正加载了什么
 
 打开成果侧栏 →「运行详情」→「上下文与 Skills 来源」，可按消息查看当时记录：已选 Skill、实际自动载入的规则、Pi 可用 Skill 目录、文件来源与指纹。目录可用不等于正文加载；正文进入本轮输入才显示已加载。明确 `/skill:` 调用和 `read` 工具有调用/读取完成/失败记录；间接脚本读取暂无法可靠归因。旧会话或旧 Pi 没有证据时会明确说明，不会补造。
-
-### 让多个 Bot 协作
-
-侧栏的「Bot 工作台」可以创建各自绑定模型与工作文件夹的 Bot，派发任务、安排执行时间、接收子任务回传并查看文件与截图。实际操作和运行边界见 [Bot 工作台说明](BOTS.md)。

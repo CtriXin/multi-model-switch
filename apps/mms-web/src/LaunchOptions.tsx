@@ -110,7 +110,10 @@ export function WorkspaceDialog({ close, added, reference, initialQuery = "", su
     if (busy) return;
     setBusy(true); setError("");
     try {
-      const result = await mutate<{path: string}>("/workspaces/choose", {});
+      const result = await Promise.race([
+        mutate<{path: string}>("/workspaces/choose", {}),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("文件夹选择器没有打开。请直接输入完整的 Windows 路径，例如 C:\\Users\\Admin\\Downloads。")), 15000)),
+      ]);
       if (result.path) {
         if (reference) await reference(result.path);
         else added?.(await mutate<Workspace>("/workspaces", {path: result.path}));

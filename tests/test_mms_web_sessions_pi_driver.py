@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -143,6 +144,43 @@ def test_malformed_line_becomes_notice_and_flow_continues(make_driver):
     sink.wait_for(lambda: any(e.get("title") == "协议异常" for e in sink.events.values()))
     sink.wait_for(lambda: "idle" in sink.proto_states)
     assert sink.text_of([i for i in sink.order if i.startswith("m-")][0]) == "echo: malformed"
+
+
+def test_event_sink_failure_does_not_fake_process_exit():
+    """A transient session-write failure must not turn a live Pi into EOF."""
+    sink = RecordingSink()
+    sink_failures = {"remaining": 1}
+
+    original = sink.set_proto_state
+
+    def fail_once(state: str) -> None:
+        if sink_failures["remaining"]:
+            sink_failures["remaining"] -= 1
+            raise OSError("simulated transient Windows file lock")
+        original(state)
+
+    sink.set_proto_state = fail_once  # type: ignore[method-assign]
+    code = (
+        "import json,sys,time\n"
+        "for msg in ({'type':'agent_start'}, {'type':'agent_settled'}):\n"
+        " sys.stdout.write(json.dumps(msg)+'\\n'); sys.stdout.flush()\n"
+        "time.sleep(0.2)\n"
+        "sys.stdin.readline()\n"
+    )
+    proc = subprocess.Popen(
+        [sys.executable, "-c", code],
+        stdin=__import__("subprocess").PIPE,
+        stdout=__import__("subprocess").PIPE,
+        stderr=__import__("subprocess").PIPE,
+    )
+    driver = PiRpcDriver(proc, sink, name="event-failure")
+    try:
+        sink.wait_for(lambda: sink.proto_states == ["idle"])
+        assert driver.exit_code is None
+        assert sink.exited == []
+        assert any(e.get("title") == "RPC 事件处理异常" for e in sink.events.values())
+    finally:
+        driver.close(graceful_timeout=2.0)
 
 
 def test_stderr_is_captured_and_reported_on_error_exit(make_driver):
