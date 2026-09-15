@@ -1,7 +1,14 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Settings2, X, Plus, Trash2, Check, LoaderCircle } from "lucide-react";
 import type { BotDefinition } from "./Bot";
-import { parsePreset, buildPreset, WIZARD_POOL } from "./bot-presets";
+import {
+  parsePreset,
+  buildPreset,
+  WIZARD_POOL,
+  getFocusOptions,
+  getBranchOptionsForFocus,
+  withCurrentValue,
+} from "./bot-presets";
 import type { OnboardingAnswers } from "./bot-presets";
 
 interface BotPresetPanelProps {
@@ -10,24 +17,6 @@ interface BotPresetPanelProps {
   onUpdateBot?: (botId: string, patch: Partial<BotDefinition>) => Promise<void>;
   preview?: boolean;
 }
-
-function getFieldOptions(field: "focus" | "style" | "autonomy"): string[] {
-  const set = new Set<string>();
-  for (const q of Object.values(WIZARD_POOL)) {
-    if (q.writes === field) {
-      for (const opt of q.options) {
-        if (opt.key === "E" || opt.label === "先聊聊再说") continue;
-        const val = opt.value || opt.label;
-        if (val) set.add(val);
-      }
-    }
-  }
-  return Array.from(set);
-}
-
-const FOCUS_OPTIONS = getFieldOptions("focus");
-const STYLE_OPTIONS = getFieldOptions("style");
-const AUTONOMY_OPTIONS = getFieldOptions("autonomy");
 
 function FieldChipSelector({
   label,
@@ -184,6 +173,19 @@ export function BotPresetPanel({
     }));
   };
 
+  // 工作重点仍是 q_start 的 4 个取值；汇报方式 / 推进方式按当前 focus 收窄到对应分支，
+  // 当前已保存的值不在其中时追加保留，避免掉进「自定义」输入框。
+  const focusOptions = useMemo(() => getFocusOptions(), []);
+  const branchOptions = useMemo(() => getBranchOptionsForFocus(answers.focus), [answers.focus]);
+  const styleOptions = useMemo(
+    () => withCurrentValue(branchOptions.styleOptions, answers.style),
+    [branchOptions, answers.style],
+  );
+  const autonomyOptions = useMemo(
+    () => withCurrentValue(branchOptions.autonomyOptions, answers.autonomy),
+    [branchOptions, answers.autonomy],
+  );
+
   const extraEntries = Object.entries(answers.extra || {});
 
   return (
@@ -225,21 +227,21 @@ export function BotPresetPanel({
           <FieldChipSelector
             label="工作重点"
             value={answers.focus}
-            options={FOCUS_OPTIONS}
+            options={focusOptions}
             onChange={(focus) => setAnswers((prev) => ({ ...prev, focus }))}
           />
 
           <FieldChipSelector
             label="汇报方式"
             value={answers.style}
-            options={STYLE_OPTIONS}
+            options={styleOptions}
             onChange={(style) => setAnswers((prev) => ({ ...prev, style }))}
           />
 
           <FieldChipSelector
             label="推进方式"
             value={answers.autonomy}
-            options={AUTONOMY_OPTIONS}
+            options={autonomyOptions}
             onChange={(autonomy) => setAnswers((prev) => ({ ...prev, autonomy }))}
           />
         </section>

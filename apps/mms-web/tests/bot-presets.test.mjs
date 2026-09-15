@@ -10,6 +10,10 @@ import {
   getPresetSummary,
   WIZARD_POOL,
   SKIPPED_WIZARD_PROMPT,
+  getFocusOptions,
+  getFocusBranchMap,
+  getBranchOptionsForFocus,
+  withCurrentValue,
 } from "../src/bot-presets.ts";
 
 test("suggestBotName covers all four focus branches and duplicate index incrementing", () => {
@@ -346,3 +350,69 @@ test("SKIPPED_WIZARD_PROMPT is a real default rule: kept in other, round-trips, 
   assert.equal(getPresetSummary(parsed.answers), null);
 });
 
+
+test("focus branch options are derived from the wizard chain, not a hardcoded map", () => {
+  // 工作重点仍然只来自 q_start 的 4 个取值
+  assert.deepEqual(
+    getFocusOptions(),
+    WIZARD_POOL["q_start"].options
+    .filter((o) => o.key !== "E")
+    .map((o) => o.value || o.label),
+  );
+  assert.equal(getFocusOptions().length, 4);
+
+  const map = getFocusBranchMap();
+
+  // 「工作与项目」这条链：q_work_report(style) -> q_work_autonomy(autonomy)
+  assert.deepEqual(
+    map["工作与项目"].styleOptions,
+    WIZARD_POOL["q_work_report"].options
+    .filter((o) => o.key !== "E")
+    .map((o) => o.value || o.label),
+  );
+  assert.deepEqual(
+    map["工作与项目"].autonomyOptions,
+    WIZARD_POOL["q_work_autonomy"].options
+    .filter((o) => o.key !== "E")
+    .map((o) => o.value || o.label),
+  );
+  assert.equal(map["工作与项目"].styleOptions.length, 4);
+  assert.equal(map["工作与项目"].autonomyOptions.length, 4);
+
+  // 「日常事务与提醒」这条链：q_daily_remind(style) -> q_daily_habit(extra) -> q_daily_autonomy(autonomy)
+  assert.deepEqual(
+    map["日常事务与提醒"].styleOptions,
+    WIZARD_POOL["q_daily_remind"].options
+    .filter((o) => o.key !== "E")
+    .map((o) => o.value || o.label),
+  );
+  assert.deepEqual(
+    map["日常事务与提醒"].autonomyOptions,
+    WIZARD_POOL["q_daily_autonomy"].options
+    .filter((o) => o.key !== "E")
+    .map((o) => o.value || o.label),
+  );
+
+  // 分支之间不串味
+  assert.ok(!map["日常事务与提醒"].styleOptions.includes("只说结论"));
+  assert.ok(!map["工作与项目"].styleOptions.includes("直奔主题"));
+});
+
+test("unknown focus falls back to the default branch and the saved value is kept as a chip", () => {
+  const fallback = getBranchOptionsForFocus(undefined);
+  assert.deepEqual(fallback, getFocusBranchMap()["工作与项目"]);
+  assert.deepEqual(getBranchOptionsForFocus("我自己写的工作重点"), fallback);
+  assert.deepEqual(getBranchOptionsForFocus("查询与研究"), getFocusBranchMap()["查询与研究"]);
+
+  // 当前值不在收窄后的选项里时追加到末尾，仍然是一个选中的芯片
+  const style = withCurrentValue(getBranchOptionsForFocus("工作与项目").styleOptions, "直奔主题");
+  assert.equal(style.length, 5);
+  assert.equal(style[style.length - 1], "直奔主题");
+  // 已在选项里则不重复追加
+  assert.deepEqual(
+    withCurrentValue(style, "只说结论"),
+    style,
+  );
+  assert.deepEqual(withCurrentValue(style, ""), style);
+  assert.deepEqual(withCurrentValue(style, undefined), style);
+});

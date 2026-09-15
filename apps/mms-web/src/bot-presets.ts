@@ -205,6 +205,101 @@ export const WIZARD_POOL: Record<string, WizardQuestion> = {
   },
 };
 
+export interface FocusBranchOptions {
+  styleOptions: string[];
+  autonomyOptions: string[];
+}
+
+/** 题目里可选的取值：跳过「先聊聊再说」，取 value，回退 label。 */
+function questionOptionValues(q: WizardQuestion): string[] {
+  const values: string[] = [];
+  for (const opt of q.options) {
+    if (opt.key === "E" || opt.label === "先聊聊再说") continue;
+    const val = opt.value || opt.label;
+    if (val && !values.includes(val)) values.push(val);
+  }
+  return values;
+}
+
+/** 沿 next 链往下走时使用的按键：第一个非 E 的选项。 */
+function traversalKey(q: WizardQuestion): string {
+  const opt = q.options.find((o) => o.key !== "E");
+  return opt ? opt.key : "A";
+}
+
+/**
+ * 从 q_start 的某个分支出发，沿 next() 链收集这条链上
+ * 第一个 writes === "style" 与第一个 writes === "autonomy" 的问题选项。
+ * 用 visited 防止题库出现环时无限循环。
+ */
+function collectBranchOptions(startQuestionId: string | null): FocusBranchOptions {
+  const branch: FocusBranchOptions = { styleOptions: [], autonomyOptions: [] };
+  const visited = new Set<string>();
+  let currentId: string | null = startQuestionId;
+
+  while (currentId && !visited.has(currentId)) {
+    visited.add(currentId);
+    const q: WizardQuestion | undefined = WIZARD_POOL[currentId];
+    if (!q) break;
+    if (q.writes === "style" && branch.styleOptions.length === 0) {
+      branch.styleOptions = questionOptionValues(q);
+    } else if (q.writes === "autonomy" && branch.autonomyOptions.length === 0) {
+      branch.autonomyOptions = questionOptionValues(q);
+    }
+    currentId = q.next ? q.next(traversalKey(q)) : null;
+  }
+
+  return branch;
+}
+
+/** q_start 的 focus 取值，工作预设面板「工作重点」的选项来源。 */
+export function getFocusOptions(): string[] {
+  const start = WIZARD_POOL.q_start;
+  return start ? questionOptionValues(start) : [];
+}
+
+/**
+ * focus 取值 -> 该分支的汇报方式 / 推进方式选项。
+ * 不硬编码 focus 到题目 id 的映射：逐个走 q_start 的选项，用该选项的 key 调 q_start.next(key)。
+ */
+export function getFocusBranchMap(): Record<string, FocusBranchOptions> {
+  const map: Record<string, FocusBranchOptions> = {};
+  const start = WIZARD_POOL.q_start;
+  if (!start || !start.next) return map;
+  for (const opt of start.options) {
+    if (opt.key === "E" || opt.label === "先聊聊再说") continue;
+    const focusValue = opt.value || opt.label;
+    if (!focusValue) continue;
+    map[focusValue] = collectBranchOptions(start.next(opt.key));
+  }
+  return map;
+}
+
+/** 默认分支：q_start 走 next("B")，即工作与项目那条链。 */
+function getDefaultBranchOptions(): FocusBranchOptions {
+  const start = WIZARD_POOL.q_start;
+  if (!start || !start.next) return { styleOptions: [], autonomyOptions: [] };
+  return collectBranchOptions(start.next("B"));
+}
+
+/** 取当前 focus 对应分支的选项；focus 为空或不认识时回退默认分支。 */
+export function getBranchOptionsForFocus(focus?: string | null): FocusBranchOptions {
+  const key = focus ? focus.trim() : "";
+  const map = getFocusBranchMap();
+  if (key && map[key]) return map[key];
+  return getDefaultBranchOptions();
+}
+
+/**
+ * 当前已保存的值若不在收窄后的选项里，追加到末尾（去重），
+ * 这样它仍然渲染成一个选中的芯片，而不是掉进「自定义」输入框。
+ */
+export function withCurrentValue(options: string[], value?: string | null): string[] {
+  const val = value ? value.trim() : "";
+  if (!val || options.includes(val)) return options;
+  return [...options, val];
+}
+
 export interface WizardAnswerEntry {
   questionId: string;
   optionKey?: string;
