@@ -49,6 +49,7 @@ export function Models({
           back={() => setManage(false)}
           saved={refresh}
           editStateChanged={editStateChanged}
+          onCreateChannel={() => { setManage(false); setFirstConnection(false); setAdd(true); }}
         />
       </div>
     );

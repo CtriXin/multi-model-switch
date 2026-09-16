@@ -1,7 +1,7 @@
 """User-managed project material, stored only in the Web private state root."""
+from .file_lock import LOCK_EX, LOCK_NB, LOCK_SH, LOCK_UN, flock
 from contextlib import contextmanager
 from datetime import datetime, timezone
-import fcntl
 import hashlib
 import json
 import os
@@ -38,10 +38,10 @@ class ProjectMaterials:
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         fd = os.open(path.with_suffix(".lock"), os.O_CREAT | os.O_RDWR, 0o600)
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX)
+            flock(fd, LOCK_EX)
             yield
         finally:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+            flock(fd, LOCK_UN)
             os.close(fd)
 
     def _read(self, workspace, path):

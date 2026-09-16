@@ -31,6 +31,17 @@ _NOTICE_TEXT_LIMIT = 1000
 _STDERR_TAIL_BYTES = 2048
 
 
+# Windows has no SIGKILL. Naming the force step once keeps every call site from
+# touching an attribute that platform lacks; the sentinel never reaches a signal
+# API there, because the Windows branch maps it to Popen.kill() first.
+FORCE_SIGNAL = getattr(signal, "SIGKILL", "force")
+
+
+def _is_windows() -> bool:
+    """One seam for the Windows branch, so it can be tested on any host."""
+    return os.name == "nt"
+
+
 def _clip(text: str, limit: int) -> str:
     text = str(text or "")
     if len(text) <= limit:
@@ -58,11 +69,16 @@ def _summarize_args(args) -> str:
 
 
 class _PendingRequest:
-    __slots__ = ("event", "response")
+    __slots__ = ("event", "response", "error", "quiet")
 
-    def __init__(self) -> None:
+    def __init__(self, quiet: bool = False) -> None:
         self.event = threading.Event()
         self.response: dict | None = None
+        self.error: str | None = None
+        # Quiet requests surface failures to their caller only, never as a
+        # transcript notice: capability probes must not pollute the session
+        # events a user is reading.
+        self.quiet = quiet
 
 
 class PiRpcDriver:
@@ -129,7 +145,14 @@ class PiRpcDriver:
 
     def _terminate_group(self, sig) -> None:
         try:
-            if os.getpgid(self._proc.pid) == self._proc.pid:
+            if _is_windows():
+                # Windows has no POSIX process groups, and Popen.terminate is
+                # TerminateProcess with kill as its alias: there is no graceful
+                # signal to deliver, only force. Map force to force and treat a
+                # graceful request as "nothing to send".
+                if sig is FORCE_SIGNAL:
+                    self._proc.kill()
+            elif os.getpgid(self._proc.pid) == self._proc.pid:
                 os.killpg(self._proc.pid, sig)
             else:
                 self._proc.send_signal(sig)
@@ -141,8 +164,14 @@ class PiRpcDriver:
 
         Keep stdin open if the child ignores termination, so a failed update
         does not itself break the original RPC transport.
+
+        On Windows there is no graceful request to send, so this reports False
+        instead of force-killing an idle Pi. The caller then aborts the update
+        with its own "no force kill attempted" error, which is the contract.
         """
         if self.alive():
+            if _is_windows():
+                return False
             self._terminate_group(signal.SIGTERM)
         if not self.wait(timeout=timeout):
             return False
@@ -170,7 +199,7 @@ class PiRpcDriver:
                 pass
             if not self.wait(timeout=3.0):
                 try:
-                    self._terminate_group(signal.SIGKILL)
+                    self._terminate_group(FORCE_SIGNAL)
                 except OSError:
                     pass
                 self.wait(timeout=5.0)
@@ -178,13 +207,13 @@ class PiRpcDriver:
 
     # -- commands ------------------------------------------------------
 
-    def request(self, command: dict, *, timeout: float | None = None) -> dict:
+    def request(self, command: dict, *, timeout: float | None = None, quiet: bool = False) -> dict:
         with self._state_lock:
             if self._exit_code is not None:
                 raise DriverClosedError("pi process exited")
             request_id = f"r{self._next_request_id}"
             self._next_request_id += 1
-            pending = _PendingRequest()
+            pending = _PendingRequest(quiet=quiet)
             self._pending[request_id] = pending
         payload = {"id": request_id, **command}
         try:
@@ -211,6 +240,47 @@ class PiRpcDriver:
             command["streamingBehavior"] = "followUp"
         return self.request(command, timeout=timeout)
 
+    def steer(self, text: str, *, images=None, timeout: float | None = None) -> dict:
+        """Queue a steering message while the agent is running.
+
+        Pi native semantics (rpc.md): the message is delivered only after the
+        current assistant turn finishes executing its tool calls, before the
+        next LLM call. Steering never interrupts in-flight tool calls and
+        never ends the current turn; only ``abort`` does. A ``success: false``
+        response means Pi rejected the steer; callers must not silently retry
+        it as a follow-up, which would delay the correction past the next
+        LLM call.
+        """
+        command: dict = {"type": "steer", "message": str(text)}
+        if images:
+            command["images"] = images
+        return self.request(command, timeout=timeout)
+
+    def follow_up(self, text: str, *, images=None, timeout: float | None = None) -> dict:
+        """Queue a message to be delivered once the run settles.
+
+        The explicit command, rather than ``prompt`` with a streaming hint: a
+        rewritten queue is put back while the agent may be between turns, and
+        ``prompt`` would start a new one instead of queueing.
+        """
+        command: dict = {"type": "follow_up", "message": str(text)}
+        if images:
+            command["images"] = images
+        return self.request(command, timeout=timeout)
+
+    def clear_queue(self, *, timeout: float | None = None) -> dict:
+        """Empty the queue and return what was in it, by lane.
+
+        Pi has no per-message delete or reorder. Rewriting the queue means
+        clearing it and putting back what should stay, in order, so the caller
+        needs to know what was actually still waiting.
+        """
+        response = self.request({"type": "clear_queue"},
+                                timeout=self._abort_timeout if timeout is None else timeout)
+        data = response.get("data") if isinstance(response.get("data"), dict) else {}
+        return {"steering": [str(t) for t in (data.get("steering") or [])],
+                "followUp": [str(t) for t in (data.get("followUp") or [])]}
+
     def abort(self, *, timeout: float | None = None) -> dict:
         for approval_id in self.pending_approvals():
             try:
@@ -223,6 +293,19 @@ class PiRpcDriver:
     def get_state(self) -> dict:
         response = self.request({"type": "get_state"})
         return response.get("data") if isinstance(response.get("data"), dict) else {}
+
+    def get_commands(self, *, timeout: float | None = None) -> list:
+        """Registered slash commands, as the RPC ``get_commands`` reports them.
+
+        Used to detect capabilities such as the native ``/btw`` extension;
+        the caller decides what a missing entry means, never this method.
+        Failures are quiet: an unsupported command is a fact about the other
+        process, not a session event the user needs to read.
+        """
+        response = self.request({"type": "get_commands"}, timeout=timeout, quiet=True)
+        data = response.get("data") if isinstance(response.get("data"), dict) else {}
+        commands = data.get("commands")
+        return [item for item in commands if isinstance(item, dict)] if isinstance(commands, list) else []
 
     # -- approvals -----------------------------------------------------
 
@@ -277,11 +360,36 @@ class PiRpcDriver:
                     line = line[:-1]
                 if not line.strip():
                     continue
-                self._handle_line(line.decode("utf-8", "replace"))
+                # A sink callback writes session state and may fail transiently
+                # (for example while a Windows file is briefly locked). That
+                # must not be treated as Pi stdout EOF: the child can still be
+                # alive and will continue emitting the RPC lifecycle. Isolate
+                # each event so one persistence/rendering failure does not
+                # finalize an otherwise healthy session.
+                try:
+                    self._handle_line(line.decode("utf-8", "replace"))
+                except Exception as exc:
+                    self._record_event_error(exc)
         except Exception:
             pass
         finally:
             self._on_stdout_eof()
+
+    def _record_event_error(self, exc: Exception) -> None:
+        detail = f"{type(exc).__name__}: {_clip(str(exc), 400)}"
+        self._stderr_tail = (self._stderr_tail + "\nRPC event handling error: " + detail)[-_STDERR_TAIL_BYTES:]
+        try:
+            self._sink.upsert_event(
+                {
+                    "id": f"n-rpc-{uuid.uuid4().hex[:12]}",
+                    "kind": "notice",
+                    "title": "RPC 事件处理异常",
+                    "text": "Pi 仍在运行，但有一条事件未能写入会话；后续事件会继续接收。",
+                }
+            )
+        except Exception:
+            # Reporting must never become another reader-thread failure.
+            pass
 
     def _stderr_loop(self) -> None:
         stream = self._proc.stderr
@@ -360,11 +468,15 @@ class PiRpcDriver:
             pending = self._pending.pop(request_id, None)
         if pending is None:
             return
-        pending.response = message
-        pending.event.set()
         if message.get("success") is False:
             error = str(message.get("error") or "unknown error")
-            self._notice(f"命令 {message.get('command') or '?'} 失败: {_clip(error, 400)}", title="命令错误")
+            pending.error = error
+            if not pending.quiet:
+                self._notice(f"命令 {message.get('command') or '?'} 失败: {_clip(error, 400)}", title="命令错误")
+        else:
+            pending.error = None
+        pending.response = message
+        pending.event.set()
 
     def _handle_ui_request(self, message: dict) -> None:
         request_id = str(message.get("id") or "")
@@ -404,6 +516,21 @@ class PiRpcDriver:
                     self._sink.upsert_event({"nativeContext": value})
             except (ValueError, TypeError):
                 pass
+            return
+        if method == "notify" and str(message.get("message", "")).startswith("BTW_EVENT:"):
+            # Side-question events ride the notify channel; malformed JSON is
+            # a protocol anomaly to surface, never a reason to crash the
+            # reader or touch the main transcript.
+            raw = str(message.get("message") or "").split(":", 1)[1]
+            try:
+                payload = json.loads(raw)
+            except (ValueError, TypeError):
+                self._notice("BTW 事件不是合法 JSON，已跳过。", title="协议异常")
+                return
+            if not isinstance(payload, dict):
+                self._notice("BTW 事件负载不是对象，已跳过。", title="协议异常")
+                return
+            self._sink.side_question_event(payload)
             return
         if method == "notify" and str(message.get("message", "")).startswith("MMS_WEB_STATE:"):
             try:
@@ -458,8 +585,10 @@ class PiRpcDriver:
             self._activity("retrying" if etype in {"auto_retry_start", "summarization_retry_scheduled"} else "running" if self._streaming else "idle")
             self._notice(f"自动重试事件: {etype}", title="retry")
         elif etype == "queue_update":
-            queue = [str(text) for text in [*(message.get("steering") or []), *(message.get("followUp") or [])]]
-            self._upsert({"id": "n-queue", "kind": "notice", "title": "待发送消息", "text": f"还有 {len(queue)} 条补充消息等待执行" if queue else "待发送队列已清空", "queue": queue})
+            steering = [str(text) for text in (message.get("steering") or [])]
+            follow_up = [str(text) for text in (message.get("followUp") or [])]
+            queue = [*steering, *follow_up]
+            self._upsert({"id": "n-queue", "kind": "notice", "title": "待发送消息", "text": f"还有 {len(queue)} 条补充消息等待执行" if queue else "待发送队列已清空", "queue": queue, "queueSteering": steering, "queueFollowUp": follow_up})
         elif etype == "extension_error":
             self._notice(_clip(str(message.get("error") or "extension error"), 400), title="扩展错误")
         # turn_start / turn_end / agent_end / bash_execution_update and

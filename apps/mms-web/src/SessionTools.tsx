@@ -10,8 +10,10 @@ import {
   Settings2,
 } from "lucide-react";
 import { request } from "./api";
+import { copyText } from "./clipboard";
 import { RecipeExport } from "./Recipe";
 import { ContextEvidence } from "./ContextEvidence";
+import { MessageQueue } from "./MessageQueue";
 import type { SessionDetail } from "./types";
 
 type Action = (
@@ -54,6 +56,10 @@ export function SessionMenu({
   const [name, setName] = useState("");
   const path = "/sessions/" + detail.session.id;
   const active = ["running", "waiting"].includes(detail.session.state);
+  // A session started in a terminal is listed here for reading only. Renaming,
+  // forking and archiving all write to Pilot's own store, which does not own
+  // this session, so the menu offers only what works: the export.
+  const readOnly = detail.session.owner === "cli";
   const lastUser = [...detail.events].reverse().find((e) => e.kind === "user");
   return (
     <div className="session-menu-wrap">
@@ -92,22 +98,26 @@ export function SessionMenu({
           <MoreHorizontal size={18} />
         </summary>
         <div>
-          <button
-            onClick={() => {
-              setName(detail.session.title);
-              setRename(true);
-            }}
-          >
-            <Pencil size={14} />
-            重命名
-          </button>
-          <button
-            disabled={active || busy}
-            onClick={() => void action(path + "/fork", {}, true)}
-          >
-            <GitBranch size={14} />
-            创建会话分支
-          </button>
+          {!readOnly && (
+            <>
+              <button
+                onClick={() => {
+                  setName(detail.session.title);
+                  setRename(true);
+                }}
+              >
+                <Pencil size={14} />
+                重命名
+              </button>
+              <button
+                disabled={active || busy}
+                onClick={() => void action(path + "/fork", {}, true)}
+              >
+                <GitBranch size={14} />
+                创建会话分支
+              </button>
+            </>
+          )}
           {detail.session.state === "error" && lastUser && (
             <button
               disabled={busy || !detail.session.capabilities.send}
@@ -123,28 +133,32 @@ export function SessionMenu({
               重试最后一条消息
             </button>
           )}
-          <button
-            onClick={() => setSharing(true)}
-            title="编辑目标、示例和需求，检查导出内容后下载模板。"
-          >
-            <Copy size={14} />
-            保存为任务模板
-          </button>
+          {!readOnly && (
+            <button
+              onClick={() => setSharing(true)}
+              title="编辑目标、示例和需求，检查导出内容后下载模板。"
+            >
+              <Copy size={14} />
+              保存为任务模板
+            </button>
+          )}
           <button onClick={() => exportConversation(detail)}>
             <Download size={14} />
             导出对话
           </button>
-          <button
-            disabled={active || busy}
-            onClick={() =>
-              void action(path + "/manage", {
-                archived: !detail.session.archived,
-              })
-            }
-          >
-            <Archive size={14} />
-            {detail.session.archived ? "恢复到列表" : "归档会话"}
-          </button>
+          {!readOnly && (
+            <button
+              disabled={active || busy}
+              onClick={() =>
+                void action(path + "/manage", {
+                  archived: !detail.session.archived,
+                })
+              }
+            >
+              <Archive size={14} />
+              {detail.session.archived ? "恢复到列表" : "归档会话"}
+            </button>
+          )}
         </div>
       </details>
     </div>
@@ -286,6 +300,7 @@ export function RuntimePanel({
         <input
           aria-label="自动压缩上下文"
           type="checkbox"
+          role="switch"
           checked={!!r.autoCompactionEnabled}
           disabled={locked || r.autoCompactionEnabled === undefined}
           onChange={(e) => void control("autoCompaction", e.target.checked)}
@@ -353,23 +368,25 @@ export function RuntimePanel({
           Pi 报告费用：${stats.cost.toFixed(5)}。以模型服务的实际账单为准。
         </p>
       )}
-      {!!r.pendingMessageCount && (
-        <>
-          <h3>待发送消息 · {r.pendingMessageCount}</h3>
-          <ol className="queued-messages">
-            {r.queue?.map((message, i) => (
-              <li key={i}>{message.slice(0, 500)}</li>
-            ))}
-          </ol>
-          <button
-            className="secondary-button"
-            disabled={busy}
-            onClick={() => void control("clearQueue")}
-          >
-            清空待发送队列
-          </button>
-        </>
-      )}
+      <MessageQueue
+        runtime={detail.runtime}
+        capabilities={detail.session.capabilities}
+        busy={busy}
+        remove={(id) =>
+          void action(`/sessions/${detail.session.id}/queue`, {
+            action: "remove",
+            id,
+          })
+        }
+        move={(id, toIndex) =>
+          void action(`/sessions/${detail.session.id}/queue`, {
+            action: "move",
+            id,
+            toIndex,
+          })
+        }
+        clear={() => void control("clearQueue")}
+      />
       <details className="diagnostic-details">
         <summary
           onClick={() => {
@@ -383,8 +400,25 @@ export function RuntimePanel({
           进程与诊断信息
         </summary>
         <pre>{diagnostic || "正在读取…"}</pre>
+        {!!diagnostic && !diagnostic.startsWith("无法") && (
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() => {
+              const url = URL.createObjectURL(new Blob([diagnostic], { type: "application/json;charset=utf-8" }));
+              const link = document.createElement("a");
+              link.href = url;
+              link.download = `pilot-diagnostics-${detail.session.id}.json`;
+              link.click();
+              setTimeout(() => URL.revokeObjectURL(url), 1000);
+            }}
+          >
+            <Download size={14} />
+            导出脱敏诊断包
+          </button>
+        )}
         <p className="section-note">
-          仅展示当前会话的状态和脱敏日志，不显示 API Key 或完整环境变量。
+          仅展示当前会话的状态和脱敏日志，不显示 API Key、请求正文、thinking、文件内容或完整环境变量。
         </p>
       </details>
     </div>
@@ -411,13 +445,11 @@ export function MessageActions({
           aria-label={copied ? "已复制" : "复制"}
           onClick={() => {
             setError("");
-            void navigator.clipboard
-              .writeText(text)
-              .then(() => {
-                setCopied(true);
-                setTimeout(() => setCopied(false), 1500);
-              })
-              .catch(() => setError("复制失败，请选择文字后复制。"));
+            void copyText(text).then((done) => {
+              if (!done) return setError("这个浏览器不允许复制，请选择文字后复制。");
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1500);
+            });
           }}
         >
           <Copy size={13} />

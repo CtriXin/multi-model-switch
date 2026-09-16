@@ -82,6 +82,7 @@ apps/*/progress.md
 apps/*/task_plan.md
 
 # AI tool caches & worktrees
+.pytest-gate/
 .ai/cache/
 .antigravitycli/
 .codegraph/

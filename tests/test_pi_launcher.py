@@ -1,10 +1,15 @@
+import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
+import sys
 import textwrap
 
 import pytest
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture(autouse=True)
@@ -69,6 +74,7 @@ def test_launch_pi_adds_glint_bridge_as_explicit_extension(monkeypatch):
     monkeypatch.setattr(mms_pi_support, "_pi_gateway_env", lambda *_args, **_kwargs: env)
     monkeypatch.setattr(mms_pi_support, "_pi_effective_selected_model", lambda *_args: "gpt-5.4")
     monkeypatch.setattr(mms_pi_support, "_glint_pi_bridge_path", lambda _env: bridge)
+    monkeypatch.setattr(mms_pi_support, "pi_btw_extension_path", lambda *_a, **_k: "")
     monkeypatch.setattr(
         mms_pi_support,
         "_exec_or_run",
@@ -165,7 +171,37 @@ def test_pi_skill_overlay_keeps_project_skill_over_global_duplicate(monkeypatch,
     assert (overlay / "global-only").resolve() == global_only_skill
 
 
-def test_pi_wrapper_prefers_a_cached_pi_binary(tmp_path):
+def _pi_wrapper_env(tmp_path, cache_dir, *, bin_dir=None, **extra):
+    """A PATH with node/npm/npx but no installed pi anywhere.
+
+    The wrapper prefers an installed Pi over its npx cache (#205), and on a
+    developer machine both `command -v pi` and `npm prefix -g` find the real
+    one. Inheriting os.environ therefore made these cache tests exec the real
+    pi instead. npm_config_prefix points at an empty prefix so `npm prefix -g`
+    answers honestly that pi is not installed there.
+    """
+    bin_dir = Path(bin_dir) if bin_dir else (tmp_path / "bin")
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    for name in ("node", "npm", "npx"):
+        target = bin_dir / name
+        real = shutil.which(name)
+        if real and not target.exists():
+            target.symlink_to(real)
+    npm_prefix = tmp_path / "npm-prefix"
+    (npm_prefix / "bin").mkdir(parents=True, exist_ok=True)
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    env = {
+        "PATH": os.pathsep.join([str(bin_dir), "/usr/bin", "/bin"]),
+        "HOME": str(home),
+        "npm_config_prefix": str(npm_prefix),
+        "MMS_PI_NPX_CACHE": str(cache_dir),
+    }
+    env.update(extra)
+    assert shutil.which("pi", path=env["PATH"]) is None
+    return env
+
+def test_pi_wrapper_uses_the_cache_when_no_pi_is_installed(tmp_path):
     wrapper = Path(__file__).resolve().parents[1] / "scripts" / "pi-cli-wrapper.sh"
     cache_dir = tmp_path / "pi-npx"
     cached_pi = cache_dir / "_npx" / "cached" / "node_modules" / ".bin" / "pi"
@@ -182,7 +218,7 @@ def test_pi_wrapper_prefers_a_cached_pi_binary(tmp_path):
         check=True,
         capture_output=True,
         text=True,
-        env={**os.environ, "MMS_PI_NPX_CACHE": str(cache_dir)},
+        env=_pi_wrapper_env(tmp_path, cache_dir),
     )
 
     assert result.stdout == "cached-pi:--version\n"
@@ -215,11 +251,7 @@ def test_pi_wrapper_warms_a_missing_cache_before_running(tmp_path):
         check=True,
         capture_output=True,
         text=True,
-        env={
-            **os.environ,
-            "MMS_PI_NPX_CACHE": str(cache_dir),
-            "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
-        },
+        env=_pi_wrapper_env(tmp_path, cache_dir, bin_dir=fake_bin),
     )
 
     assert result.stdout == "warmed-pi:--version\n"
@@ -278,6 +310,30 @@ def test_pi_shared_agent_bin_link_is_reused_across_sessions(monkeypatch, tmp_pat
     assert (Path(shared_bin) / "rg").exists(), "shared bin must survive per-PID cleanup"
 
 
+def test_pi_shared_agent_bin_uses_windows_junction_without_symlink_privilege(monkeypatch, tmp_path):
+    import os
+    from types import SimpleNamespace
+
+    import mms_launchers
+    import mms_pi_support
+
+    preview_root = tmp_path / "mms-next"
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+    monkeypatch.setattr(mms_launchers, "_selected_mms_config_root", lambda _env: str(preview_root))
+    calls = []
+
+    def junction(source, target):
+        calls.append((source, target))
+
+    monkeypatch.setattr(mms_pi_support, "os", SimpleNamespace(
+        name="nt", path=os.path, makedirs=os.makedirs, symlink=os.symlink, junction=junction,
+    ))
+    agent = preview_root / "s" / "123" / ".pi" / "agent"
+    mms_pi_support._pi_link_shared_agent_bin(str(agent))
+
+    assert calls == [(str(preview_root / "pi-gateway" / "agent-bin"), str(agent / "bin"))]
+
+
 def test_pi_wrapper_serializes_cold_npx_prewarm(tmp_path):
     wrapper = Path(__file__).resolve().parents[1] / "scripts" / "pi-cli-wrapper.sh"
     bin_dir = tmp_path / "bin"
@@ -307,15 +363,13 @@ def test_pi_wrapper_serializes_cold_npx_prewarm(tmp_path):
         encoding="utf-8",
     )
     fake_npx.chmod(0o755)
-    env = os.environ.copy()
-    env.update(
-        {
-            "PATH": f"{bin_dir}{os.pathsep}{env.get('PATH', '')}",
-            "MMS_PI_NPX_CACHE": str(cache_dir),
-            "MMS_PI_NPX_INSTALL_LOCK_TIMEOUT": "10",
-            "FAKE_NPX_LOG": str(log_path),
-            "FAKE_PI_CACHE": str(cache_dir),
-        }
+    env = _pi_wrapper_env(
+        tmp_path,
+        cache_dir,
+        bin_dir=bin_dir,
+        MMS_PI_NPX_INSTALL_LOCK_TIMEOUT="10",
+        FAKE_NPX_LOG=str(log_path),
+        FAKE_PI_CACHE=str(cache_dir),
     )
 
     processes = [
@@ -382,6 +436,12 @@ def test_launch_pi_writes_openai_models_config_and_uses_wrapper(monkeypatch, tmp
         "thinking_mode": "disable",
     }
 
+    # The bundled /btw extension has its own cases below; keep this assertion on
+    # the models.json / wrapper / thinking plumbing.
+    import mms_pi_support
+
+    monkeypatch.setattr(mms_pi_support, "pi_btw_extension_path", lambda *_a, **_k: "")
+
     mms_launchers.launch_pi({"model": "gpt-5.4"}, runtime, once=True)
 
     assert captured["cmd"] == [
@@ -420,7 +480,7 @@ def test_launch_pi_writes_openai_models_config_and_uses_wrapper(monkeypatch, tmp
     assert settings_payload["retry"] == {"enabled": True, "maxRetries": 8, "baseDelayMs": 1000}
     assert settings_payload["quietStartup"] is True
     assert settings_payload["extensions"][0].endswith("scripts/pi-retry-extension.mjs")
-    assert not (real_home / ".config" / "mms" / "pi-gateway").exists()
+    assert not (real_home / ".config" / "mms-next" / "pi-gateway").exists()
 
 
 def test_launch_pi_rewrites_deprecated_antigravity_gemini_alias_to_live_replacement(monkeypatch, tmp_path):
@@ -476,6 +536,11 @@ def test_launch_pi_rewrites_deprecated_antigravity_gemini_alias_to_live_replacem
         "thinking_mode": "disable",
     }
 
+    # The bundled /btw extension is covered by its own cases below.
+    import mms_pi_support
+
+    monkeypatch.setattr(mms_pi_support, "pi_btw_extension_path", lambda *_a, **_k: "")
+
     mms_launchers.launch_pi({"model": "gemini-3-pro-high"}, runtime, once=True)
 
     assert captured["cmd"] == [
@@ -526,7 +591,7 @@ def test_get_export_env_for_pi_writes_anthropic_models_config(monkeypatch, tmp_p
     assert exports["MMS_PI_BIN"] == "/tmp/pi-wrapper"
     assert exports["MMS_PI_NPX_CACHE"].endswith(".ai/cache/pi-npx")
     assert exports["MMS_PI_SETTINGS_JSON"].endswith("settings.json")
-    models_path = real_home / ".config" / "mms" / "pi-gateway" / "exports" / "relay-b-claude-sonnet-4-6" / "agent" / "models.json"
+    models_path = real_home / ".config" / "mms-next" / "pi-gateway" / "exports" / "relay-b-claude-sonnet-4-6" / "agent" / "models.json"
     payload = json.loads(models_path.read_text(encoding="utf-8"))
     provider = payload["providers"]["mms-relay-b"]
     assert provider["api"] == "anthropic-messages"
@@ -799,13 +864,17 @@ def test_pi_openai_provider_compat_uses_profile_specific_flags(monkeypatch, tmp_
         "supportsDeveloperRole": False,
         "thinkingFormat": "deepseek",
     }
-    assert provider["models"][0]["maxTokens"] == 384_000
+    # The 2026-09-10 live probes moved the whole deepseek family onto the
+    # v4.1 backend: 393216 output tokens and every tier accepted as itself,
+    # so xhigh is no longer folded into max.
+    assert provider["models"][0]["maxTokens"] == 393_216
     assert provider["models"][0]["thinkingLevelMap"] == {
-        "minimal": None,
-        "low": None,
-        "medium": None,
+        "minimal": "minimal",
+        "low": "low",
+        "medium": "medium",
         "high": "high",
-        "xhigh": "max",
+        "xhigh": "xhigh",
+        "max": "max",
     }
 
 
@@ -873,12 +942,14 @@ def test_pi_profile_derived_effort_maps_expose_only_truthful_levels():
         "qwen3.6-plus",
         {"supports_thinking": True},
     )
+    # qwen3.6 accepts six values; only max is refused, and the map has to say
+    # so rather than hiding tiers this route can actually execute.
     assert qwen_map == {
-        "minimal": None,
-        "low": None,
-        "medium": None,
+        "minimal": "minimal",
+        "low": "low",
+        "medium": "medium",
         "high": "high",
-        "xhigh": None,
+        "xhigh": "xhigh",
         "max": None,
     }
 
@@ -1195,7 +1266,7 @@ def test_pi_kimi_k3_exports_1m_context_and_openai_protocol(monkeypatch, tmp_path
     assert model_by_id["k3[1m]"]["maxTokens"] == 1_048_576
     assert model_by_id["k3[1m]"]["reasoning"] is True
     assert model_by_id["k3"]["input"] == ["text", "image"]
-    assert model_by_id["k3"]["contextWindow"] == 262_144
+    assert model_by_id["k3"]["contextWindow"] == 1_048_576
     assert model_by_id["k3"]["maxTokens"] == 131_072
     assert model_by_id["k3"]["reasoning"] is True
     assert model_by_id["kimi-for-coding-highspeed"]["contextWindow"] == 262_144
@@ -1851,3 +1922,523 @@ def test_pi_policy_copy_fails_explicitly_and_cannot_target_global(isolated_polic
     monkeypatch.setattr(Path, 'read_text', deny_policy)
     with pytest.raises(RuntimeError, match='Cannot load Pi agent policy'):
         pi._pi_gateway_env({'model': 'synthetic-model'})
+
+
+def test_pi_skill_overlay_links_bundled_skills_below_every_user_root(monkeypatch, tmp_path):
+    import mms_pi_support
+
+    real_home = tmp_path / "real-home"
+    user_weber = real_home / ".agents" / "skills" / "weber"
+    bundled_weber = tmp_path / "bundle" / "weber"
+    bundled_grill = tmp_path / "bundle" / "grill-me"
+    for skill_dir in (user_weber, bundled_weber, bundled_grill):
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("---\nname: test\ndescription: test\n---\n", encoding="utf-8")
+    (tmp_path / "project" / ".git").mkdir(parents=True)
+    monkeypatch.setattr(mms_pi_support, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+    monkeypatch.setattr(mms_pi_support, "_resolve_weber_root", lambda: str(bundled_weber))
+    monkeypatch.setattr(mms_pi_support, "_resolve_grill_me_root", lambda: str(bundled_grill))
+    monkeypatch.setattr(mms_pi_support, "_resolve_toon_root", lambda: "")
+
+    overlay = Path(mms_pi_support._pi_materialize_skill_overlay(tmp_path / "session", tmp_path / "project"))
+
+    # A user's own copy replaces the bundled one; a bundled-only skill still lands in the session.
+    assert (overlay / "weber").resolve() == user_weber
+    assert (overlay / "grill-me").resolve() == bundled_grill
+    assert not (overlay / "toon").exists()
+    assert list(real_home.rglob("grill-me")) == []
+
+
+# --- bundled /btw extension: injection, global-first, preference -------------
+
+
+@pytest.fixture
+def btw_pi(monkeypatch, tmp_path):
+    """A fake real HOME plus project dir, so no test reads this machine's ~/.pi."""
+    import mms_pi_support
+
+    real_home = tmp_path / "real-home"
+    project = tmp_path / "project"
+    project.mkdir(parents=True)
+    monkeypatch.setattr(
+        mms_pi_support,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+    logs = []
+
+    def resolve(runtime=None, cwd=None):
+        return mms_pi_support.pi_btw_extension_path(
+            {}, runtime, str(project if cwd is None else cwd), log=logs.append
+        )
+
+    return {
+        "support": mms_pi_support,
+        "home": real_home,
+        "project": project,
+        "logs": logs,
+        "resolve": resolve,
+    }
+
+
+def _global_settings(btw_pi, packages):
+    import json as _json
+
+    path = btw_pi["home"] / ".pi" / "agent" / "settings.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_json.dumps({"packages": packages}), encoding="utf-8")
+    return path
+
+
+def _project_settings(btw_pi, packages):
+    import json as _json
+
+    path = btw_pi["project"] / ".pi" / "settings.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_json.dumps({"packages": packages}), encoding="utf-8")
+    return path
+
+
+def test_bundled_btw_extension_is_a_verified_single_file(btw_pi):
+    import hashlib as _hashlib
+    import json as _json
+
+    mms_pi_support = btw_pi["support"]
+    vendor = Path(mms_pi_support._pi_btw_vendor_dir())
+    bundle = vendor / "index.ts"
+
+    assert bundle.is_file()
+    assert (vendor / "VERSION").read_text(encoding="utf-8").strip()
+    record = _json.loads((vendor / "SOURCE.json").read_text(encoding="utf-8"))
+    # The fork was renamed when the npm org turned out to be taken; either name
+    # is a legitimate sync source, anything else is not ours.
+    assert record["package"] in {"@ctrixin/pi-btw", "@ctrixin-dev/pi-btw"}
+    assert _hashlib.sha256(bundle.read_bytes()).hexdigest() == record["sha256"]
+    # Pi resolves its own packages; a second copy inside the bundle would be a
+    # different module instance.
+    assert record["externalPeers"]
+    assert all(
+        peer.startswith("@earendil-works/") or peer == "typebox"
+        for peer in record["externalPeers"]
+    )
+    assert btw_pi["resolve"]() == str(bundle)
+    assert btw_pi["logs"] == []
+
+
+def test_launch_pi_adds_bundled_btw_extension(btw_pi, monkeypatch):
+    mms_pi_support = btw_pi["support"]
+    bundle = Path(mms_pi_support._pi_btw_vendor_dir()) / "index.ts"
+    captured = {}
+    monkeypatch.setattr(
+        mms_pi_support,
+        "_pi_gateway_env",
+        lambda *_a, **_k: {"MMS_PI_PROVIDER": "mms-relay-a"},
+    )
+    monkeypatch.setattr(mms_pi_support, "_pi_effective_selected_model", lambda *_a: "kimi-k3")
+    monkeypatch.setattr(
+        mms_pi_support, "_exec_or_run", lambda cmd, env, once: captured.update(cmd=cmd)
+    )
+
+    mms_pi_support.launch_pi(
+        {"model": "kimi-k3"}, {"id": "relay-a", "auth_mode": "api_key"}, once=True
+    )
+
+    assert captured["cmd"] == [
+        "pi",
+        "--provider",
+        "mms-relay-a",
+        "--model",
+        "kimi-k3",
+        "--extension",
+        str(bundle),
+    ]
+
+
+def test_launch_pi_keeps_glint_bridge_before_bundled_btw(btw_pi, monkeypatch):
+    mms_pi_support = btw_pi["support"]
+    bundle = Path(mms_pi_support._pi_btw_vendor_dir()) / "index.ts"
+    captured = {}
+    monkeypatch.setattr(
+        mms_pi_support,
+        "_pi_gateway_env",
+        lambda *_a, **_k: {"MMS_PI_PROVIDER": "mms-relay-a", "MMS_PI_SKILLS_OVERLAY": "/tmp/overlay"},
+    )
+    monkeypatch.setattr(mms_pi_support, "_pi_effective_selected_model", lambda *_a: "kimi-k3")
+    monkeypatch.setattr(mms_pi_support, "_glint_pi_bridge_path", lambda _env: "/tmp/glint.ts")
+    monkeypatch.setattr(
+        mms_pi_support, "_exec_or_run", lambda cmd, env, once: captured.update(cmd=cmd)
+    )
+
+    mms_pi_support.launch_pi(
+        {"model": "kimi-k3"}, {"id": "relay-a", "auth_mode": "api_key"}, once=True
+    )
+
+    assert captured["cmd"] == [
+        "pi",
+        "--provider",
+        "mms-relay-a",
+        "--model",
+        "kimi-k3",
+        "--extension",
+        "/tmp/glint.ts",
+        "--extension",
+        str(bundle),
+        "--no-skills",
+        "--skill",
+        "/tmp/overlay",
+    ]
+
+
+def test_bundled_btw_still_injects_when_only_the_real_home_has_one(btw_pi):
+    settings = _global_settings(btw_pi, ["npm:pi-usage-hub", "npm:@ctrixin/pi-btw@0.59.0-fork.1"])
+
+    # MMS hands every session its own PI_CODING_AGENT_DIR, so this package is
+    # never loaded and cannot collide. Deferring to it would leave the session
+    # with no /btw at all, which is the opposite of what the user installed.
+    assert btw_pi["resolve"]().endswith("index.ts")
+    assert "PI_CODING_AGENT_DIR" in btw_pi["logs"][0]
+    assert "@ctrixin/pi-btw" in btw_pi["logs"][0]
+    # the user's file is only read, never rewritten
+    assert json.loads(settings.read_text(encoding="utf-8"))["packages"][0] == "npm:pi-usage-hub"
+
+
+def test_bundled_btw_yields_when_the_session_loads_that_agent_tree(btw_pi):
+    """The one case the real ~/.pi/agent does collide: a session pointed at it."""
+    _global_settings(btw_pi, ["npm:@narumitw/pi-btw@0.58.1"])
+    agent_dir = str(btw_pi["home"] / ".pi" / "agent")
+
+    path = btw_pi["support"].pi_btw_extension_path(
+        {"PI_CODING_AGENT_DIR": agent_dir},
+        None,
+        str(btw_pi["project"]),
+        log=btw_pi["logs"].append,
+    )
+
+    assert path == ""
+    assert "不重复注入" in btw_pi["logs"][0]
+
+
+def test_bundled_btw_ignores_a_pi_btw_in_another_session_agent_dir(btw_pi, tmp_path):
+    """An isolated agent dir is scanned, but it is not the user's real tree."""
+    _global_settings(btw_pi, ["npm:@narumitw/pi-btw@0.58.1"])
+    session_agent = tmp_path / "pi-gateway" / "s" / "4242" / ".pi" / "agent"
+    session_agent.mkdir(parents=True)
+
+    path = btw_pi["support"].pi_btw_extension_path(
+        {"PI_CODING_AGENT_DIR": str(session_agent)},
+        None,
+        str(btw_pi["project"]),
+        log=btw_pi["logs"].append,
+    )
+
+    assert path.endswith("index.ts")
+    assert "PI_CODING_AGENT_DIR" in btw_pi["logs"][0]
+
+
+@pytest.mark.parametrize(
+    "packages",
+    [
+        ["npm:@narumitw/pi-btw@0.58.1"],
+        [{"source": "git:github.com/CtriXin/pi-btw@v0.59.0-fork.1"}],
+        ["/Users/xin/checkouts/pi-btw"],
+    ],
+)
+def test_bundled_btw_yields_to_upstream_and_local_project_installs(btw_pi, packages):
+    _project_settings(btw_pi, packages)
+
+    assert btw_pi["resolve"]() == ""
+    assert "不重复注入" in btw_pi["logs"][0]
+
+
+def test_bundled_btw_yields_to_a_named_project_extension_file(btw_pi):
+    extension = btw_pi["project"] / ".pi" / "extensions" / "pi-btw.ts"
+    extension.parent.mkdir(parents=True)
+    extension.write_text("export default function () {}\n", encoding="utf-8")
+
+    assert btw_pi["resolve"]() == ""
+    assert "不重复注入" in btw_pi["logs"][0]
+
+
+def test_bundled_btw_still_injects_for_a_named_global_extension_file(btw_pi):
+    extension = btw_pi["home"] / ".pi" / "agent" / "extensions" / "pi-btw.ts"
+    extension.parent.mkdir(parents=True)
+    extension.write_text("export default function () {}\n", encoding="utf-8")
+
+    assert btw_pi["resolve"]().endswith("index.ts")
+    assert "PI_CODING_AGENT_DIR" in btw_pi["logs"][0]
+
+
+def test_bundled_btw_yields_to_project_package(btw_pi):
+    import json as _json
+
+    project_settings = btw_pi["project"] / ".pi" / "settings.json"
+    project_settings.parent.mkdir(parents=True)
+    project_settings.write_text(
+        _json.dumps({"packages": ["npm:@narumitw/pi-btw"]}), encoding="utf-8"
+    )
+
+    assert btw_pi["resolve"]() == ""
+    # a different project without the package still gets /btw
+    other = btw_pi["project"].parent / "other"
+    other.mkdir()
+    assert btw_pi["resolve"](cwd=other).endswith("index.ts")
+
+
+def test_bundled_btw_ignores_unrelated_pi_packages(btw_pi):
+    import json as _json
+
+    settings = _global_settings(btw_pi, ["npm:pi-usage-hub", "npm:billion-context-pi@0.1.69"])
+    extension = settings.parent / "extensions" / "glint-agent-bridge.ts"
+    extension.parent.mkdir(parents=True)
+    extension.write_text("// Glint pi extension\n", encoding="utf-8")
+
+    assert btw_pi["resolve"]().endswith("index.ts")
+    assert btw_pi["logs"] == []
+
+
+def test_bundled_btw_requires_a_matching_build_record(btw_pi, monkeypatch):
+    import hashlib as _hashlib
+    import json as _json
+
+    mms_pi_support = btw_pi["support"]
+    vendor = btw_pi["home"] / "vendor" / "pi-btw"
+    vendor.mkdir(parents=True)
+    bundle = vendor / "index.ts"
+    bundle.write_text("// @generated by scripts/sync_pi_btw.py from x\n", encoding="utf-8")
+    monkeypatch.setattr(mms_pi_support, "_pi_btw_vendor_dir", lambda: str(vendor))
+
+    assert btw_pi["resolve"]() == ""
+    assert "SOURCE.json" in btw_pi["logs"][0]
+
+    (vendor / "SOURCE.json").write_text(_json.dumps({"sha256": "0" * 64}), encoding="utf-8")
+    btw_pi["logs"].clear()
+
+    assert btw_pi["resolve"]() == ""
+    assert "sha256" in btw_pi["logs"][0]
+
+    (vendor / "SOURCE.json").write_text(
+        _json.dumps({"sha256": _hashlib.sha256(bundle.read_bytes()).hexdigest()}),
+        encoding="utf-8",
+    )
+    btw_pi["logs"].clear()
+
+    assert btw_pi["resolve"]() == str(bundle)
+
+    bundle.write_text("// tampered\n", encoding="utf-8")
+    btw_pi["logs"].clear()
+
+    assert btw_pi["resolve"]() == ""
+    assert "sha256" in btw_pi["logs"][0]
+
+
+def test_bundled_btw_stays_out_when_the_preference_is_off(btw_pi):
+    assert btw_pi["resolve"]().endswith("index.ts")
+    btw_pi["logs"].clear()
+
+    assert btw_pi["resolve"](runtime={"pi_btw": False}) == ""
+    assert "pi_btw" in btw_pi["logs"][0]
+
+    btw_pi["logs"].clear()
+    assert btw_pi["resolve"](runtime={"pi_btw": True}).endswith("index.ts")
+
+
+def test_bundled_btw_preference_reads_the_per_cli_overlay(btw_pi, monkeypatch):
+    mms_pi_support = btw_pi["support"]
+    monkeypatch.setattr(
+        mms_pi_support,
+        "load_user_preferences",
+        lambda: {"launch": {"defaults": {}, "cli": {"pi": {"pi_btw": False}}}},
+    )
+
+    assert btw_pi["resolve"]() == ""
+
+
+def test_bundled_btw_check_failure_never_breaks_the_launch(btw_pi, monkeypatch):
+    mms_pi_support = btw_pi["support"]
+
+    def boom(*_args):
+        raise OSError("unreadable")
+
+    monkeypatch.setattr(mms_pi_support, "_pi_btw_existing_install", boom)
+
+    assert btw_pi["resolve"]() == ""
+    assert "检查失败" in btw_pi["logs"][0]
+
+
+def test_launch_pi_omits_bundled_btw_when_pi_already_loads_one(btw_pi, monkeypatch):
+    mms_pi_support = btw_pi["support"]
+    _project_settings(btw_pi, ["npm:@narumitw/pi-btw@0.58.1"])
+    captured = {}
+    monkeypatch.chdir(btw_pi["project"])
+    monkeypatch.setattr(
+        mms_pi_support,
+        "_pi_gateway_env",
+        lambda *_a, **_k: {"MMS_PI_PROVIDER": "mms-relay-a"},
+    )
+    monkeypatch.setattr(mms_pi_support, "_pi_effective_selected_model", lambda *_a: "kimi-k3")
+    monkeypatch.setattr(
+        mms_pi_support, "_exec_or_run", lambda cmd, env, once: captured.update(cmd=cmd)
+    )
+
+    mms_pi_support.launch_pi(
+        {"model": "kimi-k3"}, {"id": "relay-a", "auth_mode": "api_key"}, once=True
+    )
+
+    assert [item for item in captured["cmd"] if item.endswith("index.ts")] == []
+
+
+_PI_BTW_STUB_LAUNCHERS = '''
+import importlib.util
+import json
+import os
+
+_spec = importlib.util.spec_from_file_location(
+    "_mms_launchers_under_test", os.environ["MMS_PI_BTW_REAL_LAUNCHERS"]
+)
+_real = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_real)
+
+console = _real.console
+
+
+def launch_cli(cli, model_info, runtime, once=False, extra_args=None):
+    with open(os.environ["MMS_PI_BTW_CAPTURE"], "a", encoding="utf-8") as handle:
+        handle.write(
+            json.dumps(
+                {
+                    "cli": cli,
+                    "cwd": os.getcwd(),
+                    "runtime": runtime,
+                    "extraArgs": list(extra_args or []),
+                }
+            )
+            + chr(10)
+        )
+
+
+def __getattr__(name):
+    return getattr(_real, name)
+'''
+
+
+def _pilot_worker_argv(tmp_path, monkeypatch, runtime):
+    """Run the real Pilot launch worker with only the final launch seam captured."""
+    import json as _json
+
+    capture = tmp_path / "captured.jsonl"
+    stub_dir = tmp_path / "stubs"
+    stub_dir.mkdir()
+    (stub_dir / "mms_launchers.py").write_text(_PI_BTW_STUB_LAUNCHERS, encoding="utf-8")
+    # launch_worker re-inserts the repo root at sys.path[0], so shadowing the
+    # launcher only works if the stub is already in sys.modules by then.
+    (stub_dir / "sitecustomize.py").write_text(
+        "import os, sys\n"
+        "sys.path.insert(0, os.path.dirname(__file__))\n"
+        "import mms_launchers  # noqa: F401  (the stub above)\n",
+        encoding="utf-8",
+    )
+    root = tmp_path / "web-root"
+    root.mkdir()
+    project = tmp_path / "project"
+    project.mkdir(exist_ok=True)
+    payload = root / "launch-1.json"
+    payload.write_text(
+        _json.dumps(
+            {
+                "modelInfo": {"model": "kimi-k3"},
+                "runtime": runtime,
+                "extraArgs": ["--mode", "rpc"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in {"MMS_CONFIG_ROOT", "MMS_REAL_HOME", "HOME"}
+    }
+    env.update(
+        {
+            "PYTHONPATH": os.pathsep.join([str(stub_dir), str(ROOT_DIR)]),
+            "MMS_CONFIG_ROOT": str(root),
+            "MMS_REAL_HOME": str(tmp_path / "real-home"),
+            "MMS_PI_BTW_REAL_LAUNCHERS": str(ROOT_DIR / "mms_launchers.py"),
+            "MMS_PI_BTW_CAPTURE": str(capture),
+        }
+    )
+    completed = subprocess.run(
+        [sys.executable, str(ROOT_DIR / "mms_web" / "launch_worker.py"), str(payload)],
+        cwd=str(project),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    lines = [_json.loads(line) for line in capture.read_text(encoding="utf-8").splitlines()]
+    assert len(lines) == 1
+    return lines[0]
+
+
+def test_pilot_launch_worker_injects_the_bundled_btw_extension(tmp_path, monkeypatch):
+    record = _pilot_worker_argv(tmp_path, monkeypatch, {"id": "relay-a", "auth_mode": "api_key"})
+
+    args = record["extraArgs"]
+    assert args[:2] == ["--mode", "rpc"]
+    btw = [index for index, item in enumerate(args) if item.endswith("pi-btw/index.ts")]
+    controls = [index for index, item in enumerate(args) if item.endswith("web-controls.ts")]
+    assert len(btw) == 1, args
+    assert len(controls) == 1, args
+    # Pilot's own controls keep the last word on the argv.
+    assert btw[0] < controls[0]
+
+
+def test_pilot_launch_worker_still_injects_past_a_global_pi_btw(tmp_path, monkeypatch):
+    import json as _json
+
+    settings = tmp_path / "real-home" / ".pi" / "agent" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(_json.dumps({"packages": ["npm:@narumitw/pi-btw"]}), encoding="utf-8")
+
+    record = _pilot_worker_argv(tmp_path, monkeypatch, {"id": "relay-a", "auth_mode": "api_key"})
+
+    # Pilot isolates PI_CODING_AGENT_DIR too, so the real-home package is not
+    # loaded and the session would otherwise have had no /btw at all.
+    assert len([item for item in record["extraArgs"] if item.endswith("pi-btw/index.ts")]) == 1
+    assert any(item.endswith("web-controls.ts") for item in record["extraArgs"])
+
+
+def test_pilot_launch_worker_yields_to_a_project_pi_btw(tmp_path, monkeypatch):
+    import json as _json
+
+    settings = tmp_path / "project" / ".pi" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(_json.dumps({"packages": ["npm:@narumitw/pi-btw"]}), encoding="utf-8")
+
+    record = _pilot_worker_argv(tmp_path, monkeypatch, {"id": "relay-a", "auth_mode": "api_key"})
+
+    assert [item for item in record["extraArgs"] if item.endswith("pi-btw/index.ts")] == []
+    assert any(item.endswith("web-controls.ts") for item in record["extraArgs"])
+
+
+def test_pilot_launch_worker_honours_the_preference(tmp_path, monkeypatch):
+    record = _pilot_worker_argv(
+        tmp_path,
+        monkeypatch,
+        {"id": "relay-a", "auth_mode": "api_key", "pi_btw": False},
+    )
+
+    assert [item for item in record["extraArgs"] if item.endswith("pi-btw/index.ts")] == []
+
+
+def test_vendored_btw_bundle_passes_its_own_check():
+    completed = subprocess.run(
+        [sys.executable, str(ROOT_DIR / "scripts" / "sync_pi_btw.py"), "--check"],
+        cwd=str(ROOT_DIR),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert "[check] ok" in completed.stdout

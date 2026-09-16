@@ -22,6 +22,13 @@ This file is the shared rule source for Codex, Claude, and other coding agents i
 - NSR Stop/compact, Map auto-index and CodeGraph auto-index hooks are retired. Keep explicit tools available; do not reinstall automatic registrations or delete user markers/indexes.
 - Existing MMS session registrations may use shared wrappers. Retired wrappers remain no-op compatibility entries; do not rewrite generated MMS configs to clean them up.
 
+## User-Machine Repairs And Contributions
+
+- For a user's machine-specific MMS bug, follow `docs/mms-web/WINDOWS-CONTRIBUTING.md` (the report and contribution flow also applies to other platforms).
+- Diagnose on the affected machine and keep one repair report with the exact baseline, full patch including new files, automated checks, user acceptance, and rollback. Installed-version hot patches are temporary until collected into source.
+- After local validation, ask whether the user has a GitHub account and wants to submit publicly. Help beginners prepare a fork/branch/PR; without an account or Git, provide a redacted report and patch/source bundle for a maintainer.
+- Authentication stays with the user. Show the exact files and text before public submission; do not upload credentials, raw sessions, or private configuration.
+
 ## Commit Identity
 
 For every agent-created commit, follow:
@@ -115,3 +122,23 @@ For Claude-sensitive providers such as `xin`, `fishcrs`, and `trcrs` if restored
 - For bugfixes, reproduce or inspect the failure before repair when practical.
 - Let validation scale with risk.
 - State what was executed, inspected, or assumed in the closeout.
+
+### CI runs the suite, but only compares
+
+`digger` and `redline` are reviewers, not test runners. A green pair of checks
+never meant the tests passed, and a PR once landed on `dev` while turning four
+tests red.
+
+The `pytest` job closes that hole. It runs `scripts/ci_pytest_regression.py`,
+which runs the suite at the PR's base commit and again at its head, and fails
+only on tests that pass on the base and fail on the head. There is no
+allowlist to maintain: the baseline is recomputed from the base commit on every
+run, so the machine-dependent failures that exist on every branch stay quiet
+while a real regression does not.
+
+- Run it locally the same way: `python3 scripts/ci_pytest_regression.py --base origin/dev`.
+- A candidate regression is rerun twice before the job fails, so one flaky test
+  does not block an unrelated PR.
+- Changing a test expectation is still allowed. Say in the PR why the old
+  expectation was wrong; the job reports the test as broken either way.
+- This job runs for fork PRs as well. `digger` and `redline` do not.

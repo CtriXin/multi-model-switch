@@ -6,6 +6,7 @@ Quick reference for choosing web/browser backend.
 
 | Task Shape | Backend | Why |
 |---|---|---|
+| Any live page work when `ego-browser` is installed | `ego-browser` | Own task space, reuses login state, user handoff. |
 | Search, docs, known URL content | `web-access` | No browser overhead. search/fetch/curl/Jina. |
 | Logged-in Chrome, dynamic sites, exploration | `web-access` CDP | Reuses user session. Full JS. |
 | Screenshots, traces, a11y, deterministic steps | `playwright` | Reliable, traceable, CLI-first. |
@@ -23,8 +24,9 @@ Quick reference for choosing web/browser backend.
 For logged-in Chrome tasks, `web-access` CDP is a required route, not just a preference. In MMS/Codex sandboxes, `HOME` may point at an isolated directory, so repair `web-access` before selecting headless fallback:
 
 ```bash
-WEB_ACCESS_HOST_HOME="$(python3 -c 'import os,pwd; print(pwd.getpwuid(os.getuid()).pw_dir)')" \
-  node "${WEB_ACCESS_SKILL_DIR:-$WEB_ACCESS_HOST_HOME/.codex/skills/web-access}/scripts/check-deps.mjs"
+# MMS sessions export WEB_ACCESS_SKILL_DIR; otherwise the backend is next to weber/SKILL.md.
+WEB_ACCESS_HOST_HOME="${WEB_ACCESS_HOST_HOME:-$(python3 -c 'import os,pwd; print(pwd.getpwuid(os.getuid()).pw_dir)')}" \
+  node "${WEB_ACCESS_SKILL_DIR:-${WEBER_SKILL_DIR:-.}/backends-web-access}/scripts/check-deps.mjs"
 ```
 
 If stuck, kill only the `3456` proxy listener and rerun the check; do not restart the user's Chrome unless explicitly asked.

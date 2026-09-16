@@ -8,12 +8,15 @@ import mimetypes
 import secrets
 import os
 import threading
+import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlsplit
+from urllib.parse import unquote, urlsplit, parse_qs
 
 from mms_version import VERSION
+from mms_platform import capability_snapshot
 
+from . import remote_access as access
 from .errors import WebError
 
 MAX_BODY = 12 * 1024 * 1024
@@ -30,9 +33,16 @@ def _adapter(module: str, name: str, **kwargs):
 
 
 class WebApplication:
-    def __init__(self, *, state_root: Path, config_root: Path | None = None):
+    def __init__(self, *, state_root: Path, config_root: Path | None = None,
+                 listen: str = "loopback", hostnames: tuple[str, ...] = ()):
         from .runtime import require_private_root
         state_root = require_private_root(state_root)
+        # Loopback-only is the default and needs no token, so nothing changes
+        # for a browser on this machine.
+        self.access = access.RemoteAccess(state_root, listen, hostnames)
+        # Set by create_server, which owns the handler class the extra sockets
+        # need. Absent in tests that drive the application without a server.
+        self.listeners = None
         if config_root is None:
             config_root = state_root / "config"
         self.config_root = config_root
@@ -62,7 +72,7 @@ class WebApplication:
             self.model_settings = ModelSettings(self.catalog)
         return self.model_settings
 
-    def bootstrap(self) -> dict:
+    def bootstrap(self, include_cli: bool = False) -> dict:
         snapshot = self.catalog.snapshot() if self.catalog else {
             "models": [], "services": [], "presets": [], "workspaces": [],
             "diagnostics": [{"code": "CATALOG_UNAVAILABLE",
@@ -76,13 +86,18 @@ class WebApplication:
         if self.sessions:
             capabilities.update(self.sessions.capabilities())
         if not capabilities["launch"]:
+            # The probe knows what is missing — an absent pi, a Node too old to
+            # run it. Repeating "not ready" instead leaves the reader with
+            # nothing to act on, which is what a whole machine of greyed-out
+            # models looked like.
+            blocker = str(capabilities.get("launchReason") or "").strip() or "Web 会话接入尚未就绪。"
             snapshot = {
                 **snapshot,
                 "models": [{**model, "available": False,
-                            "reason": model.get("reason") or "Web 会话接入尚未就绪。"}
+                            "reason": model.get("reason") or blocker}
                            for model in snapshot.get("models", [])],
                 "presets": [{**preset, "available": False,
-                             "reason": preset.get("reason") or "Web 会话接入尚未就绪。"}
+                             "reason": preset.get("reason") or blocker}
                             for preset in snapshot.get("presets", [])],
             }
         if capabilities["launch"]:
@@ -100,19 +115,182 @@ class WebApplication:
         return {
             **snapshot, "version": "1", "appVersion": VERSION, "mode": "live",
             "capabilities": capabilities, "csrfToken": self.csrf_token,
-            "sessions": self.sessions.list_sessions() if self.sessions else [],
+            **capability_snapshot(),
+            "sessions": self.all_sessions(include_cli),
         }
 
-    def get(self, parts: list[str]) -> dict:
+    def _cli_sessions(self) -> list[dict]:
+        """Sessions started from the command line, read from Pi's own files.
+
+        Read-only and best-effort: a missing directory or an unreadable file
+        must never take the session list down with it.
+        """
+        if not self.config_root:
+            return []
+        try:
+            from .cli_sessions import index, session_dir_for
+            return index(session_dir_for(self.config_root),
+                         workspaces=self._known_workspaces())
+        except Exception:
+            return []
+
+    def _known_workspaces(self) -> list[dict]:
+        """The registered folders, for placing command-line sessions."""
+        if not self.catalog:
+            return []
+        try:
+            return self.catalog.workspaces()
+        except Exception:
+            return []
+
+    def all_sessions(self, include_cli: bool = False) -> list[dict]:
+        """Pilot's own sessions, and the command-line ones when asked for.
+
+        The caller decides, so the page's own switch takes effect on its next
+        read with no restart and no server-side preference to keep in sync.
+        """
+        own = self._sessions().list_sessions() if self.sessions else []
+        if not include_cli:
+            return own
+        # A session resumed here owns its Pi session, so drop the read-only
+        # row for it rather than showing the same conversation twice.
+        claimed = {str(s.get("piSessionId") or "") for s in own}
+        claimed.discard("")
+        merged = own + [s for s in self._cli_sessions()
+                        if s["piSessionId"] not in claimed]
+        merged.sort(key=lambda view: view.get("updatedAt") or "", reverse=True)
+        # Transcript source paths remain server-internal; detail lookup resolves
+        # the id again from the scoped session directory.
+        return [{k: v for k, v in row.items() if k != "path"} for row in merged]
+
+    def cli_session_detail(self, session_id: str) -> dict:
+        """A read-only transcript for one command-line session."""
+        from .cli_sessions import index, session_dir_for, transcript
+        wanted = session_id[len("cli:"):]
+        if not self.config_root or not wanted:
+            raise WebError("NOT_FOUND", "找不到这个会话。", 404)
+        row = next((s for s in index(session_dir_for(self.config_root), limit=2000,
+                                     workspaces=self._known_workspaces())
+                    if s["piSessionId"] == wanted), None)
+        if row is None:
+            raise WebError("NOT_FOUND", "找不到这个会话。", 404)
+        return {"session": {k: v for k, v in row.items() if k != "path"},
+                # The transcript path is server-only and never crosses the API.
+                "events": transcript(row["path"]),
+                # Present and empty, not absent: the view reads these without
+                # checking, and an absent array is what blanked the page.
+                "artifacts": [], "artifactNotice": "", "approvals": [], "runtime": {},
+                "note": "这个会话是在命令行里开始的，这里只读。"}
+
+    def remote_access_state(self) -> dict:
+        """The switch, the ways in, and which of them are actually listening."""
+        port = self.listeners._port if self.listeners else 0
+        self.access.refresh()
+        if self.listeners:
+            # Addresses change with the network, so bring the sockets in line
+            # with what the machine has now before reporting them.
+            self.listeners.sync(self.access.extra_binds())
+        state = self.access.state(port)
+        state["listening"] = self.listeners.active if self.listeners else []
+        state["unavailable"] = self.listeners.failed if self.listeners else {}
+        # Only reachable entries are offered; a bind that failed leads nowhere.
+        if state["mode"] == "lan":
+            reachable = set(state["listening"])
+            state["links"] = [entry for entry in state["links"]
+                              if entry["kind"] != "address" or entry["host"] in reachable]
+        return state
+
+    def set_remote_access(self, payload: dict) -> dict:
+        """Turn remote access on or off, manage tunnel names, or roll the token."""
+        payload = dict(payload or {})
+        if payload.get("hostname"):
+            if self.access.mode == "loopback":
+                raise WebError("REMOTE_ACCESS_OFF", "先打开远程访问，再加隧道域名。", 409)
+            if not self.access.add_hostname(str(payload["hostname"])):
+                raise WebError("INVALID_HOSTNAME",
+                               "这不像一个域名。把隧道给你的地址整条粘进来就行。", 400)
+            return self.remote_access_state()
+        if payload.get("removeHostname"):
+            self.access.remove_hostname(str(payload["removeHostname"]))
+            return self.remote_access_state()
+        if payload.get("regenerate") is True:
+            if self.access.mode == "loopback":
+                raise WebError("REMOTE_ACCESS_OFF", "先打开远程访问，再换 token。", 409)
+            self.access.regenerate()
+            return self.remote_access_state()
+        if "enabled" not in payload:
+            raise WebError("INVALID_REQUEST", "缺少 enabled。", 400)
+        # isinstance, not `in (True, False)`: 1 == True in Python, and a
+        # stray 1 must be refused rather than quietly read as "off".
+        if not isinstance(payload["enabled"], bool):
+            raise WebError("INVALID_PARAMETER", "enabled 必须是 true 或 false。", 400)
+        wanted = "lan" if payload["enabled"] else "loopback"
+        # "all" is a deliberate command-line choice; the switch never widens
+        # past the machine's own addresses on its own, and it must not narrow
+        # it either: the wildcard socket stays bound for the life of the
+        # process, so dropping to loopback would only clear the token gate
+        # while the network can still reach every endpoint.
+        if self.access.mode == "all":
+            return self.remote_access_state()
+        self.access.set_mode(wanted)
+        if self.listeners:
+            self.listeners.sync(self.access.extra_binds())
+        return self.remote_access_state()
+
+    def adopt_cli_session(self, session_id: str, payload: dict) -> dict:
+        """Continue a terminal-started session in Pilot from here on.
+
+        The transcript path is resolved from the read-only index, never taken
+        from the request, so a caller cannot point this at another file.
+        """
+        from .cli_sessions import index, session_dir_for
+        wanted = session_id[len("cli:"):] if session_id.startswith("cli:") else ""
+        if not self.config_root or not wanted:
+            raise WebError("NOT_FOUND", "只有终端里开始的会话需要接入。", 404)
+        service = self._sessions()
+        already = next((s for s in service.list_sessions()
+                        if str(s.get("piSessionId") or "") == wanted), None)
+        if already is not None:
+            # Idempotent: a second click opens the session the first one made.
+            return service.get_session(already["id"])
+        row = next((s for s in index(session_dir_for(self.config_root), limit=2000,
+                                     workspaces=self._known_workspaces())
+                    if s["piSessionId"] == wanted), None)
+        if row is None:
+            raise WebError("NOT_FOUND", "找不到这个会话。", 404)
+        payload = dict(payload or {})
+        workspace_id = str(payload.get("workspaceId") or "") or str(row.get("workspaceId") or "")
+        if not workspace_id:
+            # The folder it ran in is not registered. Register it, so the
+            # adopted session has the working folder its files come from.
+            if not self.catalog:
+                raise WebError("CAPABILITY_UNAVAILABLE", "本地服务尚未连接。", 409)
+            folder = str(row.get("cwd") or "")
+            if not folder or not Path(folder).is_dir():
+                raise WebError("WORKSPACE_REQUIRED",
+                               "这个会话原来的目录已经不在了，请选择一个工作文件夹。", 409)
+            workspace_id = str(self.catalog.add_workspace({"path": folder})["id"])
+        payload["workspaceId"] = workspace_id
+        return service.adopt(row, payload)
+
+    def get(self, parts: list[str], query: dict[str, list[str]] | None = None) -> dict:
+        include_cli = (query or {}).get("cli", ["0"])[0] == "1"
         if parts == ["update", "identity"]:
             from .update_handoff import path_identity, session_inventory
             return {"version": VERSION, "processId": os.getpid(), "instance": self.instance, "identity": path_identity(Path(__file__).resolve().parent.parent, self.state_root, self.config_root, Path.cwd()), "sessions": session_inventory(self.sessions)}
         if parts == ["update"]:
             return self.updates.status()
+        if parts == ["remote-access"]:
+            return self.remote_access_state()
         if parts == ["model-settings"]:
             return self._model_settings().read()
+        if parts == ["skill-preferences"]:
+            return self._sessions().skills.preferences()
+        if parts == ["ui-preferences"]:
+            from .ui_preferences import UiPreferences
+            return UiPreferences(self.state_root).read(seed_version=VERSION)
         if parts == ["sessions"]:
-            return {"sessions": self._sessions().list_sessions()}
+            return {"sessions": self.all_sessions(include_cli)}
         if len(parts) == 2 and parts[0] == "attachments":
             return self._sessions().files.preview_attachment(parts[1])
         if len(parts) == 3 and parts[0] == "sessions":
@@ -122,13 +300,63 @@ class WebApplication:
                 return self._sessions().runtime_view(parts[1])
             if parts[2] == "commands":
                 return self._sessions().command_catalog(parts[1])
+            if parts[2] == "side-questions":
+                return {"sideQuestions": self._sessions().list_side_questions(parts[1])}
+        if len(parts) == 4 and parts[0] == "sessions" and parts[2] == "side-questions":
+            return self._sessions().get_side_question(parts[1], parts[3])
         if parts == ["bootstrap"]:
-            return self.bootstrap()
+            return self.bootstrap(include_cli)
         if len(parts) == 2 and parts[0] == "sessions":
+            if parts[1].startswith("cli:"):
+                return self.cli_session_detail(parts[1])
             return self._sessions().get_session(parts[1])
         raise WebError("NOT_FOUND", "找不到这个接口。", 404)
 
+    # POSTs that change nothing and can take seconds: a native folder dialog the
+    # user may leave open, and two filesystem sweeps. Holding the mutation lock
+    # through those would stop every other POST — sending a message, stopping a
+    # session, confirming an update — for as long as they run. They only read
+    # state that is written by atomic replace, so a concurrent write is seen
+    # whole or not at all.
+    _UNLOCKED_POSTS = (["workspaces", "choose"], ["workspaces", "search"], ["workspaces", "locate"])
+
+    def _post_readonly(self, parts: list[str], payload: dict) -> dict:
+        if parts == ["workspaces", "choose"]:
+            import subprocess
+            import sys
+            if sys.platform == "darwin":
+                command = ["osascript", "-e", 'POSIX path of (choose folder with prompt "选择 MMS 的工作文件夹")']
+            elif sys.platform == "win32":
+                # PowerShell is present on supported Windows installs. Keep
+                # the dialog in the interactive desktop and emit one UTF-8
+                # path so Chinese folder names survive the pipe.
+                script = (
+                    "Add-Type -AssemblyName System.Windows.Forms; "
+                    "$d=New-Object System.Windows.Forms.FolderBrowserDialog; "
+                    "$d.Description='选择 MMS 的工作文件夹'; "
+                    "if($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK){ "
+                    "[Console]::OutputEncoding=[Text.Encoding]::UTF8; "
+                    "[Console]::Write($d.SelectedPath) }"
+                )
+                command = ["powershell.exe", "-NoProfile", "-STA", "-WindowStyle", "Normal", "-ExecutionPolicy", "Bypass", "-Command", script]
+            else:
+                raise WebError("FOLDER_PICKER_UNAVAILABLE", "请直接填写电脑上的文件夹路径。", 409)
+            try:
+                result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", timeout=120)
+            except (OSError, subprocess.TimeoutExpired, UnicodeError) as exc:
+                raise WebError("FOLDER_PICKER_UNAVAILABLE", "无法打开文件夹选择器，请直接填写完整路径。", 409) from exc
+            return {"path": result.stdout.strip() if result.returncode == 0 else ""}
+        if not self.catalog:
+            raise WebError("CAPABILITY_UNAVAILABLE", "本地服务尚未连接。", 409)
+        if parts == ["workspaces", "search"]:
+            from .workspace_search import search_workspaces
+            return search_workspaces(self.catalog, payload)
+        from .workspace_search import locate_folder
+        return locate_folder(self.catalog, payload)
+
     def post(self, parts: list[str], payload: dict) -> dict:
+        if parts in self._UNLOCKED_POSTS:
+            return self._post_readonly(parts, payload)
         with self.mutation_lock:
             if parts == ["update", "commit"]:
                 if not self.probation_token or not secrets.compare_digest(str(payload.get("token") or ""), self.probation_token):
@@ -153,6 +381,8 @@ class WebApplication:
             return coordinator.start(payload) if parts[1] == "start" else coordinator.cancel()
         if parts == ["update", "check"]:
             return self.updates.request_check()
+        if parts == ["remote-access"]:
+            return self.set_remote_access(payload)
         if parts == ["update", "preferences"]:
             return self.updates.preferences(payload)
         if len(parts) == 2 and parts[0] == "model-settings" and parts[1] in {"discover", "check", "refresh", "preview", "apply"}:
@@ -168,6 +398,11 @@ class WebApplication:
                     shutil.rmtree(root)
         if parts == ["skills"]:
             return self._sessions().skills.snapshot(str(payload.get("workspaceId") or ""))
+        if parts == ["skill-preferences"]:
+            return self._sessions().skills.set_preferences(payload)
+        if parts == ["ui-preferences"]:
+            from .ui_preferences import UiPreferences
+            return UiPreferences(self.state_root).update(payload)
         if parts == ["project-materials"]:
             return self._sessions().materials.snapshot(str(payload.get("workspaceId") or ""))
         if parts == ["project-materials", "change"]:
@@ -182,18 +417,6 @@ class WebApplication:
             return self._sessions().files.choose_local(payload)
         if parts in (["files", "tree"], ["files", "read"], ["files", "git"]):
             return getattr(self._sessions().files, parts[1])(payload)
-        if parts == ["workspaces", "choose"]:
-            import subprocess
-            import sys
-            if sys.platform != "darwin":
-                raise WebError("FOLDER_PICKER_UNAVAILABLE", "请直接填写电脑上的文件夹路径。", 409)
-            result = subprocess.run(["osascript", "-e", 'POSIX path of (choose folder with prompt "选择 MMS 的工作文件夹")'], capture_output=True, text=True, timeout=120)
-            return {"path": result.stdout.strip() if result.returncode == 0 else ""}
-        if parts == ["workspaces", "search"]:
-            if not self.catalog:
-                raise WebError("CAPABILITY_UNAVAILABLE", "本地服务尚未连接。", 409)
-            from .workspace_search import search_workspaces
-            return search_workspaces(self.catalog, payload)
         if parts == ["workspaces"]:
             if not self.catalog:
                 raise WebError("CAPABILITY_UNAVAILABLE", "本地服务尚未连接。", 409)
@@ -217,8 +440,15 @@ class WebApplication:
             if not service.capabilities().get("launch"):
                 raise WebError("CAPABILITY_UNAVAILABLE", "当前会话路径尚未就绪，未启动模型。", 409)
             return service.launch(payload)
+        if len(parts) == 3 and parts[0] == "sessions" and parts[2] == "adopt":
+            return self.adopt_cli_session(parts[1], payload)
+        if len(parts) == 3 and parts[0] == "sessions" and parts[2] == "side-questions":
+            return self._sessions().ask_side_question(parts[1], payload)
+        if (len(parts) == 5 and parts[0] == "sessions" and parts[2] == "side-questions"
+                and parts[4] == "cancel"):
+            return self._sessions().cancel_side_question(parts[1], parts[3])
         if len(parts) == 3 and parts[0] == "sessions":
-            methods = {"messages": "send", "stop": "stop", "control": "control", "manage": "manage", "fork": "fork", "model": "switch_model", "artifacts": "artifact"}
+            methods = {"messages": "send", "stop": "stop", "control": "control", "manage": "manage", "fork": "fork", "model": "switch_model", "artifacts": "artifact", "queue": "queue"}
             if parts[2] in methods:
                 return getattr(self._sessions(), methods[parts[2]])(parts[1], payload)
         if len(parts) == 4 and parts[0] == "sessions" and parts[2] == "approvals":
@@ -237,6 +467,8 @@ class WebApplication:
 
     def close(self):
         self.updates.close()
+        if self.listeners:
+            self.listeners.close()
         if self.sessions:
             self.sessions.close()
 
@@ -247,6 +479,11 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
     from mms_version import VERSION
     identity = hashlib.sha256((str(Path(__file__).resolve().parent.parent) + "|" +
                                str(app.config_root.resolve()) + "|" + VERSION).encode()).hexdigest()
+    # `mms web status|url|stop|restart` decides "is this one mine" from this
+    # fingerprint instead of re-parsing the server's command line, which is not
+    # recoverable on Windows. It is a hash, so no local path is published.
+    from .service import state_identity
+    state_fingerprint = state_identity(app.state_root)
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "MMSWeb/1"
@@ -255,14 +492,28 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
             # Request paths/bodies can contain private task data. No access log.
             return
 
+        def _presented_token(self):
+            """The token this request carries, from the cookie or the query."""
+            from http.cookies import SimpleCookie
+            query = parse_qs(urlsplit(self.path).query)
+            if query.get(access.QUERY):
+                return query[access.QUERY][0], True
+            jar = SimpleCookie(self.headers.get("Cookie", ""))
+            morsel = jar.get(access.COOKIE)
+            return (morsel.value if morsel else ""), False
+
         def _check_origin(self, *, mutation=False):
             expected_port = self.server.server_address[1]
-            hosts = {f"127.0.0.1:{expected_port}", f"localhost:{expected_port}"}
-            if self.headers.get("Host") not in hosts:
+            if not app.access.accepts(self.headers.get("Host"), expected_port):
                 raise WebError("INVALID_HOST", "只允许访问本机服务地址。", 403)
             origin = self.headers.get("Origin")
-            if origin is not None and origin not in {f"http://{host}" for host in hosts}:
-                raise WebError("INVALID_ORIGIN", "请在 MMS 本地页面中执行此操作。", 403)
+            if origin is not None:
+                # The page that issued this request must live on a host this
+                # server answers to, judged by the same rule as the Host
+                # header so "--listen all" accepts every interface it serves.
+                parts = urlsplit(origin)
+                if parts.scheme not in ("http", "https") or not app.access.accepts(parts.netloc, expected_port):
+                    raise WebError("INVALID_ORIGIN", "请在 MMS 本地页面中执行此操作。", 403)
             if self.headers.get("Sec-Fetch-Site") == "cross-site":
                 raise WebError("INVALID_ORIGIN", "不允许跨站访问本地服务。", 403)
             if mutation and not secrets.compare_digest(
@@ -276,6 +527,8 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-MMS-Web-Identity", identity)
+            self.send_header("X-MMS-Web-Version", VERSION)
+            self.send_header("X-MMS-Web-State", state_fingerprint)
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
             self.send_header("X-Frame-Options", "SAMEORIGIN" if preview else "DENY")
@@ -296,6 +549,9 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
             if isinstance(exc, WebError):
                 self._json(exc.status, {"error": {"code": exc.code, "message": exc.message}})
             else:
+                # Keep the user-facing response generic, but leave a traceback
+                # in the service log so Windows-only failures are diagnosable.
+                traceback.print_exc()
                 self._json(500, {"error": {"code": "INTERNAL_ERROR",
                                          "message": "本地服务暂时无法完成操作。请检查服务状态。"}})
 
@@ -305,9 +561,41 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
                 raise WebError("NOT_FOUND", "找不到这个接口。", 404)
             return path.removeprefix("/api/v1/").split("/")
 
+        def _gate(self):
+            """Return True when the request may proceed.
+
+            A valid token in the query is exchanged for a cookie and the URL
+            is redirected without it, so the token does not sit in history,
+            in the address bar, or in a Referer header on the way out.
+            """
+            # A tunnel can reach this socket over loopback without forwarding
+            # headers. Remote mode therefore authenticates every connection.
+            if not app.access.required:
+                return True
+            presented, from_query = self._presented_token()
+            if not app.access.valid(presented):
+                self._send(401, b"401", "text/plain; charset=utf-8")
+                return False
+            if from_query and self.command == "GET":
+                split = urlsplit(self.path)
+                query = "&".join(part for part in split.query.split("&")
+                                 if not part.startswith(f"{access.QUERY}="))
+                secure = self.headers.get("X-Forwarded-Proto", "").lower() == "https"
+                self.send_response(302)
+                self.send_header("Location", split.path + (f"?{query}" if query else ""))
+                self.send_header("Set-Cookie",
+                                 f"{access.COOKIE}={presented}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000"
+                                 + ("; Secure" if secure else ""))
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return False
+            return True
+
         def do_GET(self):
             try:
                 self._check_origin()
+                if not self._gate():
+                    return
                 path = unquote(urlsplit(self.path).path)
                 if path.startswith("/api/"):
                     parts = self._parts()
@@ -319,7 +607,7 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
                             raise WebError("PREVIEW_UNAVAILABLE", "这个成果不是 HTML。", 400)
                         from .artifact_preview import offline_html
                         return self._send(200, offline_html(item["content"]), "text/html; charset=utf-8", preview=True)
-                    return self._json(200, app.get(parts))
+                    return self._json(200, app.get(parts, parse_qs(urlsplit(self.path).query)))
                 file = (root / (path.lstrip("/") or "index.html")).resolve()
                 if not file.is_relative_to(root) or not file.is_file():
                     raise WebError("NOT_FOUND", "页面资源不存在。请先构建 MMS Pilot。", 404)
@@ -336,6 +624,8 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
         def do_POST(self):
             try:
                 self._check_origin(mutation=True)
+                if not self._gate():
+                    return
                 if self.headers.get_content_type() != "application/json":
                     raise WebError("INVALID_BODY", "请求必须使用 JSON。", 415)
                 try:
@@ -357,6 +647,62 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
             except Exception as exc:
                 self._error(exc)
 
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    server = ThreadingHTTPServer((app.access.bind_address(), port), Handler)
     server.daemon_threads = True
+    app.listeners = RemoteListeners(Handler, server.server_address[1])
+    app.listeners.sync(app.access.extra_binds())
     return server
+
+
+class RemoteListeners:
+    """The sockets that exist only while remote access is switched on.
+
+    One per address rather than the wildcard, for two reasons. The always-on
+    loopback socket already holds this port, and a second wildcard bind on it
+    would collide. And closing these leaves nothing listening on the network,
+    which is what "off" has to mean: a port that accepts a connection is
+    visible whatever it answers.
+    """
+
+    def __init__(self, handler, port: int) -> None:
+        self._handler = handler
+        self._port = port
+        self._servers: dict[str, ThreadingHTTPServer] = {}
+        self.failed: dict[str, str] = {}
+
+    @property
+    def active(self) -> list[str]:
+        return sorted(self._servers)
+
+    def sync(self, addresses: list[str]) -> None:
+        """Listen on exactly these addresses, opening and closing as needed."""
+        wanted = list(dict.fromkeys(addresses))
+        for address in list(self._servers):
+            if address not in wanted:
+                self._close(address)
+        self.failed = {}
+        for address in wanted:
+            if address in self._servers:
+                continue
+            try:
+                extra = ThreadingHTTPServer((address, self._port), self._handler)
+            except OSError as error:
+                # A point-to-point tunnel endpoint may refuse a bind. Skip it
+                # and say so rather than failing the whole switch.
+                self.failed[address] = str(error)
+                continue
+            extra.daemon_threads = True
+            self._servers[address] = extra
+            threading.Thread(target=extra.serve_forever, name=f"mms-web-{address}",
+                             daemon=True).start()
+
+    def _close(self, address: str) -> None:
+        extra = self._servers.pop(address, None)
+        if extra is None:
+            return
+        extra.shutdown()
+        extra.server_close()
+
+    def close(self) -> None:
+        for address in list(self._servers):
+            self._close(address)

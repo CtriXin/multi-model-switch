@@ -186,7 +186,10 @@ def test_agy_home_context_requires_isolated_session(tmp_path):
 
     assert result["session_home"] == str(session_home)
     assert result["xdg_config_home"] == str(session_home / ".config")
-    assert result["config_root"] == str(real_home / ".config" / "mms")
+    # `~/.config/mms/accounts/<id>/s/<pid>` is still a runtime session HOME, but the
+    # single config root it unwinds to is `~/.config/mms-next` (docs/AGENT_GUARDRAILS.md
+    # "Single Config Root"), never the retired `~/.config/mms`.
+    assert result["config_root"] == str(real_home / ".config" / "mms-next")
 
 
 def test_account_env_prepares_agy_isolated_home(monkeypatch, tmp_path):

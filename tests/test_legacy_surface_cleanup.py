@@ -201,44 +201,42 @@ def test_rescue_fallback_candidates_use_recent_models_before_config(monkeypatch)
 def test_rescue_fallback_candidates_include_routed_models(monkeypatch, tmp_path: Path) -> None:
     import mms_core
 
-    generated = tmp_path / "generated"
-    generated.mkdir()
-    (generated / "model-routes.json").write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "routes": {
-                    "failed-model": {
-                        "primary": {
-                            "provider_id": "broken",
-                            "openai_base_url": "https://broken.example/v1",
-                            "api_key": "sk-test-failed",
-                            "model_id": "failed-model",
-                        },
-                        "fallbacks": [],
+    # Route candidates only come from the verified latest-approved bundle: every config
+    # root is a preview root now (single config root, MMS_CONFIG_ROOT_MODE ignored).
+    _write_latest_approved_router_manifest(
+        tmp_path,
+        router_payload={
+            "version": 1,
+            "routes": {
+                "failed-model": {
+                    "primary": {
+                        "provider_id": "broken",
+                        "openai_base_url": "https://broken.example/v1",
+                        "api_key": "sk-test-failed",
+                        "model_id": "failed-model",
                     },
-                    "deepseek-v4-flash": {
-                        "primary": {
-                            "provider_id": "deepseek",
-                            "openai_base_url": "https://deepseek.example/v1",
-                            "api_key": "sk-test-deepseek",
-                            "model_id": "deepseek-v4-flash",
-                        },
-                        "fallbacks": [],
-                    },
-                    "no-openai-route": {
-                        "primary": {
-                            "provider_id": "anthropic-only",
-                            "anthropic_base_url": "https://anthropic.example",
-                            "api_key": "sk-test-anthropic",
-                            "model_id": "no-openai-route",
-                        },
-                        "fallbacks": [],
-                    },
+                    "fallbacks": [],
                 },
-            }
-        ),
-        encoding="utf-8",
+                "deepseek-v4-flash": {
+                    "primary": {
+                        "provider_id": "deepseek",
+                        "openai_base_url": "https://deepseek.example/v1",
+                        "api_key": "sk-test-deepseek",
+                        "model_id": "deepseek-v4-flash",
+                    },
+                    "fallbacks": [],
+                },
+                "no-openai-route": {
+                    "primary": {
+                        "provider_id": "anthropic-only",
+                        "anthropic_base_url": "https://anthropic.example",
+                        "api_key": "sk-test-anthropic",
+                        "model_id": "no-openai-route",
+                    },
+                    "fallbacks": [],
+                },
+            },
+        },
     )
     monkeypatch.setattr(mms_core, "CONFIG_DIR", str(tmp_path))
     monkeypatch.setattr(mms_core, "_load_usage_stats", lambda: {"last_by_cli": {}, "sources": {}})
@@ -1094,7 +1092,9 @@ def test_mmf_missing_preview_config_does_not_run_legacy_setup(monkeypatch, tmp_p
     assert not (preview_root / "config.toml").exists()
     out = capsys.readouterr().out
     assert "Preview root uses v2 DB truth" in out
-    assert "mmf preview prepare" in out
+    # The legacy root is retired: the guidance is Pilot, not a legacy import.
+    assert "mmf web" in out
+    assert "preview prepare --from ~/.config/mms" not in out
 
 
 def test_mmf_config_mutation_is_blocked_from_legacy_config_path(monkeypatch, tmp_path, capsys) -> None:

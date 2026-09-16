@@ -54,6 +54,7 @@ _PY_COMPILE_TARGETS = [
 ]
 
 _PYTEST_TARGETS = [
+    "tests/test_mms_release_version.py",
     "tests/test_mms_web_context_evidence.py",
     "tests/test_mms_web_recipe_contract.py",
     "tests/test_mms_web_updates.py",
@@ -72,6 +73,7 @@ _PYTEST_TARGETS = [
     "tests/test_mms_web_artifact_history.py",
     "tests/test_mms_web_artifact_flow.py",
     "tests/test_mms_web_standalone_settings.py",
+    "tests/test_web_config_root_adoption.py",
     "tests/test_claude_hardening_regressions.py",
     "tests/test_claude_isolation.py",
     "tests/test_codex_history_growth.py",
@@ -121,6 +123,12 @@ _SCENARIO_MATRIX = [
         "coverage": "mmf uses ~/.config/mms-next under the fresh user home",
     },
     {
+        "id": "shared-config-root-default",
+        "state": "empty HOME with no MMS env; a channel pinned to the legacy root; a fresh Pilot state root",
+        "coverage": "mms defaults to the same ~/.config/mms-next root as mmf, a pinned channel stays on the legacy root in stable mode, and Pilot shares the default root "
+                    "(adoption of an existing Web-owned config is covered by tests/test_web_config_root_adoption.py)",
+    },
+    {
         "id": "legacy-dirty-install-cleanup",
         "state": "gateway session contains leaked .mms/.nvm/.local/bin and stale ccs",
         "coverage": "cleanup removes only MMS-owned leaked artifacts and preserves unrelated user CLI links",
@@ -161,9 +169,19 @@ _SCENARIO_MATRIX = [
         "coverage": "stable release resolution, parameter precedence, matching script/source refs, pinned downloads and temporary cleanup on success/failure",
     },
     {
+        "id": "install-entry-parity",
+        "state": "the same install reached by curl and by the npm wrapper, which pins --ref to the release it resolved",
+        "coverage": "both print the same one-line headline; a genuinely pinned older ref or a dev/canary channel still prints the full version overview",
+    },
+    {
         "id": "one-question-install",
         "state": "installer run with no arguments, with and without a terminal",
         "coverage": "nothing that changes the install is asked; stable channel and shell PATH are the defaults; the only question offers to open MMS Web, which starts detached with a real config root, falls back off a taken port, reuses a running instance, and is skipped without a terminal",
+    },
+    {
+        "id": "pi-btw-bundled-extension",
+        "state": "fresh HOME with no MMS env; a bundled Pi /btw extension, then a pi-btw in the real home, in the project, in the session's own agent dir, then pi_btw = false",
+        "coverage": "MMS injects its own /btw bundle into every Pi it starts, stays out of the way only when the session really loads another pi-btw (project settings, or an agent tree it is pointed at), keeps injecting past an isolated-away global one, and honours the preference",
     },
     {
         "id": "codex-hook-trust-and-history",
@@ -231,6 +249,59 @@ def _smoke_fresh_mmf_config_root() -> None:
             raise SystemExit(f"fresh mmf mode mismatch: {payload!r}")
         if payload.get("config_root") != expected_root:
             raise SystemExit(f"fresh mmf root mismatch: {payload.get('config_root')} != {expected_root}")
+
+
+def _smoke_shared_config_root_default() -> None:
+    """One root serves both entrances, and a pinned channel still opts out."""
+    with tempfile.TemporaryDirectory(prefix="mms-shared-root-") as tmp:
+        home = Path(tmp).resolve() / "home"
+        home.mkdir()
+        shared_root = home / ".config" / "mms-next"
+        legacy_root = home / ".config" / "mms"
+
+        completed = _run(
+            "fresh mms config root",
+            [sys.executable, str(ROOT_DIR / "mms"), "config", "root", "--json"],
+            env=_env_for_home(home),
+        )
+        payload = json.loads(completed.stdout)
+        if payload.get("config_root") != str(shared_root):
+            raise SystemExit(f"fresh mms root mismatch: {payload.get('config_root')} != {shared_root}")
+        if payload.get("mode") != "preview":
+            raise SystemExit(f"fresh mms mode mismatch: {payload!r}")
+
+        # A stale shell export or the retired mmd/mmm wrapper env pointing at
+        # the legacy root must not drag a process back there: the pin is
+        # redirected to the shared root and the mode stays preview.
+        pinned_env = _env_for_home(home)
+        pinned_env["MMS_CONFIG_ROOT"] = str(legacy_root)
+        pinned_env["MMS_CONFIG_ROOT_MODE"] = "stable"
+        completed = _run(
+            "retired legacy stable pin",
+            [sys.executable, str(ROOT_DIR / "mms"), "config", "root", "--json"],
+            env=pinned_env,
+        )
+        payload = json.loads(completed.stdout)
+        if payload.get("config_root") != str(shared_root):
+            raise SystemExit(f"legacy pin not redirected: {payload.get('config_root')} != {shared_root}")
+        if payload.get("mode") != "preview":
+            raise SystemExit(f"legacy stable pin still honoured: {payload!r}")
+
+        probe = (
+            "import json,sys;"
+            "from pathlib import Path;"
+            "from mms_web.runtime import default_config_root;"
+            "print(json.dumps({'fresh': str(default_config_root(Path(sys.argv[1])))}))"
+        )
+        fresh_state = home / ".local" / "share" / "mms-web"
+        completed = _run(
+            "pilot default config root",
+            [sys.executable, "-c", probe, str(fresh_state)],
+            env=_env_for_home(home),
+        )
+        roots = json.loads(completed.stdout)
+        if roots.get("fresh") != str(shared_root):
+            raise SystemExit(f"pilot fresh root mismatch: {roots.get('fresh')} != {shared_root}")
 
 
 def _safe_symlink(target: Path | str, link: Path) -> None:
@@ -370,6 +441,97 @@ def _smoke_nsr_low_noise_hook_matrix() -> None:
                 raise SystemExit(f"{cli} NSR still attached to noisy {event_name} hook")
 
 
+_PI_BTW_PROBE = """
+import json, os, sys
+from pathlib import Path
+
+import mms_pi_support
+
+logs = []
+cwd = sys.argv[1]
+
+
+def resolve(runtime=None, env=None):
+    return mms_pi_support.pi_btw_extension_path(env or {}, runtime, cwd, log=logs.append)
+
+
+def record(expect_btw, label, env=None, expect_log=None):
+    path = resolve(env=env)
+    injected = bool(path)
+    print(json.dumps({"label": label, "injected": injected, "expected": expect_btw,
+                      "logs": list(logs)}))
+    seen = list(logs)
+    logs.clear()
+    if injected != expect_btw:
+        raise SystemExit(f"{label}: injected={injected}, expected={expect_btw}")
+    if path and Path(path).name != "index.ts":
+        raise SystemExit(f"{label}: unexpected extension path {path}")
+    if expect_log and not any(expect_log in line for line in seen):
+        raise SystemExit(f"{label}: no log line mentioning {expect_log}: {seen!r}")
+
+
+record(True, "clean fresh home")
+
+agent_dir = Path.home() / ".pi" / "agent"
+settings = agent_dir / "settings.json"
+settings.parent.mkdir(parents=True, exist_ok=True)
+settings.write_text(json.dumps({"packages": ["npm:pi-usage-hub", "npm:@narumitw/pi-btw@0.58.1"]}),
+                    encoding="utf-8")
+# MMS gives the session its own PI_CODING_AGENT_DIR, so this copy is never
+# loaded: skipping here would leave the session with no /btw at all.
+record(True, "upstream pi-btw in the real home, session isolated",
+       expect_log="PI_CODING_AGENT_DIR")
+# ... and the one case where that same file really is loaded.
+record(False, "session pointed at the agent tree that carries pi-btw",
+       env={"PI_CODING_AGENT_DIR": str(agent_dir)}, expect_log="\u4e0d\u91cd\u590d\u6ce8\u5165")
+saved = json.loads(settings.read_text(encoding="utf-8"))
+if saved["packages"][0] != "npm:pi-usage-hub":
+    raise SystemExit("the read-only check rewrote the user's Pi settings")
+settings.unlink()
+
+project = Path(cwd) / ".pi" / "settings.json"
+project.parent.mkdir(parents=True, exist_ok=True)
+project.write_text(json.dumps({"packages": [{"source": "git:github.com/CtriXin/pi-btw@v0.59.0-fork.1"}]}),
+                   encoding="utf-8")
+record(False, "fork installed by the project", expect_log="\u4e0d\u91cd\u590d\u6ce8\u5165")
+project.unlink()
+
+record(True, "both installs removed")
+
+preferences = Path.home() / ".config" / "mms-next" / "preferences.toml"
+preferences.parent.mkdir(parents=True, exist_ok=True)
+preferences.write_text("[launch.cli.pi]" + chr(10) + "pi_btw = false" + chr(10), encoding="utf-8")
+if resolve():
+    raise SystemExit("pi_btw = false did not reach the launcher")
+if not any("pi_btw" in line for line in logs):
+    raise SystemExit("a disabled preference logged nothing: " + repr(logs))
+logs.clear()
+preferences.write_text("[launch.cli.pi]" + chr(10) + "pi_btw = true" + chr(10), encoding="utf-8")
+if not resolve():
+    raise SystemExit("pi_btw = true should inject the bundled extension")
+if resolve(runtime={"pi_btw": False}):
+    raise SystemExit("the launch overlay must win over the preferences default")
+logs.clear()
+preferences.unlink()
+"""
+
+
+def _smoke_pi_btw_bundled_extension() -> None:
+    """Every Pi MMS starts carries /btw, and MMS steps aside when it is already there."""
+    _run("pi-btw bundle check", [sys.executable, str(ROOT_DIR / "scripts" / "sync_pi_btw.py"), "--check"])
+    with tempfile.TemporaryDirectory(prefix="mms-pi-btw-") as tmp:
+        home = Path(tmp).resolve() / "home"
+        project = Path(tmp).resolve() / "project"
+        home.mkdir()
+        project.mkdir()
+        _run(
+            "pi-btw injection matrix",
+            [sys.executable, "-c", _PI_BTW_PROBE, str(project)],
+            env=_env_for_home(home),
+        )
+
+
+
 def _print_scenarios() -> None:
     print("[gate] scenario matrix:")
     for item in _SCENARIO_MATRIX:
@@ -389,8 +551,10 @@ def main() -> int:
     _print_scenarios()
     _run("py_compile", [sys.executable, "-m", "py_compile", *_PY_COMPILE_TARGETS])
     _smoke_fresh_mmf_config_root()
+    _smoke_shared_config_root_default()
     _smoke_legacy_install_state_matrix()
     _smoke_repeatable_install_dry_run()
+    _smoke_pi_btw_bundled_extension()
     _smoke_nsr_low_noise_hook_matrix()
 
     pytest_targets = _QUICK_PYTEST_TARGETS if args.quick else _PYTEST_TARGETS

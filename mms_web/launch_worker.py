@@ -19,8 +19,17 @@ def main():
     # Redirect Python banners only. Keep OS fd 1 for the exec'ed Pi process.
     with contextlib.redirect_stdout(sys.stderr):
         import mms_launchers
+        import mms_pi_support
+        extra_args = list(payload["extraArgs"])
+        btw_extension = mms_pi_support.pi_btw_extension_path(
+            None, payload["runtime"], os.getcwd(), log=mms_launchers.console.print
+        )
+        if btw_extension:
+            # Same bundled /btw the terminal launcher injects, so a Pilot side
+            # question and a terminal one are answered by the same extension.
+            extra_args += ["--extension", btw_extension]
         mms_launchers.launch_cli("pi", payload["modelInfo"], payload["runtime"],
-                                 extra_args=[*payload["extraArgs"], "--extension", str(Path(__file__).parent / "extensions/web-controls.ts")])
+                                 extra_args=[*extra_args, "--extension", str(Path(__file__).parent / "extensions/web-controls.ts")])
 
 
 if __name__ == "__main__":

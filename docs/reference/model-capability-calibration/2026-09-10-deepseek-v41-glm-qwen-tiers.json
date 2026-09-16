@@ -1,0 +1,179 @@
+{
+  "schema": "mms.model_capability_calibration.v1",
+  "generated_at": "2026-09-10T21:55:00.000Z",
+  "description": "DeepSeek v4 family upgrade to v4.1-tier capabilities + GLM 5.2/5.3 and Qwen 3.7/3.8 graded reasoning_effort tiers. All facts captured 2026-09-10 via live API probes (invalid-value error enumeration for reasoning_effort, out-of-range max_tokens error, 8x8 red-image vision probe), direct against api.deepseek.com and via Tokyo newapi GLM-CRS / Qwen-CRS routes. Supersedes the 2026-09-02 GLM tier list (upstream extended the enum) and the stale approved fact 'deepseek-v4-flash supports_vision=false'.",
+  "mms_source": "manual-live-probe-addition",
+  "models": [
+    {
+      "alias": "deepseek-v4-flash",
+      "routed_model_id": "deepseek-v4-flash",
+      "provider_id": "newapi-personal-tokyo",
+      "vendor": "DeepSeek",
+      "canonical_model_id": "deepseek-v4-flash",
+      "alias_status": "official_exact",
+      "confidence": "official_exact",
+      "official_context_window_tokens": 1048576,
+      "official_max_output_tokens": 393216,
+      "supports_vision": true,
+      "supports_thinking": true,
+      "one_million_context": true,
+      "one_million_request_format": null,
+      "expected_protocol": "openai_chat_completions",
+      "current_mms_context_window_tokens": 1000000,
+      "thinking_control": {
+        "control_type": "parameter",
+        "path": "reasoning_effort",
+        "allowed_values": ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+        "default": "high",
+        "disable_supported": false
+      },
+      "evidence": [
+        { "url": "https://api.deepseek.com/chat/completions", "official": false },
+        { "url": "https://api-docs.deepseek.com/api/create-chat-completion", "official": true }
+      ],
+      "notes": "2026-09-10 live probes: reasoning_effort='banana' -> error enumerates none/minimal/low/medium/high/xhigh/max; max_tokens=999999 -> 'valid range is [1, 393216]'; 8x8 red PNG -> answered 'Red' (vision true). Context 1048576 aligned with the v4.1 backend measurement from 2026-09-09 (1.9M input rejected, 1.2M accepted); v4-flash was not separately input-probed today. Ops notice 2026-09-10: 'deepseek-v4-flash 官方已更新为 v4.1 版本' (backend upgraded under the same name)."
+    },
+    {
+      "alias": "deepseek-v4-pro",
+      "routed_model_id": "deepseek-v4-pro",
+      "provider_id": "newapi-personal-tokyo",
+      "vendor": "DeepSeek",
+      "canonical_model_id": "deepseek-v4-pro",
+      "alias_status": "official_exact",
+      "confidence": "official_exact",
+      "official_context_window_tokens": 1048576,
+      "official_max_output_tokens": 393216,
+      "supports_vision": false,
+      "supports_thinking": true,
+      "one_million_context": true,
+      "one_million_request_format": null,
+      "expected_protocol": "openai_chat_completions",
+      "current_mms_context_window_tokens": 1000000,
+      "thinking_control": {
+        "control_type": "parameter",
+        "path": "reasoning_effort",
+        "allowed_values": ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+        "default": "high",
+        "disable_supported": false
+      },
+      "evidence": [
+        { "url": "https://api.deepseek.com/chat/completions", "official": false },
+        { "url": "https://api-docs.deepseek.com/api/create-chat-completion", "official": true }
+      ],
+      "notes": "Same probes as v4-flash (7-value enum, [1, 393216]). Vision NEGATIVE: red-image probe answered 'I'm sorry, I cannot see the image' -> stays text-only. xhigh no longer maps to max (old pin removed); xhigh is a real distinct tier now (verified: xhigh request returned 20 reasoning tokens, none returned 0)."
+    },
+    {
+      "alias": "deepseek-v4-flash-vision-exp",
+      "routed_model_id": "deepseek-v4-flash-vision-exp",
+      "provider_id": "newapi-personal-tokyo",
+      "vendor": "DeepSeek",
+      "canonical_model_id": "deepseek-v4-flash-vision-exp",
+      "alias_status": "official_exact",
+      "confidence": "official_exact",
+      "official_context_window_tokens": 1048576,
+      "official_max_output_tokens": 393216,
+      "supports_vision": true,
+      "supports_thinking": true,
+      "one_million_context": true,
+      "one_million_request_format": null,
+      "expected_protocol": "openai_chat_completions",
+      "current_mms_context_window_tokens": 1000000,
+      "thinking_control": {
+        "control_type": "parameter",
+        "path": "reasoning_effort",
+        "allowed_values": ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+        "default": "high",
+        "disable_supported": false
+      },
+      "evidence": [
+        { "url": "https://api.deepseek.com/chat/completions", "official": false }
+      ],
+      "notes": "7-value enum + [1, 393216] probed 2026-09-10; vision per model name and prior sessions."
+    },
+    {
+      "alias": "glm-5.2",
+      "routed_model_id": "glm-5.2",
+      "provider_id": "newapi-personal-tokyo",
+      "vendor": "Zhipu AI",
+      "canonical_model_id": "glm-5.2",
+      "alias_status": "official_exact",
+      "confidence": "official_exact",
+      "official_context_window_tokens": 1048576,
+      "official_max_output_tokens": 131072,
+      "supports_vision": null,
+      "supports_thinking": true,
+      "one_million_context": true,
+      "one_million_request_format": null,
+      "expected_protocol": "openai_chat_completions",
+      "current_mms_context_window_tokens": 1000000,
+      "thinking_control": {
+        "control_type": "parameter",
+        "path": "reasoning_effort",
+        "allowed_values": ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+        "default": "max",
+        "disable_supported": false
+      },
+      "evidence": [
+        { "url": "https://docs.bigmodel.cn/cn/guide/capabilities/thinking", "official": true },
+        { "url": "https://api.deepseek.com/", "official": false }
+      ],
+      "notes": "2026-09-10 live probe via Tokyo GLM-CRS: reasoning_effort='banana' -> upstream error code 1210 enumerates none、minimal、low、medium、high、xhigh、max (supersedes 2026-09-02 docs tier list low/high/max). Default stays max per 2026-09-02 official docs ('max 为默认且推荐'). glm-5-turbo and glm-4.7 silently accept invalid values but response model = glm-5.3-flash (same backend, alias-routed). supports_vision still null (unconfirmed)."
+    },
+    {
+      "alias": "glm-5.3",
+      "routed_model_id": "glm-5.3",
+      "provider_id": "newapi-personal-tokyo",
+      "vendor": "Zhipu AI",
+      "canonical_model_id": "glm-5.3",
+      "alias_status": "official_exact",
+      "confidence": "official_exact",
+      "official_context_window_tokens": 1048576,
+      "official_max_output_tokens": 131072,
+      "supports_vision": null,
+      "supports_thinking": true,
+      "one_million_context": true,
+      "one_million_request_format": null,
+      "expected_protocol": "openai_chat_completions",
+      "current_mms_context_window_tokens": 1000000,
+      "thinking_control": {
+        "control_type": "parameter",
+        "path": "reasoning_effort",
+        "allowed_values": ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+        "default": "max",
+        "disable_supported": false
+      },
+      "evidence": [
+        { "url": "https://docs.bigmodel.cn/cn/guide/capabilities/thinking", "official": true }
+      ],
+      "notes": "Same 2026-09-10 live enum as glm-5.2; default max per official docs (unchanged)."
+    },
+    {
+      "alias": "qwen3.8-flash",
+      "routed_model_id": "qwen3.8-flash",
+      "provider_id": "newapi-personal-tokyo",
+      "vendor": "Alibaba",
+      "canonical_model_id": "qwen3.8-flash",
+      "alias_status": "official_exact",
+      "confidence": "official_exact",
+      "official_context_window_tokens": 1000000,
+      "official_max_output_tokens": 131072,
+      "supports_vision": true,
+      "supports_thinking": true,
+      "one_million_context": true,
+      "one_million_request_format": null,
+      "expected_protocol": "openai_chat_completions",
+      "current_mms_context_window_tokens": 1000000,
+      "thinking_control": {
+        "control_type": "parameter",
+        "path": "reasoning_effort",
+        "allowed_values": ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+        "default": "high",
+        "disable_supported": false
+      },
+      "evidence": [
+        { "url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "official": false }
+      ],
+      "notes": "2026-09-10 live probe via Tokyo Qwen-CRS: 'reasoning_effort must be one of none/minimal/low/medium/high/xhigh/max' (7 values incl max). qwen3.8-max-preview same enum (probed). qwen3.8-max not probed (no channel in Tokyo default group) - same-family inference, flagged. Contrast qwen3.7-max/plus and qwen3.6-flash: 6 values, NO max (probed). Vision true carried over from the 2026-09-06 multimodal verification (red-image -> Red, documented in oracle-server HANDBOOK)."
+    }
+  ]
+}

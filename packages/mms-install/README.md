@@ -40,7 +40,7 @@ npx @ctrixin/mms --help               # the installer's own help
 
 It first resolves the stable GitHub Release (or your explicit ref), then downloads `install.sh` from the repository over HTTPS and runs it with `bash`, forwarding your arguments. It contains no install logic of its own, which is why a cached copy still installs the current MMS.
 
-Because it downloads and executes a shell script, it is kept small and auditable: the source host is pinned to `raw.githubusercontent.com`, redirects are refused before following them, and the payload is checked before anything runs.
+On macOS/Linux it downloads and executes the shell script. On Windows it downloads the PowerShell Native Preview bootstrap, which installs an isolated version directory and writes `mms.cmd`/`mms.ps1`; the source host is pinned to `raw.githubusercontent.com`, redirects are refused before following them, and the payload is checked before anything runs.
 
 Temporary scripts are removed after both successful and failed runs. Network and release lookup failures stop with an error instead of silently installing a different version.
 
@@ -48,7 +48,7 @@ Its own version number carries no meaning about which MMS you get. It always ins
 
 ## Requirements
 
-Node.js 18.17 or newer, and `bash`. macOS and Linux only. On Windows, run it from WSL.
+Node.js 18.17 or newer. macOS/Linux use `bash`; Windows Native Preview uses PowerShell 5.1/7 and Python 3.11+. Windows remains Preview and WSL2 is still supported as a fallback.
 
 ## License
 
