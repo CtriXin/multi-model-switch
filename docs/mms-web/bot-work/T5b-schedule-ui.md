@@ -404,19 +404,19 @@ T5a（#278）已经过独立验收：**周期调度是真周期**（实测两次
 
 **P3 直接是你的事**：管理列表里的暂停/恢复**只能**调 `/enable` `/disable`，不许在编辑 schedule 的 POST body 里塞 `enabled`。那条路现在会报错，以前是静默吞掉——两种都不会生效。
 
-## B. `wakeEnabled` 默认值那条从"顺带修正"升级为"必须修"
+## B. `wakeEnabled` 默认值那条——更正：它不是承重的
 
-包正文第 220-228 行把 `BotStudio.tsx:138` 的 `useState(bot?.wakeEnabled || false)` 写成了"顺带看一眼既存不一致"。**降级判断错了，它是承重的。**
+**我先前在这一段里写错了，现在更正。** 我曾把 `BotStudio.tsx:138` 的 `useState(bot?.wakeEnabled || false)` 说成"用户改一次 Bot 名字就会把 `wakeEnabled` 写成 false，叠加 T5a 的 P1 会让该 Bot 名下所有待触发的 `once` 定时无声报废"。**这个因果链不成立**，实测核对如下：
 
-后端 `create_bot` 默认 `wakeEnabled=True`，`BotStudio.tsx` 845/859 新建时也显式传 `true`。但 138 行的 `|| false` 意味着：**用户打开 Bot 编辑器改任何一项设置（改名、改描述、改系统提示词、换预设），保存时都会把 `wakeEnabled` 一起写成 `false`** —— 因为 958-964 行那个 POST 是**整对象覆盖式**的。
+- `mms_web/bots.py:365` 建 Bot 时 `"wakeEnabled": payload.get("wakeEnabled", True)`，字段总是写进去；
+- `:377` 校验 `type(bot["wakeEnabled"]) is not bool` 就修正，所以它永远是 bool；
+- `Bot.tsx` 的 `BotDefinition` 里 `wakeEnabled: boolean` 是**必填**，不是可选。
 
-叠上 T5a 的 P1，净效果是：**用户改一次 Bot 名字，这个 Bot 名下所有待触发的一次性定时全部无声报废。** 而 `create_task(runAt=...)` 和旧记录迁移产出的都是 `once`，所以旧用户升级后那批定时正好落在这条路径上。
+字段既然总是存在，`|| false` 和 `?? true` 对任何真实 Bot 的行为**完全一样**——只有在该字段缺失时两者才有区别，而那种对象在当前代码里构造不出来。
 
-所以：
+所以包正文第 220-228 行原本的定级（"顺带看一眼既存不一致"）是对的，按原样做即可：改成 `?? true` 与后端语义对齐，改动限制在这一行加相邻初始化，**不要**顺手重构那个表单，也**不要**因为我先前那段话去补一条"保存时不得把 wakeEnabled 写成 false"的防御测试——没有那条路径。
 
-- 138 行改成与后端一致（`bot?.wakeEnabled ?? true`）。
-- **补一条测试锁住它**：构造一个 `wakeEnabled: true` 的 bot，走一次"只改名字"的保存，断言提交的 payload 里 `wakeEnabled` 仍然是 `true`。没有这条测试，这个缺陷随时会被下一次重构放回来。
-- 顺带确认 953-980 的 `AutoWakeControl` 保存路径和 1078-1086 的 patch 式路径**不要混用**（包正文第 51 行已经点出这两条路径不同）。
+仍然成立的是：T5a 的 P1（`once` 定时在未 armed 时被无声吃掉）本身是真的，只是它的触发方式是**用户自己关掉自动唤醒、或暂停了那条 schedule**，不是"编辑 Bot 的副作用"。UI 侧对应的要求在下面 C 节。
 
 ## C. UI 必须能区分「执行过了」和「被跳过了」
 
