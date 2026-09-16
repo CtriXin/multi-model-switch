@@ -399,6 +399,51 @@
           "thinking": {
             "mode": "always_on"
           }
+        },
+        "qwen3.8-max": {
+          "effort": {
+            "openai_chat": {
+              "allowed": [
+                "none",
+                "minimal",
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max"
+              ]
+            }
+          }
+        },
+        "qwen3.8-max-preview": {
+          "effort": {
+            "openai_chat": {
+              "allowed": [
+                "none",
+                "minimal",
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max"
+              ]
+            }
+          }
+        },
+        "qwen3.8-flash": {
+          "effort": {
+            "openai_chat": {
+              "allowed": [
+                "none",
+                "minimal",
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max"
+              ]
+            }
+          }
         }
       },
       "api_formats": {
@@ -431,6 +476,20 @@
           "text",
           "image"
         ]
+      },
+      "effort": {
+        "openai_chat": {
+          "path": "reasoning_effort",
+          "default": "high",
+          "allowed": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
       }
     },
     "qwen-chat-template": {
@@ -830,8 +889,8 @@
       "context_windows": {
         "mimo-v2.5-pro[1m]": 1048576,
         "mimo-v2.5[1m]": 1048576,
-        "mimo-v2.5-pro": 1048576,
-        "mimo-v2.5": 1048576,
+        "mimo-v2.5-pro": 262144,
+        "mimo-v2.5": 262144,
         "mimo-v2-pro": 262144,
         "mimo-v2-omni": 262144,
         "mimo-v2-flash": 262144
@@ -897,7 +956,8 @@
           "audio",
           "video"
         ]
-      }
+      },
+      "note": "MiMo documents the [1m] suffix as what enables extended context on the Anthropic-compatible endpoint Claude Code uses, so the plain model id there runs in 256K mode: https://mimo.mi.com/docs/en-US/tokenplan/integration/claudecode . This profile answers for that endpoint and for any MiMo channel that does not say which endpoint it is, so its plain entries stay at 256K — a channel that turns out to be the Anthropic one must never be told a window the server will not honour. The OpenAI-style routes serve 1M under the plain name and record it in their own profiles (mimo-openai, openrouter-xiaomi-mimo)."
     },
     "minimax": {
       "label": "MiniMax",
@@ -1079,35 +1139,69 @@
           "path": "reasoning_effort",
           "default": "high",
           "allowed": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
             "high",
+            "xhigh",
             "max"
-          ],
-          "map": {
-            "low": "high",
-            "medium": "high",
-            "xhigh": "max"
-          }
+          ]
         },
         "anthropic_messages": {
           "path": "output_config.effort",
           "default": "high",
           "allowed": [
+            "low",
+            "medium",
             "high",
+            "xhigh",
+            "ultra",
             "max"
-          ],
-          "map": {
-            "low": "high",
-            "medium": "high",
-            "xhigh": "max"
-          }
+          ]
         }
       },
+      "model_overrides": {},
       "context_windows": {
-        "deepseek-v4-pro": 1000000,
-        "deepseek-v4-flash": 1000000,
-        "deepseek-chat": 1000000,
-        "deepseek-reasoner": 1000000,
-        "deepseek-v4-flash-vision-exp": 1000000
+        "deepseek-v4-pro": 1048576,
+        "deepseek-v4-flash": 1048576,
+        "deepseek-v4.1-flash-expires-on-0910": 1048576,
+        "deepseek-chat": 1048576,
+        "deepseek-reasoner": 1048576,
+        "deepseek-v4-flash-vision-exp": 1048576
+      },
+      "supports_vision": {
+        "deepseek-v4-flash": true,
+        "deepseek-v4-pro": false,
+        "deepseek-v4-flash-vision-exp": true,
+        "deepseek-chat": true,
+        "deepseek-reasoner": true,
+        "deepseek-v4.1-flash-expires-on-0910": true
+      },
+      "input_modalities": {
+        "deepseek-v4-flash": [
+          "text",
+          "image"
+        ],
+        "deepseek-v4-pro": [
+          "text"
+        ],
+        "deepseek-v4-flash-vision-exp": [
+          "text",
+          "image"
+        ],
+        "deepseek-chat": [
+          "text",
+          "image"
+        ],
+        "deepseek-reasoner": [
+          "text",
+          "image"
+        ],
+        "deepseek-v4.1-flash-expires-on-0910": [
+          "text",
+          "image"
+        ]
       },
       "model_aliases": {
         "anthropic_messages": {
@@ -1130,28 +1224,12 @@
         }
       },
       "max_output_tokens": {
-        "deepseek-v4-pro": 384000,
-        "deepseek-v4-flash": 384000,
-        "deepseek-chat": 384000,
-        "deepseek-reasoner": 384000,
-        "deepseek-v4-flash-vision-exp": 384000
-      },
-      "supports_vision": {
-        "deepseek-v4-flash": false,
-        "deepseek-v4-pro": false,
-        "deepseek-v4-flash-vision-exp": true
-      },
-      "input_modalities": {
-        "deepseek-v4-flash": [
-          "text"
-        ],
-        "deepseek-v4-pro": [
-          "text"
-        ],
-        "deepseek-v4-flash-vision-exp": [
-          "text",
-          "image"
-        ]
+        "deepseek-v4-pro": 393216,
+        "deepseek-v4-flash": 393216,
+        "deepseek-v4.1-flash-expires-on-0910": 393216,
+        "deepseek-chat": 393216,
+        "deepseek-reasoner": 393216,
+        "deepseek-v4-flash-vision-exp": 393216
       }
     },
     "kimi-code": {
@@ -1214,7 +1292,7 @@
       },
       "context_windows": {
         "kimi-k3": 1048576,
-        "k3": 262144,
+        "k3": 1048576,
         "kimi-for-coding": 262144,
         "kimi-for-coding-highspeed": 262144,
         "kimi-k2.5": 262144,
@@ -1921,7 +1999,21 @@
           }
         }
       },
-      "effort": null,
+      "effort": {
+        "openai_chat": {
+          "path": "reasoning_effort",
+          "default": "max",
+          "allowed": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      },
       "supports_vision": {
         "glm-5.2": false,
         "glm-5.3": false
@@ -2090,14 +2182,18 @@
         "openai_chat": {
           "path": "reasoning_effort",
           "default": "max",
+          "allowed": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "official_default": "max",
           "recommended_default": "max",
-          "request_default": "max",
-          "allowed": [
-            "low",
-            "high",
-            "max"
-          ]
+          "request_default": "max"
         }
       },
       "context_windows": {

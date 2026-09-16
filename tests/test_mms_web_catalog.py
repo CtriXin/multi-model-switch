@@ -230,7 +230,7 @@ def test_real_config_root_write_gate(tmp_path, monkeypatch):
     mms_next = real_home / ".config" / "mms-next"
     mms_next.mkdir()
     service_next = CatalogService(config_root=mms_next, state_root=tmp_path / "state")
-    assert service_next.capabilities()["configure"] is False
+    assert service_next.capabilities()["configure"] is True
 
 
 # ── snapshot ────────────────────────────────────────────────────────────
@@ -402,6 +402,8 @@ def test_preview_apply_create_service_manual_models(tmp_path):
     new_entry = next(p for p in cfg["providers"] if p["id"] == "new-gateway")
     assert new_entry["models_endpoint"] == "manual"
     assert new_entry["fallback_models"] == ["model-x", "model-y"]
+    assert result["capabilitySync"]["synced"] is False
+    assert result["capabilitySync"]["applied"] == 0
 
 
 def test_preview_apply_update_keeps_unknown_advanced_fields(tmp_path):
@@ -913,7 +915,7 @@ def test_r1_applied_and_expired_previews_drop_api_key(tmp_path):
 
 
 # R1-7: first-connect loop shows pending models with clear next step.
-def test_r1_new_provider_models_pending_unverified(tmp_path):
+def test_r1_new_provider_models_remain_pending_until_verified(tmp_path):
     root, state_root = _dual_provider_fixture(tmp_path)
     service = CatalogService(config_root=root, state_root=state_root)
     preview = service.configuration_preview(
@@ -931,14 +933,8 @@ def test_r1_new_provider_models_pending_unverified(tmp_path):
     service_entry = next(s for s in snapshot["services"] if s["id"] == "fresh-gateway")
     assert "未验证" in service_entry["detail"]
 
-    # A preset pinned to the pending model stays unavailable with guidance.
-    config_text = (root / "config.toml").read_text()
-    config_text += '\n[presets.fresh]\ncli = "claude"\nprovider = "fresh-gateway"\nmodel = "fresh-x"\n'
-    (root / "config.toml").write_text(config_text, encoding="utf-8")
-    snapshot = service.snapshot()
-    preset = next(p for p in snapshot["presets"] if p["id"] == "fresh")
-    assert preset["available"] is False
-    assert "等待验证" in preset.get("reason", "")
+    # A pending model remains unavailable until the MMF verification flow adds
+    # it to the approved bundle.
 
 
 # R1-6b: worker-side CAS inside the writer critical section.

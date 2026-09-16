@@ -23,23 +23,49 @@ def test_runtime_reasoning_helpers_normalize_values():
     assert mms_launchers._claude_code_effort_env_value("gpt-5.4", {"reasoning_effort": "xhigh"}) == ""
 
 
-def test_claude_kimi_k3_context_env_uses_selector_window(monkeypatch):
+def test_claude_kimi_k3_context_env_follows_user_policy(monkeypatch):
+    """K3 has no MMS-specific ``[1m]`` selector: user policy wins for every alias."""
     import mms_launchers
 
+    import mms_capability_resolver
+    import mms_context_window
+
     monkeypatch.setattr(
-        mms_launchers,
-        "_load_model_context_overrides",
+        mms_context_window,
+        "load_model_context_overrides",
         lambda: {"models": {}, "provider_overrides": {}},
     )
 
-    def fake_capability_context_window(model_name, *, provider_id=None, accepted_sources=None):
-        if str(model_name).lower() == "k3" and accepted_sources == {"model_policy", "manual_override"}:
-            return 1_000_000
-        return None
+    def fake_capabilities(model_name, *, provider_id="", **_kwargs):
+        if str(model_name).lower() == "k3":
+            return {
+                "context_window_tokens": 1_000_000,
+                "sources": {"context_window_tokens": "model_policy"},
+            }
+        return {"context_window_tokens": 0, "sources": {"context_window_tokens": "conservative_fallback"}}
 
-    monkeypatch.setattr(mms_launchers, "_capability_context_window", fake_capability_context_window)
+    monkeypatch.setattr(mms_capability_resolver, "resolve_model_capabilities", fake_capabilities)
 
-    assert mms_launchers._lookup_context_window("k3", provider_id="kimi") == 262_144
+    assert mms_launchers._lookup_context_window("k3", provider_id="kimi") == 1_000_000
+    assert mms_launchers._lookup_context_window("k3[1m]", provider_id="kimi") == 1_000_000
+
+
+def test_claude_kimi_k3_without_policy_uses_profile_one_million_window(monkeypatch):
+    """Without a policy the provider profile decides, and it records K3 as native 1M."""
+    import mms_launchers
+
+    import mms_capability_resolver
+    import mms_context_window
+
+    monkeypatch.setattr(
+        mms_context_window,
+        "load_model_context_overrides",
+        lambda: {"models": {}, "provider_overrides": {}},
+    )
+    monkeypatch.setattr(mms_capability_resolver, "_load_default_approved_facts_shared", lambda: {})
+    monkeypatch.setattr(mms_capability_resolver, "load_default_model_policy", lambda: {})
+
+    assert mms_launchers._lookup_context_window("k3", provider_id="kimi") == 1_048_576
     assert mms_launchers._lookup_context_window("k3[1m]", provider_id="kimi") == 1_048_576
 
 
@@ -80,7 +106,13 @@ def test_claude_glm_1m_context_sets_client_cap_without_selector():
     assert all("[1m]" not in value for value in env.values())
 
 
-def test_claude_glm_below_1m_does_not_override_client_cap():
+def test_claude_glm_below_1m_still_states_its_own_window():
+    """#230: a known window is stated whatever its size, not only at 1M.
+
+    Claude Code's built-in cap describes Anthropic's models, so leaving it in
+    place for a routed GLM meant compacting at the client's number rather than
+    the model's.
+    """
     import mms_launchers
 
     env = {}
@@ -90,7 +122,7 @@ def test_claude_glm_below_1m_does_not_override_client_cap():
         model_names=("glm-5.2",),
     )
 
-    assert "CLAUDE_CODE_MAX_CONTEXT_TOKENS" not in env
+    assert env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] == "200000"
 
 
 def test_default_gpt_reasoning_effort_uses_xhigh_for_source_checkout(monkeypatch):
@@ -306,3 +338,73 @@ def test_gpt_explicit_model_effort_precedes_checkout_default(monkeypatch):
     monkeypatch.setattr(mms_capability_resolver, "load_default_model_policy", lambda: {"models": {"gpt-5": {"capabilities": {"reasoning_effort": "low"}}}})
     assert mms_core._default_reasoning_effort_for_model_info({"model": "gpt-5"}) == "low"
     assert mms_core._default_reasoning_effort_for_model_info({"model": "gpt-unconfigured"}) == mms_core._default_gpt_reasoning_effort()
+
+
+def _isolated_codex_gateway(monkeypatch, tmp_path):
+    """Run the Codex gateway writer against a throwaway config root."""
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    config_root = real_home / ".config" / "mms-next"
+    config_root.mkdir(parents=True)
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(config_root))
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+    for name in (
+        "_cleanup_stale_sessions",
+        "_link_shared_dotfiles",
+        "_sync_codex_session_claude_json",
+        "_install_session_command_wrappers",
+        "_install_session_packet_env",
+    ):
+        monkeypatch.setattr(mms_launchers, name, lambda *a, **k: None)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=False: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_locale_profile", lambda env, runtime: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, runtime: env)
+    monkeypatch.setattr(mms_launchers, "_install_host_context_env", lambda *a, **k: {})
+    monkeypatch.setattr(mms_launchers, "_build_codex_session_hooks", lambda *a, **k: {"hooks": {}})
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.chdir(repo)
+    return mms_launchers
+
+
+def test_codex_gateway_context_window_only_widens_unknown_models():
+    import mms_launchers
+
+    kimi = {"id": "kimi"}
+    for alias in ("k3", "k3[1m]", "kimi-k3"):
+        assert mms_launchers._codex_gateway_context_window(kimi, {"model": alias}) == 1_048_576, alias
+
+    # Codex knows its own catalog, including an effective window below the
+    # model's maximum. Overriding those would push past a deliberate limit.
+    for openai_model in ("gpt-5.5", "gpt-5.3-codex", "GPT-5.4"):
+        assert mms_launchers._codex_gateway_context_window(kimi, {"model": openai_model}) is None, openai_model
+
+    # Below 1M Codex's own default stands; we only ever widen.
+    assert mms_launchers._codex_gateway_context_window(kimi, {"model": "kimi-for-coding"}) is None
+    assert mms_launchers._codex_gateway_context_window(kimi, {"model": ""}) is None
+    assert mms_launchers._codex_gateway_context_window(kimi, None) is None
+
+
+def test_codex_gateway_config_carries_the_one_million_window(monkeypatch, tmp_path):
+    """K3 is a 1M model, and Codex has no way to know that on its own.
+
+    Every other harness is told: Claude Code through its context env, Pi
+    through models.json. Codex was the one that received nothing, so it fell
+    back to its default for an unknown routed model and compacted early.
+    """
+    from pathlib import Path
+
+    mms_launchers = _isolated_codex_gateway(monkeypatch, tmp_path)
+    runtime = {"id": "kimi", "api_key": "sk-test", "nsr_mode": "disable"}
+
+    env = mms_launchers._codex_gateway_env(runtime, "https://relay.example.com", model_info={"model": "k3"})
+    config = Path(env["CODEX_HOME"], "config.toml").read_text(encoding="utf-8")
+    assert "model_context_window = 1048576" in config
+
+    # The gateway config is reused across sessions, so switching models must
+    # take the window back out rather than leave K3's 1M on a GPT session.
+    env = mms_launchers._codex_gateway_env(runtime, "https://relay.example.com", model_info={"model": "gpt-5.4"})
+    config = Path(env["CODEX_HOME"], "config.toml").read_text(encoding="utf-8")
+    assert "model_context_window" not in config
+    assert 'base_url = "https://relay.example.com"' in config

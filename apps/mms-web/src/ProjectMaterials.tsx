@@ -84,7 +84,7 @@ export function ProjectMaterials({ workspaceId }: { workspaceId: string }) {
           {editing && <form className="material-editor" onSubmit={event => { event.preventDefault(); void change("save", { ...draft, ...(draft.id ? {} : { id: undefined }) }); }}>
             <label>标题<input aria-label="资料标题" maxLength={80} value={draft.title} disabled={busy} onChange={event => setDraft({ ...draft, title: event.target.value })} placeholder="例如：项目背景" /></label>
             <label>正文<textarea aria-label="资料正文" value={draft.content} disabled={busy} onChange={event => setDraft({ ...draft, content: event.target.value })} placeholder="只填写希望在这个项目中持续使用的资料或要求。" /></label>
-            <label className="material-toggle"><input type="checkbox" checked={draft.enabled} disabled={busy} onChange={event => setDraft({ ...draft, enabled: event.target.checked })} />保存后在新消息中使用</label>
+            <label className="material-toggle">保存后在新消息中使用<input type="checkbox" role="switch" aria-label="保存后在新消息中使用" checked={draft.enabled} disabled={busy} onChange={event => setDraft({ ...draft, enabled: event.target.checked })} /></label>
             <p className="section-note">单条最多 20 KB，总量最多 80 KB；大文件请直接引用原路径。</p>
             <div className="material-editor-actions"><button type="button" disabled={busy} onClick={() => setEditing(false)}>取消编辑</button><button type="submit" disabled={busy || !draft.title.trim() || !draft.content.trim()}>{busy ? "正在保存…" : "保存资料"}</button></div>
           </form>}

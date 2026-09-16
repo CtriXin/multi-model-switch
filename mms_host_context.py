@@ -33,7 +33,7 @@ def _real_path(home: str, *parts: str) -> str:
 
 
 def default_config_path(real_home: str | os.PathLike[str]) -> str:
-    return _real_path(str(real_home), ".config", "mms", "ops-env-safe.toml")
+    return _real_path(str(real_home), ".config", "mms-next", "ops-env-safe.toml")
 
 
 def load_host_capability_config(

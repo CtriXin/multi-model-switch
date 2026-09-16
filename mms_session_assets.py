@@ -18,7 +18,7 @@ from typing import Any
 
 CLI_ORDER = ("claude", "codex", "opencode", "pi", "agy")
 SURFACE_KINDS = ("skills", "mcp", "hooks")
-PACK_SCOPES = ("always", "caveman", "nsr", "ecc", "omc")
+PACK_SCOPES = ("always", "nsr", "ecc", "omc")
 
 _CLI_LABELS = {
     "claude": "Claude",
@@ -29,9 +29,8 @@ _CLI_LABELS = {
 }
 
 _MMS_MANAGED_NAMES = {
-    "agent-browser",
     "auto-github-contributor",
-    "caveman",
+    "grill-me",
     "ecc",
     "hive",
     "nsr",
@@ -39,8 +38,6 @@ _MMS_MANAGED_NAMES = {
     "pilot",
     "rtk opencode plugin",
     "toon",
-    "token-saver",
-    "web-access",
     "weber",
 }
 
@@ -51,18 +48,15 @@ _KIND_LABELS = {
 }
 
 _ASSET_SUMMARIES = {
-    "agent-browser": "轻量浏览器自动化，适合不需要登录态的页面检查、截图和本地 WebUI 验证。",
     "auto-github-contributor": "GitHub 贡献辅助能力，安装后才会出现；默认不改用户全局配置。",
-    "caveman": "低 token 沟通模式，适合长会话压缩表达；只有启用 Caveman 时才生效。",
     "ecc": "Claude 工程工作流能力包，包含规则、命令和质量检查；适合更重的工程约束。",
     "hive": "多 agent 执行/评审入口，适合把复杂任务拆分给 worker。",
+    "grill-me": "先逐题澄清目标和约束，适合把模糊想法变成可执行计划。",
     "nsr": "长任务 continuation 钩子，降低目标中断；默认不挂 startup/prompt 噪音钩子。",
     "omc": "Claude 编排能力包，包含 team / verify loop 等更主动的工作流。",
     "pilot": "规划和执行包生成入口；MCP 默认关闭，只有显式 opt-in 时才注入。",
     "rtk opencode plugin": "OpenCode 的 token 节省插件，自动压缩或改写高噪音命令输出。",
     "toon": "把结构化 JSON、状态包和 handoff 压成更省 token 的格式。",
-    "token-saver": "长日志、大 diff、重复状态的省 token 工具；多数时候由 agent 自动使用。",
-    "web-access": "联网和登录态浏览能力，适合搜索、网页读取、公司后台或需要真实 Chrome 的任务。",
     "weber": "网页任务路由器：帮 agent 判断该用本地 WebUI、登录态浏览器还是轻量抓取。",
 }
 
@@ -191,7 +185,7 @@ def _classify_origin(kind: str, scope: str, title: str, details: list[Any], *, h
     repo = _repo_root().lower()
     home_lower = home.lower()
 
-    if scope in {"caveman", "nsr", "ecc", "omc"}:
+    if scope in {"nsr", "ecc", "omc"}:
         return {"group": "mms_dynamic", "origin": "MMS optional pack"}
     if title_key in _MMS_MANAGED_NAMES:
         return {"group": "mms_dynamic", "origin": "MMS managed"}
@@ -213,7 +207,6 @@ def _classify_origin(kind: str, scope: str, title: str, details: list[Any], *, h
 def _scope_label(scope: str) -> str:
     mapping = {
         "always": "默认可见",
-        "caveman": "Caveman 开启时",
         "nsr": "NSR 开启时",
         "ecc": "ECC pack 开启时",
         "omc": "OMC pack 开启时",
@@ -314,11 +307,12 @@ def _call_bool(mms_core: Any | None, name: str, *args: Any) -> bool:
 
 
 def _preview_for_cli(mms_core: Any | None, cli: str, runtime: dict[str, Any]) -> tuple[dict[str, Any], dict[str, bool]]:
-    has_caveman = _call_bool(mms_core, "_caveman_available_for_cli", cli)
+    # Caveman is retired and must remain absent even if an old core exposes it.
+    has_caveman = False
     has_nsr = _call_bool(mms_core, "_nsr_available_for_cli", cli)
     has_ecc = cli == "claude" and _call_bool(mms_core, "_ecc_available_for_claude")
     has_omc = cli == "claude" and _call_bool(mms_core, "_omc_available_for_claude")
-    flags = {"caveman": has_caveman, "nsr": has_nsr, "ecc": has_ecc, "omc": has_omc}
+    flags = {"caveman": False, "nsr": has_nsr, "ecc": has_ecc, "omc": has_omc}
     if cli == "pi":
         flags = {"caveman": False, "nsr": False, "ecc": False, "omc": False}
         return {"allow_execution_surfaces": False, "mcp": {}, "skills": {}, "hooks": {}}, flags
@@ -430,13 +424,10 @@ def _managed_roots(home: str) -> list[dict[str, Any]]:
     install_root = _safe_text(install.get("real_root"))
     install_surface = {"Skill": "skills", "能力包": "packs", "MCP": "mcp"}
     specs = [
-        ("web-access", "Skill", "_resolve_web_access_root"),
         ("weber", "Skill", "_resolve_weber_root"),
-        ("agent-browser", "Skill", "_resolve_agent_browser_root"),
+        ("grill-me", "Skill", "_resolve_grill_me_root"),
         ("toon", "Skill", "_resolve_toon_root"),
-        ("token-saver", "Skill", "_resolve_token_saver_root"),
         ("auto-github-contributor", "Skill", "_resolve_auto_github_contributor_root"),
-        ("caveman", "能力包", "_resolve_caveman_root"),
         ("nsr", "能力包", "_resolve_nsr_root"),
         ("ecc", "能力包", "_resolve_ecc_root"),
         ("omc", "能力包", "_resolve_omc_root"),
@@ -600,7 +591,6 @@ def _preference_snippet(prefs: dict[str, Any]) -> str:
     assets = (prefs.get("assets") or {}) if isinstance(prefs, dict) else {}
     mms_core = _load_mms_core()
     install = _managed_install_contract(_real_home(mms_core), mms_core)
-    caveman = _safe_text(defaults.get("caveman_mode") or "enable")
     nsr = _safe_text(defaults.get("nsr_mode") or "enable")
     agent_pack = _safe_text(defaults.get("agent_pack") or "none")
     bypass = defaults.get("bypass")
@@ -614,7 +604,6 @@ def _preference_snippet(prefs: dict[str, Any]) -> str:
             f"disabled_clis = [" + ", ".join(f'"{_safe_text(item)}"' for item in disabled_clis) + "]",
             "",
             "[launch.defaults]",
-            f'caveman_mode = "{caveman}"',
             f'nsr_mode = "{nsr}"',
             f'agent_pack = "{agent_pack}"',
             f"bypass = {bypass_text}",
@@ -869,7 +858,7 @@ def _global_sources_for_cli(cli: str, cli_rows: list[dict[str, Any]], *, home: s
             sources,
             surface="hooks",
             label="Pi session settings",
-            path="~/.config/mms/pi-gateway",
+            path="~/.config/mms-next/pi-gateway",
             count=0,
             items=[],
             note="Pi 目前由 MMS 生成 models/settings/retry extension；不继承 Skill/MCP/Hook 目录。",
@@ -900,7 +889,7 @@ def _confirm_reference() -> dict[str, Any]:
         "panels": [
             {"id": "summary", "label": "摘要", "description": "CLI / Model / Launch / Bypass / Thinking / Effort / Agent Pack 等启动摘要。"},
             {"id": "mcp", "label": "MCP", "description": "本次启动会注入或继承的 MCP server；可在 TUI 里逐项临时禁用。"},
-            {"id": "skills", "label": "技能", "description": "本次 session 可发现的 skill；按 always / Caveman / NSR / ECC / OMC 展开。"},
+            {"id": "skills", "label": "技能", "description": "本次 session 可发现的 skill；按 always / NSR / ECC / OMC 展开。"},
             {"id": "hooks", "label": "钩子", "description": "启动、工具前后、压缩、会话结束等自动 hook；可查看触发点和命令路径。"},
         ],
         "actions": [
@@ -910,7 +899,7 @@ def _confirm_reference() -> dict[str, Any]:
             {"key": "D / Space", "label": "禁用选择", "description": "进入禁用模式后，对本次启动逐项关闭 surface。"},
             {"key": "Tab", "label": "切 Bypass", "description": "切换本次启动是否绕过审批。"},
             {"key": "M", "label": "切 1M", "description": "仅支持的 Claude Opus/Sonnet 模型显示。"},
-            {"key": "C / N", "label": "Caveman / NSR", "description": "仅对应能力可用时显示。"},
+            {"key": "N", "label": "NSR", "description": "仅对应能力可用时显示。"},
             {"key": "T / E", "label": "思考 / 强度", "description": "仅支持 thinking/effort 的 Claude/Codex 路径显示。"},
             {"key": "X", "label": "能力包", "description": "Claude 可用时在 none / ECC / OMC 间切换。"},
             {"key": "B / Q", "label": "返回 / 取消", "description": "退出确认页，不写回持久配置。"},
@@ -973,16 +962,6 @@ def _cli_control_cards(cli: str, flags: dict[str, bool], defaults: dict[str, Any
             "hint": "对应 TUI 确认页 Tab 切换。",
         }
     ]
-    if flags.get("caveman"):
-        controls.append(
-            {
-                "id": "caveman",
-                "label": "Caveman",
-                "key": "C",
-                "state": "默认开启" if _safe_text(defaults.get("caveman_mode") or "enable") != "disable" else "默认关闭",
-                "hint": "对应 TUI 确认页 C 切换。",
-            }
-        )
     if flags.get("nsr"):
         controls.append(
             {
@@ -1183,7 +1162,6 @@ def build_session_assets_snapshot(
         "bundled_install": _bundled_install_contract(home),
         "global_roots": _global_roots(home),
         "launch_defaults": {
-            "caveman_mode": _safe_text(defaults.get("caveman_mode") or "enable"),
             "nsr_mode": _safe_text(defaults.get("nsr_mode") or "enable"),
             "agent_pack": _safe_text(defaults.get("agent_pack") or "none"),
             "bypass": defaults.get("bypass") is not False,
@@ -1191,7 +1169,7 @@ def build_session_assets_snapshot(
         "disabled_defaults": _disabled_defaults(prefs),
         "preference_snippet": _preference_snippet(prefs),
         "configuration_contract": {
-            "persistent_path": preferences_path or "~/.config/mms/preferences.toml",
+            "persistent_path": preferences_path or "~/.config/mms-next/preferences.toml",
             "managed_assets_root": _managed_install_contract(home, mms_core).get("root"),
             "bundled_assets_root": _bundled_install_contract(home).get("root"),
             "launch_override": "TUI 启动确认页本次切换优先级最高，但不写回真实配置。",
@@ -1200,7 +1178,7 @@ def build_session_assets_snapshot(
         "guidance": [
             "先看 MMS dynamic：这些是 MMS session 才注入的能力，适合按 CLI/任务开关。",
             "再看 Global / inherited：这些会影响 MMS 外的 CLI，默认只读，不建议新手直接改。",
-            "Caveman/NSR/ECC/OMC 是能力包开关；MCP、skills、hooks 是能力包实际展开后的 surface。",
+            "NSR/ECC/OMC 是能力包开关；MCP、skills、hooks 是能力包实际展开后的 surface。",
         ],
     }
 

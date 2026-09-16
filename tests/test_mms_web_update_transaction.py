@@ -18,6 +18,7 @@ RUNNER=ROOT/'tests/fixtures/mms_web/update_runner.py'
 def copy_candidate(destination, *, broken=False):
     destination.mkdir(parents=True)
     files=set(subprocess.check_output(['git','ls-files'],cwd=ROOT,text=True).splitlines())
+    files.update(str(p.relative_to(ROOT)) for p in ROOT.glob('*.py'))  # new top-level modules not yet tracked
     files.update(str(p.relative_to(ROOT)) for p in (ROOT/'mms_web').rglob('*.py'))
     files.update(str(p.relative_to(ROOT)) for p in (ROOT/'mms_web_static').rglob('*') if p.is_file())
     for name in files:

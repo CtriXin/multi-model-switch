@@ -1,5 +1,7 @@
 import type { Bootstrap, Session, SessionDetail } from "./types";
+import type { AskSideQuestion, SideQuestion } from "./side-questions";
 import { previewBootstrap, previewDetails } from "./preview";
+import { newRequestId } from "./request-id";
 
 export const isPreview =
   new URLSearchParams(location.search).get("preview") === "1";
@@ -58,10 +60,19 @@ export async function request<T>(
   return payload as T;
 }
 
+/** Whether the session list should include command-line sessions.
+ *  Set from the page's own preference, so turning it off empties the list on
+ *  the next read without a restart or a server-side setting. */
+let withCliSessions = false;
+export function includeCliSessions(on: boolean) {
+  withCliSessions = on;
+}
+const cliQuery = () => (withCliSessions ? "?cli=1" : "");
+
 export async function bootstrap(signal?: AbortSignal): Promise<Bootstrap> {
   const data = isPreview
     ? structuredClone(sampleBootstrap)
-    : await request<Bootstrap>("/bootstrap", undefined, signal);
+    : await request<Bootstrap>(`/bootstrap${cliQuery()}`, undefined, signal);
   if (
     !data ||
     data.version !== "1" ||
@@ -84,7 +95,7 @@ export async function bootstrap(signal?: AbortSignal): Promise<Bootstrap> {
 export async function listSessions(signal?: AbortSignal): Promise<Session[]> {
   if (isPreview) return structuredClone(sampleBootstrap.sessions);
   return (
-    await request<{ sessions: Session[] }>("/sessions", undefined, signal)
+    await request<{ sessions: Session[] }>(`/sessions${cliQuery()}`, undefined, signal)
   ).sessions;
 }
 export async function getSession(
@@ -96,6 +107,60 @@ export async function getSession(
   if (!samples[id]) throw new Error("找不到这条预览会话。");
   return structuredClone(samples[id]);
 }
+/** `/btw` side questions.
+ *
+ *  These deliberately do not go through `mutate`: that helper is the main
+ *  task's single-flight write path, and it returns a whole `SessionDetail`.
+ *  A side question must be askable while the main task is mid-write, carries
+ *  its own `idempotencyKey`, and answers with one row.
+ */
+const sideQuestionPath = (sessionId: string) =>
+  `/sessions/${encodeURIComponent(sessionId)}/side-questions`;
+const previewUnavailable = () =>
+  new Error("预览不会调用本地服务。连接 MMS Pilot 后才能发起旁问。");
+
+export async function askSideQuestion(
+  sessionId: string,
+  body: AskSideQuestion,
+): Promise<SideQuestion> {
+  if (isPreview) throw previewUnavailable();
+  return request<SideQuestion>(sideQuestionPath(sessionId), { ...body });
+}
+export async function listSideQuestions(
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<SideQuestion[]> {
+  if (isPreview) return [];
+  return (
+    await request<{ sideQuestions: SideQuestion[] }>(
+      sideQuestionPath(sessionId),
+      undefined,
+      signal,
+    )
+  ).sideQuestions;
+}
+export async function getSideQuestion(
+  sessionId: string,
+  btwId: string,
+  signal?: AbortSignal,
+): Promise<SideQuestion> {
+  if (isPreview) throw previewUnavailable();
+  return request<SideQuestion>(
+    `${sideQuestionPath(sessionId)}/${encodeURIComponent(btwId)}`,
+    undefined,
+    signal,
+  );
+}
+export async function cancelSideQuestion(
+  sessionId: string,
+  btwId: string,
+): Promise<SideQuestion> {
+  if (isPreview) throw previewUnavailable();
+  return request<SideQuestion>(
+    `${sideQuestionPath(sessionId)}/${encodeURIComponent(btwId)}/cancel`,
+    {},
+  );
+}
 export async function mutate<T>(
   path: string,
   payload: Record<string, unknown>,
@@ -103,7 +168,7 @@ export async function mutate<T>(
   if (!isPreview) {
     const fingerprint = JSON.stringify([path, payload]);
     if (uncertainMutation?.fingerprint !== fingerprint)
-      uncertainMutation = { fingerprint, requestId: crypto.randomUUID() };
+      uncertainMutation = { fingerprint, requestId: newRequestId() };
     try {
       const result = await request<T>(path, {
         ...payload,
@@ -132,7 +197,7 @@ export async function mutate<T>(
       (item) => item.id === preset?.modelId,
     );
     if (!preset || !model) throw new Error("请选择有效的启动组合。");
-    const id = crypto.randomUUID();
+    const id = newRequestId();
     samples[id] = {
       session: {
         id,
@@ -168,7 +233,7 @@ export async function mutate<T>(
     detail.session.state = "idle";
     detail.session.capabilities.approve = false;
     detail.events.push({
-      id: crypto.randomUUID(),
+      id: newRequestId(),
       sequence: detail.events.length + 1,
       kind: "notice",
       text: "已记录预览选择，未执行文件写入。",
@@ -183,14 +248,14 @@ function appendPreviewMessage(
   time: string,
 ) {
   detail.events.push({
-    id: crypto.randomUUID(),
+    id: newRequestId(),
     sequence: detail.events.length + 1,
     kind: "user",
     text,
     createdAt: time,
   });
   detail.events.push({
-    id: crypto.randomUUID(),
+    id: newRequestId(),
     sequence: detail.events.length + 1,
     kind: "notice",
     text: "预览消息已保留在当前页面。连接 MMS 本地服务后，才能实际运行这个任务。",

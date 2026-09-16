@@ -322,18 +322,17 @@ def test_selected_root_missing_latest_approved_capabilities_fails_closed(monkeyp
         resolve_model_capabilities("missing-approved-model")
 
 
-def test_stable_legacy_root_missing_latest_approved_capabilities_falls_back(monkeypatch, tmp_path: Path) -> None:
+def test_missing_latest_approved_capabilities_fails_closed_for_shared_root(monkeypatch, tmp_path: Path) -> None:
     clear_capability_resolver_caches()
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    (tmp_path / "xdg" / "mms-next").mkdir(parents=True)
     monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
     monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
     monkeypatch.delenv("MMS_PREVIEW_MODE", raising=False)
     monkeypatch.delenv("MMS_COMMAND_NAME", raising=False)
 
-    caps = resolve_model_capabilities("legacy-unknown-model")
-
-    assert caps["context_window_tokens"] == 8_192
-    assert caps["sources"]["context_window_tokens"] == "conservative_fallback"
+    with pytest.raises(CapabilityBundleError, match="latest-approved capabilities unavailable"):
+        resolve_model_capabilities("legacy-unknown-model")
 
 
 def test_default_approved_capabilities_bundle_is_cached(monkeypatch, tmp_path: Path) -> None:

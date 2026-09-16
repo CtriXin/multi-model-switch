@@ -1,11 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   Check,
+  ChevronDown,
   Download,
   Plus,
   RefreshCw,
   Search,
+  Trash2,
 } from "lucide-react";
 import { request } from "./api";
 import { Dialog } from "./components";
@@ -48,7 +50,7 @@ type Snapshot = {
   providers: Provider[];
 };
 type Change = {
-  kind: "add" | "remove" | "effort" | "vision" | "context" | "connection";
+  kind: "add" | "remove" | "effort" | "vision" | "context" | "connection" | "channel-remove";
   model: string;
   before?: string;
   after?: string;
@@ -82,7 +84,7 @@ type Preview = {
   previewId: string;
   changes: Change[];
   configRoot: string;
-  confirmPhrase: string;
+  confirmPhrase?: string;
   writeSummary: string;
 };
 
@@ -129,11 +131,13 @@ export function ChannelModels({
   back,
   saved,
   editStateChanged,
+  onCreateChannel,
 }: {
   initialProvider: string;
   back: () => void;
   saved: () => void;
   editStateChanged: (state: {dirty: boolean; busy: boolean}) => void;
+  onCreateChannel?: () => void;
 }) {
   const [snapshot, setSnapshot] = useState<Snapshot>();
   const [providerId, setProviderId] = useState(initialProvider);
@@ -156,8 +160,20 @@ export function ChannelModels({
   const [refresh, setRefresh] = useState<Refresh>();
   const [refreshPicks, setRefreshPicks] = useState<Record<string, boolean>>({});
   const [preview, setPreview] = useState<Preview>();
-  const [phrase, setPhrase] = useState("");
   const [leave, setLeave] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<{ id: string; name: string } | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setMenuOpen(false); };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
+  }, [menuOpen]);
   const refreshFields = refresh?.proposals.flatMap((item) =>
     item.fields.map((field) => ({ key: fieldKey(item.model, field), field })),
   ) || [];
@@ -174,6 +190,7 @@ export function ChannelModels({
     Object.keys(visions).length > 0 ||
     Object.keys(contextWindows).length > 0 ||
     Object.keys(connection).length > 0;
+  const selectionInvalid = !!provider && chosen.length === 0;
   useEffect(() => {
     editStateChanged({dirty, busy: busy === "apply"});
     return () => editStateChanged({dirty: false, busy: false});
@@ -282,9 +299,11 @@ export function ChannelModels({
         draft(),
       );
       setRemote(result.models);
-      setNotice(
-        `拉取到 ${result.models.length} 个模型。新模型需勾选后保存；已选模型不会自动移除。`,
-      );
+      // Remote discovery is authoritative for this channel. Replace the
+      // visible selection so removed upstream models leave the local route.
+      setChosen(result.models);
+      setManual([]);
+      setNotice(`已用远端模型列表覆盖当前通道，共 ${result.models.length} 个模型。取消勾选后保存即可继续精简。`);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -353,11 +372,14 @@ export function ChannelModels({
     );
   }
   async function review() {
+    if (selectionInvalid) {
+      setError("每个通道至少保留一个模型；如需停用整个通道，请删除通道。");
+      return;
+    }
     setBusy("preview");
     setError("");
     try {
       setPreview(await request<Preview>("/model-settings/preview", draft()));
-      setPhrase("");
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -371,7 +393,7 @@ export function ChannelModels({
     try {
       const result = await request<{ applied: boolean; runtimeReady: boolean }>(
         "/model-settings/apply",
-        { previewId: preview.previewId, confirmPhrase: phrase },
+        { previewId: preview.previewId, confirmed: true },
       );
       setPreview(undefined);
       saved();
@@ -381,6 +403,39 @@ export function ChannelModels({
           ? "设置已保存。新会话会读取新配置；单独设置的会话 effort 优先于模型默认值。"
           : "设置已保存。部分通道仍缺少连接信息；已就绪的通道可以继续使用。",
       );
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy("");
+    }
+  }
+  function askDelete(id: string, name: string) {
+    setMenuOpen(false);
+    if (dirty) {
+      setError("请先保存或放弃当前通道的修改，再删除通道。");
+      return;
+    }
+    setError("");
+    setConfirmDelete({ id, name });
+  }
+  async function deleteChannel(id: string) {
+    setBusy("apply");
+    setError("");
+    try {
+      const preview = await request<Preview>("/model-settings/preview", {
+        providerId: id,
+        removeProviderId: id,
+        revision: snapshot?.revision,
+        fingerprint: snapshot?.fingerprint,
+      });
+      await request<{ applied: boolean }>("/model-settings/apply", {
+        previewId: preview.previewId,
+        confirmed: true,
+      });
+      setConfirmDelete(null);
+      saved();
+      await load();
+      setNotice("通道已删除。新会话不再使用它；其他通道和已有会话不受影响。");
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -444,6 +499,24 @@ export function ChannelModels({
           {notice}
         </p>
       )}
+      {snapshot && (
+        <div className="channel-save" role="region" aria-label="保存模型设置">
+          <span>
+            {selectionInvalid
+              ? "至少保留一个模型后才能保存"
+              : dirty
+                ? "有未保存的修改"
+                : "与已保存的配置一致"}
+          </span>
+          <button
+            className="button primary"
+            disabled={!dirty || !!busy || selectionInvalid}
+            onClick={() => void review()}
+          >
+            {busy === "preview" ? "正在检查变更…" : "检查并保存"}
+          </button>
+        </div>
+      )}
       {busy === "load" && (
         <p role="status" className="muted">
           正在读取已保存的模型配置…
@@ -452,21 +525,90 @@ export function ChannelModels({
       {snapshot && (
         <>
           <div className="channel-toolbar">
-            <label>
-              通道
-              <select
-                aria-label="管理通道"
-                value={providerId}
-                disabled={!!busy}
-                onChange={(e) => navigate(e.target.value)}
-              >
-                {snapshot.providers.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} · {p.id}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="channel-select-field">
+              <span className="channel-select-caption">通道</span>
+              <div className="channel-select" ref={menuRef}>
+                <button
+                  type="button"
+                  className="channel-select-trigger"
+                  aria-haspopup="listbox"
+                  aria-expanded={menuOpen}
+                  disabled={!!busy}
+                  onClick={() => setMenuOpen((v) => !v)}
+                >
+                  <span className="channel-select-value">
+                    {provider ? (
+                      <>
+                        <strong>{provider.name}</strong>
+                        <small>{provider.id}</small>
+                      </>
+                    ) : (
+                      "选择通道"
+                    )}
+                  </span>
+                  <ChevronDown size={16} />
+                </button>
+                {menuOpen && (
+                  <div className="channel-select-menu" role="listbox" aria-label="通道列表">
+                    {snapshot.providers.map((p) => (
+                      <div
+                        key={p.id}
+                        className={
+                          "channel-select-option" +
+                          (p.id === providerId ? " active" : "")
+                        }
+                      >
+                        <button
+                          type="button"
+                          role="option"
+                          aria-selected={p.id === providerId}
+                          className="channel-select-option-main"
+                          onClick={() => {
+                            setMenuOpen(false);
+                            navigate(p.id);
+                          }}
+                        >
+                          {p.id === providerId ? (
+                            <Check size={15} />
+                          ) : (
+                            <span className="channel-select-dot" aria-hidden="true" />
+                          )}
+                          <span className="channel-select-labels">
+                            <strong>{p.name}</strong>
+                            <small>{p.id}</small>
+                          </span>
+                        </button>
+                        {snapshot.providers.length > 1 && (
+                          <button
+                            type="button"
+                            className="channel-select-delete"
+                            aria-label={`删除通道 ${p.name}`}
+                            title="删除通道"
+                            disabled={!!busy}
+                            onClick={() => askDelete(p.id, p.name)}
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    {onCreateChannel && (
+                      <button
+                        type="button"
+                        className="channel-select-create"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          onCreateChannel();
+                        }}
+                      >
+                        <Plus size={15} />
+                        新建通道
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
             <button
               className="button"
               disabled={!!busy || !provider?.canDiscover}
@@ -629,7 +771,7 @@ export function ChannelModels({
                             : !model
                               ? "手工添加，保存后可配置默认值"
                               : remote && !remote.includes(id)
-                                ? "本次拉取未返回，已保留原选择"
+                                ? "本次拉取未返回，已按远端列表取消勾选"
                                 : capabilityOrigin(model)}
                         </small>
                       </span>
@@ -809,16 +951,6 @@ export function ChannelModels({
             保存，会影响其他通道的同名模型；下拉框按当前 Pi
             通道的可用档位展示；其他 harness 按各自能力处理。
           </p>
-          <footer className="channel-save">
-            <span>{dirty ? "有未保存的修改" : "与已保存的配置一致"}</span>
-            <button
-              className="button primary"
-              disabled={!dirty || !!busy}
-              onClick={() => void review()}
-            >
-              {busy === "preview" ? "正在检查变更…" : "检查并保存"}
-            </button>
-          </footer>
         </>
       )}
       {refresh && (
@@ -949,6 +1081,40 @@ export function ChannelModels({
           </div>
         </Dialog>
       )}
+      {confirmDelete && (
+        <Dialog
+          title="删除通道"
+          close={() => { if (busy !== "apply") setConfirmDelete(null); }}
+          dismissible={busy !== "apply"}
+        >
+          <div className="channel-confirm">
+            <p>
+              删除通道 <strong>{confirmDelete.name}</strong> 后，新会话不再使用它。其他通道和已有会话不受影响。
+            </p>
+            {error && (
+              <p role="alert" className="form-error">
+                {error}
+              </p>
+            )}
+            <footer>
+              <button
+                className="button"
+                disabled={busy === "apply"}
+                onClick={() => setConfirmDelete(null)}
+              >
+                取消
+              </button>
+              <button
+                className="button danger"
+                disabled={busy === "apply"}
+                onClick={() => void deleteChannel(confirmDelete.id)}
+              >
+                {busy === "apply" ? "正在删除…" : "删除通道"}
+              </button>
+            </footer>
+          </div>
+        </Dialog>
+      )}
       {preview && (
         <Dialog
           title={snapshot?.configScope === "standalone" ? "确认保存设置" : "确认保存到 MMF"}
@@ -962,17 +1128,19 @@ export function ChannelModels({
               {preview.changes.map((c, i) => (
                 <li key={i}>
                   <strong>
-                    {c.kind === "add"
-                      ? "加入通道"
-                      : c.kind === "remove"
-                        ? "从通道移除"
-                        : c.kind === "connection"
-                          ? "修改连接"
-                          : c.kind === "vision"
-                            ? "修改识图能力"
-                            : c.kind === "context"
-                              ? "修改上下文长度"
-                              : "修改默认 effort"}
+                    {c.kind === "channel-remove"
+                      ? "删除通道"
+                      : c.kind === "add"
+                        ? "加入通道"
+                        : c.kind === "remove"
+                          ? "从通道移除"
+                          : c.kind === "connection"
+                            ? "修改连接"
+                            : c.kind === "vision"
+                              ? "修改识图能力"
+                              : c.kind === "context"
+                                ? "修改上下文长度"
+                                : "修改默认 effort"}
                   </strong>
                   <span>
                     {c.model}
@@ -988,16 +1156,9 @@ export function ChannelModels({
                 </li>
               ))}
             </ul>
-            <label>
-              输入“{preview.confirmPhrase}”确认保存
-              <input
-                aria-label="MMF 保存确认文字"
-                value={phrase}
-                onChange={(e) => setPhrase(e.target.value)}
-                disabled={!!busy}
-                autoComplete="off"
-              />
-            </label>
+            <p className="form-hint">
+              确认后将写入当前配置并刷新已发布模型目录。
+            </p>
             {error && (
               <p role="alert" className="form-error">
                 {error}
@@ -1013,8 +1174,10 @@ export function ChannelModels({
               </button>
               <button
                 className="button primary"
-                disabled={!!busy || phrase !== preview.confirmPhrase}
-                onClick={() => void apply()}
+                disabled={!!busy}
+                onClick={() => {
+                  void apply();
+                }}
               >
                 {busy === "apply" ? "正在保存并校验…" : snapshot?.configScope === "standalone" ? "保存设置" : "保存到 MMF"}
               </button>

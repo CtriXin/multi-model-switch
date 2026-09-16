@@ -27,6 +27,19 @@ def test_unavailable_or_unchecked_target_is_rejected(tmp_path):
     c.stager.assert_not_called()
 
 
+def test_manual_upgrade_guidance_blocks_one_click_start(tmp_path):
+    app, c = setup(tmp_path, Mock())
+    guidance = {'required': True, 'reason': '配置根需要迁移。'}
+    with patch.object(app.updates, 'status', return_value={
+        'upgradeGuidance': guidance, 'updateAvailable': True,
+        'latest': {'tag': 'v99.0.0'},
+    }):
+        with pytest.raises(Exception, match='配置根需要迁移') as exc:
+            c.start({'target': 'v99.0.0'})
+    assert getattr(exc.value, 'code', '') == 'UPDATE_REQUIRES_MANUAL_STEP'
+    c.stager.assert_not_called()
+
+
 def test_failed_stage_never_enters_maintenance_or_shutdown(tmp_path):
     app,c=setup(tmp_path,Mock(side_effect=ValueError('fixture')))
     c.start({'target':'v99.0.0'});c._thread.join(2)

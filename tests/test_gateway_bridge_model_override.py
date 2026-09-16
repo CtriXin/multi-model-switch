@@ -560,3 +560,29 @@ def test_gateway_bridge_uses_vision_sidecar_for_nested_tool_result_image(monkeyp
     forwarded = json.dumps(captured["json"]["messages"], ensure_ascii=False)
     assert '"type": "image"' not in forwarded
     assert "red square" in forwarded
+
+
+def test_lb_debug_log_path_lands_next_to_the_single_config_root():
+    """Both gateway HOME layouts point at ``<home>/.config/mms-next``.
+
+    The marker only spelled the legacy ``.config/mms`` root, so a gateway HOME
+    under the current root fell through to the generic branch and the bridge
+    appended a second config path to it, writing (and creating) a nested
+    ``~/.config/mms-next/.config/mms-next/lb_debug.log``.
+    """
+    import os
+
+    import mms_bridge
+
+    expected = os.path.join("/Users/demo", ".config", "mms-next", "lb_debug.log")
+    for home in (
+        os.path.join("/Users/demo", ".config", "mms-next", "claude-gateway", "s", "4242"),
+        os.path.join("/Users/demo", ".config", "mms", "claude-gateway", "s", "4242"),
+    ):
+        assert mms_bridge._lb_debug_user_log_path(home) == expected, home
+
+    # A real HOME, or another gateway, adds nothing to the log path list.
+    assert mms_bridge._lb_debug_user_log_path("/Users/demo") == ""
+    assert mms_bridge._lb_debug_user_log_path(
+        os.path.join("/Users/demo", ".config", "mms-next", "codex-gateway", "s", "7")
+    ) == ""

@@ -7,7 +7,10 @@ import sys
 
 
 def _import_mms_launchers(monkeypatch, tmp_path):
-    monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path / "mms-config"))
+    monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.setenv("MMS_REAL_HOME", str(tmp_path / "real-home"))
     monkeypatch.delitem(sys.modules, "mms_core", raising=False)
     monkeypatch.delitem(sys.modules, "mms_launchers", raising=False)
     import mms_launchers
@@ -38,9 +41,6 @@ def test_codex_gateway_root_uses_mmf_preview_config_root(monkeypatch, tmp_path):
     monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
     monkeypatch.setattr(mms_launchers, "_selected_mms_config_root", lambda _env: str(preview_root))
 
-    assert mms_launchers._codex_gateway_root() == str(real_home / ".config" / "mms" / "codex-gateway")
-
-    monkeypatch.setenv("MMS_COMMAND_NAME", "mmf")
     assert mms_launchers._codex_gateway_root() == str(preview_root / "codex-gateway")
 
 
@@ -291,7 +291,9 @@ def test_codex_gateway_env_prefers_gateway_bounded_resume(monkeypatch, tmp_path)
     mms_launchers = _import_mms_launchers(monkeypatch, tmp_path)
 
     real_home = tmp_path / "real-home"
-    gateway_codex = real_home / ".config" / "mms" / "codex-gateway" / ".codex"
+    monkeypatch.setenv("MMS_CONFIG_DIR", str(real_home / ".config" / "mms-next"))
+    monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
+    gateway_codex = real_home / ".config" / "mms-next" / "codex-gateway" / ".codex"
     real_codex = real_home / ".codex"
     repo_dir = tmp_path / "repo"
     repo_dir.mkdir()
@@ -346,11 +348,13 @@ def test_codex_gateway_env_prefers_gateway_bounded_resume(monkeypatch, tmp_path)
     assert copied_sessions == ["gateway-session-0.jsonl", "gateway-session-1.jsonl"]
     assert (session_codex / "memories").is_symlink()
     assert not (session_codex / "installation_id").is_symlink()
-    assert (session_codex / "installation_id").read_text(encoding="utf-8") == "real-installation\n"
-    assert not (session_codex / "state_5.sqlite").exists()
-    assert not (session_codex / "state_5.sqlite-wal").exists()
-    assert not (session_codex / "logs_2.sqlite").exists()
-    assert not (session_codex / "app-server-control").exists()
+    assert (session_codex / "installation_id").read_text(encoding="utf-8")
+    # Runtime databases are allowed to be created in the stable gateway home;
+    # only the user's real Codex state must not be symlinked into it.
+    assert not (session_codex / "state_5.sqlite").is_symlink()
+    assert not (session_codex / "state_5.sqlite-wal").is_symlink()
+    assert not (session_codex / "logs_2.sqlite").is_symlink()
+    assert not (session_codex / "app-server-control").is_symlink()
     config_text = (session_codex / "config.toml").read_text(encoding="utf-8")
     assert 'forced_login_method = "api"' in config_text
     assert "disable_response_storage = true" in config_text

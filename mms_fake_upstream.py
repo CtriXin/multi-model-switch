@@ -43,7 +43,7 @@ def _real_home():
 
 
 def _base_dir():
-    return os.path.join(_real_home(), ".config", "mms", "fake-upstream")
+    return os.path.join(_real_home(), ".config", "mms-next", "fake-upstream")
 
 
 def _state_path():

@@ -255,7 +255,7 @@ def _selected_config_root() -> Path:
         value = str(os.environ.get(key) or "").strip()
         if value:
             return Path(value).expanduser()
-    return Path.home() / ".config" / "mms"
+    return Path.home() / ".config" / "mms-next"
 
 
 def _manifest_payload_path(config_root: Path, manifest: dict[str, Any], file_key: str) -> Path | None:

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
-import { Check, ChevronDown, Search, SlidersHorizontal } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, Search, SlidersHorizontal } from "lucide-react";
 import type { Model, Preset } from "./types";
 import { readRoutePreferences } from "./ModelExplorer";
 import { modelKey, selectModelRoute } from "./modelSelection";
@@ -19,6 +19,10 @@ export function QuickModelMenu({ presets, models, value, favorites, change, clos
   children: ReactNode;
 }) {
   const [query, setQuery] = useState("");
+  // Picking a model and tuning it are two things, not one panel with both.
+  // Showing the list and the options together put a scrollable list inside a
+  // scrollable popover, so the two are now states of the same surface.
+  const [advanced, setAdvanced] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const selected = presets.find(p => p.id === value);
@@ -56,38 +60,59 @@ export function QuickModelMenu({ presets, models, value, favorites, change, clos
     buttons[next].focus();
   }
 
+  const advancedToggle = <button type="button" className="quick-model-advanced-toggle"
+    data-guide="model-advanced" aria-expanded={advanced} onClick={() => setAdvanced(!advanced)}>
+    <SlidersHorizontal size={15} /><span>通道与高级选项</span>
+    {advanced ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+  </button>;
+
   return <div className="quick-model-menu" aria-busy={pending}>
-    <label className="quick-model-search">
-      <Search size={16} />
-      <input autoFocus aria-label="搜索模型" placeholder="搜索模型…" value={query}
-        onChange={e => setQuery(e.target.value)}
-        onKeyDown={e => {
-          if (e.key === "ArrowDown" && !e.nativeEvent.isComposing) {
-            e.preventDefault();
-            e.currentTarget.closest(".quick-model-menu")?.querySelector<HTMLButtonElement>(".quick-model-option:not(:disabled)")?.focus();
-          }
-        }} />
-    </label>
-    <div className="quick-model-list" role="group" aria-label="可选模型" onKeyDown={moveFocus}>
-      {shown.map(([key, options]) => {
-        const preset = selectModelRoute(options, favorites, preferences, value);
-        const active = !!selected && modelKey(selected) === key;
-        return <button type="button" key={key} className="quick-model-option" aria-pressed={active}
-          disabled={disabled || pending || !preset.available}
-          title={preset.available ? `使用通道：${preset.channel || preset.providerId}` : preset.reason || "此模型暂不可用"}
-          onClick={() => void choose(preset.id, true)}>
-          <VendorMark name={preset.name} family={models.find(m => m.id === preset.modelId)?.family} />
-          <span>{preset.name}</span>
-          {!preset.available ? <small>不可用</small> : active && <Check size={15} />}
-        </button>;
-      })}
-      {!shown.length && <p className="popover-note">没有匹配的模型，换个关键词试试。</p>}
-    </div>
+    {advanced ? (
+      // One row for the model in play, and it is the way back to the list.
+      <button type="button" className="quick-model-current" onClick={() => setAdvanced(false)}>
+        {selected
+          ? <>
+              <VendorMark name={selected.name} family={models.find(m => m.id === selected.modelId)?.family} />
+              <span>{selected.name}</span>
+            </>
+          : <span className="muted">先选择模型</span>}
+        <small>换模型</small>
+      </button>
+    ) : (
+      <>
+        <label className="quick-model-search">
+          <Search size={16} />
+          <input autoFocus aria-label="搜索模型" placeholder="搜索模型…" value={query}
+            onChange={e => setQuery(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === "ArrowDown" && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                e.currentTarget.closest(".quick-model-menu")?.querySelector<HTMLButtonElement>(".quick-model-option:not(:disabled)")?.focus();
+              }
+            }} />
+        </label>
+        <div className="quick-model-list" role="group" aria-label="可选模型" onKeyDown={moveFocus}>
+          {shown.map(([key, options]) => {
+            const preset = selectModelRoute(options, favorites, preferences, value);
+            const active = !!selected && modelKey(selected) === key;
+            return <button type="button" key={key} className="quick-model-option" aria-pressed={active}
+              disabled={disabled || pending || !preset.available}
+              title={preset.available ? `使用通道：${preset.channel || preset.providerId}` : preset.reason || "此模型暂不可用"}
+              onClick={() => void choose(preset.id, true)}>
+              <VendorMark name={preset.name} family={models.find(m => m.id === preset.modelId)?.family} />
+              <span>{preset.name}</span>
+              {!preset.available ? <small>不可用</small> : active && <Check size={15} />}
+            </button>;
+          })}
+          {!shown.length && <p className="popover-note">没有匹配的模型，换个关键词试试。</p>}
+        </div>
+      </>
+    )}
     {(pending || notice) && <p className="popover-note" role="status">{pending ? "正在切换模型…" : notice}</p>}
     {error && <p className="inline-alert" role="alert">{error}</p>}
-    <details className="quick-model-advanced" data-guide="model-advanced">
-      <summary><SlidersHorizontal size={15} /><span>通道与高级选项</span><ChevronDown size={14} /></summary>
-      <fieldset disabled={pending}>
+    <div className={"quick-model-advanced" + (advanced ? " open" : "")}>
+      {advancedToggle}
+      {advanced && <fieldset disabled={pending}>
         <label className="task-setting-row">
           <span>本次通道</span>
           <select aria-label="本次模型通道" value={value} disabled={disabled || !routes.length}
@@ -99,7 +124,7 @@ export function QuickModelMenu({ presets, models, value, favorites, change, clos
           </select>
         </label>
         {children}
-      </fieldset>
-    </details>
+      </fieldset>}
+    </div>
   </div>;
 }

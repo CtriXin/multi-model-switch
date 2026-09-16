@@ -138,7 +138,7 @@ def default_config_dir() -> Path:
         explicit = os.environ.get(key, "").strip()
         if explicit:
             return Path(explicit).expanduser()
-    return real_home() / ".config" / "mms"
+    return real_home() / ".config" / "mms-next"
 
 
 def _same_path(left: Path, right: Path) -> bool:
@@ -1058,7 +1058,7 @@ def format_feishu_card(report: dict[str, Any], reason: str) -> dict[str, Any]:
             "elements": [
                 {
                     "tag": "plain_text",
-                    "content": "本机结果：~/.config/mms/health-watchdog/latest.json",
+                    "content": "本机结果：~/.config/mms-next/health-watchdog/latest.json",
                 }
             ],
         }

@@ -1,0 +1,157 @@
+/* The block that appears under the switch. It carries a code, an address and
+   two buttons, which is more than a preference row holds, so it sits below the
+   row rather than inside it and keeps the same left edge. */
+.remote-access {
+  padding: 4px 0 18px;
+  border-bottom: 1px solid var(--line);
+}
+/* Which address to use depends on where the other device is, so they are
+   offered as a choice rather than guessed at. */
+.remote-ways {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.remote-way {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  text-align: left;
+  padding: 8px 13px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: transparent;
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    background var(--duration-fast) var(--ease-out);
+}
+.remote-way strong {
+  font-family: var(--font-mono);
+  font-size: max(11px, 0.8571rem);
+  font-weight: 500;
+}
+.remote-way small {
+  color: var(--muted);
+  font-size: max(11px, 0.7857rem);
+}
+.remote-way.selected {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  background: var(--selected);
+}
+.remote-share {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+  /* Clear of the address row above: the code is a separate step, not part of
+     the same line of chips. */
+  margin-top: 18px;
+}
+.remote-share .qr-code {
+  flex-shrink: 0;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  /* The quiet zone is drawn inside the SVG; this only keeps the frame off it. */
+  padding: 6px;
+  background: #fff;
+}
+.remote-share-copy {
+  min-width: 0;
+  flex: 1;
+}
+.remote-share-copy p {
+  color: var(--muted);
+  font-size: max(12px, 0.8571rem);
+  line-height: 1.6;
+}
+.remote-url {
+  display: block;
+  margin: 9px 0 12px;
+  padding: 8px 11px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--soft);
+  font-family: var(--font-mono);
+  font-size: max(11px, 0.7857rem);
+  /* A token has no spaces to break at and must stay selectable in full. */
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+.remote-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.remote-actions .button,
+.preference-row > .button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+@media (max-width: 640px) {
+  .remote-share {
+    flex-direction: column;
+  }
+}
+/* The name a tunnel only reveals once it is running. Sits with the addresses
+   because it is one more way in, not a separate feature. */
+.tunnel-hostnames {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+.tunnel-hostnames label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 220px;
+}
+.tunnel-hostnames label span {
+  color: var(--muted);
+  font-size: max(11px, 0.7857rem);
+}
+.tunnel-hostnames input {
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink);
+  font-size: max(11px, 0.8571rem);
+  min-width: 0;
+}
+.tunnel-list {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  flex-basis: 100%;
+}
+.tunnel-list li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: max(11px, 0.7857rem);
+}
+.tunnel-list button {
+  display: inline-flex;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 2px;
+  border-radius: 999px;
+}
+.tunnel-list button:hover:not(:disabled) {
+  color: var(--ink);
+  background: var(--soft);
+}

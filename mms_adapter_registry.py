@@ -74,7 +74,7 @@ TOP_SOURCE_COMPANIES = [
         "id": "moonshot-kimi",
         "company": "Moonshot AI",
         "brand": "Kimi",
-        "families": ["kimi-*", "k3", "k3[1m]", "kimi-for-coding", "kimi-for-coding-highspeed"],
+        "families": ["kimi-*", "k3", "kimi-for-coding", "kimi-for-coding-highspeed"],
         "source_kind": "hybrid",
         "oauth_native": True,
         "default_adapter": "provider_api",

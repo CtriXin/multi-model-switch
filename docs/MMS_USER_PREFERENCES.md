@@ -40,11 +40,11 @@ disabled_clis = []            # e.g. ["pi", "agy"]
 [launch.defaults]
 thinking_mode = "enable"      # enable | disable
 reasoning_effort = "high"     # low | medium | high | xhigh
-caveman_mode = "enable"       # enable | disable
-caveman_level = "light"       # light | standard | full
+# Caveman 已全局下线，旧字段不再生效。
 nsr_mode = "enable"           # enable | disable
 agent_pack = "none"           # none | ecc | omc
 bypass = true                 # true | false
+pi_btw = true                 # true | false；MMS 内建 Pi /btw 旁问扩展
 
 [launch.cli.codex]
 reasoning_effort = "high"
@@ -52,12 +52,13 @@ reasoning_effort = "high"
 [launch.cli.claude]
 agent_pack = "ecc"
 
+[launch.cli.pi]
+pi_btw = false                # 只关 Pi 的旁问扩展
+
 [launch.cli.agy]
-caveman_mode = "enable"
-caveman_level = "light"
 
 [session_surfaces.disabled]
-skills = ["agent-browser"]
+skills = []
 mcp = []
 hooks = []
 
@@ -66,13 +67,11 @@ managed_enabled = true
 managed_root = "~/.local/share/mms/assets"
 
 [assets.roots]
-web_access = "~/my-skills/web-access"
 weber = "~/my-skills/weber"
-agent_browser = "~/my-skills/agent-browser"
+grill_me = "~/my-skills/grill-me"
 codegraph = "~/my-skills/codegraph"
 token_saver = "~/my-skills/token-saver"
 toon = "~/my-skills/toon"
-caveman = "~/my-packs/caveman"
 nsr = "~/my-packs/non-stop-run"
 ecc = "~/.mms/agent-packs/everything-claude-code"
 omc = "~/.mms/agent-packs/oh-my-claudecode"
@@ -86,11 +85,10 @@ omc = "~/.mms/agent-packs/oh-my-claudecode"
 | --- | --- | --- |
 | `thinking_mode` | `enable` / `disable` | Default Thinking toggle for supported `Claude` / `Codex` routes |
 | `reasoning_effort` | `low` / `medium` / `high` / `xhigh` | Default effort when the selected model profile supports it |
-| `caveman_mode` | `enable` / `disable` | Default session-local Caveman overlay |
-| `caveman_level` | `light` / `standard` / `full` | Default Caveman intensity when enabled |
 | `nsr_mode` | `enable` / `disable` | Default session-local NSR Stop-hook injection for Claude/Codex; default is `enable`, but the rewritten loop only activates after `/nsr` |
 | `agent_pack` | `none` / `ecc` / `omc` | Default Claude agent pack toggle |
 | `bypass` | `true` / `false` | Default launch approval bypass toggle |
+| `pi_btw` | `true` / `false` | 只对 `pi` 生效：是否注入 MMS 内建的 `/btw` 旁问扩展，默认 `true` |
 | `disabled_session_surfaces` | table with `skills` / `mcp` / `hooks` arrays | Per-launch disabled surface overlay |
 
 Supported CLI names:
@@ -107,7 +105,7 @@ mcp = []
 hooks = []
 ```
 
-`skills` accepts MMS dynamic skill names such as `web-access`, and CLI-scoped Global Skill filters such as `claude:frontend-design` or `codex:bugfix`. Scoped Global Skill filters only affect MMS-launched sessions; they do not delete or edit `~/.claude/skills` or `~/.codex/skills`.
+`skills` accepts MMS dynamic skill names such as `weber` or `grill-me`, and CLI-scoped Global Skill filters such as `claude:frontend-design` or `codex:bugfix`. Scoped Global Skill filters only affect MMS-launched sessions; they do not delete or edit `~/.claude/skills` or `~/.codex/skills`.
 
 `[launch] disabled_clis` accepts MMS launch targets such as:
 
@@ -140,7 +138,7 @@ Put symlinks here when possible. Launcher resolves this user override root first
 `[assets.roots]` accepts:
 
 ```text
-web_access, weber, agent_browser, codegraph, token_saver, toon, caveman, nsr, ecc, omc, auto_github_contributor
+weber, grill_me, codegraph, toon, nsr, ecc, omc, auto_github_contributor
 ```
 
 Env vars like `MMS_WEB_ACCESS_ROOT`, `MMS_ECC_ROOT`, and `MMS_MANAGED_ASSETS_ROOT` still take priority over `preferences.toml`. Figma and Pilot MCP are default-off even when installed; enable them per launch environment with `MMS_ENABLE_MCP_FIGMA=1` / `MMS_ENABLE_FIGMA_MCP=1` or `MMS_ENABLE_MCP_PILOT=1` / `MMS_ENABLE_PILOT_MCP=1`.
@@ -198,11 +196,10 @@ MMS 自带动态 assets 随当前包放在 `assets/session-assets`；安装版�
 Common roots:
 
 ```text
-~/.mms/assets/session-assets/packs/caveman
-~/.mms/assets/session-assets/skills/web-access
 ~/.mms/assets/session-assets/skills/weber
-~/.mms/assets/session-assets/skills/agent-browser
-~/.mms/assets/session-assets/skills/token-saver
+~/.mms/assets/session-assets/skills/weber/backends-web-access
+~/.mms/assets/session-assets/skills/weber/backends-agent-browser
+~/.mms/assets/session-assets/skills/grill-me
 ~/.mms/assets/session-assets/skills/toon
 ~/.mms/hooks/nsr-stop-wrapper.py
 ~/.mms/hooks/nsr-loop-hook.py

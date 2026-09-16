@@ -456,8 +456,16 @@ export function ModelExplorer({
                   disabled={!selected.available || !facts}
                   onClick={choose}
                 >
-                  使用 {selected.name}
-                  <ChevronRight size={16} />
+                  {/* Reading a channel's parameters takes a moment. Say that,
+                      rather than showing a dead button with no reason. */}
+                  {!facts && !error ? (
+                    <>正在读取通道参数…</>
+                  ) : (
+                    <>
+                      使用 {selected.name}
+                      <ChevronRight size={16} />
+                    </>
+                  )}
                 </button>
               )}
             </>

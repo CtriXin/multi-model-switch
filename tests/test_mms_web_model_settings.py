@@ -77,6 +77,19 @@ def test_route_changes_preserve_other_channel(settings):
     assert by_id["channel-b"] == {"gpt-5", "gpt-4.1"}
 
 
+def test_deselect_and_save_without_legacy_config(settings):
+    """A first Pilot setup publishes Registry truth without config.toml."""
+    (settings.root / "config.toml").unlink()
+    draft = payload(settings)
+    draft.update(models=["gpt-5"], efforts={})
+    preview = settings.preview(draft)
+    result = settings.apply({"previewId": preview["previewId"], "confirmed": True})
+    assert result["applied"] and result["runtimeReady"]
+    rows = settings.read()["providers"]
+    visible = {p["id"]: {m["id"] for m in p["models"] if m["visible"]} for p in rows}
+    assert visible == {"channel-a": {"gpt-5"}, "channel-b": {"gpt-5", "gpt-4.1"}}
+
+
 def test_stale_and_invalid_input(settings):
     draft = payload(settings)
     preview = settings.preview(draft)
@@ -399,3 +412,107 @@ def test_review_protects_unsaved_edits_and_compares_with_the_draft(settings):
     assert by_field["context"]["before"] == "524288"
     assert by_field["effort"]["before"] == "high"
     assert settings.fingerprint() == before
+
+
+def test_delete_channel_removes_provider_and_keeps_others(settings):
+    before = {p["id"] for p in settings.read()["providers"]}
+    assert {"channel-a", "channel-b"} <= before
+    snap = settings.read()
+    preview = settings.preview({
+        "fingerprint": snap["fingerprint"], "revision": snap["revision"],
+        "providerId": "channel-b", "removeProviderId": "channel-b",
+    })
+    assert preview["changes"] == [{"kind": "channel-remove", "model": "channel-b", "channels": ["channel-b"]}]
+    # A confirm phrase is still required before anything is written.
+    with pytest.raises(WebError, match="确认"):
+        settings.apply({"previewId": preview["previewId"]})
+    result = settings.apply({"previewId": preview["previewId"], "confirmPhrase": "写入预览DB"})
+    assert result["applied"]
+    after = settings.read()
+    ids = {p["id"] for p in after["providers"]}
+    assert "channel-b" not in ids and "channel-a" in ids
+    # channel-a keeps its published models untouched by the deletion.
+    keep = next(p for p in after["providers"] if p["id"] == "channel-a")
+    assert {m["id"] for m in keep["models"] if m["visible"]} == {"gpt-5", "gpt-4.1"}
+
+
+def test_delete_last_channel_is_refused(settings):
+    snap = settings.read()
+    settings.apply({"previewId": settings.preview({
+        "fingerprint": snap["fingerprint"], "revision": snap["revision"],
+        "providerId": "channel-b", "removeProviderId": "channel-b",
+    })["previewId"], "confirmPhrase": "写入预览DB"})
+    snap = settings.read()
+    assert [p["id"] for p in snap["providers"]] == ["channel-a"]
+    with pytest.raises(WebError, match="最后一个通道"):
+        settings.preview({
+            "fingerprint": snap["fingerprint"], "revision": snap["revision"],
+            "providerId": "channel-a", "removeProviderId": "channel-a",
+        })
+
+
+def test_fetching_models_replaces_the_route_instead_of_merging(settings, tmp_path):
+    """A model deleted upstream has to leave this machine, not just lose a tick.
+
+    Fetching used to union the remote list into the local one, so a model the
+    channel had dropped stayed selectable in the terminal forever. The remote
+    list is authoritative: saving it must remove what it no longer contains,
+    from the published routes and from a freshly launched session alike.
+    """
+    from mms_web.server import WebApplication
+
+    snapshot = settings.read()
+    seeded = settings.preview({
+        "fingerprint": snapshot["fingerprint"],
+        "revision": snapshot["revision"],
+        "providerId": "channel-a",
+        "models": ["gpt-5", "gpt-4.1", "retired-model"],
+        "efforts": {},
+    })
+    settings.apply({"previewId": seeded["previewId"], "confirmPhrase": "写入预览DB"})
+    snapshot = settings.read()
+    channel = next(p for p in snapshot["providers"] if p["id"] == "channel-a")
+    assert "retired-model" in {m["id"] for m in channel["models"] if m["visible"]}
+
+    # The upstream fixture never serves retired-model, so this is the real shape
+    # of "the channel deleted a model".
+    found = settings.discover({
+        "fingerprint": snapshot["fingerprint"],
+        "revision": snapshot["revision"],
+        "providerId": "channel-a",
+        "models": ["gpt-5"],
+    })
+    assert "retired-model" not in found["models"]
+
+    preview = settings.preview({
+        "fingerprint": snapshot["fingerprint"],
+        "revision": snapshot["revision"],
+        "providerId": "channel-a",
+        "models": sorted(found["models"]),
+        "efforts": {},
+    })
+    assert {"kind": "remove", "model": "retired-model"} in preview["changes"]
+    settings.apply({"previewId": preview["previewId"], "confirmPhrase": "写入预览DB"})
+
+    channel = next(p for p in settings.read()["providers"] if p["id"] == "channel-a")
+    # Not merely hidden: gone from the rows the page and the terminal read.
+    assert {m["id"] for m in channel["models"]} == set(found["models"])
+
+    published = json.loads((settings.root / "generated" / "model-routes.json").read_text(encoding="utf-8"))
+    assert "retired-model" not in json.dumps(published)
+    assert "retired-model" not in (settings.root / "config.toml").read_text(encoding="utf-8")
+
+    app = WebApplication(state_root=tmp_path / "web-overwrite", config_root=settings.root)
+    project = tmp_path / "project-overwrite"
+    project.mkdir()
+    try:
+        workspace = app.catalog.add_workspace({"path": str(project)})
+        with pytest.raises(WebError):
+            app.post(["launch-options"], {"presetId": "web:pi:channel-a:retired-model",
+                                          "workspaceId": workspace["id"]})
+        # The models that survived the fetch still launch.
+        options = app.post(["launch-options"], {"presetId": "web:pi:channel-a:gpt-5",
+                                                "workspaceId": workspace["id"]})
+        assert options["model"]["id"] == "gpt-5"
+    finally:
+        app.close()

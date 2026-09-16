@@ -9,6 +9,8 @@ import mimetypes
 import os
 import subprocess
 import sys
+import tempfile
+import time
 import uuid
 from pathlib import Path
 
@@ -16,6 +18,40 @@ from .errors import WebError
 from .runtime import private_json
 
 MAX_FILE = 8 * 1024 * 1024
+
+
+def _windows_filesystem() -> bool:
+    """Separate predicate so tests can exercise the Windows branch anywhere."""
+    return os.name == "nt"
+
+
+def _is_link_or_reparse(path: Path) -> bool:
+    """True for symlinks and, on Windows, junctions / other reparse points.
+
+    ``Path.is_symlink()`` does not detect junctions on Windows.  Python's
+    Windows ``stat_result`` exposes the reparse-point bit as
+    ``st_file_attributes`` (and the tag as ``st_reparse_tag``); there is no
+    portable ``st_reparse_point`` field.  ``Path.is_junction`` is used when
+    available, with the raw attributes as the compatibility path for the
+    Python versions used by the acceptance matrix.
+
+    Fail-closed on stat errors is the caller's job; an unreadable entry here
+    returns False so normal ``not folder.is_dir()`` checks still fire.
+    """
+    try:
+        if os.path.islink(path):
+            return True
+        is_junction = getattr(path, "is_junction", None)
+        if callable(is_junction) and is_junction():
+            return True
+        info = os.stat(path, follow_symlinks=False)
+        file_attributes = int(getattr(info, "st_file_attributes", 0) or 0)
+        if file_attributes & 0x400:  # FILE_ATTRIBUTE_REPARSE_POINT
+            return True
+        return bool(getattr(info, "st_reparse_tag", 0) or getattr(info, "st_reparse_point", 0))
+    except OSError:
+        return False
+ATTACHMENT_KEEP_DAYS = 30  # imported copies unreferenced by any session are pruned after this
 TEXT_LIMIT = 1024 * 1024
 EXCLUDED = {"node_modules", "__pycache__", "vendor", "dist", "build"}
 PRIVATE = {"credentials.sh", "auth.json", "credentials.json", "id_rsa", "id_ed25519"}
@@ -42,9 +78,61 @@ class FileService:
         self.catalog = catalog
         self.root = state_root / "attachments"
 
+    def prune_workspace_attachments(self, root: Path, *, now: float | None = None) -> list[str]:
+        """Drop imported copies older than ATTACHMENT_KEEP_DAYS that no session still mentions.
+
+        Imports live under <workspace>/.pilot/attachments and would otherwise grow forever.
+        A file stays as long as any session record (event text, attachment entries or
+        skill context) contains its file name, so paths already handed to a model keep working.
+        """
+        folder = Path(root) / ".pilot" / "attachments"
+        if not folder.is_dir():
+            return []
+        now = time.time() if now is None else now
+        cutoff = now - ATTACHMENT_KEEP_DAYS * 86400
+        stale = []
+        try:
+            for entry in folder.iterdir():
+                try:
+                    if entry.is_file() and not entry.is_symlink() and entry.stat().st_mtime < cutoff:
+                        stale.append(entry)
+                except OSError:
+                    continue
+        except OSError:
+            return []
+        if not stale:
+            return []
+        referenced = set()
+        sessions_dir = self.root.parent / "sessions"
+        names = {entry.name for entry in stale}
+        try:
+            session_files = list(sessions_dir.glob("*.json")) if sessions_dir.is_dir() else []
+        except OSError:
+            session_files = []
+        for session_file in session_files:
+            try:
+                text = session_file.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            referenced.update(name for name in names if name in text)
+            if referenced == names:
+                break
+        removed = []
+        for entry in stale:
+            if entry.name in referenced:
+                continue
+            try:
+                entry.unlink()
+                removed.append(str(entry))
+            except OSError:
+                continue
+        return removed
+
     def import_to_workspace(self, payload: dict) -> dict:
         """Persist browser-provided bytes as a normal project file, then reference it."""
         root = self.workspace(str(payload.get("workspaceId") or ""))
+        # Imported attachments are durable workspace files; cleanup is explicit,
+        # never a side effect of a later import.
         raw = str(payload.get("data") or "")
         try:
             if len(raw) > MAX_FILE * 1.4:
@@ -57,26 +145,56 @@ class FileService:
         name = Path(str(payload.get("name") or "file").replace("\\", "/")).name
         name = "".join(c for c in name if ord(c) >= 32).encode()[:180].decode(errors="ignore").strip(". ") or "file"
         filename = uuid.uuid4().hex[:12] + "-" + name
-        # O_NOFOLLOW keeps a project symlink from redirecting this write elsewhere.
-        fd = None
         try:
-            fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
-            for part in (".pilot", "attachments"):
+            if _windows_filesystem():
+                # Windows lacks O_DIRECTORY/dir_fd. Reject symlink/junction
+                # redirection on each directory, then import atomically:
+                # write a private temp file and rename it into place, so a
+                # crash never leaves a partial attachment at the final path.
+                pilot = root / ".pilot"
+                attachments = pilot / "attachments"
+                for folder in (pilot, attachments):
+                    if folder.exists() and (_is_link_or_reparse(folder) or not folder.is_dir()):
+                        raise OSError("attachment directory is redirected")
+                    folder.mkdir(mode=0o700, exist_ok=True)
+                output_path = attachments / filename
+                if _is_link_or_reparse(output_path):
+                    raise OSError("attachment path is redirected")
+                descriptor, temporary = tempfile.mkstemp(dir=str(attachments), prefix=".import-", suffix=".tmp")
                 try:
-                    os.mkdir(part, 0o700, dir_fd=fd)
-                except FileExistsError:
+                    with os.fdopen(descriptor, "wb") as stream:
+                        stream.write(data)
+                    os.replace(temporary, output_path)
+                finally:
+                    try:
+                        os.unlink(temporary)
+                    except OSError:
+                        pass
+                try:
+                    output_path.chmod(0o600)
+                except OSError:
                     pass
-                child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
-                os.close(fd)
-                fd = child
-            output = os.open(filename, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=fd)
-            with os.fdopen(output, "wb") as stream:
-                stream.write(data)
+            else:
+                # O_NOFOLLOW keeps a project symlink from redirecting this write.
+                fd = None
+                try:
+                    fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+                    for part in (".pilot", "attachments"):
+                        try:
+                            os.mkdir(part, 0o700, dir_fd=fd)
+                        except FileExistsError:
+                            pass
+                        child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                        os.close(fd)
+                        fd = child
+                    output = os.open(filename, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=fd)
+                    with os.fdopen(output, "wb") as stream:
+                        stream.write(data)
+                finally:
+                    if fd is not None:
+                        os.close(fd)
         except OSError as exc:
             raise WebError("FILE_IMPORT_FAILED", "这个工作文件夹不能保存附件，请换一个可写的文件夹后重试。", 400) from exc
-        finally:
-            if fd is not None:
-                os.close(fd)
         target = root / ".pilot" / "attachments" / filename
         return self.reference_local({"paths": [str(target)]})["attachments"][0]
 

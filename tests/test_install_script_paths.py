@@ -41,6 +41,34 @@ def _run_install_check(*, home: Path, extra_env: dict[str, str] | None = None) -
     return completed.stdout
 
 
+def _run_install_dry_run(*, home: Path) -> str:
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+    env.update(_version_env_overrides(stable_ref="v4.19.1", latest_tag_ref="v4.19.1"))
+    completed = subprocess.run(
+        ["bash", str(INSTALL_SCRIPT), "--dry-run", "--ref", "v4.19.1"],
+        cwd=ROOT_DIR, env=env, capture_output=True, text=True, check=True,
+    )
+    return completed.stdout
+
+
+def test_installer_warns_about_legacy_config_without_touching_it(tmp_path):
+    legacy = tmp_path / ".config" / "mms"
+    legacy.mkdir(parents=True)
+    config = legacy / "config.toml"
+    config.write_text("legacy", encoding="utf-8")
+    output = _run_install_dry_run(home=tmp_path)
+    assert "旧版 MMS 配置" in output
+    assert "mms-next" in output
+    assert config.read_text(encoding="utf-8") == "legacy"
+
+
+def test_installer_does_not_warn_for_gateway_runtime_only(tmp_path):
+    (tmp_path / ".config" / "mms" / "codex-gateway" / "s").mkdir(parents=True)
+    output = _run_install_dry_run(home=tmp_path)
+    assert "旧版 MMS 配置" not in output
+
+
 def _extract_shell_function_body(script_text: str, function_name: str) -> str:
     marker = f"{function_name}() {{"
     start = script_text.find(marker)
@@ -482,12 +510,13 @@ def test_install_script_retires_mmc_entrypoint():
     assert '已移除 retired mmc 命令链接' in text
 
 
-def test_install_script_copies_mmslogs_entrypoint_before_linking():
+def test_install_script_copies_mmslogs_entrypoint_without_public_mmf_link():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
 
     assert '[ -f "$SOURCE_DIR/mmf" ] && cp "$SOURCE_DIR"/mmf "$MMS_HOME/"' in text
     assert '[ -f "$MMS_HOME/mmf" ] && chmod +x "$MMS_HOME/mmf"' in text
     assert '[ -f "$MMS_HOME/mmf" ] && rewrite_shebang "$MMS_HOME/mmf" "$PYTHON_PATH"' in text
+    assert 'if [ "$INSTALL_CHANNEL" = "dev" ] || [ "$INSTALL_CHANNEL" = "canary" ]; then' in text
     assert '[ -f "$MMS_HOME/mmf" ] && ln -sf "$MMS_HOME/mmf" "$BIN_DIR/mmf"' in text
     assert '[ -f "$SOURCE_DIR/mmslogs" ] && cp "$SOURCE_DIR"/mmslogs "$MMS_HOME/"' in text
     assert '[ -f "$MMS_HOME/mmslogs" ] && chmod +x "$MMS_HOME/mmslogs"' in text
@@ -501,7 +530,7 @@ def test_install_script_describes_built_in_tools_in_plain_language():
 
     assert "xmem" not in text.lower()
     assert "Built-in tools" in text
-    assert "web access, browser automation, token-saving tools" in text
+    assert "weber routing, grill-me, TOON and NSR come with MMS" in text
     assert "only apply inside sessions MMS starts" in text
     # the jargon inventory is gone from the install screen
     assert "weber router + web-access logged-in Chrome + agent-browser headless" not in text
@@ -526,27 +555,22 @@ def test_install_check_reports_all_bundled_session_assets(tmp_path):
     session_assets = mms_home / "assets" / "session-assets"
     hooks = mms_home / "hooks"
     for path in (
-        session_assets / "packs" / "caveman" / "skills" / "caveman",
-        session_assets / "packs" / "caveman" / "hooks",
-        session_assets / "skills" / "token-saver",
         session_assets / "skills" / "toon",
-        session_assets / "skills" / "web-access",
         session_assets / "skills" / "weber",
-        session_assets / "skills" / "agent-browser",
+        session_assets / "skills" / "weber" / "backends-web-access",
+        session_assets / "skills" / "weber" / "backends-agent-browser",
+        session_assets / "skills" / "grill-me",
         hooks,
     ):
         path.mkdir(parents=True, exist_ok=True)
     for path in (
-        session_assets / "packs" / "caveman" / "skills" / "caveman" / "SKILL.md",
-        session_assets / "skills" / "token-saver" / "SKILL.md",
         session_assets / "skills" / "toon" / "SKILL.md",
-        session_assets / "skills" / "web-access" / "SKILL.md",
         session_assets / "skills" / "weber" / "SKILL.md",
-        session_assets / "skills" / "agent-browser" / "SKILL.md",
+        session_assets / "skills" / "weber" / "backends-web-access" / "SKILL.md",
+        session_assets / "skills" / "weber" / "backends-agent-browser" / "SKILL.md",
+        session_assets / "skills" / "grill-me" / "SKILL.md",
     ):
         path.write_text("# asset\n", encoding="utf-8")
-    (session_assets / "packs" / "caveman" / "hooks" / "caveman-activate.js").write_text("// activate\n", encoding="utf-8")
-    (session_assets / "packs" / "caveman" / "hooks" / "caveman-mode-tracker.js").write_text("// tracker\n", encoding="utf-8")
     for name in (
         "nsr-builtin-hook.py",
         "nsr-loop-hook.py",
@@ -561,7 +585,7 @@ def test_install_check_reports_all_bundled_session_assets(tmp_path):
     output = _run_install_check(home=home)
 
     assert ("Bundled session assets" in output) or ("内建 session assets" in output)
-    for label in ("Caveman", "token-saver", "TOON", "web-access", "weber", "agent-browser", "NSR"):
+    for label in ("TOON", "weber", "grill-me", "NSR"):
         assert f"✓ {label}:" in output
 
 
@@ -719,9 +743,9 @@ def test_install_script_removes_global_token_saver_and_toon_packs():
     assert "write_mms_script_wrapper" not in text
     assert "INSTALL_TOKEN_SAVER" not in text
     assert "INSTALL_TOON" not in text
-    # still shipped as bundled session assets
-    assert "$assets_root/skills/token-saver/SKILL.md" in text
+    # TOON remains a bundled session asset; token-saver is retired.
     assert "$assets_root/skills/toon/SKILL.md" in text
+    assert "$assets_root/skills/token-saver" not in text
 
 def test_install_script_removes_optional_xmem_pack():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
@@ -919,11 +943,21 @@ def test_install_completion_points_at_the_web_app_and_v2_preview_gate():
     assert "在 MMS Web 里添加 provider 和 API Key" in text
     assert "bash install.sh --check" in text
 
-    # preview path is unchanged
-    assert "下一步（首次 preview/mmf 只做这两行）" in text
-    assert "$NEXT_MMF_CMD preview prepare" in text
+    # preview path: the legacy root is never read, so the only next step is
+    # configuring providers in the WebUI
+    assert "下一步（先配通道）" in text
+    assert "$NEXT_MMF_CMD preview prepare" not in text
+    assert "legacy_config_has_route_candidates" not in text
     assert "$NEXT_MMF_CMD config web" in text
     assert "$NEXT_MMF_CMD config doctor" in text
+
+
+def test_stable_install_does_not_overwrite_local_mmf_entrypoint():
+    text = INSTALL_SCRIPT.read_text(encoding="utf-8")
+    stable_block = text[text.index('if [ "$INSTALL_CHANNEL" = "dev" ] || [ "$INSTALL_CHANNEL" = "canary" ]; then'):text.index('# Remove stale MMS-owned legacy ccs/mmc artifacts')]
+    assert 'ln -sf "$MMS_HOME/mmf" "$BIN_DIR/mmf"' in stable_block
+    assert 'elif [ -L "$BIN_DIR/mmf" ]; then' in stable_block
+    assert '"$MMS_HOME/mmf")' in stable_block
 
 def test_install_script_dry_run_does_not_create_home_dirs(tmp_path):
     """--dry-run does not create .claude/, .codex/, or .config/opencode under temp HOME."""
@@ -1174,7 +1208,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_HEAD(self):
         self.send_response(200)
         home = Path(sys.argv[0]).parent.parent.parent
-        identity = hashlib.sha256(f"{home / '.mms'}|{home / '.local/share/mms-web/config'}|".encode()).hexdigest()
+        # The server hashes source|config_root|version; the installer must use
+        # the shared config root, not Pilot's old private directory.
+        identity = hashlib.sha256(f"{home / '.mms'}|{home / '.config/mms-next'}|".encode()).hexdigest()
         self.send_header("X-MMS-Web-Identity", identity)
         self.end_headers()
 
@@ -1418,3 +1454,53 @@ def test_retired_skill_cleanup_preserves_custom_target_inside_install_root(tmp_p
     _run_retired_cleanup(home)
     assert (skills / "handover").resolve() == custom
     assert (skills / "offduty").read_text() == "user instructions"
+
+
+def _piped_dry_run(tmp_path, *args, stable_ref="v9.9.9"):
+    """Run the installer the way curl and npx do: piped, outside the repo."""
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+    env.update(_version_env_overrides(stable_ref=stable_ref, latest_tag_ref=stable_ref))
+    for name in ("REAL_HOME", "MMS_REAL_HOME", "ORIGINAL_HOME", "MMS_CONFIG_ROOT"):
+        env.pop(name, None)
+    return subprocess.run(
+        ["bash", "-s", "--", "--lang", "en", *args, "--dry-run"],
+        cwd=tmp_path,
+        env=env,
+        input=INSTALL_SCRIPT.read_text(encoding="utf-8"),
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+
+
+def test_headline_is_one_line_for_the_bare_command(tmp_path):
+    out = _piped_dry_run(tmp_path)
+
+    assert "Installing the latest version: v9.9.9" in out
+    assert "Version overview" not in out
+
+
+def test_headline_is_one_line_when_the_wrapper_pins_the_latest_release(tmp_path):
+    """The npm wrapper resolves the release itself and pins --ref so the script
+    and the sources cannot drift. That pin must read like the bare command."""
+    out = _piped_dry_run(tmp_path, "--ref", "v9.9.9")
+
+    assert "Installing the latest version: v9.9.9" in out
+    assert "Version overview" not in out
+
+
+def test_overview_is_shown_when_an_older_version_is_pinned(tmp_path):
+    out = _piped_dry_run(tmp_path, "--ref", "v4.2.0")
+
+    assert "Version overview" in out
+    assert "Planned install ref: v4.2.0" in out
+
+
+def test_overview_is_shown_for_the_dev_and_canary_channels(tmp_path):
+    for channel in ("dev", "canary"):
+        out = _piped_dry_run(tmp_path, "--channel", channel)
+        assert "Version overview" in out, channel
+        assert f"Install channel: {channel}" in out, channel
