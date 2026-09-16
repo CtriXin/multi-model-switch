@@ -871,6 +871,7 @@ def test_paused_once_schedule_keeps_its_only_chance_until_rearmed(tmp_path):
         fired_single = rt.list_tasks(bot_id=awake["id"])
         assert len(fired_single) == 1 and fired_single[0]["prompt"] == "单条提醒"
         assert rt._schedules[single["id"]]["nextRunAt"] is None
+        assert any("延后" in message["content"] for message in rt.list_messages(fired_single[0]["id"]))
     finally:
         rt.close()
 
@@ -945,5 +946,47 @@ def test_a_repeating_schedule_gets_no_late_note_after_a_busy_skip(tmp_path):
         # The late note belongs to one-shots only: an interval run that fires on
         # its next due time is not late.
         assert not any("延后" in message["content"] for message in rt.list_messages(fired["id"]))
+    finally:
+        rt.close()
+
+
+class FlakyValidateExecutor(FakeExecutor):
+    """validate() fails while the model catalog is not ready, then recovers."""
+
+    def __init__(self):
+        super().__init__()
+        self.broken = False
+
+    def validate(self, bot):
+        if self.broken:
+            raise WebError("BOT_EXECUTOR_UNAVAILABLE", "Pi 执行器尚未连接，请先配置可用的 MMS 模型。", 409)
+        return super().validate(bot)
+
+
+def test_a_failed_create_does_not_consume_a_once_schedule(tmp_path):
+    executor = FlakyValidateExecutor()
+    rt = runtime(tmp_path, executor)
+    try:
+        worker = bot(rt, "重启中的 Bot", "ws-once-error")
+        past = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+        once = rt.create_schedule(worker["id"], {"prompt": "一次提醒", "rule": {"kind": "once", "at": past}})
+        executor.broken = True
+        rt.tick(); drain_launch(rt)
+        row = rt._schedules[once["id"]]
+        assert rt.list_tasks(bot_id=worker["id"]) == []
+        assert row["nextRunAt"] == once["nextRunAt"], "a failed create must give the one-shot its due time back"
+        assert row["lastSkip"]["reason"] == "error"
+
+        # While the executor stays broken the parked row is not rewritten.
+        parked_at = row["updatedAt"]
+        rt.tick(); rt.tick(); drain_launch(rt)
+        assert rt._schedules[once["id"]]["updatedAt"] == parked_at
+        assert rt._schedules[once["id"]]["nextRunAt"] == once["nextRunAt"]
+
+        executor.broken = False
+        rt.tick(); drain_launch(rt)
+        fired = rt.list_tasks(bot_id=worker["id"])
+        assert len(fired) == 1 and fired[0]["prompt"] == "一次提醒"
+        assert rt._schedules[once["id"]]["nextRunAt"] is None
     finally:
         rt.close()

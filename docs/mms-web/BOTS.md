@@ -75,6 +75,10 @@ Bot 设置里的自动记忆、单轮记忆预算和“整理阈值”可调整�
 
 周期任务不补课：停机（Pilot 没开、进程重启）期间错过超过一个周期就只把 `nextRunAt` 推到下一个未来时刻，并在 schedule 的 `lastSkip` 和（若已有上一轮任务）system 消息里记下跳过次数，不会把积压的触发全部补跑；恰好错过一次才立即补上。`interval` 的下一次永远从本该触发的时刻算起（`previous + everySeconds`），不会被每次触发的微小延迟带偏；“每天 9 点”在夏令时切换日仍然是本地 9:00。
 
+**`once` 只有一次机会，没跑就不消耗它。** 到点但当时不能触发时（Bot 级 `wakeEnabled=false` 或单条 `enabled=false`、`overlapPolicy=skip` 且上一轮仍在跑、创建 task 失败），这条 schedule 会被**停在一旁（parked）**：`nextRunAt` 保留那个已经过去的时间，`lastSkip` 写上与原因对应的 `reason`（`paused` / `busy` / `error`），`lastRunAt` 仍为 `null`。重新可用后的下一个 `tick` 会补触发一次，并在新建 task 上写一条 system 消息说明本次是延后补触发（时间按 schedule 自己的 `timezone` 渲染）。
+
+因此 **`nextRunAt` 已是过去时间、而 `lastRunAt=null` 不是“卡住”**：它表示这条一次性的定时正在等下一次机会，UI 不要把它显示成逾期，也不要和“已执行完”（`nextRunAt=null` 且 `lastRunAt` 有值）混淆。同样的原因重复出现时不会每个 tick 重写记录（不反复落盘）。
+
 **边界：Pilot 是本机进程，它不运行就不触发。** 不做 launchd / systemd / 开机自启；它也不会唤醒睡眠中的电脑，不保证无人值守网页登录、验证码或账号会话始终有效。
 
 默认最多同时运行 3 个任务。调度器会让不同 workspace 的任务并行，并让同一 Bot 或同一 workspace 的任务串行。这是协调规则，不是操作系统级沙箱：Bot 使用当前用户权限，workspace 之间不能被当作安全隔离边界。
@@ -258,7 +262,9 @@ schedule: {
 ### 重叠与错过
 
 - 默认 `overlapPolicy = "skip"`：到点时上一轮还在跑就跳过这一轮，把 `nextRunAt` 推到下一次，并在 schedule 的 `lastSkip` 里记录；如果已有上一轮 task，同时在该 task 上写一条 system 消息。判定复用调度器已有的 busy 语义（有 `starting`/`running` task，或 `waiting` 且 `waitReason` 不在 `{children, manual, user, plan-approval}`，或 `orphanAlive`）。`"queue"` 是显式选项，照常新建 task，由现有队列逻辑排队。
+- `once` 的 `skip` 是例外：它不消耗这一次机会，而是 parked（保留过期 `nextRunAt` + `lastSkip.reason="busy"`），等这一轮结束后补触发一次。
 - 错过：只补“还在一个周期内”的那一次；超过一个周期就不补，只把 `nextRunAt` 推到下一个未来时刻并记录跳过次数。`once` 错过就直接触发一次，触发后 `nextRunAt=null`，记录不自动删除（UI 可以显示“已执行完”并允许删除）。
+- 到点后 `create_task` 失败（例如 `BOT_EXECUTOR_UNAVAILABLE` / `BOT_MODEL_REQUIRED` / `BOT_GLOBAL_WORKSPACE_REQUIRED` / `TASK_LIMIT`）：`once` 把 `nextRunAt` 放回并 parked（`lastSkip.reason="error"`，不重复落盘），Pi 恢复后补触发；周期规则则记 `lastSkip.reason="error"` 并按下一次正常推进。
 
 ### 结果送达与 CLI
 

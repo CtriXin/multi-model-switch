@@ -1,0 +1,25 @@
+### P1b mutation test (create_task failure path)
+
+Mutation: delete the once-failure restore/park branch from tick() in mms_web/bots.py, so a failed create_task leaves the one-shot consumed (nextRunAt=None).
+Command: PYTHONPATH=. python3 -m pytest -q tests/test_mms_web_bots.py -k failed_create
+
+        executor = FlakyValidateExecutor()
+        rt = runtime(tmp_path, executor)
+        try:
+            worker = bot(rt, "重启中的 Bot", "ws-once-error")
+            past = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+            once = rt.create_schedule(worker["id"], {"prompt": "一次提醒", "rule": {"kind": "once", "at": past}})
+            executor.broken = True
+            rt.tick(); drain_launch(rt)
+            row = rt._schedules[once["id"]]
+            assert rt.list_tasks(bot_id=worker["id"]) == []
+>           assert row["nextRunAt"] == once["nextRunAt"], "a failed create must give the one-shot its due time back"
+E           AssertionError: a failed create must give the one-shot its due time back
+E           assert None == '2026-09-16T13:53:47.184288+00:00'
+
+tests/test_mms_web_bots.py:977: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_mms_web_bots.py::test_a_failed_create_does_not_consume_a_once_schedule
+1 failed, 65 deselected in 0.11s
+
+---- restoring the fix ----

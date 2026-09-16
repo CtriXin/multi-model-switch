@@ -9,7 +9,7 @@ import pytest
 
 from mms_web import bot_schedules
 from mms_web.bot_schedules import (MAX_SCHEDULES_PER_BOT, MIN_INTERVAL_SECONDS, advance, apply_update,
-                                   build_schedule, defer_once, is_due, local_timezone_name, normalize_rule,
+                                   build_schedule, defer_once, format_local, is_due, local_timezone_name, normalize_rule,
                                    normalize_timezone, parse_every, parse_weekday, sanitize_schedules)
 from mms_web.errors import WebError
 
@@ -244,3 +244,9 @@ def test_stored_rows_are_parked_instead_of_bricking_the_loop():
     assert is_due(good, at(2100, 1, 1)) and not is_due(good, at(2000, 1, 1))
     assert not is_due({**good, "nextRunAt": None}, at(2100, 1, 1))
     assert not is_due({**good, "nextRunAt": "not-a-time"}, at(2100, 1, 1))
+
+
+def test_format_local_renders_the_schedule_timezone_and_survives_bad_input():
+    assert format_local("2026-09-17T01:00:00+00:00", "Asia/Singapore") == "2026-09-17 09:00（Asia/Singapore）"
+    assert format_local("not-a-time", "Asia/Singapore") == "not-a-time"
+    assert format_local("2026-09-17T01:00:00+00:00", "Mars/Olympus") == "2026-09-17T01:00:00+00:00"

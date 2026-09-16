@@ -320,6 +320,19 @@ def defer_once(schedule: dict, *, stamp: str, reason: str) -> dict | None:
     return updated
 
 
+def format_local(value: str, timezone_name: str) -> str:
+    """Render a stored UTC instant in a schedule's timezone for a message.
+
+    Falls back to the raw value when either side no longer parses, so a
+    message never fails to render.
+    """
+    try:
+        local = _parse_iso(value, "INVALID_SCHEDULE_RULE", "").astimezone(_zone(timezone_name))
+        return f"{local:%Y-%m-%d %H:%M}（{timezone_name}）"
+    except (WebError, TypeError, ValueError, ZoneInfoNotFoundError):
+        return str(value)
+
+
 def is_due(schedule: dict, now: datetime) -> bool:
     """Whether a stored ``nextRunAt`` is at or before ``now``."""
     due = str(schedule.get("nextRunAt") or "")

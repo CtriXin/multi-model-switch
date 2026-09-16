@@ -22,7 +22,7 @@ from .file_lock import LOCK_EX, LOCK_NB, flock
 from .errors import WebError
 from . import bot_schedules
 from .bot_schedules import (MAX_SCHEDULES_PER_BOT, RECENT_TASK_LIMIT, advance, apply_update,
-                            build_schedule, defer_once, is_due)
+                            build_schedule, defer_once, format_local, is_due)
 from .bot_executor import _context_percent
 from .runtime import private_json
 from .bot_memory import BotMemoryStore, BotMemoryError
@@ -1623,9 +1623,19 @@ class BotRuntime(BotCommunications):
                 if fired:
                     self._tasks[fired["id"]]["scheduleId"] = updated["id"]
                     if schedule["rule"]["kind"] == "once" and (schedule.get("lastSkip") or {}).get("reason") in {"paused", "busy"}:
-                        self._message(fired["id"], "system", f"这条定时原定 {due_at} 触发，因暂停或上一轮未结束而延后，现在补触发。")
+                        self._message(fired["id"], "system", f"这条定时原定 {format_local(due_at, updated['timezone'])} 触发，因暂停或上一轮未结束而延后，现在补触发。")
                     updated.update(lastRunAt=now(), lastTaskId=fired["id"], lastSkip=None,
                                    recentTaskIds=(updated.get("recentTaskIds") or [])[-(RECENT_TASK_LIMIT - 1):] + [fired["id"]])
+                elif reason and schedule["rule"]["kind"] == "once" and updated.get("nextRunAt") is None:
+                    # create_task failed before anything ran: give the one-shot
+                    # its only chance back instead of consuming it.
+                    updated["nextRunAt"] = due_at
+                    parked = defer_once(updated, stamp=now(), reason="error")
+                    if parked is None:
+                        continue  # already parked for this failure: no rewrite
+                    updated = parked
+                    if updated.get("lastTaskId"):
+                        self._message(updated["lastTaskId"], "system", f"定时没有执行（{reason}），已保留待触发。")
                 elif reason:
                     updated["lastSkip"] = {"at": now(), "reason": "busy" if holding else ("missed" if skipped else "error"), "skipped": skipped}
                     if updated.get("lastTaskId"):
