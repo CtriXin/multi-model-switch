@@ -11,6 +11,7 @@
 .quick-model-option:hover:not(:disabled), .quick-model-option:focus-visible { background: var(--soft); outline: 1px solid var(--accent); outline-offset: -1px; }
 .quick-model-option:disabled { opacity: .55; cursor: default; }
 .quick-model-option small { font-size: max(11px, .7143rem); color: var(--muted); }
+.quick-model-channel { flex: 0 1 auto; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The selected model, shown as one row while the options are open. It is the
    way back to the list, so the two panels never stack into two scrollers. */
 .quick-model-current { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 11px 9px; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: var(--ink); text-align: left; font: inherit; cursor: pointer; }

@@ -3,6 +3,7 @@ import { ChevronDown, FolderOpen, Search, ArrowUpRight } from "lucide-react";
 import type { Model, Preset, Workspace } from "./types";
 import { Dialog } from "./components";
 import { ModelExplorer } from "./ModelExplorer";
+import { availableRoutesForModel, channelLabel } from "./modelSelection";
 import { mutate, request } from "./api";
 
 export function ModelPicker({
@@ -27,6 +28,7 @@ export function ModelPicker({
   const [open, setOpen] = useState(false);
   const [candidate, setCandidate] = useState(value);
   const selected = presets.find((p) => p.id === value);
+  const extraChannels = availableRoutesForModel(presets, selected).length > 1;
   return (
     <>
       <button
@@ -40,7 +42,9 @@ export function ModelPicker({
       >
         <span>
           <strong>{selected?.name || "选择模型"}</strong>
-          <small>{selected?.channel || "选择接入通道"}</small>
+          {extraChannels && selected && (
+            <small>{channelLabel(selected, models)}</small>
+          )}
         </span>
         <ChevronDown size={14} />
       </button>

@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Settings2, X, Plus, Trash2, Check, LoaderCircle } from "lucide-react";
 import type { BotDefinition } from "./Bot";
+import type { Model, Preset } from "./types";
+import { ModelPicker } from "./LaunchOptions";
 import {
   parsePreset,
   buildPreset,
@@ -16,6 +18,8 @@ interface BotPresetPanelProps {
   onClose: () => void;
   onUpdateBot?: (botId: string, patch: Partial<BotDefinition>) => Promise<void>;
   preview?: boolean;
+  presets?: Preset[];
+  models?: Model[];
 }
 
 function FieldChipSelector({
@@ -77,6 +81,8 @@ function FieldChipSelector({
 
 export function BotPresetPanel({
   bot,
+  presets = [],
+  models = [],
   onClose,
   onUpdateBot,
   preview = false,
@@ -90,6 +96,7 @@ export function BotPresetPanel({
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState("");
   const [error, setError] = useState("");
+  const [favorites, setFavorites] = useState<string[]>([]);
 
   const panelRef = useRef<HTMLElement>(null);
   const initialPromptRef = useRef(bot.systemPrompt || "");
@@ -234,7 +241,7 @@ export function BotPresetPanel({
 
       if (panel.contains(target)) return;
 
-      if (target.closest?.('[aria-label="调整工作预设"], [title="工作预设"]')) {
+      if (target.closest?.('[aria-label="打开设定"], [title="设定"]')) {
         return;
       }
 
@@ -264,15 +271,15 @@ export function BotPresetPanel({
             <Settings2 size={17} />
           </span>
           <div>
-            <h2>工作预设</h2>
-            <p>{bot.name} 的工作方式、个性与补充约定</p>
+            <h2>设定</h2>
+            <p>{bot.name} 的模型、唤醒与工作方式</p>
           </div>
         </div>
         <button
           className="bot-memory-icon-button"
           type="button"
           onClick={handleClose}
-          aria-label="关闭预设面板"
+          aria-label="关闭设定"
           title="关闭"
         >
           <X size={17} />
@@ -285,6 +292,45 @@ export function BotPresetPanel({
             预览模式：真实更新已禁用。
           </p>
         )}
+
+        <section className="bot-memory-section">
+          <div className="bot-memory-section-heading">
+            <h3>默认模型</h3>
+          </div>
+          <ModelPicker
+            presets={presets.filter((item) => item.harness === "pi" && item.available)}
+            models={models}
+            workspaceId={bot.workspaceId || "default"}
+            value={bot.presetId || ""}
+            change={(presetId) => {
+              void onUpdateBot?.(bot.id, { presetId: presetId || null });
+            }}
+            favorites={favorites}
+            toggleFavorite={(id) =>
+              setFavorites((old) =>
+                old.includes(id) ? old.filter((item) => item !== id) : [...old, id],
+              )
+            }
+            disabled={preview}
+          />
+          <label className="bot-auto-wake-control">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={Boolean(bot.wakeEnabled)}
+              disabled={preview}
+              onChange={(event) => {
+                void onUpdateBot?.(bot.id, { wakeEnabled: event.target.checked });
+              }}
+            />
+            <span>
+              <strong>自动唤醒</strong>
+              <small>
+                {bot.wakeEnabled ? "定时任务到点后自动开始" : "仅在手动唤醒后继续"}
+              </small>
+            </span>
+          </label>
+        </section>
 
         {/* 核心工作方式 */}
         <section className="bot-memory-section">

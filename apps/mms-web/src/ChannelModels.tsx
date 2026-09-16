@@ -136,7 +136,7 @@ export function ChannelModels({
   initialProvider: string;
   back: () => void;
   saved: () => void;
-  editStateChanged: (state: {dirty: boolean; busy: boolean}) => void;
+  editStateChanged: (state: {dirty: boolean; busy: boolean; save?: () => void}) => void;
   onCreateChannel?: () => void;
 }) {
   const [snapshot, setSnapshot] = useState<Snapshot>();
@@ -192,7 +192,11 @@ export function ChannelModels({
     Object.keys(connection).length > 0;
   const selectionInvalid = !!provider && chosen.length === 0;
   useEffect(() => {
-    editStateChanged({dirty, busy: busy === "apply"});
+    editStateChanged({
+      dirty,
+      busy: busy === "apply",
+      save: dirty ? () => void review() : undefined,
+    });
     return () => editStateChanged({dirty: false, busy: false});
   }, [dirty, busy, editStateChanged]);
   const ids = [
@@ -498,24 +502,6 @@ export function ChannelModels({
           <Check size={16} />
           {notice}
         </p>
-      )}
-      {snapshot && (
-        <div className="channel-save" role="region" aria-label="保存模型设置">
-          <span>
-            {selectionInvalid
-              ? "至少保留一个模型后才能保存"
-              : dirty
-                ? "有未保存的修改"
-                : "与已保存的配置一致"}
-          </span>
-          <button
-            className="button primary"
-            disabled={!dirty || !!busy || selectionInvalid}
-            onClick={() => void review()}
-          >
-            {busy === "preview" ? "正在检查变更…" : "检查并保存"}
-          </button>
-        </div>
       )}
       {busy === "load" && (
         <p role="status" className="muted">
@@ -1185,13 +1171,28 @@ export function ChannelModels({
           </div>
         </Dialog>
       )}
+      {snapshot && (
+        <div className="channel-save" role="region" aria-label="保存模型设置">
+          <span>
+            {selectionInvalid
+              ? "至少保留一个模型后才能保存"
+              : dirty
+                ? "有未保存的修改"
+                : "与已保存的配置一致"}
+          </span>
+          <button
+            className="button primary"
+            disabled={!dirty || !!busy || selectionInvalid}
+            onClick={() => void review()}
+          >
+            {busy === "preview" ? "正在检查变更…" : "检查并保存"}
+          </button>
+        </div>
+      )}
       {leave !== null && (
-        <Dialog title="有尚未保存的修改" close={() => setLeave(null)}>
-          <p>离开后将丢弃本页修改。已保存的配置不会改变。</p>
+        <Dialog title="通道设置尚未保存" close={() => setLeave(null)}>
+          <p>模型勾选、连接信息或默认 effort 还没写入配置。离开会丢掉这次修改。</p>
           <div className="channel-leave">
-            <button className="button" onClick={() => setLeave(null)}>
-              继续编辑
-            </button>
             <button
               className="button"
               onClick={() => {
@@ -1205,7 +1206,19 @@ export function ChannelModels({
                 }
               }}
             >
-              放弃修改并离开
+              放弃修改
+            </button>
+            <button className="button" onClick={() => setLeave(null)}>
+              继续编辑
+            </button>
+            <button
+              className="button primary"
+              onClick={() => {
+                setLeave(null);
+                void review();
+              }}
+            >
+              检查并保存
             </button>
           </div>
         </Dialog>

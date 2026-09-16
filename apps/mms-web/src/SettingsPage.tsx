@@ -1,5 +1,6 @@
 import { type ReactNode, useState } from "react";
-import { Sun, Moon, Monitor, Minus, Plus, SlidersHorizontal, Palette, Settings2, Cpu } from "lucide-react";
+import { Sun, Moon, Monitor, Minus, Plus, SlidersHorizontal, Palette, Settings2, Cpu, Copy } from "lucide-react";
+import { copyText } from "./clipboard";
 import type { Bootstrap } from "./types";
 import { RemoteAccessSection } from "./RemoteAccess";
 import { Models } from "./Models";
@@ -59,7 +60,7 @@ export function SettingsPage({
   effortChanged: (id: string) => void;
   requestNavigation: (action: () => void) => void;
   startTask: (text: string) => void;
-  editStateChanged: (state: {dirty: boolean; busy: boolean}) => void;
+  editStateChanged: (state: {dirty: boolean; busy: boolean; save?: () => void}) => void;
   autoCollapseProcess: boolean;
   setAutoCollapseProcess: (on: boolean) => void;
   fontFamily: string;
@@ -421,6 +422,14 @@ export function SettingsPage({
                 <h2>配置目录</h2>
                 <p><code>{data.platform.configRoot}</code></p>
               </div>
+              <button
+                type="button"
+                className="button subtle"
+                onClick={() => { void copyText(data.platform!.configRoot!); }}
+              >
+                <Copy size={14} />
+                复制
+              </button>
             </div>
           )}
           {data.platform?.stateRoot && (
@@ -429,6 +438,14 @@ export function SettingsPage({
                 <h2>状态目录</h2>
                 <p><code>{data.platform.stateRoot}</code></p>
               </div>
+              <button
+                type="button"
+                className="button subtle"
+                onClick={() => { void copyText(data.platform!.stateRoot!); }}
+              >
+                <Copy size={14} />
+                复制
+              </button>
             </div>
           )}
           <p className="settings-footnote">

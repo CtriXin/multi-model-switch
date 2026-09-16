@@ -38,16 +38,17 @@ test("compareSemverDesc sorts versions strictly descending by semver numbers", (
 test("SettingsPage includes 4th tab '运行环境' with Cpu icon and isolated runtime section", () => {
   const content = fs.readFileSync(path.join(srcDir, "SettingsPage.tsx"), "utf-8");
 
-  // 4 tabs must be present in settings-tabs
   assert.match(content, /tab === "models"/);
   assert.match(content, /tab === "appearance"/);
   assert.match(content, /tab === "usage"/);
   assert.match(content, /tab === "runtime"/);
   assert.match(content, /<Cpu size=\{16\} \/>\s*运行环境/);
 
-  // Platform capability is located in runtime tab
   assert.match(content, /runtime-settings/);
   assert.match(content, /className="platform-capability"/);
+  assert.match(content, /copyText\(data\.platform!\.configRoot!\)/);
+  assert.match(content, /copyText\(data\.platform!\.stateRoot!\)/);
+  assert.doesNotMatch(content, /navigator\s*\.\s*clipboard/);
 });
 
 test("Platform capability is moved out of models page and only present in runtime tab", () => {
@@ -59,8 +60,7 @@ test("Platform capability is moved out of models page and only present in runtim
   assert.doesNotMatch(modelsContent, /platform-capability/);
   assert.doesNotMatch(channelContent, /platform-capability/);
 
-  // In SettingsPage, platform-capability is inside the runtime branch
-  const runtimeBranchIndex = settingsContent.indexOf('runtime-settings');
+  const runtimeBranchIndex = settingsContent.indexOf("runtime-settings");
   const capabilityIndex = settingsContent.indexOf('className="platform-capability"');
   assert.ok(runtimeBranchIndex > 0);
   assert.ok(capabilityIndex > runtimeBranchIndex);
@@ -106,6 +106,29 @@ test("Channel save footer is sticky with full width, border and scroll occlusion
 
   // scroll padding to prevent occluding the bottom content
   assert.match(studioCss, /scroll-padding-bottom:\s*72px/);
+});
+
+test("daily model UI hides provider slugs and uses 高级选项", () => {
+  const quick = fs.readFileSync(path.join(srcDir, "QuickModelMenu.tsx"), "utf-8");
+  const models = fs.readFileSync(path.join(srcDir, "Models.tsx"), "utf-8");
+  const selection = fs.readFileSync(path.join(srcDir, "modelSelection.ts"), "utf-8");
+  assert.match(quick, /高级选项/);
+  assert.doesNotMatch(quick, /通道与高级选项/);
+  assert.match(quick, /channelLabel/);
+  assert.match(models, /点模型即可用于新会话/);
+  assert.match(selection, /export function channelLabel/);
+});
+
+test("Bot settings live in the right-hand 设定 drawer", () => {
+  const bot = fs.readFileSync(path.join(srcDir, "Bot.tsx"), "utf-8");
+  const panel = fs.readFileSync(path.join(srcDir, "BotPresetPanel.tsx"), "utf-8");
+  const studio = fs.readFileSync(path.join(srcDir, "BotStudio.tsx"), "utf-8");
+  assert.match(bot, /打开设定/);
+  assert.doesNotMatch(bot, /编辑 Bot/);
+  assert.match(panel, /<h2>设定<\/h2>/);
+  assert.match(panel, /ModelPicker/);
+  assert.match(studio, /returnLabel/);
+  assert.match(studio, /requestClose/);
 });
 
 test("Home page does not automatically display WhatsNew card", () => {

@@ -4,6 +4,7 @@ import type { Bootstrap } from "./types";
 import { ModelExplorer } from "./ModelExplorer";
 import { ChannelModels } from "./ChannelModels";
 import { ConnectionDialog } from "./ConnectionDialog";
+import { channelLabel } from "./modelSelection";
 
 export function Models({
   connectionCompleted,
@@ -26,7 +27,7 @@ export function Models({
   change: (id: string) => void;
   workspaceId: string;
   effortChanged: (id: string) => void;
-  editStateChanged: (state: {dirty: boolean; busy: boolean}) => void;
+  editStateChanged: (state: {dirty: boolean; busy: boolean; save?: () => void}) => void;
 }) {
   const [manage, setManage] = useState(false);
   const [add, setAdd] = useState(false);
@@ -58,7 +59,7 @@ export function Models({
       <div className="page-heading">
         <div>
           <h2>模型与通道</h2>
-          <p>选择可用通道即用于新会话。已有会话仍使用原通道。</p>
+          <p>点模型即可用于新会话。已有会话不变。</p>
         </div>
         <div className="model-library-actions">
           {data.capabilities.modelSettings && (
@@ -81,7 +82,7 @@ export function Models({
         {active && (
           <>
             {" "}
-            · 新会话使用：{active.name} / {active.channel || active.providerId}
+            · 新会话：{active.name} · {channelLabel(active, data.models, data.services)}
           </>
         )}
       </p>
