@@ -217,6 +217,14 @@ def test_defer_once_parks_a_due_one_shot_without_consuming_it():
     assert defer_once(parked, stamp="2026-09-17T00:00:03.000+00:00", reason="busy")["lastSkip"]["reason"] == "busy"
 
 
+def test_editing_the_rule_clears_a_stale_skip_marker():
+    schedule = build_schedule("bot_1", {"prompt": "提醒", "rule": {"kind": "once", "at": "2026-09-17T00:00:00+00:00"}},
+                              existing_count=0, now=at(2026, 9, 16))
+    parked = defer_once(schedule, stamp="2026-09-17T00:00:01.000+00:00", reason="paused")
+    edited = apply_update(parked, {"rule": {"kind": "interval", "everySeconds": 300}}, now=at(2026, 9, 18))
+    assert edited["lastSkip"] is None and edited["nextRunAt"] > at(2026, 9, 18).isoformat()
+
+
 def test_stored_rows_are_parked_instead_of_bricking_the_loop():
     good = build_schedule("bot_1", {"prompt": "查机票", "rule": {"kind": "interval", "everySeconds": 300}},
                           existing_count=0, now=at(2026, 9, 17))

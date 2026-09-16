@@ -398,7 +398,9 @@ def apply_update(schedule: dict, payload: dict, *, now: datetime) -> dict:
         rule = normalize_rule(payload.get("rule") or updated["rule"])
         zone = normalize_timezone(payload.get("timezone", updated["timezone"]))
         updated["rule"], updated["timezone"] = rule, zone
-        # An edited rule restarts from now; it never inherits a stale due time.
+        # An edited rule restarts from now; it never inherits a stale due time
+        # or a paused/busy marker from the shape it replaced.
         updated["nextRunAt"] = rule["at"] if rule["kind"] == "once" else _iso(next_run_at(rule, zone, after=now))
+        updated["lastSkip"] = None
     updated["updatedAt"] = now.astimezone(timezone.utc).isoformat(timespec="milliseconds")
     return updated
