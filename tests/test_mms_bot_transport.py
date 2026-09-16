@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import http.client
 import json
+import re
 import subprocess
 import sys
 import threading
@@ -318,3 +319,124 @@ def test_wait_route_answers_and_dismisses(transport, tmp_path):
 
     status, _, body = request("POST", f"/api/v1/tasks/{second['id']}/wait", {"action": "dismiss"})
     assert status == 403
+
+
+def test_schedule_routes_round_trip_and_errors(transport, tmp_path):
+    app, server, request = transport
+    worker, _ = make_task(app, tmp_path, prompt="基础任务")
+    headers = {"X-MMS-CSRF": app.csrf_token}
+    base = f"/api/v1/bots/{worker['id']}/schedules"
+    body = {"prompt": "每天查机票", "rule": {"kind": "daily", "atLocalTime": "09:00"},
+            "timezone": "Asia/Singapore", "requestId": "sched-route-1"}
+
+    status, _, raw = request("POST", base, body, headers)
+    assert status == 200, raw
+    schedule = json.loads(raw)
+    assert schedule["rule"] == {"kind": "daily", "atLocalTime": "09:00"}
+    assert schedule["timezone"] == "Asia/Singapore" and schedule["createdBy"] == "user"
+
+    # The same requestId replays instead of creating a second schedule.
+    status, _, raw = request("POST", base, body, headers)
+    assert status == 200 and json.loads(raw)["id"] == schedule["id"]
+    status, _, raw = request("GET", base)
+    assert [row["id"] for row in json.loads(raw)["schedules"]] == [schedule["id"]]
+
+    status, _, raw = request("POST", f"{base}/{schedule['id']}",
+                             {"prompt": "改成每三小时", "rule": {"kind": "interval", "everySeconds": 10800},
+                              "overlapPolicy": "queue"}, headers)
+    assert status == 200, raw
+    edited = json.loads(raw)
+    assert edited["prompt"] == "改成每三小时" and edited["rule"] == {"kind": "interval", "everySeconds": 10800}
+    assert edited["overlapPolicy"] == "queue"
+    assert json.loads(request("POST", f"{base}/{schedule['id']}/disable", {}, headers)[2])["enabled"] is False
+    assert json.loads(request("POST", f"{base}/{schedule['id']}/enable", {}, headers)[2])["enabled"] is True
+    status, _, raw = request("POST", f"{base}/{schedule['id']}/delete", {}, headers)
+    assert status == 200 and json.loads(raw) == {"deleted": True, "scheduleId": schedule["id"]}
+    assert json.loads(request("GET", base)[2])["schedules"] == []
+
+    for payload, codes in (
+        ({"prompt": "太快", "rule": {"kind": "interval", "everySeconds": 60}}, (400, "SCHEDULE_INTERVAL_TOO_SHORT")),
+        ({"prompt": "怪规则", "rule": {"kind": "cron"}}, (400, "INVALID_SCHEDULE_RULE")),
+        ({"prompt": "怪时区", "rule": {"kind": "daily", "atLocalTime": "09:00"}, "timezone": "Mars/Olympus"},
+         (400, "INVALID_TIMEZONE")),
+    ):
+        status, _, raw = request("POST", base, payload, headers)
+        assert (status, json.loads(raw)["error"]["code"]) == codes
+
+    status, _, raw = request("POST", f"{base}/sch_missing", {"prompt": "改"}, headers)
+    assert status == 404 and json.loads(raw)["error"]["code"] == "SCHEDULE_NOT_FOUND"
+
+    for index in range(20):
+        assert request("POST", base, {"prompt": f"第 {index} 条", "rule": {"kind": "interval", "everySeconds": 300}},
+                       headers)[0] == 200
+    status, _, raw = request("POST", base, {"prompt": "第 21 条", "rule": {"kind": "interval", "everySeconds": 300}}, headers)
+    assert status == 409 and json.loads(raw)["error"]["code"] == "SCHEDULE_LIMIT"
+
+    # A schedule belongs to exactly one Bot; another Bot's id sees nothing.
+    other, _ = make_task(app, tmp_path, prompt="另一个任务")
+    assert json.loads(request("GET", f"/api/v1/bots/{other['id']}/schedules")[2])["schedules"] == []
+    status, _, raw = request("POST", f"/api/v1/bots/{other['id']}/schedules/{schedule['id']}", {"prompt": "越界"}, headers)
+    assert status == 404
+
+
+def test_bot_worker_can_only_manage_its_own_schedules(transport, tmp_path):
+    app, server, request = transport
+    first_bot, first_task = make_task(app, tmp_path, prompt="第一个")
+    second_bot, _ = make_task(app, tmp_path, prompt="第二个")
+    foreign = app.bots.create_schedule(second_bot["id"], {"prompt": "别人的定时",
+                                                          "rule": {"kind": "interval", "everySeconds": 300}})
+    token = app.bots._tasks[first_task["id"]]["token"]
+    auth = {"Authorization": f"Bearer {token}"}
+
+    status, _, raw = request("POST", "/api/v1/bot-worker",
+                             {"action": "schedule", "op": "create", "prompt": "我自己的定时",
+                              "rule": {"kind": "daily", "atLocalTime": "09:00"}, "createdBy": "bot",
+                              "requestId": "worker-sched-1"}, auth)
+    assert status == 200, raw
+    mine = json.loads(raw)["schedule"]
+    assert mine["botId"] == first_bot["id"] and mine["createdBy"] == "bot"
+
+    status, _, raw = request("POST", "/api/v1/bot-worker",
+                             {"action": "schedule", "op": "list", "requestId": "worker-sched-2"}, auth)
+    assert [row["id"] for row in json.loads(raw)["schedules"]] == [mine["id"]]
+
+    status, _, raw = request("POST", "/api/v1/bot-worker",
+                             {"action": "schedule", "op": "delete", "scheduleId": foreign["id"],
+                              "requestId": "worker-sched-3"}, auth)
+    assert status == 404 and json.loads(raw)["error"]["code"] == "SCHEDULE_NOT_FOUND"
+    assert app.bots.list_schedules(second_bot["id"]), "the other Bot's schedule must survive"
+
+    status, _, raw = request("POST", "/api/v1/bot-worker",
+                             {"action": "schedule", "op": "list", "botId": second_bot["id"],
+                              "requestId": "worker-sched-4"}, auth)
+    assert status == 403 and json.loads(raw)["error"]["code"] == "BOT_SCOPE"
+
+
+def _bot_prompt(tmp_path, task=None, bot=None):
+    sessions = _Sessions()
+    executor = PiBotExecutor(sessions, _Catalog())
+    bot = bot or {"id": "bot_1", "name": "worker", "description": "", "systemPrompt": "",
+                  "presetId": "pi:test", "workspaceId": "ws-test"}
+    task = task or {"id": "task_1", "prompt": "写一个文件", "launchRequestId": "launch-1",
+                    "collaborationRequested": False}
+    executor.start(task, bot, tmp_path / "context.json")
+    return sessions.launched[0]["prompt"]
+
+
+def test_bot_prompt_lists_every_registered_subcommand(tmp_path):
+    from mms_web.bot_client import command_catalog_text, registered_command_names
+
+    prompt = _bot_prompt(tmp_path)
+    catalog = command_catalog_text()
+    assert catalog in prompt, "the generated command list must be part of the real prompt"
+    for name in registered_command_names():
+        assert re.search(r"(?<![\w-])" + re.escape(name) + r"(?![\w-])", catalog), name
+
+
+def test_bot_prompt_covers_schedule_and_memory_and_keeps_handwritten_policy(tmp_path):
+    prompt = _bot_prompt(tmp_path)
+    assert "schedule create" in prompt and "memory-remember" in prompt
+    assert "不要回答做不到" in prompt
+    # Converting the command list to generated text must not eat the policy lines.
+    assert "不要循环轮询" in prompt
+    assert "complete 不是用户验收" in prompt

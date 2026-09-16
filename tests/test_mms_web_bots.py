@@ -238,19 +238,48 @@ def test_distinct_workspaces_can_run_in_parallel_but_same_bot_is_serial(tmp_path
         rt.close()
 
 
-def test_scheduled_wake_respects_bot_wake_enabled(tmp_path):
+def test_schedule_wake_respects_bot_wake_enabled_and_advances_without_it(tmp_path):
     executor = FakeExecutor()
     rt = runtime(tmp_path, executor)
     try:
         asleep = bot(rt, "手动 Bot", "ws-a", wake=False)
         awake = bot(rt, "自动 Bot", "ws-b", wake=True)
-        run_at = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
-        blocked = rt.create_task({"requestId": "scheduled-off", "botId": asleep["id"], "prompt": "off", "runAt": run_at})
-        ready = rt.create_task({"requestId": "scheduled-on", "botId": awake["id"], "prompt": "on", "runAt": run_at})
+        past = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+        rule = {"kind": "interval", "everySeconds": 300}
+        blocked = rt.create_schedule(asleep["id"], {"prompt": "off", "rule": rule})
+        ready = rt.create_schedule(awake["id"], {"prompt": "on", "rule": rule})
+        rt._schedules[blocked["id"]]["nextRunAt"] = past
+        rt._schedules[ready["id"]]["nextRunAt"] = past
         rt.tick(); drain_launch(rt)
-        assert rt.get_task(blocked["id"])["status"] == "scheduled"
-        assert rt.get_task(ready["id"])["status"] in {"running", "completed"}
-        assert any(item[0] == ready["id"] for item in executor.starts)
+        # The Bot-level switch blocks the run but never accumulates runs.
+        assert rt.list_tasks(bot_id=asleep["id"]) == []
+        assert rt.list_schedules(asleep["id"])[0]["nextRunAt"] > datetime.now(timezone.utc).isoformat()
+        fired = rt.list_tasks(bot_id=awake["id"])
+        assert len(fired) == 1 and fired[0]["scheduleId"] == ready["id"]
+        assert any(item[0] == fired[0]["id"] for item in executor.starts)
+    finally:
+        rt.close()
+
+
+def test_interval_schedule_fires_once_per_due_time_without_drift(tmp_path):
+    executor = FakeExecutor()
+    rt = runtime(tmp_path, executor)
+    try:
+        worker = bot(rt, "周期 Bot", "ws-interval")
+        schedule = rt.create_schedule(worker["id"], {"prompt": "查机票", "rule": {"kind": "interval", "everySeconds": 300}})
+        first_due = schedule["nextRunAt"]
+        rt._schedules[schedule["id"]]["nextRunAt"] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+        rt.tick(); drain_launch(rt)
+        after_first = rt.list_schedules(worker["id"])[0]
+        assert len(after_first["recentTaskIds"]) == 1
+        # The next due time keeps the original cadence (previous + interval),
+        # not "now + interval": a late tick must not accumulate drift.
+        assert after_first["nextRunAt"] != first_due
+        rt._schedules[schedule["id"]]["nextRunAt"] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+        rt.tick(); drain_launch(rt)
+        tasks = rt.list_tasks(bot_id=worker["id"])
+        assert len(tasks) == 2 and len({item["id"] for item in tasks}) == 2
+        assert all(item["scheduleId"] == schedule["id"] for item in tasks)
     finally:
         rt.close()
 
@@ -279,32 +308,33 @@ def test_child_result_wakes_parent_and_acceptance_is_separate(tmp_path):
         rt.close()
 
 
-def test_restart_marks_running_interrupted_without_replay_and_recovers_scheduled(tmp_path):
+def test_restart_marks_running_interrupted_without_replay_and_keeps_schedules(tmp_path):
     first_executor = FakeExecutor()
     first = runtime(tmp_path, first_executor)
     running_bot = bot(first, "运行中", "ws-running")
-    scheduled_bot = bot(first, "计划", "ws-scheduled")
+    schedule_bot = bot(first, "计划", "ws-scheduled")
     running = first.create_task({"requestId": "running", "botId": running_bot["id"], "prompt": "不会重跑"})
-    scheduled = first.create_task({"requestId": "scheduled", "botId": scheduled_bot["id"], "prompt": "重启恢复", "runAt": (datetime.now(timezone.utc) + timedelta(seconds=60)).isoformat()})
+    schedule = first.create_schedule(schedule_bot["id"], {"prompt": "重启恢复", "rule": {"kind": "interval", "everySeconds": 300}})
     first.tick(); drain_launch(first)
     assert first.get_task(running["id"])["status"] == "running"
     first.close()
 
     # Simulate the scheduler reaching the persisted due time while Pilot was
-    # offline; the task remains scheduled and is not replayed as running.
+    # offline; the schedule fires once and the running task is not replayed.
     state_path = tmp_path / "bots" / "state.json"
     record = json.loads(state_path.read_text())
-    record["tasks"][scheduled["id"]]["runAt"] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+    record["schedules"][schedule["id"]]["nextRunAt"] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
     state_path.write_text(json.dumps(record))
 
     second_executor = FakeExecutor()
     second = runtime(tmp_path, second_executor)
     try:
         assert second.get_task(running["id"])["status"] == "interrupted"
-        assert second.get_task(scheduled["id"])["status"] == "scheduled"
         second.tick(); drain_launch(second)
         assert not any(item[0] == running["id"] for item in second_executor.starts)
-        assert any(item[0] == scheduled["id"] for item in second_executor.starts)
+        fired = second.list_tasks(bot_id=schedule_bot["id"])
+        assert len(fired) == 1 and fired[0]["scheduleId"] == schedule["id"]
+        assert any(item[0] == fired[0]["id"] for item in second_executor.starts)
     finally:
         second.close()
 
@@ -622,3 +652,188 @@ def test_a_direct_plan_marks_its_only_step_done_when_the_task_finishes(tmp_path)
         assert view["coordinatorPlan"]["steps"][0]["status"] == "failed"
     finally:
         rt.close()
+
+
+def test_overlap_skip_and_queue_decide_whether_a_due_run_creates_a_task(tmp_path):
+    executor = ScriptedPlanExecutor()
+    rt = runtime(tmp_path, executor)
+    try:
+        worker = bot(rt, "重叠 Bot", "ws-overlap")
+        running = rt.create_task({"requestId": "long-run", "botId": worker["id"], "prompt": "长任务"})
+        rt._tasks[running["id"]].update(status="running", sessionId="session-long")
+        skip = rt.create_schedule(worker["id"], {"prompt": "跳过我这轮", "rule": {"kind": "interval", "everySeconds": 300}})
+        queue = rt.create_schedule(worker["id"], {"prompt": "排队执行", "rule": {"kind": "interval", "everySeconds": 300},
+                                                  "overlapPolicy": "queue"})
+        past = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+        rt._schedules[skip["id"]].update(nextRunAt=past, lastTaskId=running["id"])
+        rt._schedules[queue["id"]]["nextRunAt"] = past
+        rt.tick(); drain_launch(rt)
+
+        tasks = rt.list_tasks(bot_id=worker["id"])
+        assert [task["prompt"] for task in tasks] == ["排队执行", "长任务"]
+        queued = tasks[0]
+        assert queued["status"] == "queued" and queued["scheduleId"] == queue["id"]
+
+        skipped = rt._schedules[skip["id"]]
+        assert skipped["lastSkip"]["reason"] == "busy" and skipped["nextRunAt"] > past
+        assert any("上一轮仍在运行" in message["content"] for message in rt.list_messages(running["id"]))
+    finally:
+        rt.close()
+
+
+def test_scheduled_run_notifies_with_schedule_id(tmp_path):
+    executor = FakeExecutor()
+    rt = runtime(tmp_path, executor)
+    try:
+        worker = bot(rt, "通知 Bot", "ws-notify")
+        schedule = rt.create_schedule(worker["id"], {"prompt": "查机票", "rule": {"kind": "interval", "everySeconds": 300}})
+        rt._schedules[schedule["id"]]["nextRunAt"] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+        rt.tick(); drain_launch(rt)
+        assert rt.get_task(rt.list_tasks(bot_id=worker["id"])[0]["id"])["status"] == "running"
+        rt.tick()
+        events = rt.list_notifications()["events"]
+        assert events and events[-1]["type"] == "task.completed"
+        assert events[-1]["scheduleId"] == schedule["id"]
+        assert events[-1]["taskId"] == rt.list_tasks(bot_id=worker["id"])[0]["id"]
+    finally:
+        rt.close()
+
+
+def test_missed_periods_are_skipped_without_a_backlog(tmp_path):
+    executor = FakeExecutor()
+    rt = runtime(tmp_path, executor)
+    try:
+        worker = bot(rt, "错过 Bot", "ws-missed")
+        schedule = rt.create_schedule(worker["id"], {"prompt": "每三小时", "rule": {"kind": "interval", "everySeconds": 10800}})
+        three_days = datetime.now(timezone.utc) - timedelta(days=3)
+        rt._schedules[schedule["id"]]["nextRunAt"] = three_days.isoformat()
+        rt.tick(); drain_launch(rt)
+        assert rt.list_tasks(bot_id=worker["id"]) == []
+        updated = rt.list_schedules(worker["id"])[0]
+        assert updated["lastSkip"]["skipped"] == 24
+        assert updated["nextRunAt"] > datetime.now(timezone.utc).isoformat()
+    finally:
+        rt.close()
+
+
+def test_create_task_with_run_at_returns_a_once_schedule_instead(tmp_path):
+    executor = FakeExecutor()
+    rt = runtime(tmp_path, executor)
+    try:
+        worker = bot(rt, "一次性 Bot")
+        run_at = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        created = rt.create_task({"requestId": "once-1", "botId": worker["id"], "prompt": "提醒我", "runAt": run_at})
+        assert created["kind"] == "schedule" and created["rule"] == {"kind": "once", "at": run_at}
+        assert rt.list_tasks(bot_id=worker["id"]) == []
+        replay = rt.create_task({"requestId": "once-1", "botId": worker["id"], "prompt": "提醒我", "runAt": run_at})
+        assert replay["kind"] == "schedule" and replay["id"] == created["id"] and len(rt.list_schedules(worker["id"])) == 1
+
+        child = rt.create_task({"requestId": "child-1", "botId": worker["id"], "prompt": "父任务"})
+        with pytest.raises(WebError) as failure:
+            rt.create_task({"botId": worker["id"], "prompt": "定时子任务", "parentTaskId": child["id"], "runAt": run_at})
+        assert failure.value.code == "INVALID_REQUEST"
+    finally:
+        rt.close()
+
+
+def test_schedule_crud_codes_replay_and_cross_bot_scope(tmp_path):
+    executor = FakeExecutor()
+    rt = runtime(tmp_path, executor)
+    try:
+        first = bot(rt, "A Bot", "ws-a")
+        second = bot(rt, "B Bot", "ws-b")
+        created = rt.create_schedule(first["id"], {"requestId": "sch-1", "prompt": "查机票",
+                                                   "rule": {"kind": "daily", "atLocalTime": "09:00"}})
+        assert created["timezone"] and created["nextRunAt"] and created["createdBy"] == "user"
+        replayed = rt.create_schedule(first["id"], {"requestId": "sch-1", "prompt": "查机票",
+                                                    "rule": {"kind": "daily", "atLocalTime": "09:00"}})
+        assert replayed["id"] == created["id"] and len(rt.list_schedules(first["id"])) == 1
+
+        updated = rt.update_schedule(first["id"], created["id"], {"rule": {"kind": "interval", "everySeconds": 10800},
+                                                                  "overlapPolicy": "queue", "prompt": "改过的说明"})
+        assert updated["rule"] == {"kind": "interval", "everySeconds": 10800} and updated["overlapPolicy"] == "queue"
+        assert rt.set_schedule_enabled(first["id"], created["id"], False)["enabled"] is False
+        assert rt.set_schedule_enabled(first["id"], created["id"], True)["enabled"] is True
+        assert rt.delete_schedule(first["id"], created["id"])["deleted"] is True
+        assert rt.list_schedules(first["id"]) == []
+
+        for code, call in (
+            ("SCHEDULE_INTERVAL_TOO_SHORT", lambda: rt.create_schedule(first["id"], {"prompt": "太快", "rule": {"kind": "interval", "everySeconds": 60}})),
+            ("INVALID_SCHEDULE_RULE", lambda: rt.create_schedule(first["id"], {"prompt": "坏规则", "rule": {"kind": "cron", "expression": "* * * * *"}})),
+            ("INVALID_TIMEZONE", lambda: rt.create_schedule(first["id"], {"prompt": "坏时区", "rule": {"kind": "daily", "atLocalTime": "09:00"}, "timezone": "Mars/Olympus"})),
+            ("SCHEDULE_NOT_FOUND", lambda: rt.update_schedule(first["id"], "sch_missing", {"prompt": "改"})),
+            ("SCHEDULE_NOT_FOUND", lambda: rt.update_schedule(second["id"], "sch_missing", {"prompt": "改"})),
+        ):
+            with pytest.raises(WebError) as failure:
+                call()
+            assert failure.value.code == code
+        for index in range(20):
+            rt.create_schedule(second["id"], {"prompt": f"第 {index} 条", "rule": {"kind": "interval", "everySeconds": 300}})
+        with pytest.raises(WebError) as limit:
+            rt.create_schedule(second["id"], {"prompt": "第 21 条", "rule": {"kind": "interval", "everySeconds": 300}})
+        assert limit.value.code == "SCHEDULE_LIMIT" and limit.value.status == 409
+        with pytest.raises(WebError) as scope:
+            rt._schedule(first["id"], rt.list_schedules(second["id"])[0]["id"])
+        assert scope.value.code == "SCHEDULE_NOT_FOUND"
+    finally:
+        rt.close()
+
+
+def test_delete_bot_removes_its_schedules(tmp_path):
+    rt = runtime(tmp_path)
+    try:
+        worker = bot(rt, "删定时 Bot")
+        rt.create_schedule(worker["id"], {"prompt": "查机票", "rule": {"kind": "interval", "everySeconds": 300}})
+        rt.delete_bot(worker["id"])
+        assert rt._schedules == {}
+    finally:
+        rt.close()
+
+
+def test_legacy_scheduled_task_migrates_to_a_once_schedule(tmp_path):
+    executor = FakeExecutor()
+    rt = runtime(tmp_path, executor)
+    try:
+        worker = bot(rt, "旧定时 Bot")
+        legacy = rt.create_task({"requestId": "legacy-scheduled", "botId": worker["id"], "prompt": "旧的一次性定时"})
+        run_at = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        rt._tasks[legacy["id"]].update(status="scheduled", runAt=run_at, queueReason=None)
+        rt._persist()
+    finally:
+        rt.close()
+
+    reopened = runtime(tmp_path, FakeExecutor())
+    try:
+        schedules = reopened.list_schedules(worker["id"])
+        assert len(schedules) == 1 and schedules[0]["rule"] == {"kind": "once", "at": run_at}
+        migrated = reopened.get_task(legacy["id"])
+        assert migrated["status"] == "waiting" and migrated["waitReason"] == "manual" and migrated["runAt"] is None
+        assert any("迁移" in message["content"] for message in reopened.list_messages(legacy["id"]))
+    finally:
+        reopened.close()
+
+    # The migration id is derived from the task id, so a load that was never
+    # persisted cannot create a second copy of the same schedule.
+    again = runtime(tmp_path, FakeExecutor())
+    try:
+        assert len(again.list_schedules(worker["id"])) == 1
+    finally:
+        again.close()
+
+
+def test_state_without_a_schedules_key_still_loads(tmp_path):
+    rt = runtime(tmp_path)
+    try:
+        bot(rt, "老文件 Bot")
+        rt.create_schedule(rt.list_bots()[0]["id"], {"prompt": "查机票", "rule": {"kind": "interval", "everySeconds": 300}})
+    finally:
+        rt.close()
+    state_path = tmp_path / "bots" / "state.json"
+    record = json.loads(state_path.read_text())
+    record.pop("schedules")
+    state_path.write_text(json.dumps(record))
+    reopened = runtime(tmp_path, FakeExecutor())
+    try:
+        assert reopened._load_error == "" and reopened.list_schedules(reopened.list_bots()[0]["id"]) == []
+    finally:
+        reopened.close()
