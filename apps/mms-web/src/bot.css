@@ -1767,8 +1767,11 @@
   background: var(--surface);
   color: var(--ink);
   box-shadow: 0 10px 28px color-mix(in srgb, var(--ink) 14%, transparent), 0 2px 6px color-mix(in srgb, var(--ink) 6%, transparent);
-  padding: 6px;
-  min-width: 170px;
+  padding: 8px;
+  min-width: 280px;
+  max-width: min(360px, calc(100vw - 32px));
+  max-height: min(70vh, 420px);
+  overflow: auto;
   z-index: 1000;
 }
 
@@ -3309,4 +3312,180 @@
   flex-basis: 100%;
   font-size: 12px;
   color: var(--bot-danger);
+}
+
+.bot-schedule-kind-tabs,
+.bot-schedule-weekdays,
+.bot-schedule-interval-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0 8px;
+}
+
+.bot-schedule-kind-tab {
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.bot-schedule-kind-tab.is-selected,
+.bot-schedule-kind-tab[aria-selected="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+
+.bot-schedule-hint,
+.bot-schedule-quota,
+.bot-schedule-quota-chip,
+.bot-schedule-gate-note,
+.bot-schedule-empty-bound,
+.bot-schedule-footnote {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.bot-schedule-gate-note {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft);
+  color: var(--ink);
+}
+
+.bot-schedule-quota-chip {
+  display: inline-flex;
+  align-items: center;
+}
+
+.bot-schedule-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.bot-schedule-row {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.bot-schedule-row.is-gated,
+.bot-schedule-row.is-paused {
+  background: var(--soft);
+}
+
+.bot-schedule-row-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.bot-schedule-row-main strong {
+  font-size: 13px;
+}
+
+.bot-schedule-state {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.bot-schedule-state.is-held,
+.bot-schedule-state.is-invalid,
+.bot-schedule-state.is-error {
+  color: var(--bot-amber);
+}
+
+.bot-schedule-state.is-completed {
+  color: var(--muted);
+}
+
+.bot-schedule-prompt {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--ink);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.bot-schedule-meta {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.bot-schedule-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.bot-schedule-link {
+  margin-left: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.bot-schedule-edit {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.bot-schedule-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.bot-schedule-master {
+  margin-bottom: 10px;
+}
+
+.bot-schedule-footnote {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bot-dispatch-schedule {
+  border: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.bot-dispatch-schedule legend {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 13px;
+}
+
+.bot-dispatch-schedule legend small {
+  color: var(--muted);
+  font-weight: 400;
 }
