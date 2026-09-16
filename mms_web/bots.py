@@ -20,6 +20,9 @@ from uuid import uuid4
 from .file_lock import LOCK_EX, LOCK_NB, flock
 
 from .errors import WebError
+from . import bot_schedules
+from .bot_schedules import (MAX_SCHEDULES_PER_BOT, RECENT_TASK_LIMIT, advance, apply_update,
+                            build_schedule, is_due)
 from .bot_executor import _context_percent
 from .runtime import private_json
 from .bot_memory import BotMemoryStore, BotMemoryError
@@ -203,7 +206,7 @@ class BotRuntime(BotCommunications):
         self._stop = threading.Event()
         self._changed = threading.Event()
         self._bots, self._tasks, self._messages, self._artifacts, self._requests = {}, {}, {}, {}, {}
-        self._communications = {}
+        self._schedules, self._communications = {}, {}
         self._launching = set()
         self._workers = set()
         self._thread = None
@@ -227,6 +230,7 @@ class BotRuntime(BotCommunications):
             self._messages = data["messages"]
             self._artifacts = data["artifacts"]
             self._requests = data.get("requests", {})
+            self._schedules = bot_schedules.sanitize_schedules(data.get("schedules"))
             self._communications = data.get("communications", {})
             for task in self._tasks.values():
                 # The old Pi process is not ours after restart. Preserve its
@@ -244,6 +248,7 @@ class BotRuntime(BotCommunications):
                 bot.setdefault("orchestrationPolicy", "direct-first")
                 bot.setdefault("planner", "model")
             self._migrate_wait_contracts()
+            self._migrate_scheduled_tasks()
         except (OSError, ValueError, KeyError, TypeError):
             self._load_error = "Bot 记录无法读取，原文件已保留；请检查记录后再写入。"
 
@@ -261,7 +266,7 @@ class BotRuntime(BotCommunications):
             self._file_lock = handle
         private_json(self.root / "state.json", {"schema": 2, "bots": self._bots, "tasks": self._tasks,
                     "messages": self._messages, "artifacts": self._artifacts, "requests": self._requests,
-                    "communications": self._communications})
+                    "schedules": self._schedules, "communications": self._communications})
         self._changed.set()
 
     def configure_endpoint(self, url):
@@ -476,7 +481,9 @@ class BotRuntime(BotCommunications):
             self._communications = {key: row for key, row in self._communications.items()
                                     if row.get("senderBotId") != bot_id and row.get("recipientBotId") != bot_id
                                     and row.get("taskId") not in task_ids and row.get("deliveryTaskId") not in task_ids}
-            removed_resources = task_ids | (old_communication_ids - set(self._communications)) | {bot_id}
+            removed_schedules = {key for key, row in self._schedules.items() if row["botId"] == bot_id}
+            self._schedules = {key: row for key, row in self._schedules.items() if key not in removed_schedules}
+            removed_resources = task_ids | (old_communication_ids - set(self._communications)) | removed_schedules | {bot_id}
             self._requests = {key: value for key, value in self._requests.items()
                               if value.get("resource") not in removed_resources}
             self._bots.pop(bot_id, None)
@@ -499,12 +506,16 @@ class BotRuntime(BotCommunications):
         with self._lock:
             key, value = self._replay("task", payload)
             if key in self._requests:
-                return self.get_task(value)
+                if value in self._schedules:
+                    return {**deepcopy(self._schedules[value]), "kind": "schedule"}
+                return {**self.get_task(value), "kind": "task"}
             bot = self._bot(str(payload.get("botId") or ""))
             self.executor.validate(bot)
             if len(self._tasks) >= MAX_TASKS:
                 raise WebError("TASK_LIMIT", "本地已保存 2,000 个任务，请归档后继续。", 409)
             parent_id = payload.get("parentTaskId")
+            if parent_id and payload.get("runAt"):
+                raise WebError("INVALID_REQUEST", "子任务不能定时执行。", 400)
             if parent_id:
                 parent = self._task(parent_id)
                 ancestor, depth = parent, 0
@@ -517,18 +528,25 @@ class BotRuntime(BotCommunications):
                     raise WebError("BOT_CHILD_LIMIT", "一个任务最多分发 20 个子任务。", 409)
             run_at = parse_time(payload.get("runAt"))
             prompt = text_field(payload, "prompt", 32000, True)
+            if run_at:
+                # A one-off time is no longer a task state; it is its own
+                # schedule entity, so the timer survives restarts and can be
+                # listed, paused or deleted.
+                schedule = self.create_schedule(bot["id"], {"prompt": prompt, "rule": {"kind": "once", "at": run_at}})
+                self._remember(key, value, schedule["id"])
+                return {**schedule, "kind": "schedule"}
             coordinator_plan = plan_for(prompt, bot, list(self._bots.values()))
             task = {"id": "task_" + uuid4().hex[:16], "botId": bot["id"],
                     "prompt": prompt, "parentTaskId": parent_id,
-                    "status": "scheduled" if run_at else "queued", "runAt": run_at, "children": [],
+                    "status": "queued", "runAt": None, "children": [],
                     "result": None, "error": None, "acceptedAt": None, "sessionId": None, "waitReason": None,
                     "turn": 0, "createdAt": now(), "updatedAt": now(), "token": "", "seenEvents": {},
-                    "priority": task_priority(payload), "queueReason": "等待调度" if not run_at else None,
+                    "priority": task_priority(payload), "queueReason": "等待调度",
                     "coordinatorPlan": coordinator_plan}
             task["executionMode"] = coordinator_plan["mode"]
             task["collaborationRequested"] = collaboration_requested(task["prompt"])
             task["outcome"] = None
-            if payload.get("wake") is False and not run_at:
+            if payload.get("wake") is False:
                 task.update(status="waiting", waitReason="manual")
             self._tasks[task["id"]] = task
             self._artifacts[task["id"]] = []
@@ -541,7 +559,55 @@ class BotRuntime(BotCommunications):
                     parent.update(status="waiting", waitReason="children", acceptedAt=None)
             self._remember(key, value, task["id"])
             self._persist()
-            return self._view(task)
+            return {**self._view(task), "kind": "task"}
+
+    def create_schedule(self, bot_id, payload):
+        with self._lock:
+            key, value = self._replay("schedule", payload)
+            if key in self._requests:
+                return deepcopy(self._schedule(bot_id, value))
+            self._bot(bot_id)
+            count = sum(1 for item in self._schedules.values() if item["botId"] == bot_id)
+            schedule = build_schedule(bot_id, payload, existing_count=count,
+                                      now=datetime.now(timezone.utc), created_by=payload.get("createdBy"))
+            self._schedules[schedule["id"]] = schedule
+            self._remember(key, value, schedule["id"])
+            self._persist()
+            return deepcopy(schedule)
+
+    def list_schedules(self, bot_id):
+        with self._lock:
+            self._bot(bot_id)
+            rows = [deepcopy(item) for item in self._schedules.values() if item["botId"] == bot_id]
+            return sorted(rows, key=lambda item: str(item.get("createdAt") or ""))
+
+    def update_schedule(self, bot_id, schedule_id, payload):
+        with self._lock:
+            updated = apply_update(self._schedule(bot_id, schedule_id), payload, now=datetime.now(timezone.utc))
+            self._schedules[schedule_id] = updated
+            self._persist()
+            return deepcopy(updated)
+
+    def delete_schedule(self, bot_id, schedule_id):
+        with self._lock:
+            self._schedule(bot_id, schedule_id)
+            self._schedules.pop(schedule_id, None)
+            self._persist()
+            return {"deleted": True, "scheduleId": schedule_id}
+
+    def set_schedule_enabled(self, bot_id, schedule_id, enabled):
+        with self._lock:
+            schedule = self._schedule(bot_id, schedule_id)
+            schedule["enabled"] = bool(enabled)
+            schedule["updatedAt"] = now()
+            self._persist()
+            return deepcopy(schedule)
+
+    def _schedule(self, bot_id, schedule_id):
+        schedule = self._schedules.get(schedule_id)
+        if not schedule or schedule["botId"] != bot_id:
+            raise WebError("SCHEDULE_NOT_FOUND", "找不到这条定时。", 404)
+        return schedule
 
     def auto_task(self, payload):
         """Route a natural-language request to the best Bot.
@@ -715,6 +781,31 @@ class BotRuntime(BotCommunications):
                     task["waitOptions"] = options
             else:
                 task["waitQuestion"] = ""
+
+    def _migrate_scheduled_tasks(self):
+        """Release legacy ``scheduled`` tasks into independent once-schedules.
+
+        The schedule id is derived from the task id so a load that has not been
+        persisted yet cannot create a second copy of the same migration.
+        """
+        stamp = datetime.now(timezone.utc)
+        for task in self._tasks.values():
+            if task.get("status") != "scheduled":
+                continue
+            try:
+                run_at = parse_time(task.get("runAt"))
+                count = sum(1 for item in self._schedules.values() if item["botId"] == task["botId"])
+                if run_at and count < MAX_SCHEDULES_PER_BOT:
+                    schedule = build_schedule(task["botId"], {"prompt": task["prompt"], "rule": {"kind": "once", "at": run_at}},
+                                              existing_count=count, now=stamp, created_by="user",
+                                              schedule_id="sch_" + hashlib.sha256(task["id"].encode()).hexdigest()[:16])
+                    self._schedules[schedule["id"]] = schedule
+                    task["scheduleId"] = schedule["id"]
+            except Exception:
+                # A broken legacy row must not stop the whole record loading.
+                pass
+            task.update(status="waiting", waitReason="manual", runAt=None, token="", updatedAt=now())
+            self._message(task["id"], "system", "原来的定时已迁移成独立的定时；本任务改为等待手动唤醒。")
 
     def _last_wait_text(self, task):
         """The most recent user-facing text, used when no explicit question came."""
@@ -1481,11 +1572,6 @@ class BotRuntime(BotCommunications):
                 if task.get("orphanAlive") and not self.executor.orphan_alive(task):
                     task["orphanAlive"] = False
                     changed = True
-                if task["status"] == "scheduled" and task.get("runAt") and self._bot(task["botId"])["wakeEnabled"]:
-                    if datetime.fromisoformat(task["runAt"]) <= datetime.now(timezone.utc):
-                        task.update(status="queued", runAt=None)
-                        self._message(task["id"], "system", "到达计划时间，自动唤醒。")
-                        changed = True
                 if task["status"] == "waiting" and task.get("waitReason") == "user" and task.get("waitSince"):
                     # A question nobody answered for a week is not a pending
                     # conversation any more; close it instead of glowing forever.
@@ -1505,6 +1591,31 @@ class BotRuntime(BotCommunications):
             busy = [t for t in self._tasks.values() if t.get("orphanAlive") or t["status"] in {"starting", "running"} or (t["status"] == "waiting" and t.get("waitReason") not in {"children", "manual", "user", "plan-approval"})]
             busy_bots = {t["botId"] for t in busy}
             busy_workspaces = {self._bot(t["botId"])["workspaceId"] for t in busy}
+            now_dt = datetime.now(timezone.utc)
+            for schedule in list(self._schedules.values()):
+                if not is_due(schedule, now_dt):
+                    continue
+                bot = self._bots.get(schedule["botId"])
+                updated, skipped = advance(schedule, now=now_dt)
+                armed = bool(bot and bot.get("wakeEnabled", True) and updated["enabled"])
+                holding = bool(bot and bot["id"] in busy_bots and updated.get("overlapPolicy", "skip") == "skip")
+                reason = "上一轮仍在运行" if holding else (f"错过了 {skipped} 次触发" if skipped else "")
+                fired = None
+                try:
+                    fired = self.create_task({"botId": bot["id"], "prompt": updated["prompt"]}) if armed and not holding and not skipped else None
+                except Exception:
+                    fired, reason = None, "创建任务失败"
+                if fired:
+                    self._tasks[fired["id"]]["scheduleId"] = updated["id"]
+                    updated.update(lastRunAt=now(), lastTaskId=fired["id"], lastSkip=None,
+                                   recentTaskIds=(updated.get("recentTaskIds") or [])[-(RECENT_TASK_LIMIT - 1):] + [fired["id"]])
+                elif armed and reason:
+                    updated["lastSkip"] = {"at": now(), "reason": "busy" if holding else ("missed" if skipped else "error"), "skipped": skipped}
+                    if updated.get("lastTaskId"):
+                        self._message(updated["lastTaskId"], "system", f"定时没有执行（{reason}），已按规则跳过。")
+                updated["updatedAt"] = now()
+                self._schedules[updated["id"]] = updated
+                changed = True
             queued = sorted(
                 (task for task in self._tasks.values() if task["status"] == "queued"),
                 # Python's sort is stable: omitting the random task id keeps
@@ -1903,6 +2014,20 @@ class BotRuntime(BotCommunications):
                 if ancestor["id"] != task_id:
                     raise WebError("BOT_SCOPE", "只能读取当前任务及其子任务。", 403)
             return self.get_task(target)
+        if action == "schedule":
+            if payload.get("botId") and payload["botId"] != task["botId"]:
+                raise WebError("BOT_SCOPE", "只能管理当前 Bot 自己的定时。", 403)
+            op = str(payload.get("op") or "")
+            if op == "create":
+                spec = {key: payload[key] for key in ("prompt", "rule", "timezone", "overlapPolicy", "createdBy", "requestId") if key in payload}
+                return {"schedule": self.create_schedule(task["botId"], spec)}
+            if op == "list":
+                return {"schedules": self.list_schedules(task["botId"])}
+            if op in {"pause", "resume"}:
+                return {"schedule": self.set_schedule_enabled(task["botId"], str(payload.get("scheduleId") or ""), op == "resume")}
+            if op == "delete":
+                return self.delete_schedule(task["botId"], str(payload.get("scheduleId") or ""))
+            raise WebError("INVALID_REQUEST", "schedule 操作必须是 create、list、pause、resume 或 delete。", 400)
         if action in {"complete", "fail", "wait"}:
             content = str(payload.get("result") or payload.get("error") or payload.get("text") or payload.get("content") or payload.get("reason") or "")[:32000]
             with self._lock:
