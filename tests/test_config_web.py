@@ -232,6 +232,7 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
         "codex",
         "opencode",
         "pi",
+        "grok",
         "agy",
     ]
     assert "preference_snippet" in snapshot["session_assets"]
