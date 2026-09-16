@@ -7,24 +7,8 @@ export interface BotFleetPolicy {
   maxFamilies: number;
   families: string[];
   models: Record<string, string>;
+  hintShown: boolean;
 }
-
-const FAMILY_PREFIXES: Array<[string, string]> = [
-  ["claude", "Claude"],
-  ["gpt", "GPT"],
-  ["codex", "GPT"],
-  ["gemini", "Gemini"],
-  ["qwen", "Qwen"],
-  ["kimi", "Kimi"],
-  ["k2", "Kimi"],
-  ["k3", "Kimi"],
-  ["glm", "GLM"],
-  ["minimax", "MiniMax"],
-  ["deepseek", "DeepSeek"],
-  ["grok", "Grok"],
-  ["mimo", "MiMo"],
-  ["doubao", "Doubao"],
-];
 
 export const DEFAULT_FLEET_POLICY: BotFleetPolicy = {
   enabled: true,
@@ -32,6 +16,7 @@ export const DEFAULT_FLEET_POLICY: BotFleetPolicy = {
   maxFamilies: 2,
   families: [],
   models: {},
+  hintShown: false,
 };
 
 export function normalizeFleetPolicy(raw?: Partial<BotFleetPolicy> | null): BotFleetPolicy {
@@ -60,16 +45,13 @@ export function normalizeFleetPolicy(raw?: Partial<BotFleetPolicy> | null): BotF
     maxFamilies: families.length ? Math.max(max, families.length) : max,
     families,
     models,
+    hintShown: raw?.hintShown === true,
   };
 }
 
 export function familyFromPreset(preset: Preset): string {
   const given = String(preset.family || "").trim();
-  if (given) return given;
-  const lowered = String(preset.name || "").toLowerCase();
-  for (const [prefix, family] of FAMILY_PREFIXES) {
-    if (lowered.startsWith(prefix)) return family;
-  }
+  if (given && given !== "Other" && given !== "其他") return given;
   return "Other";
 }
 

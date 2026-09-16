@@ -196,8 +196,27 @@ def test_fleet_plan_uses_owner_bot_not_new_colleagues():
     assert thin["reason"] == UNDERFILLED_REASON
     closed = fleet_plan(owner, presets, "让几个模型评审这次改动", {"enabled": False})
     assert closed["mode"] == "direct" and closed["source"] == "fleet-disabled"
+    assert plan.get("notice")
+    assert "并行听 2 家" in plan["notice"]
+    again = fleet_plan(owner, presets, "让几个模型评审这次改动", {"hintShown": True})
+    assert again["mode"] == "fleet"
+    assert not again.get("notice")
     assert normalize_fleet_policy({"maxFamilies": 9})["maxFamilies"] == 9
     assert normalize_fleet_policy({})["maxFamilies"] == 2
+    assert normalize_fleet_policy({})["hintShown"] is False
+
+
+def test_family_fallback_is_mms_core_not_a_second_table():
+    from mms_web.catalog import _model_family
+    from mms_web.bot_coordinator import _preset_family
+    from mms_config_web import _FALLBACK_MODEL_FAMILIES
+    from mms_core import MODEL_FAMILIES
+    assert _model_family("grok-4.6") == "Grok"
+    assert _model_family("doubao-pro") == "Doubao"
+    assert _preset_family({"name": "grok-4.6", "harness": "pi"}) == "Grok"
+    assert "Grok" in _FALLBACK_MODEL_FAMILIES
+    assert "Doubao" in _FALLBACK_MODEL_FAMILIES
+    assert tuple(entry["family"] for entry in MODEL_FAMILIES) == _FALLBACK_MODEL_FAMILIES
 
 
 def test_plan_transitions_follow_the_table_and_record_history():

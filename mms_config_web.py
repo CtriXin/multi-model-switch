@@ -52,6 +52,7 @@ from mms_opencode_profiles import (
     opencode_review_host_config,
     validate_opencode_committee_tier_preset,
 )
+from mms_core import MODEL_FAMILIES as _MODEL_FAMILIES
 
 
 _SECRET_KEYS = {"api_key", "openai_api_key", "anthropic_api_key", "gateway_key", "token", "secret", "authorization", "password", "passphrase"}
@@ -77,7 +78,7 @@ _SAFE_TOKEN_COUNT_KEYS = {
 _ALLOWED_PROTOCOLS = ("anthropic_messages", "openai_chat_completions")
 _ALLOWED_CLIS = ("claude", "codex", "opencode", "pi", "agy")
 _ALLOWED_ROLES = ("primary", "auto", "fallback")
-_FALLBACK_MODEL_FAMILIES = ("Claude", "GPT", "Gemini", "DeepSeek", "Qwen", "Kimi", "Mimo", "MiniMax", "GLM")
+_FALLBACK_MODEL_FAMILIES = tuple(entry["family"] for entry in _MODEL_FAMILIES if entry.get("family"))
 _OPENCODE_ROSTER_PRESETS = ("builder", "executor", "explore", "bughunt", "vision", "reviewer", "spec", "fixer")
 _OPENCODE_REQUIRED_BUILDER_AGENTS = {"mobius-builder-pro", "builder_primary"}
 _REGISTRY_V2_GENERATED_FILES = (

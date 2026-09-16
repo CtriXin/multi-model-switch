@@ -15,6 +15,7 @@ test("normalizeFleetPolicy defaults to two cheap families and keeps pinned famil
     maxFamilies: 2,
     families: [],
     models: {},
+    hintShown: false,
   });
   assert.equal(normalizeFleetPolicy({ enabled: false, maxFamilies: 9 }).enabled, false);
   assert.equal(normalizeFleetPolicy({ maxFamilies: 9 }).maxFamilies, 9);
@@ -31,7 +32,7 @@ test("availableFleetFamilies skips unavailable and Other", () => {
     { id: "a", name: "glm-5-turbo", harness: "pi", available: true, family: "GLM" },
     { id: "b", name: "mystery", harness: "pi", available: true },
     { id: "c", name: "k3", harness: "pi", available: false, family: "Kimi" },
-    { id: "d", name: "kimi-for-coding-highspeed", harness: "pi", available: true },
+    { id: "d", name: "kimi-for-coding-highspeed", harness: "pi", available: true, family: "Kimi" },
   ]);
   assert.deepEqual(names, ["GLM", "Kimi"]);
 });

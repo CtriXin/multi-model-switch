@@ -36,31 +36,14 @@ DEFAULT_FLEET_POLICY = {
     "maxFamilies": DEFAULT_FLEET_FAMILIES,
     "families": [],
     "models": {},
+    "hintShown": False,
 }
 UNDERFILLED_REASON = "现在只有一家能用，我自己看了，不是多方评审。"
 FLEET_DISABLED_REASON = "多方听意见已关闭，由当前 Bot 直接完成。"
-
-# Keep in sync with mms_web.catalog._FAMILY_RULES. Used when a preset has no
-# family yet; N is discovered at runtime, never hardcoded.
-_FAMILY_PREFIXES = (
-    ("claude", "Claude"),
-    ("gpt", "GPT"),
-    ("codex", "GPT"),
-    ("o1", "GPT"),
-    ("o3", "GPT"),
-    ("o4", "GPT"),
-    ("gemini", "Gemini"),
-    ("qwen", "Qwen"),
-    ("kimi", "Kimi"),
-    ("k2", "Kimi"),
-    ("k3", "Kimi"),
-    ("glm", "GLM"),
-    ("minimax", "MiniMax"),
-    ("deepseek", "DeepSeek"),
-    ("grok", "Grok"),
-    ("mimo", "MiMo"),
-    ("doubao", "Doubao"),
+FLEET_FIRST_HINT = (
+    "这次会并行听 {n} 家。开着「多方听意见」时，发送都会这样扇出；关掉则只问当前 Bot。"
 )
+
 _CHEAP_MARKERS = ("flash", "turbo", "highspeed", "mini", "air", "lite", "haiku", "small", "fast")
 _INTENSE_MARKERS = ("opus", "sonnet", "thinking", "max", "pro", "heavy", "astra", "k3", "5.4", "5.6", "gpt-6")
 
@@ -182,6 +165,7 @@ def normalize_fleet_policy(raw) -> dict:
         "maxFamilies": maximum,
         "families": families,
         "models": models,
+        "hintShown": True if source.get("hintShown") is True else False,
     }
 
 
@@ -200,13 +184,11 @@ def is_split_plan(plan) -> bool:
 
 def _preset_family(preset: dict) -> str:
     family = str(preset.get("family") or "").strip()
-    if family:
+    if family and family not in {"Other", "其他"}:
         return family
-    lowered = str(preset.get("modelName") or preset.get("name") or "").lower()
-    for prefix, name in _FAMILY_PREFIXES:
-        if lowered.startswith(prefix):
-            return name
-    return "Other"
+    from .catalog import _model_family
+    inferred = _model_family(preset.get("modelName") or preset.get("name") or "")
+    return inferred if inferred not in {"Other", "其他"} else "Other"
 
 
 def _marker_score(text: str, markers: tuple[str, ...]) -> int:
@@ -298,7 +280,7 @@ def fleet_plan(owner: dict, presets: list[dict], prompt: str, policy=None) -> di
             "onFailure": "skip",
         })
     labels = "、".join(step["label"] for step in steps)
-    return {
+    plan = {
         "version": 2,
         "mode": "fleet",
         "ownerBotId": owner.get("id"),
@@ -310,6 +292,9 @@ def fleet_plan(owner: dict, presets: list[dict], prompt: str, policy=None) -> di
         "source": "fleet",
         "fleetPolicy": policy,
     }
+    if not policy.get("hintShown"):
+        plan["notice"] = FLEET_FIRST_HINT.format(n=len(steps))
+    return plan
 
 
 def normalize_step_status(status):

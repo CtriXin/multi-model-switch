@@ -49,26 +49,8 @@ _KNOWN_HARNESSES = ("pi", "codex", "claude", "opencode", "gemini", "agy")
 PROJECT_ID = "mms-web"
 _PROTECTED_ROOT_NAMES = (".config/mms", ".config/mms-next")
 
-# Display-layer family heuristics only; launch truth stays inside MMS.
-_FAMILY_RULES = (
-    ("claude", "Claude"),
-    ("gpt", "GPT"),
-    ("codex", "GPT"),
-    ("o1", "GPT"),
-    ("o3", "GPT"),
-    ("o4", "GPT"),
-    ("gemini", "Gemini"),
-    ("qwen", "Qwen"),
-    ("kimi", "Kimi"),
-    ("k2", "Kimi"),
-    ("k3", "Kimi"),
-    ("glm", "GLM"),
-    ("minimax", "MiniMax"),
-    ("deepseek", "DeepSeek"),
-    ("grok", "Grok"),
-    ("mimo", "MiMo"),
-    ("doubao", "Doubao"),
-)
+# Display-layer family fallback only. Prefer the catalog `family` field;
+# prefix matching goes through mms_core.MODEL_FAMILIES, the single list.
 
 
 def _ensure_repo_on_path() -> None:
@@ -112,11 +94,13 @@ def _context_label(tokens) -> str:
 
 
 def _model_family(model_name: str) -> str:
-    lowered = str(model_name or "").lower()
-    for prefix, family in _FAMILY_RULES:
-        if lowered.startswith(prefix):
-            return family
-    return "Other"
+    """Prefer MMS core family inference; never keep a second prefix table here."""
+    _ensure_repo_on_path()
+    from mms_core import _infer_model_family
+    family, _ = _infer_model_family(model_name)
+    if family in {"", "其他", "Other"}:
+        return "Other"
+    return family
 
 
 def _parse_env_file(text: str) -> dict:

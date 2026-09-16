@@ -22,6 +22,13 @@
 .bot-plan-reason {
   color: var(--ink);
 }
+.bot-plan-notice {
+  flex-basis: 100%;
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
 .bot-plan-tag {
   font-size: 0.6875rem;
   color: var(--muted);

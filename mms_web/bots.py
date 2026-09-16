@@ -1117,6 +1117,13 @@ class BotRuntime(BotCommunications):
                 return deepcopy(live.get("coordinatorPlan"))
             live.update(coordinatorPlan=plan, executionMode=plan["mode"], planResolved=True,
                         planDecidedAt=now(), orchestrationPolicy=policy, updatedAt=now())
+            if plan.get("mode") == "fleet" and plan.get("notice"):
+                self._message(live["id"], "system", plan["notice"])
+                stored = self._bots.get(bot["id"])
+                if stored is not None:
+                    fleet_policy = normalize_fleet_policy(stored.get("fleetPolicy"))
+                    fleet_policy["hintShown"] = True
+                    stored["fleetPolicy"] = fleet_policy
             self._persist()
             return deepcopy(plan)
 

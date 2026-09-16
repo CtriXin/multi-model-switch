@@ -206,6 +206,7 @@ export function BotPlan({ task, bots }: { task: BotTask; bots: BotDefinition[] }
           {statusLabel}
         </span>
         {plan.reason && <span className="bot-plan-reason">{plan.reason}</span>}
+        {plan.notice && <p className="bot-plan-notice">{plan.notice}</p>}
         {plan.source === "fallback" && <span className="bot-plan-tag bot-plan-tag-muted">关键词兜底</span>}
         {plan.source === "user" && <span className="bot-plan-tag bot-plan-tag-muted">已修改</span>}
       </div>

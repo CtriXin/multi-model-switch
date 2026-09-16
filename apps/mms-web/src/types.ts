@@ -373,6 +373,7 @@ export interface BotTaskPlan {
   version?: number;
   mode: "direct" | "delegate" | "fleet";
   reason?: string;
+  notice?: string;
   steps?: BotPlanStep[];
   candidates?: Array<{ id: string; name: string; description?: string }>;
   merge?: string;
