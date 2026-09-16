@@ -850,6 +850,9 @@ class SessionService(SessionActions, SessionSideQuestions):
                     else:
                         event["status"] = "delivered"
                         event["lateCancel"] = True
+                elif event and event.get("status") == "delivered":
+                    # Delete was in flight when Pi consumed the message.
+                    event["lateCancel"] = True
                 session.forget_pending(removed)
         restored: list[str] = []
         for queued_id in order:

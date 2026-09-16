@@ -691,6 +691,24 @@ def test_removing_a_steer_pi_already_took_does_not_claim_cancelled(tmp_path, see
     assert driver.follow_ups == ["先补一段说明", "最后再总结一次"]
 
 
+def test_a_delete_that_loses_to_delivery_during_clear_still_marks_late(tmp_path, seeded_seam):
+    service, drivers = make_service(tmp_path)
+    sid, session, driver = queue_steer_and_followups(service, drivers, tmp_path)
+    steer_id, first, second = queued_ids(service, sid)
+    inner = driver.clear_queue
+
+    def racing_clear(*, timeout=None):
+        deliver(service, session, "改成看注册页")
+        return inner()
+
+    driver.clear_queue = racing_clear
+    detail = service.queue(sid, {"requestId": "q-1", "action": "remove", "id": steer_id})
+    dropped = next(e for e in user_events(detail) if e["id"] == steer_id)
+    assert dropped["status"] == "delivered"
+    assert dropped.get("lateCancel") is True
+    assert [item["id"] for item in session.pending_view()] == [first, second]
+
+
 def test_a_sent_message_records_how_it_was_delivered(tmp_path, seeded_seam):
     service, drivers = make_service(tmp_path)
     detail = launch_ok(service)
