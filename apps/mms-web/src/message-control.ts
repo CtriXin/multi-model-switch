@@ -141,6 +141,10 @@ export function deliveryLabel(event: SessionEvent): string {
   // delivery states apart; both still mean the message never ran.
   if (event.status === "failed" || event.status === "error")
     return "发送失败，未执行";
+  // Delete ran after Pi had already taken the message: status is the same
+  // delivered value as a survivor that vanished mid-rewrite.
+  if (event.status === "delivered" && Boolean((event as SessionEvent & { lateCancel?: boolean }).lateCancel))
+    return "已送给模型 · 删除来晚了";
   if (event.contextUsage?.state === "uncertain") return "发送结果待确认";
   if (event.status !== "queued") return "";
   if (event.mode === "steer")

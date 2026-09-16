@@ -51,8 +51,14 @@ function Turn({events, completed, forced, report, steered, ...props}: Props & {
     <span>{count ? `${count} 次工具调用` : "思考与执行记录"}</span>
     {!!failures && <span className="process-failure">{failures} 项失败</span>}
   </button>;
+  const userNote = user ? deliveryLabel(user) : "";
   return <section className="conversation-turn">
-    {user && <EventView {...props} event={user} />}
+    {user && (
+      <>
+        {!!userNote && <small className="delivery-note">{userNote}</small>}
+        <EventView {...props} event={user} />
+      </>
+    )}
     {!!process.length && <div className="turn-process">
       {controls}
       <ProcessEvents {...props} events={collapsed ? pinned : process} />

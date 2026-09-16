@@ -498,3 +498,12 @@
 @media (max-width: 600px) { .turn-process > .turn-process-toggle, .turn-process-footer { margin-left: 0; } }
 
 .turn-process-toggle .process-failure { color: var(--danger, #b42318); font-weight: 600; }
+
+/* A delivered message that a late delete could not withdraw. Not an error. */
+.conversation-content .delivery-note {
+  display: block;
+  margin: 0 0 6px 39px;
+  font-size: max(11px, 0.7857rem);
+  color: var(--muted);
+  text-align: right;
+}
