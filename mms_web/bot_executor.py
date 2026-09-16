@@ -11,6 +11,36 @@ from uuid import uuid4
 from .errors import WebError
 
 PLAN_TIMEOUT_SECONDS = 20.0
+_COMPACT_NOOP_MESSAGES = {
+    "nothing to compact (session too small)",
+    "already compacted",
+}
+
+
+def _context_percent(usage):
+    """Read Pi context usage as a 0-100 percentage, never as a ratio."""
+    if not isinstance(usage, dict):
+        return None
+    candidates = [usage.get("percent"), usage.get("usedPercent")]
+    nested = usage.get("usage")
+    if isinstance(nested, dict):
+        candidates.extend((nested.get("percent"), nested.get("usedPercent")))
+    for value in candidates:
+        if value is None:
+            continue
+        try:
+            percent = float(value)
+        except (TypeError, ValueError):
+            continue
+        # Pi's getContextUsage() already returns percent in the 0-100 range.
+        # Do not infer a ratio from a small value: 0.8781 means 0.8781%.
+        return percent if 0 <= percent <= 100 else None
+    return None
+
+
+def _is_compact_noop(exc):
+    message = str(getattr(exc, "message", exc) or "").strip().lower()
+    return message in _COMPACT_NOOP_MESSAGES
 
 
 class PiBotExecutor:
@@ -162,17 +192,7 @@ class PiBotExecutor:
         except Exception:
             return
         usage = (view.get("stats") or {}).get("contextUsage") if isinstance(view, dict) else None
-        percent = None
-        if isinstance(usage, dict):
-            percent = usage.get("usedPercent", usage.get("percent"))
-            if percent is None and isinstance(usage.get("usage"), dict):
-                percent = usage["usage"].get("percent")
-        try:
-            percent = float(percent) if percent is not None else None
-            if percent is not None and percent <= 1:
-                percent *= 100
-        except (TypeError, ValueError):
-            percent = None
+        percent = _context_percent(usage)
         if percent is None or percent < float(bot.get("compactAtPercent", 70)):
             return
         instructions = (
@@ -181,7 +201,14 @@ class PiBotExecutor:
         )
         if task.get("memoryContext"):
             instructions += "\n长期记忆参考：\n" + str(task["memoryContext"])[:6000]
-        self.sessions.control(session_id, {"action": "compact", "value": instructions, "requestId": "bot-compact-" + task["id"]})
+        try:
+            self.sessions.control(session_id, {"action": "compact", "value": instructions, "requestId": "bot-compact-" + task["id"]})
+        except WebError as exc:
+            # A short session has nothing to compact. It must not block the
+            # next user message when stale/estimated usage crossed the gate.
+            if _is_compact_noop(exc):
+                return
+            raise
 
     def orphan_alive(self, task):
         pid = task.get("processId")
