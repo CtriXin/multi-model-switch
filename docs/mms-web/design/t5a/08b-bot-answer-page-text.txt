@@ -1,0 +1,69 @@
+Bots
+T5a 验证 Bot
+T5a schedule verification
+T5a 限额 Bot
+等待你手动唤醒
+T5a 对话 Bot
+等待你手动唤醒
+通知
+15 条未读
+T5a 限额 Bot
+11 条未读 · 占位任务完成
+T5a 验证 Bot
+4 条未读 · 你已接管了这个任务空间。告诉我出发地、目的地和出发日期，我接着帮你查。
+自动唤醒
+定时任务到点后自动开始
+返回 Pilot
+T5a 对话 Bot
+等待你
+
+real model verification
+
+记忆
+预设
+协作
+
+你能不能每天定时帮我做一件事？如果能，告诉我你会怎么做。
+
+记为约定
+
+可以做。我会用 schedule create --daily HH:MM 建一条每日定时，到点自动执行你想安排的工作。
+
+告诉我你想每天定时做什么事，以及具体几点执行？
+
+请现在就用内部工具执行这条命令（在 bash 里跑，命令前缀和 context 参数按你提示词里的内部工具命令来）：schedule create '每天检查一次' --daily 09:00。执行后把命令的原始 JSON 输出原样贴给我，不要只描述。
+
+记为约定
+复制代码
+{
+  "schedule": {
+    "id": "sch_636b3d62d44041c3",
+    "botId": "bot_94b26e2c941d46ac",
+    "prompt": "每天检查一次",
+    "rule": {
+      "kind": "daily",
+      "atLocalTime": "09:00"
+    },
+    "timezone": "Asia/Singapore",
+    "enabled": true,
+    "overlapPolicy": "skip",
+    "nextRunAt": "2026-09-17T01:00:00+00:00",
+    "lastRunAt": null,
+    "lastTaskId": null,
+    "recentTaskIds": [],
+    "lastSkip": null,
+    "createdBy": "bot",
+    "createdAt": "2026-09-16T03:45:09.376+00:00",
+    "updatedAt": "2026-09-16T03:45:09.376+00:00"
+  }
+}
+
+
+定时已创建，ID 为 sch_636b3d62d44041c3，时区是新加坡时间（UTC+8），即每天新加坡早上9点对应UTC 01:00，下次执行是 9月17日。
+
+旧机制的一次性定时
+
+记为约定
+等待你手动唤醒
+唤醒
+

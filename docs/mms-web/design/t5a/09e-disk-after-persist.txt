@@ -1,0 +1,5 @@
+disk legacy: waiting manual None scheduleId: sch_876b22fc8fc7e8a9
+migrated schedule on disk: {"prompt": "旧机制的一次性定时", "createdBy": "user", "timezone": "Asia/Singapore", "nextRunAt": "2026-09-16T05:06:30.627775+00:00", "enabled": true}
+bot B legacy task (its bot is at the 20-schedule limit): waiting manual
+schedules total on disk: 23
+schema: 2

@@ -1,0 +1,2 @@
+{"error": {"code": "INVALID_SCHEDULE_RULE", "message": "不支持的定时类型 cron；支持 once、interval、daily、weekly。"}}
+HTTP 400

@@ -1,0 +1,462 @@
+[
+  {
+    "id": "sch_e614c14747204ed9",
+    "botId": "bot_227696ee9f034ce1",
+    "prompt": "每天九点扫文档",
+    "rule": {
+      "kind": "daily",
+      "atLocalTime": "09:00"
+    },
+    "timezone": "Asia/Singapore",
+    "enabled": false,
+    "overlapPolicy": "skip",
+    "nextRunAt": "2026-09-17T01:00:00+00:00",
+    "lastRunAt": null,
+    "lastTaskId": null,
+    "recentTaskIds": [],
+    "lastSkip": null,
+    "createdBy": "user",
+    "createdAt": "2026-09-16T03:44:11.952+00:00",
+    "updatedAt": "2026-09-16T03:54:20.588+00:00"
+  },
+  {
+    "id": "sch_f24cb79ed1324c1a",
+    "botId": "bot_227696ee9f034ce1",
+    "prompt": "占位 1",
+    "rule": {
+      "kind": "interval",
+      "everySeconds": 300
+    },
+    "timezone": "Asia/Singapore",
+    "enabled": false,
+    "overlapPolicy": "skip",
+    "nextRunAt": "2026-09-16T03:55:41.959459+00:00",
+    "lastRunAt": "2026-09-16T03:50:42.132+00:00",
+    "lastTaskId": "task_6fc3e2504afa45c7",
+    "recentTaskIds": [
+      "task_6fc3e2504afa45c7"
+    ],
+    "lastSkip": null,
+    "createdBy": "user",
+    "createdAt": "2026-09-16T03:45:41.959+00:00",
+    "updatedAt": "2026-09-16T03:54:20.594+00:00"
+  },
+  {
+    "id": "sch_36df9d3061d042a1",
+    "botId": "bot_227696ee9f034ce1",
+    "prompt": "占位 2",
+    "rule": {
+      "kind": "interval",
+      "everySeconds": 300
+    },
+    "timezone": "Asia/Singapore",
+    "enabled": false,
+    "overlapPolicy": "skip",
+    "nextRunAt": "2026-09-16T03:55:41.974127+00:00",
+    "lastRunAt": "2026-09-16T03:50:42.172+00:00",
+    "lastTaskId": "task_4e1b7ebeaa884bc7",
+    "recentTaskIds": [
+      "task_4e1b7ebeaa884bc7"
+    ],
+    "lastSkip": null,
+    "createdBy": "user",
+    "createdAt": "2026-09-16T03:45:41.974+00:00",
+    "updatedAt": "2026-09-16T03:54:20.600+00:00"
+  },
+  {
+    "id": "sch_e960b79e2c394759",
+    "botId": "bot_227696ee9f034ce1",
+    "prompt": "占位 3",
+    "rule": {
+      "kind": "interval",
+      "everySeconds": 300
+    },
+    "timezone": "Asia/Singapore",
+    "enabled": false,
+    "overlapPolicy": "skip",
+    "nextRunAt": "2026-09-16T03:55:41.990366+00:00",
+    "lastRunAt": "2026-09-16T03:50:42.213+00:00",
+    "lastTaskId": "task_3d67808125f444ea",
+    "recentTaskIds": [
+      "task_3d67808125f444ea"
+    ],
+    "lastSkip": null,
+    "createdBy": "user",
+    "createdAt": "2026-09-16T03:45:41.990+00:00",
+    "updatedAt": "2026-09-16T03:54:20.605+00:00"
+  },
+  {
+    "id": "sch_334f88c780d14146",
+    "botId": "bot_227696ee9f034ce1",
+    "prompt": "占位 4",
+    "rule": {
+      "kind": "interval",
+      "everySeconds": 300
+    },
+    "timezone": "Asia/Singapore",
+    "enabled": false,
+    "overlapPolicy": "skip",
+    "nextRunAt": "2026-09-16T03:55:42.021640+00:00",
+    "lastRunAt": "2026-09-16T03:50:42.253+00:00",
+    "lastTaskId": "task_0d6e5c0c3b4f4e42",
+    "recentTaskIds": [
+      "task_0d6e5c0c3b4f4e42"
+    ],
+    "lastSkip": null,
+    "createdBy": "user",
+    "createdAt": "2026-09-16T03:45:42.021+00:00",
+    "updatedAt": "2026-09-16T03:54:20.610+00:00"
+  },
+  {
+    "id": "sch_83a836f7a2eb4827",
+    "botId": "bot_227696ee9f034ce1",
+    "prompt": "占位 5",
+    "rule": {
+      "kind": "interval",
+      "everySeconds": 300
+    },
+    "timezone": "Asia/Singapore",
+    "enabled": false,
+    "overlapPolicy": "skip",
+    "nextRunAt": "2026-09-16T03:55:42.037099+00:00",
+    "lastRunAt": "2026-09-16T03:50:42.292+00:00",
+    "lastTaskId": "task_98b23818fbca4bec",
+    "recentTaskIds": [
+      "task_98b23818fbca4bec"
+    ],
+    "lastSkip": null,
+    "createdBy": "user",
+    "createdAt": "2026-09-16T03:45:42.037+00:00",
+    "updatedAt": "2026-09-16T03:54:20.615+00:00"
+  },
+  {
+    "id": "sch_2ee2e0ea2d764dfd",
+    "botId": "bot_227696ee9f034ce1",
+    "prompt": "占位 6",
+    "rule": {
+      "kind": "interval",
+      "everySeconds": 300
+    },
+    "timezone": "Asia/Singapore",
+    "enabled": false,
+    "overlapPolicy": "skip",
+    "nextRunAt": "2026-09-16T03:55:42.051869+00:00",
+    "lastRunAt": "2026-09-16T03:50:42.332+00:00",
+    "lastTaskId": "task_d06b4b3518bf46c3",
+    "recentTaskIds": [
+      "task_d06b4b3518bf46c3"
+    ],
+    "lastSkip": null,
+    "createdBy": "user",
+    "createdAt": "2026-09-16T03:45:42.051+00:00",
+    "updatedAt": "2026-09-16T03:54:20.620+00:00"
+  },
+  {
+    "id": "sch_bbdae21cf710459e",
+    "botId": "bot_227696ee9f034ce1",
+    "prompt": "占位 7",
+    "rule": {
+      "kind": "interval",
+      "everySeconds": 300
+    },
+    "timezone": "Asia/Singapore",
+    "enabled": false,
+    "overlapPolicy": "skip",
+    "nextRunAt": "2026-09-16T03:55:42.066888+00:00",
+    "lastRunAt": "2026-09-16T03:50:42.371+00:00",
+    "lastTaskId": "task_78de73972125496b",
+    "recentTaskIds": [
+      "task_78de73972125496b"
+    ],
+    "lastSkip": null,
+    "createdBy": "user",
+    "createdAt": "2026-09-16T03:45:42.066+00:00",
+    "updatedAt": "2026-09-16T03:54:20.626+00:00"
+  },
+  {
+    "id": "sch_3b54b6bab18849c7",
+    "botId": "bot_227696ee9f034ce1",
+    "prompt": "占位 8",
+    "rule": {
+      "kind": "interval",
+      "everySeconds": 300
+    },
+    "timezone": "Asia/Singapore",
+    "enabled": false,
+    "overlapPolicy": "skip",
+    "nextRunAt": "2026-09-16T03:55:42.081330+00:00",
+    "lastRunAt": "2026-09-16T03:50:42.411+00:00",
+    "lastTaskId": "task_6cf6ac0a499349a6",
+    "recentTaskIds": [
+      "task_6cf6ac0a499349a6"
+    ],
+    "lastSkip": null,
+    "createdBy": "user",
+    "createdAt": "2026-09-16T03:45:42.081+00:00",
+    "updatedAt": "2026-09-16T03:54:20.631+00:00"
+  },
+  {
+    "id": "sch_e092b66e32af49c7",
+    "botId": "bot_227696ee9f034ce1",
+    "prompt": "占位 9",
+    "rule": {
+      "kind": "interval",
+      "everySeconds": 300
+    },
+    "timezone": "Asia/Singapore",
+    "enabled": false,
+    "overlapPolicy": "skip",
+    "nextRunAt": "2026-09-16T03:55:42.096608+00:00",
+    "lastRunAt": null,
+    "lastTaskId": null,
+    "recentTaskIds": [],
+    "lastSkip": {
+      "at": "2026-09-16T03:50:42.415+00:00",
+      "reason": "busy",
+      "skipped": 0
+    },
+    "createdBy": "user",
+    "createdAt": "2026-09-16T03:45:42.096+00:00",
+    "updatedAt": "2026-09-16T03:54:20.637+00:00"
+  },
+  {
+    "id": "sch_825bcdce477e4172",
+    "botId": "bot_227696ee9f034ce1",
+    "prompt": "占位 10",
+    "rule": {
+      "kind": "interval",
+      "everySeconds": 300
+    },
+    "timezone": "Asia/Singapore",
+    "enabled": false,
+    "overlapPolicy": "skip",
+    "nextRunAt": "2026-09-16T03:55:42.115180+00:00",
+    "lastRunAt": null,
+    "lastTaskId": null,
+    "recentTaskIds": [],
+    "lastSkip": {
+      "at": "2026-09-16T03:50:42.416+00:00",
+      "reason": "busy",
+      "skipped": 0
+    },
+    "createdBy": "user",
+    "createdAt": "2026-09-16T03:45:42.115+00:00",
+    "updatedAt": "2026-09-16T03:54:20.642+00:00"
+  },
+  {
+    "id": "sch_a39498df1e8e49db",
+    "botId": "bot_227696ee9f034ce1",
+    "prompt": "占位 11",
+    "rule": {
+      "kind": "interval",
+      "everySeconds": 300
+    },
+    "timezone": "Asia/Singapore",
+    "enabled": false,
+    "overlapPolicy": "skip",
+    "nextRunAt": "2026-09-16T03:55:42.134415+00:00",
+    "lastRunAt": null,
+    "lastTaskId": null,
+    "recentTaskIds": [],
+    "lastSkip": {
+      "at": "2026-09-16T03:50:42.416+00:00",
+      "reason": "busy",
+      "skipped": 0
+    },
+    "createdBy": "user",
+    "createdAt": "2026-09-16T03:45:42.134+00:00",
+    "updatedAt": "2026-09-16T03:54:20.647+00:00"
+  },
+  {
+    "id": "sch_7d3660aa754848a4",
+    "botId": "bot_227696ee9f034ce1",
+    "prompt": "占位 12",
+    "rule": {
+      "kind": "interval",
+      "everySeconds": 300
+    },
+    "timezone": "Asia/Singapore",
+    "enabled": false,
+    "overlapPolicy": "skip",
+    "nextRunAt": "2026-09-16T03:55:42.172043+00:00",
+    "lastRunAt": null,
+    "lastTaskId": null,
+    "recentTaskIds": [],
+    "lastSkip": {
+      "at": "2026-09-16T03:50:42.416+00:00",
+      "reason": "busy",
+      "skipped": 0
+    },
+    "createdBy": "user",
+    "createdAt": "2026-09-16T03:45:42.172+00:00",
+    "updatedAt": "2026-09-16T03:54:20.653+00:00"
+  },
+  {
+    "id": "sch_f3f2ee7ff04946b2",
+    "botId": "bot_227696ee9f034ce1",
+    "prompt": "占位 13",
+    "rule": {
+      "kind": "interval",
+      "everySeconds": 300
+    },
+    "timezone": "Asia/Singapore",
+    "enabled": false,
+    "overlapPolicy": "skip",
+    "nextRunAt": "2026-09-16T03:55:42.192077+00:00",
+    "lastRunAt": null,
+    "lastTaskId": null,
+    "recentTaskIds": [],
+    "lastSkip": {
+      "at": "2026-09-16T03:50:42.416+00:00",
+      "reason": "busy",
+      "skipped": 0
+    },
+    "createdBy": "user",
+    "createdAt": "2026-09-16T03:45:42.192+00:00",
+    "updatedAt": "2026-09-16T03:54:20.658+00:00"
+  },
+  {
+    "id": "sch_eb0b41b9e4ea47d3",
+    "botId": "bot_227696ee9f034ce1",
+    "prompt": "占位 14",
+    "rule": {
+      "kind": "interval",
+      "everySeconds": 300
+    },
+    "timezone": "Asia/Singapore",
+    "enabled": false,
+    "overlapPolicy": "skip",
+    "nextRunAt": "2026-09-16T03:55:42.208438+00:00",
+    "lastRunAt": null,
+    "lastTaskId": null,
+    "recentTaskIds": [],
+    "lastSkip": {
+      "at": "2026-09-16T03:50:42.416+00:00",
+      "reason": "busy",
+      "skipped": 0
+    },
+    "createdBy": "user",
+    "createdAt": "2026-09-16T03:45:42.208+00:00",
+    "updatedAt": "2026-09-16T03:54:20.664+00:00"
+  },
+  {
+    "id": "sch_7a5bf5bf895e4ff3",
+    "botId": "bot_227696ee9f034ce1",
+    "prompt": "占位 15",
+    "rule": {
+      "kind": "interval",
+      "everySeconds": 300
+    },
+    "timezone": "Asia/Singapore",
+    "enabled": false,
+    "overlapPolicy": "skip",
+    "nextRunAt": "2026-09-16T03:55:42.224984+00:00",
+    "lastRunAt": null,
+    "lastTaskId": null,
+    "recentTaskIds": [],
+    "lastSkip": {
+      "at": "2026-09-16T03:50:42.416+00:00",
+      "reason": "busy",
+      "skipped": 0
+    },
+    "createdBy": "user",
+    "createdAt": "2026-09-16T03:45:42.224+00:00",
+    "updatedAt": "2026-09-16T03:54:20.669+00:00"
+  },
+  {
+    "id": "sch_8b03168968d54e8c",
+    "botId": "bot_227696ee9f034ce1",
+    "prompt": "占位 16",
+    "rule": {
+      "kind": "interval",
+      "everySeconds": 300
+    },
+    "timezone": "Asia/Singapore",
+    "enabled": false,
+    "overlapPolicy": "skip",
+    "nextRunAt": "2026-09-16T03:55:42.241432+00:00",
+    "lastRunAt": null,
+    "lastTaskId": null,
+    "recentTaskIds": [],
+    "lastSkip": {
+      "at": "2026-09-16T03:50:42.416+00:00",
+      "reason": "busy",
+      "skipped": 0
+    },
+    "createdBy": "user",
+    "createdAt": "2026-09-16T03:45:42.241+00:00",
+    "updatedAt": "2026-09-16T03:54:20.674+00:00"
+  },
+  {
+    "id": "sch_d6639570bb0644a5",
+    "botId": "bot_227696ee9f034ce1",
+    "prompt": "占位 17",
+    "rule": {
+      "kind": "interval",
+      "everySeconds": 300
+    },
+    "timezone": "Asia/Singapore",
+    "enabled": false,
+    "overlapPolicy": "skip",
+    "nextRunAt": "2026-09-16T03:55:42.256582+00:00",
+    "lastRunAt": null,
+    "lastTaskId": null,
+    "recentTaskIds": [],
+    "lastSkip": {
+      "at": "2026-09-16T03:50:42.416+00:00",
+      "reason": "busy",
+      "skipped": 0
+    },
+    "createdBy": "user",
+    "createdAt": "2026-09-16T03:45:42.256+00:00",
+    "updatedAt": "2026-09-16T03:54:20.681+00:00"
+  },
+  {
+    "id": "sch_82c2927315004ee1",
+    "botId": "bot_227696ee9f034ce1",
+    "prompt": "占位 18",
+    "rule": {
+      "kind": "interval",
+      "everySeconds": 300
+    },
+    "timezone": "Asia/Singapore",
+    "enabled": false,
+    "overlapPolicy": "skip",
+    "nextRunAt": "2026-09-16T03:55:42.272115+00:00",
+    "lastRunAt": null,
+    "lastTaskId": null,
+    "recentTaskIds": [],
+    "lastSkip": {
+      "at": "2026-09-16T03:50:42.416+00:00",
+      "reason": "busy",
+      "skipped": 0
+    },
+    "createdBy": "user",
+    "createdAt": "2026-09-16T03:45:42.272+00:00",
+    "updatedAt": "2026-09-16T03:54:20.686+00:00"
+  },
+  {
+    "id": "sch_68454ba4353f45f5",
+    "botId": "bot_227696ee9f034ce1",
+    "prompt": "占位 19",
+    "rule": {
+      "kind": "interval",
+      "everySeconds": 300
+    },
+    "timezone": "Asia/Singapore",
+    "enabled": false,
+    "overlapPolicy": "skip",
+    "nextRunAt": "2026-09-16T03:55:42.289793+00:00",
+    "lastRunAt": null,
+    "lastTaskId": null,
+    "recentTaskIds": [],
+    "lastSkip": {
+      "at": "2026-09-16T03:50:42.416+00:00",
+      "reason": "busy",
+      "skipped": 0
+    },
+    "createdBy": "user",
+    "createdAt": "2026-09-16T03:45:42.289+00:00",
+    "updatedAt": "2026-09-16T03:54:20.691+00:00"
+  }
+]

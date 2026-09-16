@@ -69,9 +69,13 @@ Bot 设置里的自动记忆、单轮记忆预算和“整理阈值”可调整�
 
 ## 定时与自动唤醒
 
-任务可以带有带时区的 `runAt`。当时间到达且目标 Bot 的 `wakeEnabled` 为 `true`，Pilot 调度器会把任务从 `scheduled` 转为可执行状态。关闭自动唤醒后，计划任务不会被后台自动启动，可以手动唤醒。
+定时是独立的 `schedule` 实体，不是 task 上的一次性字段：它带 `rule`（`once` / `interval` / `daily` / `weekly`）、必填的 IANA `timezone`、单条 `enabled` 开关和 `overlapPolicy`（`skip` / `queue`）。到点时调度器**新建一个 task**（`status=queued`），所以每次运行都有独立的 transcript、成果和结果。修改或删除 schedule 不会删除已经跑出来的 task；`once` 触发过一次后 `nextRunAt=null`，记录保留到用户删除。
 
-自动唤醒只发生在 MMS 服务进程和当前电脑都保持运行时。它不会开机、唤醒睡眠中的电脑，也不保证无人值守网页登录、验证码或账号会话始终有效。
+`wakeEnabled` 是这个 Bot 所有 schedule 的总开关：关闭后不触发，但 `nextRunAt` 仍按规则推进（不攒起来以后补，也不写“已跳过”提示）。单条 schedule 的 `enabled` 与它是两层，任一为 false 就不触发。
+
+周期任务不补课：停机（Pilot 没开、进程重启）期间错过超过一个周期就只把 `nextRunAt` 推到下一个未来时刻，并在 schedule 的 `lastSkip` 和（若已有上一轮任务）system 消息里记下跳过次数，不会把积压的触发全部补跑；恰好错过一次才立即补上。`interval` 的下一次永远从本该触发的时刻算起（`previous + everySeconds`），不会被每次触发的微小延迟带偏；“每天 9 点”在夏令时切换日仍然是本地 9:00。
+
+**边界：Pilot 是本机进程，它不运行就不触发。** 不做 launchd / systemd / 开机自启；它也不会唤醒睡眠中的电脑，不保证无人值守网页登录、验证码或账号会话始终有效。
 
 默认最多同时运行 3 个任务。调度器会让不同 workspace 的任务并行，并让同一 Bot 或同一 workspace 的任务串行。这是协调规则，不是操作系统级沙箱：Bot 使用当前用户权限，workspace 之间不能被当作安全隔离边界。
 
@@ -79,7 +83,7 @@ Bot 设置里的自动记忆、单轮记忆预算和“整理阈值”可调整�
 
 Pi Bot 在 worker 中执行 `screenshot` 后，截图会保存为 task-private artifact。列表只返回成果元数据和受保护的内容 URL；裸本地路径不会通过 HTTP 读取，路径越界、文件改变或大小超过限制都会失败。图片内容通过 `/api/v1/tasks/:taskId/artifacts/:artifactId/content` 读取，服务端会按 artifact 的 hash 和目录边界复核。
 
-重启时，原来处于 `starting` 或 `running` 的任务会标为 `interrupted`，不会自动重放可能已经提交的副作用；`scheduled` 任务保留计划时间，服务恢复后按 `wakeEnabled` 再调度。继续 interrupted 任务必须由用户显式唤醒，继续提示会要求先检查已有记录和成果。如果记录中的原进程仍存在，会保留工作目录占用并阻止重复启动；不会按不明 PID 杀进程。外部副作用仍需按成果核验，不能保证任意外部系统 exactly-once。
+重启时，原来处于 `starting` 或 `running` 的任务会标为 `interrupted`，不会自动重放可能已经提交的副作用；schedule 表和 `nextRunAt` 原样保留，服务恢复后第一次 `tick` 按上面的“不补课”规则处理。旧记录里仍是 `scheduled` 状态、带 `runAt` 的 task 会在加载时迁移成一条 `once` schedule，那个 task 本身转成 `waiting / waitReason=manual`（不再卡在无法唤醒的状态）。继续 interrupted 任务必须由用户显式唤醒，继续提示会要求先检查已有记录和成果。如果记录中的原进程仍存在，会保留工作目录占用并阻止重复启动；不会按不明 PID 杀进程。外部副作用仍需按成果核验，不能保证任意外部系统 exactly-once。
 
 ## HTTP 简表
 
@@ -97,7 +101,12 @@ Pi Bot 在 worker 中执行 `screenshot` 后，截图会保存为 task-private a
 | POST | `/bots/:botId/delete` | 删除 Bot 身份、该 Bot 的聊天任务、记忆、协作消息和截图成果；执行中或协作中的任务会拒绝删除 |
 | POST | `/bots/:botId/memory` | `remember`/`forget` 一条记忆；正文为 `{ "action": "remember", "content": "..." }` |
 | POST | `/bots/:botId/communications/:messageId/wake` | 手动继续投递处于等待状态的协作消息 |
-| POST | `/bots/:botId/tasks` | 给指定 Bot 创建任务 |
+| POST | `/bots/:botId/tasks` | 给指定 Bot 创建任务；带 `runAt` 时不再建 task，而是建一条 `once` schedule（响应带 `kind: "task" \| "schedule"` 区分） |
+| GET | `/bots/:botId/schedules` | 该 Bot 的全部定时 |
+| POST | `/bots/:botId/schedules` | 新建定时：`prompt`、`rule`、可选 `timezone`（缺省写回本机时区）、`overlapPolicy` 与 `requestId` |
+| POST | `/bots/:botId/schedules/:scheduleId` | 修改 `prompt` / `rule` / `timezone` / `overlapPolicy`；改 rule 或 timezone 会从当前时间重算 `nextRunAt` |
+| POST | `/bots/:botId/schedules/:scheduleId/enable` \| `/disable` | 启停单条定时 |
+| POST | `/bots/:botId/schedules/:scheduleId/delete` | 删除定时；已产生的 task 保留 |
 | GET | `/bots/notifications?since=<iso>` | 拉取任务事件（完成/失败/等待/重试），`since` 之后的事件 |
 | GET / POST | `/bots/notifications/config` | 读取或写入 webhook 列表（`state_root/bots/notify.json`） |
 | GET | `/tasks`、`/tasks/:id` | 查询任务 |
@@ -219,3 +228,40 @@ Webhook 配置保存在 `state_root/bots/notify.json`，形状为 `{"webhooks": 
 `GET /api/v1/bots` 的每个 Bot 带派生字段 `pendingQuestion`：`{taskId, question, options, since} | null`，取该 Bot 最新一条带问题的 `waiting/user` 任务；`waitQuestion` 为空的旧记录不点亮它，因此历史脏数据不再让侧栏显示“等待你补充信息”却点不出问题。回复走 `POST /api/v1/tasks/:id/wait`，`{"action": "answer", "text": "..."}` 复用普通消息路径恢复任务（等价于在聊天里发一句话），`{"action": "dismiss"}` 直接把任务按 `completed` 收尾并记 `waitDismissed=true`；`waiting/user` 超过 7 天未回复会在 `tick` 中自动结束，结果文本为“等待超时，已结束”。启动加载时会把旧 `waiting/user` 记录补上 `waitSince`，并从进度文本回填 `waitQuestion`（套不出问题的置空）。
 
 记忆摘要只在任务有长期价值时写入：`outcome` 有结构化结论（`# 结论`）或 `changes`、任务有 artifacts、或结果文本 ≥ 120 字且不是“收到/明白/已发送/沟通完毕/无待办/先候着”这类确认。纯 peer 消息任务（有 mailbox 消息、无 artifacts、无结构化结论）一律不写，避免问候和收尾确认占满记忆。
+
+## v2.6 定时实体（schedule）
+
+定时从 task 上的 `runAt` 字段改成独立实体，作用是真正的周期调度，而不是“定时发送一次”。
+
+### 数据模型与规则
+
+```
+schedule: {
+  id, botId, prompt, timezone,
+  rule: {kind: "once", at}                                  # 带时区的 ISO8601
+      | {kind: "interval", everySeconds}                    # 整数秒，最小 300
+      | {kind: "daily", atLocalTime}                        # "HH:MM"，24 小时制
+      | {kind: "weekly", weekday, atLocalTime},             # weekday 0=周一 … 6=周日
+  enabled, overlapPolicy: "skip" | "queue",
+  nextRunAt, lastRunAt, lastTaskId, recentTaskIds,          # recentTaskIds 上限 10
+  lastSkip: {at, reason, skipped} | null,
+  createdBy: "user" | "bot", createdAt, updatedAt
+}
+```
+
+- `timezone` 必填且总是显式保存。REST 缺省时后端取服务器本机时区（`zoneinfo`，不新增依赖）并写回 schedule；未识别的名字返回 `INVALID_TIMEZONE`（400），不是 500。
+- `rule.kind` 只支持上面四种；未知 kind 返回 `INVALID_SCHEDULE_RULE`（400），不会被静默当成 `once`。本次不做 cron。
+- 限额：`interval.everySeconds` 最小 300（`SCHEDULE_INTERVAL_TOO_SHORT`，400，“定时间隔最短 5 分钟。”），单个 Bot 最多 20 条（`SCHEDULE_LIMIT`，409，“一个 Bot 最多 20 条定时。”）。找不到/不属于该 Bot 的 id 返回 `SCHEDULE_NOT_FOUND`（404）。这条限额是为了防止“每 10 秒”把模型额度烧干。
+- `nextRunAt` 的值只从规则推进：`interval` 用 `previous + everySeconds`，`daily`/`weekly` 把本地时刻投到下一个未来日期。触发的微小延迟不会累积成漂移；`daily 09:00` 在夏令时切换日仍是本地 09:00（被跳过的本地时刻取切换后的第一个有效时刻，重复的本地时刻取第一次出现）。
+- 关闭单条 `enabled` 或 Bot 级 `wakeEnabled` 时都不触发，但 `nextRunAt` 照规则推进；总闸关闭不写“已跳过”提示。
+
+### 重叠与错过
+
+- 默认 `overlapPolicy = "skip"`：到点时上一轮还在跑就跳过这一轮，把 `nextRunAt` 推到下一次，并在 schedule 的 `lastSkip` 里记录；如果已有上一轮 task，同时在该 task 上写一条 system 消息。判定复用调度器已有的 busy 语义（有 `starting`/`running` task，或 `waiting` 且 `waitReason` 不在 `{children, manual, user, plan-approval}`，或 `orphanAlive`）。`"queue"` 是显式选项，照常新建 task，由现有队列逻辑排队。
+- 错过：只补“还在一个周期内”的那一次；超过一个周期就不补，只把 `nextRunAt` 推到下一个未来时刻并记录跳过次数。`once` 错过就直接触发一次，触发后 `nextRunAt=null`，记录不自动删除（UI 可以显示“已执行完”并允许删除）。
+
+### 结果送达与 CLI
+
+- schedule 触发产生的 task 带 `scheduleId`，走正常 `_finish` 路径，因此完成/失败事件照常进入 `notifications.json`，payload 里多一个 `scheduleId` 字段；不新增 `EVENT_TYPES`，“跳过”用 system 消息而不是通知。
+- Bot 自己的子命令（`bot_client.py`）：`schedule create <prompt...> --every 3h|180m|10800s | --daily HH:MM | --weekly mon..sun HH:MM | --once ISO8601 [--overlap skip|queue] [--timezone IANA]`、`schedule list`、`schedule pause|resume|delete <schedule_id>`。Bot 只能操作自己（当前 task 的 `botId`）名下的 schedule，越界返回 `BOT_SCOPE`（403）。
+- Bot 提示词里的命令清单由 `bot_client.py` 的 argparse 注册信息生成（`command_catalog_text()`），不再手写，避免“能力存在但 Bot 不知道”。行为性指示（先 list 再 dispatch、不要循环轮询、`complete` 不是用户验收等）仍手写。

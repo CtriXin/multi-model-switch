@@ -1,0 +1,2 @@
+{"error": {"code": "SCHEDULE_LIMIT", "message": "一个 Bot 最多 20 条定时。"}}
+HTTP 409
