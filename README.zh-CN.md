@@ -50,19 +50,25 @@ v4 各版累积下来的能力：
 
 边界：只监听本机地址，没有远程多用户认证，配置隔离不等于文件系统 sandbox。要给别人用，让对方在自己机器上安装并使用自己的模型服务。
 
-## 版本通道：Stable / Dev / Canary
+## 版本通道：两条发布线
 
-我们采用类似 Chrome 的三通道策略，并把 branch / channel / 入口语义固定下来：
+从 2026-09-16 起，`main` 和 `dev` 是**两条长期并行的发布线**，不再互相追赶：
 
-| 通道 | 固定关系 | 安装命令 | 适合谁 | 更新节奏 | 质量预期 |
+| 线 | 分支 | 版本 | 安装命令 | 适合谁 | 里面有什么 |
 |---|---|---|---|---|---|
-| Stable | `Stable == main` | `--channel stable` | 普通用户、主力生产环境 | 慢，最终固定到 `main` | 纯稳定上线版本，完整 smoke 后推进 |
-| Dev | `Dev == dev branch == MMF/mmf` | `--channel dev` | 作者自己的日常工作机、需要最新修复的人 | 快，跟随 `dev` 分支 | 开发中稳定，targeted tests 通过 |
-| Canary | `Canary == canary branch == MMG/mmg` | `--channel canary` | 每天测试的实验机器 / session | 最快，可每日同步 | 小步高频 commit，允许短期破，但必须方便回滚 |
+| 稳定线 | `main` | 4.22.x | `--channel stable`（默认） | 所有把它当日常工具用的人 | 已经坐稳的功能。新版本只收修复和验证过的能力 |
+| 预览线 | `dev` | 5.x | `--channel dev` | 愿意试新东西、能接受波动的人 | 稳定线的全部内容，外加还在打磨的 Bot 工作台 |
+| Canary | `canary` | 跟随 `canary` 分支 | `--channel canary` | 专门验证某个修复的人 | 小步高频，允许短期破 |
 
-分支约定见 [`docs/RELEASE_CHANNELS.md`](docs/RELEASE_CHANNELS.md)。除非人类明确要求改 release/channel contract，否则不要再重命名、重映射或混用这些关系。当前过渡期：`main` 会和 `dev` 同步一段时间；等 Stable 追到当前能力后，`main` 固定为 Stable/default，不再当日常 Dev 使用。开发过程中发现的 bug 会先修复，再进入 Stable。
+改动的流向是固定的：**`main` 上的每一处改动都默认进入 `dev`；`dev` 上稳定下来的能力再定期回流 `main`。** 所以预览线永远是稳定线的超集。
 
-v4.0.0 是 MMS Pilot 的首个大版本，之后 4.x 沿 Dev 继续推进。下列 3.x 轨道为此前分支发布历史，不代表 v4 已晋级各分支：Stable/Main `3.4.z`、Dev `3.5.z`、Canary `3.6.z`。`z` 是各 channel 内的 release 计数：单 commit release 就 `z+1`，复合多个已验证 commits 的 release 也只 bump 一次；未 tag 的日常小步 commit 继续用 git hash 追踪。
+两条线在同一台机器上**不能共存**。要换线，重跑安装器并带上对应的 `--channel`；配置、通道和会话历史都在同一个 config root（`~/.config/mms-next`）里，换线不会清空它们。
+
+> **注意**：目前只能从终端重跑安装器换线，Pilot 的更新入口里还没有"切到预览线"的开关。这是已知缺口，不是设计如此。
+
+分支约定见 [`docs/RELEASE_CHANNELS.md`](docs/RELEASE_CHANNELS.md)。
+
+v4.0.0 是 MMS Pilot 的首个大版本。4.x 现在是稳定线（`main`），5.x 是预览线（`dev`）。下列 3.x 轨道为此前分支发布历史，不代表 v4 已晋级各分支：Stable/Main `3.4.z`、Dev `3.5.z`、Canary `3.6.z`。`z` 是各 channel 内的 release 计数：单 commit release 就 `z+1`，复合多个已验证 commits 的 release 也只 bump 一次；未 tag 的日常小步 commit 继续用 git hash 追踪。
 
 当前本机维护者命令已固定：`mms` 是 public installed copy，只用于公开版本复现；`mmf` 指 dev worktree；`mmg` 指 canary worktree。`mmd` / `mmm` 已退休。唯一的 config root 是 `~/.config/mms-next`，`mms` / `mmf` / `mmg` 和 Pilot 网页都落在它上面；legacy `~/.config/mms` 不再被任何入口读取。重新生成本机命令用 `scripts/link_local_channel_commands.sh`。
 
@@ -107,7 +113,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel canary
 
 # 固定到某个 release 或分支
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref v4.2.1
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref v4.22.2
 curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref main
 
 # 不打开 Web 端，也不改 shell 配置（CI、脚本）
