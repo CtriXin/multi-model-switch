@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Settings2, X, Plus, Trash2, Check, LoaderCircle } from "lucide-react";
 import type { BotDefinition } from "./Bot";
 import {
@@ -91,14 +91,18 @@ export function BotPresetPanel({
   const [saved, setSaved] = useState("");
   const [error, setError] = useState("");
 
+  const panelRef = useRef<HTMLElement>(null);
+  const initialPromptRef = useRef(bot.systemPrompt || "");
+
   useEffect(() => {
     const parsed = parsePreset(bot.systemPrompt || "");
     setAnswers(parsed.answers || {});
     setRules(parsed.rules || []);
     setOther(parsed.other || "");
+    initialPromptRef.current = bot.systemPrompt || "";
     setSaved("");
     setError("");
-  }, [bot.id]);
+  }, [bot.id, bot.systemPrompt]);
 
   const handleSave = async () => {
     if (preview || !onUpdateBot) return;
@@ -112,6 +116,7 @@ export function BotPresetPanel({
         other,
       });
       await onUpdateBot(bot.id, { systemPrompt: prompt });
+      initialPromptRef.current = prompt;
       setSaved("工作预设已保存");
       setTimeout(() => setSaved(""), 3000);
     } catch (cause) {
@@ -188,8 +193,71 @@ export function BotPresetPanel({
 
   const extraEntries = Object.entries(answers.extra || {});
 
+  const currentPrompt = useMemo(() => {
+    return buildPreset({
+      answers,
+      rules,
+      other,
+    });
+  }, [answers, rules, other]);
+
+  const isDirty = useMemo(() => {
+    if (newRule.trim() || newExtraKey.trim() || newExtraVal.trim()) {
+      return true;
+    }
+    return currentPrompt !== initialPromptRef.current;
+  }, [currentPrompt, newRule, newExtraKey, newExtraVal]);
+
+  const isDirtyRef = useRef(isDirty);
+  isDirtyRef.current = isDirty;
+
+  const handleClose = () => {
+    if (isDirtyRef.current) {
+      const discard =
+        typeof window !== "undefined" && typeof window.confirm === "function"
+          ? window.confirm("当前工作预设已修改，确定要放弃未保存的修改并关闭吗？")
+          : true;
+      if (discard) {
+        onClose();
+      }
+    } else {
+      onClose();
+    }
+  };
+
+  useEffect(() => {
+    const handlePointerDown = (e: PointerEvent) => {
+      const panel = panelRef.current;
+      if (!panel) return;
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+
+      if (panel.contains(target)) return;
+
+      if (target.closest?.('[aria-label="调整工作预设"], [title="工作预设"]')) {
+        return;
+      }
+
+      handleClose();
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        handleClose();
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onClose]);
+
   return (
-    <aside className="bot-memory-panel bot-preset-panel" aria-label={`${bot.name} 的工作预设`}>
+    <aside ref={panelRef} className="bot-memory-panel bot-preset-panel" aria-label={`${bot.name} 的工作预设`}>
       <div className="bot-memory-heading">
         <div className="bot-memory-title">
           <span className="bot-memory-icon" aria-hidden="true">
@@ -203,7 +271,7 @@ export function BotPresetPanel({
         <button
           className="bot-memory-icon-button"
           type="button"
-          onClick={onClose}
+          onClick={handleClose}
           aria-label="关闭预设面板"
           title="关闭"
         >

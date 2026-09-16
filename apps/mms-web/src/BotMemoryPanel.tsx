@@ -407,8 +407,41 @@ export function BotMemoryPanel({
 
   const notes = view?.notes || [];
   const context = view?.context;
+  const panelRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const handlePointerDown = (e: PointerEvent) => {
+      const panel = panelRef.current;
+      if (!panel) return;
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+
+      if (panel.contains(target)) return;
+
+      if (target.closest?.('[aria-label="打开记忆面板"], [title="记忆"]')) {
+        return;
+      }
+
+      onClose();
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onClose]);
+
   return (
-    <aside className="bot-memory-panel" aria-label={`${bot.name} 的记忆`}>
+    <aside ref={panelRef} className="bot-memory-panel" aria-label={`${bot.name} 的记忆`}>
       <div className="bot-memory-heading">
         <div className="bot-memory-title">
           <span className="bot-memory-icon" aria-hidden="true">

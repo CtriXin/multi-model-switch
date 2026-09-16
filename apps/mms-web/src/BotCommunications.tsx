@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, ArrowRight, FileText, LoaderCircle, MessageSquare, X, Zap } from "lucide-react";
 import { RichText } from "./components";
 import { request } from "./api";
@@ -327,8 +327,41 @@ export function BotCommunications({
     }
   }
 
+  const panelRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const handlePointerDown = (e: PointerEvent) => {
+      const panel = panelRef.current;
+      if (!panel) return;
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+
+      if (panel.contains(target)) return;
+
+      if (target.closest?.('[aria-label="打开协作面板"], [title="协作"]')) {
+        return;
+      }
+
+      onClose?.();
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onClose?.();
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onClose]);
+
   return (
-    <aside className="bot-communications-panel" aria-label={`${bot.name} 的协作`}>
+    <aside ref={panelRef} className="bot-communications-panel" aria-label={`${bot.name} 的协作`}>
       <div className="bot-communications-heading">
         <div className="bot-communications-title">
           <span className="bot-communications-icon" aria-hidden="true">
