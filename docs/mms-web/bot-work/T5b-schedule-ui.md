@@ -384,3 +384,73 @@ composer：
 6. **`docs/mms-web/DESIGN.md` 不存在**（2026-09-16 在 `77f2fd8a` 复核），实际文件是 `apps/mms-web/DESIGN.md`（T1e / T1f / T2c / T3c 里的路径已过期）。本包用后者。
 8. **`parseBotSettingCommand` 的调用点不在它自己里。** 它只 `return { patch, message }`，真正的 `onUpdateBot(bot.id, setting.patch)` 在 `Bot.tsx` **1902** 行、`sendMessage` 内。这条是 T5c 的范围，本包不动，但改 `sendMessage` 的提交逻辑时会撞到同一个函数体，见"与近期改动的冲突面"。
 7. **"共 3 条""定时已暂停""自动唤醒已关闭"这些第二行文案是本包自拟的**，设计里只给了"每天 09:00 · 下次 明天 09:00"一种形状和"要处理 enabled=false"的要求。如果 owner 对措辞有偏好，在验收时一并给回。
+
+---
+
+# 追加（2026-09-16，T5a 独立验收之后）
+
+T5a（#278）已经过独立验收：**周期调度是真周期**（实测两次真实触发，`nextRunAt` 推进 300.000000 秒零漂移，连续 14 次正常）、**旧的一次性 `runAt` 取巧路径真删干净了**（`grep '"scheduled"' mms_web/*.py` 没有任何代码路径再把 task 置成 `scheduled`）、**Bot 的提示词里真的列出了 schedule 子命令**（`command_catalog_text()` 生成 20 条，并且有一条门禁测试盯着"新增子命令必须进清单"，变异实测为红）。所以 T5b 可以按 T5a 已定的 API 形状写，不用担心地基会变。
+
+但验收查出四条 T5a 侧的问题，deepseek 正在修。其中两条**直接改变 T5b 的做法**。
+
+## A. 从修好之后的 T5a HEAD 开分支
+
+`bot/T5a-schedule-backend` 会再推一次。**等它推完再开分支**，否则你会基于一份已知有数据丢失缺陷的后端写 UI。四条分别是：
+
+- **P1（必须改）**：`once` 定时在 Bot「自动唤醒关闭」或 schedule「暂停中」到点时，**被永久吃掉且不留任何痕迹**（`nextRunAt=None, lastRunAt=None, lastSkip=None`，tasks 0）。修法已定：未 armed 时不消耗 `once`，保留 `nextRunAt` 并写 `lastSkip{reason:"paused"}`，重新 armed 之后的下一个 tick 补触发一次。
+- **P2**：迁移在 Bot 已有 20 条 schedule 时静默丢定时，并写了一条假消息（"原来的定时已迁移成独立的定时"）。按实际结果分支写消息。
+- **P3**：`POST /bots/:id/schedules/:sid` **静默忽略 body 里的 `enabled`**（实测返回 200 但值没变）。已定：改成**显式报错**，启停只走 `/enable` `/disable`。
+- **P4**：提示词门禁测试加 `assert len(names) >= 20`，防止 argparse 私有属性失效后变成空断言。
+
+**P3 直接是你的事**：管理列表里的暂停/恢复**只能**调 `/enable` `/disable`，不许在编辑 schedule 的 POST body 里塞 `enabled`。那条路现在会报错，以前是静默吞掉——两种都不会生效。
+
+## B. `wakeEnabled` 默认值那条从"顺带修正"升级为"必须修"
+
+包正文第 220-228 行把 `BotStudio.tsx:138` 的 `useState(bot?.wakeEnabled || false)` 写成了"顺带看一眼既存不一致"。**降级判断错了，它是承重的。**
+
+后端 `create_bot` 默认 `wakeEnabled=True`，`BotStudio.tsx` 845/859 新建时也显式传 `true`。但 138 行的 `|| false` 意味着：**用户打开 Bot 编辑器改任何一项设置（改名、改描述、改系统提示词、换预设），保存时都会把 `wakeEnabled` 一起写成 `false`** —— 因为 958-964 行那个 POST 是**整对象覆盖式**的。
+
+叠上 T5a 的 P1，净效果是：**用户改一次 Bot 名字，这个 Bot 名下所有待触发的一次性定时全部无声报废。** 而 `create_task(runAt=...)` 和旧记录迁移产出的都是 `once`，所以旧用户升级后那批定时正好落在这条路径上。
+
+所以：
+
+- 138 行改成与后端一致（`bot?.wakeEnabled ?? true`）。
+- **补一条测试锁住它**：构造一个 `wakeEnabled: true` 的 bot，走一次"只改名字"的保存，断言提交的 payload 里 `wakeEnabled` 仍然是 `true`。没有这条测试，这个缺陷随时会被下一次重构放回来。
+- 顺带确认 953-980 的 `AutoWakeControl` 保存路径和 1078-1086 的 patch 式路径**不要混用**（包正文第 51 行已经点出这两条路径不同）。
+
+## C. UI 必须能区分「执行过了」和「被跳过了」
+
+T5a 的 schedule 记录里有 `lastRunAt`、`lastSkip{reason, skipped}` 两组字段。已知的 reason 至少有 `missed`（进程没开着，错过 N 次，不补发）、`paused`（P1 修好之后的新值）、`invalid`（`sanitize_schedules` 对坏行保留并停用）。
+
+**这三种在列表里必须看得出区别，而且不能和"已执行完"混在一起。** 这是 P1 之所以严重的原因——在 UI 上 `lastRunAt=null / lastSkip=null` 和"从来没到过点"长得一模一样。
+
+另外这几条是 T5a 已实测确认的实际行为，UI 要如实反映，不要自己另编一套说法：
+
+- 暂停期间 `interval/daily/weekly` 的 `nextRunAt` **继续推进**，恢复后**不补跑**（这是对的，别显示成"欠了 N 次"）。
+- 编辑 `rule` 或 `timezone` 会从**现在**重算 `nextRunAt`；只改 `overlapPolicy` 不动 `nextRunAt`。
+- `--once` 传一个已经过去的时间：允许创建，**下一 tick 立即补触发一次**。创建成功的提示要说明这一点。
+- 跳过/错过的说明消息挂在**上一轮 task** 上；没有上一轮时只有 `lastSkip` 字段、没有消息——这种情况列表是唯一的出口。
+- 同一个 Bot 的两条 schedule 在同一 tick 同时到点，即使都是 `overlapPolicy:"skip"` 也会各建一个 task（它们会自然排队，无害）。不要在 UI 上说成"重叠会被跳过"。
+
+## D. 变异测试（硬要求，本轮新增）
+
+交付之前，自己把核心改动**逐处撤销**，确认对应的测试**变红**。撤销之后还全绿的，说明那条测试没测到东西，要重写。
+
+至少要覆盖：
+
+- 把 `BotStudio.tsx:138` 改回 `|| false` → **必须红**（B 里要求的那条测试）。
+- 把 composer 定时控件的 rule 构造改坏（比如 `every` 的单位换算）→ **必须红**。
+- 把管理列表的暂停/恢复改成走编辑 POST 而不是 `/enable` `/disable` → **必须红**。
+- 把 `lastSkip` 的三种 reason 在列表里的区分删掉 → **必须红**。
+
+把每一条变异和它的实际输出贴进交付。**这一段没有的交付直接退回。**
+
+理由：这一批已经反复出现"把核心修复整个撤销，测试仍然全绿"——测试只测了纯函数，没锁住真正决定行为的那一层。`node --test` 全绿不等于测到了。
+
+## E. 交付里额外要回答的
+
+在包正文「交付格式」的基础上补这几条：
+
+- B 那条测试的实际断言和变异结果。
+- C 里三种 `lastSkip.reason` 在列表里分别长什么样（截图）。
+- 你基于的 T5a HEAD 是哪个 commit，P1–P4 是否都已经在里面。
