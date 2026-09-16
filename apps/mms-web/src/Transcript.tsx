@@ -102,7 +102,7 @@ export function evaluateTurnReplySlot({
   return { slot: "empty" };
 }
 
-function Turn({events, completed, forced, report, steered, isLatestTurn, isSteered, onResend, ...props}: Props & {
+export function Turn({events, completed, forced, report, steered, isLatestTurn, isSteered, onResend, ...props}: Props & {
   events: SessionEvent[]; completed: boolean; forced: {collapsed: boolean; revision: number} | null;
   report: (id: string, collapsed: boolean) => void;
   steered: Map<string, string>;

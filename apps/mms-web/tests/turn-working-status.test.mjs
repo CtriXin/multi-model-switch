@@ -49,6 +49,8 @@ const {
   BUSY_PHASES,
 } = statusMod.exports;
 
+import { renderToStaticMarkup } from "react-dom/server";
+
 // Load Transcript module
 const transcriptFile = path.resolve(__dirname, "../src/Transcript.tsx");
 const transcriptSource = fs.readFileSync(transcriptFile, "utf-8");
@@ -59,23 +61,32 @@ const transcriptTranspiled = esbuild.transformSync(transcriptSource, {
 
 const transcriptMod = { exports: {} };
 const transcriptSandbox = {
+  React,
   module: transcriptMod,
   exports: transcriptMod.exports,
   require: (req) => {
     if (req === "react") return React;
     if (req === "lucide-react") return {
-      ChevronRight: () => null,
-      ChevronDown: () => null,
-      RotateCcw: () => null,
-      CircleAlert: () => null,
+      ChevronRight: () => React.createElement("span", { className: "icon-chevron-right" }),
+      ChevronDown: () => React.createElement("span", { className: "icon-chevron-down" }),
+      RotateCcw: () => React.createElement("span", { className: "icon-resend" }),
+      CircleAlert: () => React.createElement("span", { className: "icon-alert" }),
     };
     if (req === "./SessionStatus") return statusMod.exports;
+    if (req === "./components") return {
+      EventView: (props) => React.createElement("div", { className: "event-view" }, props.event?.text),
+      Logo: () => React.createElement("span", { className: "logo" }),
+      harnessNames: {},
+    };
     if (req === "./message-control") return {
       deliveryLabel: () => "小字提示",
       steerLinks: () => [],
       steerBadge: () => "",
     };
-    if (req === "./ToolEvent") return { ToolEvent: () => null };
+    if (req === "./ToolEvent") return {
+      ToolGroup: () => React.createElement("div", { className: "tool-group" }),
+      ToolEvent: () => null,
+    };
     if (req === "./ConversationOutline") return { ConversationOutline: () => null };
     return {};
   },
@@ -87,6 +98,7 @@ vm.runInContext(transcriptTranspiled, transcriptSandbox);
 const {
   isTurnCompleted,
   evaluateTurnReplySlot,
+  Turn,
 } = transcriptMod.exports;
 
 test("turnWorkingHint provides clear status hint for thinking, tool, responding and waiting", () => {
@@ -236,7 +248,7 @@ test("evaluateTurnReplySlot mutation sensitivity: 三槽位精准分流与真实
   const runningSession = { state: "running", activity: { phase: "tool", toolName: "bash" } };
   const idleSession = { state: "idle", activity: null };
 
-  // Case A: 真正被强行收尾的回合 (force-ended tool) -> 必须产生 'interrupted' 槽位
+  // Case A: 真正被强行收尾的回合 (force-ended tool) 且为当前最新回合 -> 产生 'interrupted' 槽位
   const forceEndedTurn = [
     { id: "u1", kind: "user", text: "long running command" },
     { id: "t1", kind: "tool", status: "error", text: "本轮已结束，未收到此工具的完成回报。" },
@@ -244,12 +256,22 @@ test("evaluateTurnReplySlot mutation sensitivity: 三槽位精准分流与真实
   const forceEndedResult = evaluateTurnReplySlot({
     events: forceEndedTurn,
     completed: true,
+    isLatestTurn: true,
+    isSteered: false,
+    session: stoppedSession,
+  });
+  assert.equal(forceEndedResult.slot, "interrupted", "latest turn with force-ended tool must evaluate to interrupted slot");
+  assert.equal(forceEndedResult.notice, "本轮执行被中断，未产生回复。发送新消息可继续对话。");
+
+  // 历史完成回合 (isLatestTurn === false) 即使有 force-ended tool 标记也必须归入 'empty' (渲染 null)，绝不误出中断提示
+  const historicalForceEndedResult = evaluateTurnReplySlot({
+    events: forceEndedTurn,
+    completed: true,
     isLatestTurn: false,
     isSteered: false,
     session: stoppedSession,
   });
-  assert.equal(forceEndedResult.slot, "interrupted", "force-ended tool turn must evaluate to interrupted slot");
-  assert.equal(forceEndedResult.notice, "本轮执行被中断，未产生回复。发送新消息可继续对话。");
+  assert.equal(historicalForceEndedResult.slot, "empty", "historical turn with force-ended tool must evaluate to empty slot and never show false interrupted notice");
 
   // Case B: 中途引导的回合 (isSteered === true) -> 必须产生 'empty' (渲染 null)，绝不加第三档文案
   const steeredTurn = [
@@ -315,3 +337,136 @@ test("CSS: 保证 interrupted notice 与 resend button 样式合规且无裸 hex
   const turnWorkingSection = css.slice(css.indexOf("/* Working status placeholder"));
   assert.equal(turnWorkingSection.includes("#"), false, "no bare hex in interrupted/working section");
 });
+
+test("isTurnInterrupted mutation sensitivity: isSteered short-circuit overrides force-ended tool events", () => {
+  const stoppedSession = { state: "stopped", activity: null };
+  const forceEndedTurnEvents = [
+    { id: "u1", kind: "user", text: "long running command" },
+    { id: "t1", kind: "tool", status: "error", text: "本轮已结束，未收到此工具的完成回报。" },
+  ];
+
+  // 1. isSteered=true 时必须短路返回 false（即使存在 forceEndedTool 事件文本）
+  // 若移除 `if (isSteered) return false;` 突变，此断言必挂！
+  assert.equal(
+    isTurnInterrupted(forceEndedTurnEvents, stoppedSession, true, true),
+    false,
+    "isSteered=true must short-circuit and return false even with finish_pending_tools error text",
+  );
+
+  // 2. isSteered=false 且 isLatestTurn=true 时必须返回 true
+  assert.equal(
+    isTurnInterrupted(forceEndedTurnEvents, stoppedSession, true, false),
+    true,
+    "isSteered=false must return true for latest turn with finish_pending_tools error text",
+  );
+
+  // 3. 历史回合 isLatestTurn=false 时必须严格返回 false
+  assert.equal(
+    isTurnInterrupted(forceEndedTurnEvents, stoppedSession, false, false),
+    false,
+    "isLatestTurn=false must return false for historical turn",
+  );
+});
+
+test("DOM/SSR: renderToStaticMarkup locks turn-interrupted-notice copy and resend button rendering", () => {
+  const stoppedSession = {
+    id: "s-test",
+    state: "stopped",
+    activity: null,
+  };
+  const mockDetail = {
+    session: stoppedSession,
+    events: [],
+  };
+
+  const forceEndedTurnEvents = [
+    { id: "u1", kind: "user", text: "sleep 600", createdAt: "2026-09-16T12:00:00Z" },
+    { id: "t1", kind: "tool", status: "error", text: "本轮已结束，未收到此工具的完成回报。" },
+  ];
+
+  // Case 1: Latest interrupted turn WITH onResend handler
+  // Must render .turn-interrupted-notice, the exact notice text, and .pending-resend-button
+  const interruptedHtml = renderToStaticMarkup(
+    React.createElement(Turn, {
+      events: forceEndedTurnEvents,
+      completed: true,
+      forced: null,
+      report: () => {},
+      steered: new Map(),
+      isLatestTurn: true,
+      isSteered: false,
+      onResend: () => {},
+      detail: mockDetail,
+      autoCollapseProcess: true,
+    })
+  );
+
+  assert.ok(
+    interruptedHtml.includes('class="turn-interrupted-notice"'),
+    "HTML must include turn-interrupted-notice container",
+  );
+  assert.ok(
+    interruptedHtml.includes("本轮执行被中断，未产生回复。发送新消息可继续对话。"),
+    "HTML must render the exact interrupted notice copy",
+  );
+  assert.ok(
+    interruptedHtml.includes('class="pending-resend-button"'),
+    "HTML must include pending-resend-button",
+  );
+  assert.ok(
+    interruptedHtml.includes("重新发送"),
+    "HTML must render '重新发送' button label",
+  );
+
+  // Case 2: Historical completed turn (isLatestTurn = false)
+  // Must NOT render turn-interrupted-notice or pending-resend-button
+  const historicalHtml = renderToStaticMarkup(
+    React.createElement(Turn, {
+      events: forceEndedTurnEvents,
+      completed: true,
+      forced: null,
+      report: () => {},
+      steered: new Map(),
+      isLatestTurn: false,
+      isSteered: false,
+      onResend: () => {},
+      detail: mockDetail,
+      autoCollapseProcess: true,
+    })
+  );
+
+  assert.equal(
+    historicalHtml.includes("turn-interrupted-notice"),
+    false,
+    "Historical turn must NOT render turn-interrupted-notice",
+  );
+  assert.equal(
+    historicalHtml.includes("pending-resend-button"),
+    false,
+    "Historical turn must NOT render pending-resend-button",
+  );
+
+  // Case 3: Steered turn (isSteered = true)
+  // Must NOT render turn-interrupted-notice
+  const steeredHtml = renderToStaticMarkup(
+    React.createElement(Turn, {
+      events: forceEndedTurnEvents,
+      completed: true,
+      forced: null,
+      report: () => {},
+      steered: new Map(),
+      isLatestTurn: true,
+      isSteered: true,
+      onResend: () => {},
+      detail: mockDetail,
+      autoCollapseProcess: true,
+    })
+  );
+
+  assert.equal(
+    steeredHtml.includes("turn-interrupted-notice"),
+    false,
+    "Steered turn must NOT render turn-interrupted-notice",
+  );
+});
+

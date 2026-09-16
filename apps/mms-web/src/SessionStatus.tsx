@@ -69,13 +69,20 @@ export function isTurnInterrupted(
   if (hasAnswer) return false;
   if (isSteered) return false;
 
+  // STRICT REQUIREMENT: Only the latest turn can be considered interrupted.
+  // Historical turns where execution ended without an answer (e.g. user stopped during bash sleep)
+  // are completed history and must never display the interrupted notice banner or resend prompt.
+  if (!isLatestTurn) {
+    return false;
+  }
+
   const hasForceEndedTool = events.some(
     e => e.kind === "tool" && (e.status === "error" || e.status === "cancelled") &&
       typeof e.text === "string" && e.text.includes("本轮已结束，未收到此工具的完成回报。")
   );
   if (hasForceEndedTool) return true;
 
-  if (isLatestTurn && session) {
+  if (session) {
     const isAbnormalTerminal = ["stopped", "error", "closed"].includes(session.state);
     if (isAbnormalTerminal && !sessionIsBusy(session)) {
       return true;
