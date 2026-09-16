@@ -20,6 +20,15 @@ function ProcessEvents({events, ...props}: Props & {events: SessionEvent[]}) {
     : <EventView key={event.id} {...props} event={event} continuation intermediate />)}</>;
 }
 
+function findActiveAnswer(events: SessionEvent[]): SessionEvent | undefined {
+  const lastAssistant = [...events].reverse().find(e => e.kind === "assistant" && !!e.text.trim());
+  if (!lastAssistant) return undefined;
+  const assistantIndex = events.indexOf(lastAssistant);
+  const subsequentTools = events.slice(assistantIndex + 1).some(e => e.kind === "tool");
+  if (subsequentTools) return undefined;
+  return lastAssistant;
+}
+
 function TurnWorkingStatus({
   detail,
   disconnected = false,
@@ -68,7 +77,9 @@ function Turn({events, completed, forced, report, steered, ...props}: Props & {
   const [choice, setChoice] = useState<{collapsed: boolean; revision: number} | null>(null);
   const revision = forced?.revision || 0;
   const user = events[0]?.kind === "user" ? events[0] : null;
-  const answer = completed ? [...events].reverse().find(e => e.kind === "assistant" && !!e.text.trim()) : undefined;
+  const completedAnswer = completed ? [...events].reverse().find(e => e.kind === "assistant" && !!e.text.trim()) : undefined;
+  const streamingAnswer = !completed ? findActiveAnswer(events) : undefined;
+  const answer = completedAnswer || streamingAnswer;
   const collapsed = choice?.revision === revision ? choice.collapsed
     : forced ? forced.collapsed : props.autoCollapseProcess && completed && !!answer;
   const answerIndex = answer ? events.indexOf(answer) : events.length;
@@ -84,6 +95,7 @@ function Turn({events, completed, forced, report, steered, ...props}: Props & {
   const turnId = events[0]?.id || "";
   const hasProcess = !!process.length;
   const isWorking = !completed && !answer && (collapsed || !hasProcess);
+  const isRunning = !completed;
   useEffect(() => {
     if (hasProcess) report(turnId, collapsed);
   }, [report, turnId, collapsed, hasProcess]);
@@ -91,6 +103,7 @@ function Turn({events, completed, forced, report, steered, ...props}: Props & {
     {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
     {collapsed ? "展开过程" : "收起过程"}
     <span>{count ? `${count} 次工具调用` : "思考与执行记录"}</span>
+    {isRunning && collapsed && <span className="turn-process-live-dot" title="正在执行中" aria-label="正在执行中" />}
     {!!failures && <span className="process-failure">{failures} 项失败</span>}
   </button>;
   return <section className="conversation-turn">

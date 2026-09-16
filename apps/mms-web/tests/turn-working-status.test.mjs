@@ -86,8 +86,46 @@ test("transcript.css declares turn-working placeholder and animation tokens", ()
   assert.ok(css.includes(".turn-working-indicator"), "defines .turn-working-indicator");
   assert.ok(css.includes("turn-working-fade-in"), "defines turn-working-fade-in animation");
   assert.ok(css.includes(".turn-working-label"), "defines .turn-working-label");
+  assert.ok(css.includes(".turn-process-live-dot"), "defines .turn-process-live-dot");
 
   // Verify token compliance: no bare hex in turn-working definitions
   const turnWorkingSection = css.slice(css.indexOf("/* Working status placeholder"));
   assert.equal(turnWorkingSection.includes("#"), false, "no bare hex color in turn-working section");
+});
+
+test("findActiveAnswer distinguishes streaming final reply from intermediate tool preface", () => {
+  const transcriptSource = fs.readFileSync(path.resolve(__dirname, "../src/Transcript.tsx"), "utf-8");
+  
+  // Extract findActiveAnswer function
+  const match = transcriptSource.match(/function findActiveAnswer[\s\S]*?\n\}/);
+  assert.ok(match, "findActiveAnswer function is present in Transcript.tsx");
+  
+  const transpiledFunc = esbuild.transformSync(match[0], {
+    loader: "ts",
+    format: "cjs",
+  }).code;
+  
+  const fnMod = { exports: {} };
+  const fnSandbox = { module: fnMod, exports: fnMod.exports };
+  vm.createContext(fnSandbox);
+  vm.runInContext(`${transpiledFunc}; module.exports = findActiveAnswer;`, fnSandbox);
+  const findActiveAnswer = fnMod.exports;
+
+  // Case 1: intermediate explanation before a tool call should not be captured as answer
+  const intermediateEvents = [
+    { id: "1", kind: "user", text: "check alerts" },
+    { id: "2", kind: "assistant", text: "好的我来看一下" },
+    { id: "3", kind: "tool", title: "read_file" },
+  ];
+  assert.equal(findActiveAnswer(intermediateEvents), undefined, "preface before tool is not final answer");
+
+  // Case 2: reply after all tool calls are completed is captured as streaming answer
+  const streamingEvents = [
+    { id: "1", kind: "user", text: "check alerts" },
+    { id: "2", kind: "tool", title: "read_file" },
+    { id: "3", kind: "assistant", text: "根据日志发现以下两项报警原因：" },
+  ];
+  const captured = findActiveAnswer(streamingEvents);
+  assert.ok(captured, "captured final reply");
+  assert.equal(captured.id, "3");
 });
