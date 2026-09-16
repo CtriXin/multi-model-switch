@@ -35,19 +35,20 @@ test("compareSemverDesc sorts versions strictly descending by semver numbers", (
   assert.equal(parseSemver("invalid"), null);
 });
 
-test("SettingsPage keeps three tabs and folds runtime diagnostics under 本机", () => {
+test("SettingsPage includes 4th tab '运行环境' with Cpu icon and isolated runtime section", () => {
   const content = fs.readFileSync(path.join(srcDir, "SettingsPage.tsx"), "utf-8");
 
   assert.match(content, /tab === "models"/);
   assert.match(content, /tab === "appearance"/);
-  assert.match(content, /tab === "local"/);
-  assert.match(content, /外观与使用/);
-  assert.match(content, /<Laptop size=\{16\} \/>\s*本机/);
-  assert.doesNotMatch(content, /tab === "usage"/);
+  assert.match(content, /tab === "usage"/);
+  assert.match(content, /tab === "runtime"/);
+  assert.match(content, /<Cpu size=\{16\} \/>\s*运行环境/);
 
   assert.match(content, /runtime-settings/);
   assert.match(content, /className="platform-capability"/);
-  assert.match(content, /runtime-diagnostics/);
+  assert.match(content, /copyText\(data\.platform!\.configRoot!\)/);
+  assert.match(content, /copyText\(data\.platform!\.stateRoot!\)/);
+  assert.doesNotMatch(content, /navigator\s*\.\s*clipboard/);
 });
 
 test("Platform capability is moved out of models page and only present in runtime tab", () => {
@@ -59,10 +60,10 @@ test("Platform capability is moved out of models page and only present in runtim
   assert.doesNotMatch(modelsContent, /platform-capability/);
   assert.doesNotMatch(channelContent, /platform-capability/);
 
-  const localTabIndex = settingsContent.indexOf('tab === "local"');
+  const runtimeBranchIndex = settingsContent.indexOf("runtime-settings");
   const capabilityIndex = settingsContent.indexOf('className="platform-capability"');
-  assert.ok(localTabIndex > 0);
-  assert.ok(capabilityIndex > localTabIndex);
+  assert.ok(runtimeBranchIndex > 0);
+  assert.ok(capabilityIndex > runtimeBranchIndex);
 });
 
 test("Dark theme contrast: capability chip uses semantic tokens and avoids hardcoded light backgrounds", () => {
