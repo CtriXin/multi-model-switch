@@ -13,6 +13,7 @@ from .runtime import private_json
 
 REPO = 'CtriXin/multi-model-switch'
 RELEASE_API = f'https://api.github.com/repos/{REPO}/releases/latest'
+PREVIEW_RELEASES_API = f'https://api.github.com/repos/{REPO}/releases?per_page=30'
 CHECK_INTERVAL = 6 * 60 * 60
 TAG = re.compile(r'^v(\d+)\.(\d+)\.(\d+)$')
 # A release says what an upgrade costs under this heading. Everything the
@@ -86,16 +87,10 @@ def release_notes(version):
         return ''
 
 
-def fetch_release():
-    request = urllib.request.Request(RELEASE_API, headers={'User-Agent': 'MMS-Pilot', 'Accept': 'application/vnd.github+json'})
-    with urllib.request.build_opener(NoRedirect()).open(request, timeout=10) as response:
-        content = response.read(1024 * 1024 + 1)
-    if len(content) > 1024 * 1024:
-        raise ValueError('release response too large')
-    value = json.loads(content)
+def _release_payload(value):
     tag = value.get('tag_name')
-    if not isinstance(tag, str) or not TAG.fullmatch(tag) or value.get('draft') or value.get('prerelease'):
-        raise ValueError('invalid stable release')
+    if not isinstance(tag, str) or not TAG.fullmatch(tag):
+        raise ValueError('invalid release tag')
     body = str(value.get('body') or '')
     from .update_guidance import release_policy
     return {'tag': tag, 'notes': body[:16000], 'upgradeNotice': upgrade_notice(body),
@@ -104,9 +99,50 @@ def fetch_release():
             'url': f'https://github.com/{REPO}/releases/tag/{tag}'}
 
 
+def fetch_release():
+    request = urllib.request.Request(RELEASE_API, headers={'User-Agent': 'MMS-Pilot', 'Accept': 'application/vnd.github+json'})
+    with urllib.request.build_opener(NoRedirect()).open(request, timeout=10) as response:
+        content = response.read(1024 * 1024 + 1)
+    if len(content) > 1024 * 1024:
+        raise ValueError('release response too large')
+    value = json.loads(content)
+    if value.get('draft') or value.get('prerelease'):
+        raise ValueError('invalid stable release')
+    return _release_payload(value)
+
+
+def fetch_preview_release():
+    """Return the newest non-draft preview release.
+
+    Preview checks are opt-in through the update channel setting. Stable
+    checking continues to use ``/releases/latest`` and never sees prereleases.
+    """
+    request = urllib.request.Request(PREVIEW_RELEASES_API, headers={'User-Agent': 'MMS-Pilot', 'Accept': 'application/vnd.github+json'})
+    with urllib.request.build_opener(NoRedirect()).open(request, timeout=10) as response:
+        content = response.read(1024 * 1024 + 1)
+    if len(content) > 1024 * 1024:
+        raise ValueError('release response too large')
+    values = json.loads(content)
+    if not isinstance(values, list):
+        raise ValueError('invalid preview release list')
+    candidates = []
+    for value in values:
+        if not isinstance(value, dict) or value.get('draft') or not value.get('prerelease'):
+            continue
+        try:
+            parsed = version_tuple(value.get('tag_name'))
+            if parsed is not None:
+                candidates.append((parsed, value))
+        except (TypeError, ValueError):
+            continue
+    if not candidates:
+        raise ValueError('没有可用的 5.x 预览版')
+    return _release_payload(max(candidates, key=lambda item: item[0])[1])
+
+
 class UpdateService:
-    def __init__(self, app, *, fetcher=fetch_release, clock=time.time):
-        self.app, self.fetcher, self.clock = app, fetcher, clock
+    def __init__(self, app, *, fetcher=fetch_release, preview_fetcher=fetch_preview_release, clock=time.time):
+        self.app, self.fetcher, self.preview_fetcher, self.clock = app, fetcher, preview_fetcher, clock
         self.root = app.state_root / 'updates'
         self._check_lock = threading.Lock()
         self._stop = threading.Event()
@@ -119,8 +155,16 @@ class UpdateService:
             return False
         return read_json(self.root / 'settings.json').get('enabled', True) is not False
 
+    def channel(self):
+        value = read_json(self.root / 'settings.json').get('channel', 'stable')
+        return value if value in {'stable', 'preview'} else 'stable'
+
+    def _cache_path(self, channel=None):
+        return self.root / ('check-preview.json' if (channel or self.channel()) == 'preview' else 'check.json')
+
     def status(self):
-        cache = read_json(self.root / 'check.json')
+        channel = self.channel()
+        cache = read_json(self._cache_path(channel))
         latest = cache.get('latest') if isinstance(cache.get('latest'), dict) else {}
         remote, current = version_tuple(latest.get('tag')), version_tuple(VERSION)
         available = bool(remote and current and remote > current)
@@ -132,7 +176,7 @@ class UpdateService:
         from .update_guidance import upgrade_guidance
         guidance = upgrade_guidance(VERSION, latest if available else {}, installation=installation,
                                     config_root=getattr(self.app, 'config_root', None))
-        return {'currentVersion': VERSION, 'latest': latest, 'updateAvailable': available,
+        return {'currentVersion': VERSION, 'channel': channel, 'latest': latest, 'updateAvailable': available,
                 'whatsNew': self.whats_new(),
                 'enabled': self.enabled(), 'checking': self._checking,
                 'checkedAt': checked_at(cache), 'checkInterval': CHECK_INTERVAL,
@@ -155,17 +199,19 @@ class UpdateService:
         if not self._check_lock.acquire(blocking=False):
             return self.status()
         try:
-            cache = read_json(self.root / 'check.json')
+            channel = self.channel()
+            cache_path = self._cache_path(channel)
+            cache = read_json(cache_path)
             interval = 60 if manual else (1800 if cache.get('error') else CHECK_INTERVAL)
             age = self.clock() - checked_at(cache)
             if checked_at(cache) and 0 <= age < interval:
                 return self.status()
             self._checking = True
             try:
-                latest = self.fetcher()
-                private_json(self.root / 'check.json', {'checkedAt': self.clock(), 'latest': latest, 'error': ''})
+                latest = (self.preview_fetcher if channel == 'preview' else self.fetcher)()
+                private_json(cache_path, {'checkedAt': self.clock(), 'latest': latest, 'error': ''})
             except Exception:
-                private_json(self.root / 'check.json', {**cache, 'checkedAt': self.clock(), 'error': '暂时无法检查更新，稍后可以重试。现有会话不受影响。'})
+                private_json(cache_path, {**cache, 'checkedAt': self.clock(), 'error': '暂时无法检查更新，稍后可以重试。现有会话不受影响。'})
         finally:
             self._checking = False
             self._check_lock.release()
@@ -176,9 +222,12 @@ class UpdateService:
         return self.status()
 
     def preferences(self, payload):
-        if not isinstance(payload.get('enabled'), bool):
+        current = read_json(self.root / 'settings.json')
+        enabled = payload.get('enabled', current.get('enabled', True))
+        channel = payload.get('channel', current.get('channel', 'stable'))
+        if not isinstance(enabled, bool) or channel not in {'stable', 'preview'}:
             raise WebError('INVALID_REQUEST', '更新检查设置无效。', 400)
-        private_json(self.root / 'settings.json', {'enabled': payload['enabled']})
+        private_json(self.root / 'settings.json', {'enabled': enabled, 'channel': channel})
         return self.status()
 
     def start_scheduler(self):

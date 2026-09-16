@@ -8,6 +8,7 @@ import "./updates.css";
 
 type UpdateStatus = {
   currentVersion: string;
+  channel?: "stable" | "preview";
   latest: { tag?: string; notes?: string; url?: string; upgradeNotice?: string };
   updateAvailable: boolean; enabled: boolean; checking: boolean; checkedAt: number;
   error: string; canUpgrade: boolean; port?: number;
@@ -75,6 +76,7 @@ export function UpdateCenter({ ready, open, setOpen, onStatus }: {
     finally { setPending(false); }
   }
   const busy = pending || data?.checking;
+  const channel = data?.channel || "stable";
   // At rest there is nothing to act on, so the top bar shows nothing. The
   // version label in settings is the way in; this control appears only when
   // an update is waiting or one is running, which is when it earns the space.
@@ -85,8 +87,10 @@ export function UpdateCenter({ ready, open, setOpen, onStatus }: {
     {open && <dialog ref={dialog} className="update-center" aria-labelledby="update-title" onCancel={e => { e.preventDefault(); setOpen(false); }} onClick={e => { if (e.target === dialog.current) setOpen(false); }}>
       <header><div><h2 id="update-title">版本与更新</h2><p>当前版本 {data ? `v${data.currentVersion}` : "读取中…"}</p></div><button type="button" className="icon-button" aria-label="关闭更新" onClick={() => setOpen(false)}><X size={19} /></button></header>
       <div className="update-body">
-        <div className="update-check-row"><span>{data?.checking ? "正在检查…" : data?.updateAvailable ? `发现新版 ${data.latest.tag}` : data?.checkedAt && !data.error ? "已是最新稳定版" : "检查 Pilot 的最新版本"}</span><button type="button" className="text-button" disabled={busy || isPreview || !data} onClick={() => void act("check")}><RefreshCw size={14} />检查更新</button></div>
+        <div className="update-check-row"><span>{data?.checking ? "正在检查…" : data?.updateAvailable ? `发现新版 ${data.latest.tag}` : data?.checkedAt && !data.error ? channel === "preview" ? "已是最新 5.x 预览版" : "已是最新 4.x 稳定版" : channel === "preview" ? "检查 5.x 预览版" : "检查 4.x 稳定版"}</span><button type="button" className="text-button" disabled={busy || isPreview || !data} onClick={() => void act("check")}><RefreshCw size={14} />检查更新</button></div>
         {data?.checkedAt ? <p className="update-muted">上次检查：{new Date(data.checkedAt * 1000).toLocaleString()}</p> : null}
+        <label className="update-preference"><span>更新通道<small>{channel === "preview" ? "5.x 预览版：包含 Bot 工作台，可能还有变化。" : "4.x 稳定版：当前默认与推荐通道。"}</small></span><select aria-label="更新通道" value={channel} disabled={pending || isPreview || !data} onChange={e => { setConfirming(false); void act("preferences", { channel: e.target.value }); }}><option value="stable">4.x 稳定版</option><option value="preview">5.x 预览版</option></select></label>
+        {channel === "preview" && <p className="update-preview-note" role="status">已切换到 5.x 预览通道。检查并确认后才会升级；切回 4.x 稳定版即可继续留在稳定线。</p>}
         <label className="update-preference"><span>自动检查更新<small>每 6 小时检查一次；发现新版后由你决定是否更新。</small></span><input type="checkbox" role="switch" aria-label="自动检查更新" checked={data?.enabled ?? false} disabled={pending || isPreview || !data} onChange={e => void act("preferences", { enabled: e.target.checked })} /></label>
         {data?.latest.notes && <section className="update-notes" aria-label="更新内容"><h3>{data.latest.tag} 更新内容</h3>{/* Release notes are Markdown. Rendering them into a paragraph showed
             the asterisks, the list dashes and the code fence as literal text. */}
