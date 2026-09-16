@@ -1031,7 +1031,7 @@ body,
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 16px 0 24px;
+  padding: 16px 14px 24px 0;
   width: 100%;
   max-width: none;
   margin: 0;
@@ -1041,7 +1041,7 @@ body,
 .settings-shell .channel-models {
   width: 100%;
   max-width: none;
-  padding: 0 0 28px 0;
+  padding: 0 14px 28px 0;
   box-sizing: border-box;
 }
 .settings-shell .page-heading {
@@ -1297,7 +1297,7 @@ body,
   overflow-y: auto;
   overflow-x: hidden;
   min-height: 0;
-  padding-right: 4px;
+  padding-right: 14px;
 }
 /* A numeric stepper reads better than a slider for a value with nine steps. */
 .font-size-row .stepper {
