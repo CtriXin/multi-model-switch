@@ -22,7 +22,7 @@ from .file_lock import LOCK_EX, LOCK_NB, flock
 from .errors import WebError
 from . import bot_schedules
 from .bot_schedules import (MAX_SCHEDULES_PER_BOT, RECENT_TASK_LIMIT, advance, apply_update,
-                            build_schedule, is_due)
+                            build_schedule, defer_once, is_due)
 from .bot_executor import _context_percent
 from .runtime import private_json
 from .bot_memory import BotMemoryStore, BotMemoryError
@@ -792,20 +792,26 @@ class BotRuntime(BotCommunications):
         for task in self._tasks.values():
             if task.get("status") != "scheduled":
                 continue
+            note = "原来的定时时间无效，没有迁移；本任务改为等待手动唤醒。"
             try:
                 run_at = parse_time(task.get("runAt"))
                 count = sum(1 for item in self._schedules.values() if item["botId"] == task["botId"])
-                if run_at and count < MAX_SCHEDULES_PER_BOT:
+                if not run_at:
+                    pass
+                elif count >= MAX_SCHEDULES_PER_BOT:
+                    note = "原来的定时没有迁移：这个 Bot 已达 20 条定时上限；本任务改为等待手动唤醒。"
+                else:
                     schedule = build_schedule(task["botId"], {"prompt": task["prompt"], "rule": {"kind": "once", "at": run_at}},
                                               existing_count=count, now=stamp, created_by="user",
                                               schedule_id="sch_" + hashlib.sha256(task["id"].encode()).hexdigest()[:16])
                     self._schedules[schedule["id"]] = schedule
                     task["scheduleId"] = schedule["id"]
+                    note = "原来的定时已迁移成独立的定时；本任务改为等待手动唤醒。"
             except Exception:
                 # A broken legacy row must not stop the whole record loading.
-                pass
+                note = "原来的定时记录无法读取，没有迁移；本任务改为等待手动唤醒。"
             task.update(status="waiting", waitReason="manual", runAt=None, token="", updatedAt=now())
-            self._message(task["id"], "system", "原来的定时已迁移成独立的定时；本任务改为等待手动唤醒。")
+            self._message(task["id"], "system", note)
 
     def _last_wait_text(self, task):
         """The most recent user-facing text, used when no explicit question came."""
@@ -1596,10 +1602,19 @@ class BotRuntime(BotCommunications):
                 if not is_due(schedule, now_dt):
                     continue
                 bot = self._bots.get(schedule["botId"])
+                armed = bool(bot and bot.get("wakeEnabled", True) and schedule["enabled"])
+                holding = bool(bot and bot["id"] in busy_bots and schedule.get("overlapPolicy", "skip") == "skip")
+                due_at = schedule.get("nextRunAt")
+                if schedule["rule"]["kind"] == "once" and (not armed or holding):
+                    # A one-shot gets exactly one chance: keep its due time and
+                    # record why it waits instead of silently consuming it.
+                    parked = defer_once(schedule, stamp=now(), reason="paused" if not armed else "busy")
+                    if parked:
+                        self._schedules[parked["id"]] = parked
+                        changed = True
+                    continue
                 updated, skipped = advance(schedule, now=now_dt)
-                armed = bool(bot and bot.get("wakeEnabled", True) and updated["enabled"])
-                holding = bool(bot and bot["id"] in busy_bots and updated.get("overlapPolicy", "skip") == "skip")
-                reason = "上一轮仍在运行" if holding else (f"错过了 {skipped} 次触发" if skipped else "")
+                reason = "" if not armed else ("上一轮仍在运行" if holding else (f"错过了 {skipped} 次触发" if skipped else ""))
                 fired = None
                 try:
                     fired = self.create_task({"botId": bot["id"], "prompt": updated["prompt"]}) if armed and not holding and not skipped else None
@@ -1607,9 +1622,11 @@ class BotRuntime(BotCommunications):
                     fired, reason = None, "创建任务失败"
                 if fired:
                     self._tasks[fired["id"]]["scheduleId"] = updated["id"]
+                    if (schedule.get("lastSkip") or {}).get("reason") in {"paused", "busy"}:
+                        self._message(fired["id"], "system", f"这条定时原定 {due_at} 触发，因暂停或上一轮未结束而延后，现在补触发。")
                     updated.update(lastRunAt=now(), lastTaskId=fired["id"], lastSkip=None,
                                    recentTaskIds=(updated.get("recentTaskIds") or [])[-(RECENT_TASK_LIMIT - 1):] + [fired["id"]])
-                elif armed and reason:
+                elif reason:
                     updated["lastSkip"] = {"at": now(), "reason": "busy" if holding else ("missed" if skipped else "error"), "skipped": skipped}
                     if updated.get("lastTaskId"):
                         self._message(updated["lastTaskId"], "system", f"定时没有执行（{reason}），已按规则跳过。")

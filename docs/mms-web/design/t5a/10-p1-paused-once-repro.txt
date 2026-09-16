@@ -1,0 +1,20 @@
+[bot wakeEnabled=False / re-arm wakeEnabled=True] due + paused, tick() x3:
+  schedule: {'enabled': True, 'nextRunAt': '2026-09-16T07:12:32.695526+00:00', 'lastRunAt': None, 'lastSkip': {'at': '2026-09-16T07:12:33.695+00:00', 'reason': 'paused', 'skipped': 0}}
+  tasks: 0
+  nextRunAt kept: True
+  no rewrite on later ticks: True
+[bot wakeEnabled=False / re-arm wakeEnabled=True] re-armed, tick():
+  schedule: {'enabled': True, 'nextRunAt': None, 'lastRunAt': '2026-09-16T07:12:33.699+00:00', 'lastSkip': None}
+  tasks: 1
+  late note: ['这条定时原定 2026-09-16T07:12:32.695526+00:00 触发，因暂停或上一轮未结束而延后，现在补触发。']
+
+[schedule enabled=False / re-arm enabled=True] due + paused, tick() x3:
+  schedule: {'enabled': False, 'nextRunAt': '2026-09-16T07:12:32.703789+00:00', 'lastRunAt': None, 'lastSkip': {'at': '2026-09-16T07:12:33.705+00:00', 'reason': 'paused', 'skipped': 0}}
+  tasks: 0
+  nextRunAt kept: True
+  no rewrite on later ticks: True
+[schedule enabled=False / re-arm enabled=True] re-armed, tick():
+  schedule: {'enabled': True, 'nextRunAt': None, 'lastRunAt': '2026-09-16T07:12:33.707+00:00', 'lastSkip': None}
+  tasks: 1
+  late note: ['这条定时原定 2026-09-16T07:12:32.703789+00:00 触发，因暂停或上一轮未结束而延后，现在补触发。']
+

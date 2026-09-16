@@ -837,3 +837,88 @@ def test_state_without_a_schedules_key_still_loads(tmp_path):
         assert reopened._load_error == "" and reopened.list_schedules(reopened.list_bots()[0]["id"]) == []
     finally:
         reopened.close()
+
+
+def test_paused_once_schedule_keeps_its_only_chance_until_rearmed(tmp_path):
+    executor = FakeExecutor()
+    rt = runtime(tmp_path, executor)
+    try:
+        asleep = bot(rt, "总闸关的 Bot", "ws-once-off", wake=False)
+        awake = bot(rt, "单条关的 Bot", "ws-once-single", wake=True)
+        past = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+        blocked = rt.create_schedule(asleep["id"], {"prompt": "一次提醒", "rule": {"kind": "once", "at": past}})
+        single = rt.create_schedule(awake["id"], {"prompt": "单条提醒", "rule": {"kind": "once", "at": past}})
+        rt.set_schedule_enabled(awake["id"], single["id"], False)
+
+        rt.tick(); drain_launch(rt)
+        assert rt.list_tasks(bot_id=asleep["id"]) == [] and rt.list_tasks(bot_id=awake["id"]) == []
+        for schedule_id, original in ((blocked["id"], blocked["nextRunAt"]), (single["id"], single["nextRunAt"])):
+            row = rt._schedules[schedule_id]
+            assert row["nextRunAt"] == original, "a paused one-shot must keep its due time"
+            assert row["lastSkip"]["reason"] == "paused" and row["lastRunAt"] is None
+
+        # Re-arming the Bot-level switch lets the parked one-shot run once.
+        rt.update_bot(asleep["id"], {"wakeEnabled": True})
+        rt.tick(); drain_launch(rt)
+        fired = rt.list_tasks(bot_id=asleep["id"])
+        assert len(fired) == 1 and fired[0]["prompt"] == "一次提醒"
+        assert rt._schedules[blocked["id"]]["nextRunAt"] is None
+        assert any("延后" in message["content"] for message in rt.list_messages(fired[0]["id"]))
+
+        # The same holds for the per-schedule switch.
+        rt.set_schedule_enabled(awake["id"], single["id"], True)
+        rt.tick(); drain_launch(rt)
+        fired_single = rt.list_tasks(bot_id=awake["id"])
+        assert len(fired_single) == 1 and fired_single[0]["prompt"] == "单条提醒"
+        assert rt._schedules[single["id"]]["nextRunAt"] is None
+    finally:
+        rt.close()
+
+
+def test_busy_skip_defers_a_once_schedule_instead_of_dropping_it(tmp_path):
+    executor = ScriptedPlanExecutor()
+    rt = runtime(tmp_path, executor)
+    try:
+        worker = bot(rt, "忙碌 Bot", "ws-busy-once")
+        running = rt.create_task({"requestId": "busy-once", "botId": worker["id"], "prompt": "长任务"})
+        rt._tasks[running["id"]].update(status="running", sessionId="session-long")
+        past = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+        once = rt.create_schedule(worker["id"], {"prompt": "一次提醒", "rule": {"kind": "once", "at": past}})
+        rt.tick(); drain_launch(rt)
+        assert [task["prompt"] for task in rt.list_tasks(bot_id=worker["id"])] == ["长任务"]
+        row = rt._schedules[once["id"]]
+        assert row["nextRunAt"] == once["nextRunAt"] and row["lastSkip"]["reason"] == "busy"
+
+        executor.outcomes[running["id"]] = "completed"
+        rt.tick(); drain_launch(rt)
+        rt.tick(); drain_launch(rt)
+        fired = next(task for task in rt.list_tasks(bot_id=worker["id"]) if task["prompt"] == "一次提醒")
+        assert rt._schedules[once["id"]]["nextRunAt"] is None
+        assert any("延后" in message["content"] for message in rt.list_messages(fired["id"]))
+    finally:
+        rt.close()
+
+
+def test_legacy_scheduled_task_at_the_limit_reports_the_truth(tmp_path):
+    executor = FakeExecutor()
+    rt = runtime(tmp_path, executor)
+    try:
+        worker = bot(rt, "满额 Bot", "ws-limit-migrate")
+        for index in range(20):
+            rt.create_schedule(worker["id"], {"prompt": f"占位 {index}", "rule": {"kind": "interval", "everySeconds": 300}})
+        legacy = rt.create_task({"requestId": "legacy-limit", "botId": worker["id"], "prompt": "旧的一次性定时"})
+        rt._tasks[legacy["id"]].update(status="scheduled", runAt=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat())
+        rt._persist()
+    finally:
+        rt.close()
+
+    reopened = runtime(tmp_path, FakeExecutor())
+    try:
+        assert len(reopened.list_schedules(worker["id"])) == 20
+        assert reopened._tasks[legacy["id"]].get("scheduleId") is None
+        assert reopened.get_task(legacy["id"])["status"] == "waiting"
+        contents = [message["content"] for message in reopened.list_messages(legacy["id"])]
+        assert any("没有迁移" in content and "上限" in content for content in contents), contents
+        assert not any("已迁移成" in content for content in contents)
+    finally:
+        reopened.close()

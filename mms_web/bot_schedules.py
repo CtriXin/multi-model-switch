@@ -304,6 +304,22 @@ def sanitize_schedules(raw) -> dict:
     return clean
 
 
+def defer_once(schedule: dict, *, stamp: str, reason: str) -> dict | None:
+    """Park a due ``once`` row without consuming its only chance.
+
+    Returns the updated copy, or ``None`` when it is already parked with the
+    same reason, so a paused or busy one-shot is not rewritten every tick.
+    The stored ``nextRunAt`` is deliberately left in the past: the next tick
+    after the Bot is armed again fires it once.
+    """
+    if (schedule.get("lastSkip") or {}).get("reason") == reason:
+        return None
+    updated = deepcopy(schedule)
+    updated["lastSkip"] = {"at": stamp, "reason": reason, "skipped": 0}
+    updated["updatedAt"] = stamp
+    return updated
+
+
 def is_due(schedule: dict, now: datetime) -> bool:
     """Whether a stored ``nextRunAt`` is at or before ``now``."""
     due = str(schedule.get("nextRunAt") or "")
