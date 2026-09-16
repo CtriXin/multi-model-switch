@@ -61,7 +61,7 @@ def _clean_env() -> dict[str, str]:
 
 
 def run_suite(checkout: Path, target: str, report: Path, *, only: list[str] | None = None):
-    """Run pytest; return ``(failing node ids, tests collected)``."""
+    """Run pytest; return ``(failing node ids, tests collected, failure details)``."""
     cmd = [
         sys.executable,
         "-m",
@@ -69,7 +69,7 @@ def run_suite(checkout: Path, target: str, report: Path, *, only: list[str] | No
         "-p",
         "no:randomly",
         "-q",
-        "--tb=no",
+        "--tb=line" if only else "--tb=no",
         f"--junitxml={report}",
     ]
     cmd.extend(only or [target])
@@ -80,7 +80,11 @@ def run_suite(checkout: Path, target: str, report: Path, *, only: list[str] | No
         sys.stdout.write(proc.stdout[-8000:])
         sys.stderr.write(proc.stderr[-4000:])
         raise SystemExit(f"pytest produced no report in {checkout} (exit {proc.returncode})")
-    return parse_report(report, checkout)
+    failures, collected, details = parse_report(report, checkout)
+    if only and failures:
+        sys.stdout.write(proc.stdout[-8000:])
+        sys.stderr.write(proc.stderr[-2000:])
+    return failures, collected, details
 
 
 def _node_id(case, checkout: Path) -> str:
@@ -108,13 +112,23 @@ def _node_id(case, checkout: Path) -> str:
 def parse_report(report: Path, checkout: Path):
     root = ET.parse(report).getroot()
     failures: set[str] = set()
+    details: dict[str, str] = {}
     collected = 0
     for case in root.iter("testcase"):
         collected += 1
-        if case.find("failure") is None and case.find("error") is None:
+        node = case.find("failure")
+        if node is None:
+            node = case.find("error")
+        if node is None:
             continue
-        failures.add(_node_id(case, checkout))
-    return failures, collected
+        node_id = _node_id(case, checkout)
+        failures.add(node_id)
+        message = (node.get("message") or "").strip()
+        body = (node.text or "").strip()
+        snippet = "\n".join(part for part in (message, body) if part)
+        if snippet:
+            details[node_id] = snippet[:1200]
+    return failures, collected, details
 
 
 def base_worktree(base_ref: str) -> Path:
@@ -163,25 +177,31 @@ def main() -> int:
         print(f"== base {args.base} ==", flush=True)
         base_checkout = base_worktree(args.base)
         created.append(base_checkout)
-        base_failures, base_collected = run_suite(base_checkout, args.target, workdir / "base.xml")
+        base_failures, base_collected, _base_details = run_suite(
+            base_checkout, args.target, workdir / "base.xml"
+        )
         print(f"base: {len(base_failures)} failing of {base_collected}", flush=True)
 
         print(f"== head {args.head or 'working tree'} ==", flush=True)
-        head_failures, head_collected = run_suite(head_checkout, args.target, workdir / "head.xml")
+        head_failures, head_collected, head_details = run_suite(
+            head_checkout, args.target, workdir / "head.xml"
+        )
         print(f"head: {len(head_failures)} failing of {head_collected}", flush=True)
 
         candidates = sorted(head_failures - base_failures)
+        details = dict(head_details)
         if candidates:
             print(f"\n{len(candidates)} test(s) newly failing; rerunning to rule out flakes", flush=True)
             for attempt in range(FLAKE_RERUNS):
                 if not candidates:
                     break
-                still, rerun_collected = run_suite(
+                still, rerun_collected, rerun_details = run_suite(
                     head_checkout,
                     args.target,
                     workdir / f"rerun{attempt}.xml",
                     only=list(candidates),
                 )
+                details.update(rerun_details)
                 if rerun_collected != len(candidates):
                     # The rerun did not select what we asked for, so a pass here
                     # proves nothing. Keep the candidates and report them.
@@ -203,6 +223,9 @@ def main() -> int:
             print(f"\nBroken by this PR ({len(candidates)}):")
             for item in candidates:
                 print(f"  - {item}")
+                snippet = details.get(item) or ""
+                for line in snippet.splitlines()[:16]:
+                    print(f"      {line}")
             print(
                 "\nThese pass at the base commit and fail here. Fix them, or say in the PR "
                 "why the old expectation was wrong and update it."

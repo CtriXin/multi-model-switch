@@ -88,6 +88,7 @@ _PYTEST_TARGETS = [
     "tests/test_hook_retirement.py",
     "tests/test_owned_superset_hook.py",
     "tests/test_pi_launcher.py",
+    "tests/test_grok_launcher.py",
     "tests/test_mms_installer_runtime.py",
     "tests/test_command_smoke.py",
 ]
