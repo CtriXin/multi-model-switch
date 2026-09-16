@@ -301,3 +301,30 @@ jobs:
           name: redline-report
           path: .redline-guard/report
           retention-days: 30
+
+  pytest:
+    # Runs for forks too: it needs no secrets, and a fork PR currently reaches
+    # the merge button with no automated test signal at all.
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # The base commit has to be present locally to run the suite there.
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python test tools
+        run: python3 -m pip install pytest httpx rich
+
+      - name: Fail only on tests this PR breaks
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python3 scripts/ci_pytest_regression.py

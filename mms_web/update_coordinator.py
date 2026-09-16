@@ -50,6 +50,12 @@ class UpdateCoordinator:
                 return self.app.updates.status()
             latest = self.app.updates.status()
             target = payload.get('target')
+            if (latest.get('upgradeGuidance') or {}).get('required'):
+                raise WebError(
+                    'UPDATE_REQUIRES_MANUAL_STEP',
+                    latest['upgradeGuidance'].get('reason') or '请先按页面提示运行安装命令。',
+                    409,
+                )
             if not self.available() or not latest['updateAvailable'] or target != latest['latest'].get('tag'):
                 raise WebError('UPDATE_UNAVAILABLE', '请先检查更新，并选择可用的稳定版本。', 409)
             self._cancel.clear()
@@ -97,6 +103,17 @@ class UpdateCoordinator:
             except OSError:
                 pass
             self._status('error', '新版准备或安全检查未完成，当前服务继续运行；会话未清理。可以稍后重试。')
+
+    def port(self):
+        """The port the update keeps: the handoff re-launches on this one.
+
+        Reporting it must never be the reason the update status fails to load,
+        so an unreadable address is 0 rather than an exception.
+        """
+        try:
+            return int(self.server.server_address[1])
+        except (AttributeError, IndexError, TypeError, ValueError):
+            return 0
 
     def _cutover(self, candidate, target):
         operation_root = self.root/'operations'/self._operation['id']

@@ -298,7 +298,7 @@ source-overlay surface, not the downstream source of truth:
 |---|---|
 | DeepSeek | `deepseek-v4-flash`, `deepseek-v4-pro` |
 | MiMo | `mimo-v2.5`, `mimo-v2.5-pro` |
-| Kimi | `k3`, `k3[1m]`, `kimi-k3`, `kimi-for-coding`, `kimi-for-coding-highspeed`, `kimi-k2.7-code`, `kimi-k2.5`, `K2.6` |
+| Kimi | `k3`, `k3[1m]` (legacy MMS selector), `kimi-k3`, `kimi-for-coding`, `kimi-for-coding-highspeed`, `kimi-k2.7-code`, `kimi-k2.5`, `K2.6` |
 | Qwen | `qwen3-coder-plus`, `qwen3.5-plus`, `qwen3.6-plus`, `qwen3.8-max-preview` |
 | GLM | `glm-5-turbo`, `glm-5.1` |
 | MiniMax | `MiniMax-M2.7` |

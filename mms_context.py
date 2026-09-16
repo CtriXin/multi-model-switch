@@ -105,7 +105,7 @@ def _discover_context_store_dirs(primary: Path, *, limit: int = DEFAULT_STATS_ST
     """Find recent MMS session context stores for human-facing gain checks."""
     candidates: list[Path] = []
     for home in _real_home_candidates():
-        config_root = home / ".config" / "mms"
+        config_root = home / ".config" / "mms-next"
         if not config_root.exists():
             continue
         try:

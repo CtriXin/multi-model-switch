@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -36,6 +37,7 @@ class RecordingSink:
         self.approvals_pending: dict[str, dict] = {}
         self.approvals_resolved: list[tuple[str, str]]
         self.approvals_resolved = []
+        self.side_question_events: list[dict] = []
         self.exited: list[tuple[int, str]] = []
         self.exit_event = threading.Event()
 
@@ -74,6 +76,10 @@ class RecordingSink:
         with self.lock:
             self.exited.append((exit_code, stderr_tail))
         self.exit_event.set()
+
+    def side_question_event(self, payload: dict) -> None:
+        with self.lock:
+            self.side_question_events.append(payload)
 
     # helpers
 
@@ -138,6 +144,43 @@ def test_malformed_line_becomes_notice_and_flow_continues(make_driver):
     sink.wait_for(lambda: any(e.get("title") == "协议异常" for e in sink.events.values()))
     sink.wait_for(lambda: "idle" in sink.proto_states)
     assert sink.text_of([i for i in sink.order if i.startswith("m-")][0]) == "echo: malformed"
+
+
+def test_event_sink_failure_does_not_fake_process_exit():
+    """A transient session-write failure must not turn a live Pi into EOF."""
+    sink = RecordingSink()
+    sink_failures = {"remaining": 1}
+
+    original = sink.set_proto_state
+
+    def fail_once(state: str) -> None:
+        if sink_failures["remaining"]:
+            sink_failures["remaining"] -= 1
+            raise OSError("simulated transient Windows file lock")
+        original(state)
+
+    sink.set_proto_state = fail_once  # type: ignore[method-assign]
+    code = (
+        "import json,sys,time\n"
+        "for msg in ({'type':'agent_start'}, {'type':'agent_settled'}):\n"
+        " sys.stdout.write(json.dumps(msg)+'\\n'); sys.stdout.flush()\n"
+        "time.sleep(0.2)\n"
+        "sys.stdin.readline()\n"
+    )
+    proc = subprocess.Popen(
+        [sys.executable, "-c", code],
+        stdin=__import__("subprocess").PIPE,
+        stdout=__import__("subprocess").PIPE,
+        stderr=__import__("subprocess").PIPE,
+    )
+    driver = PiRpcDriver(proc, sink, name="event-failure")
+    try:
+        sink.wait_for(lambda: sink.proto_states == ["idle"])
+        assert driver.exit_code is None
+        assert sink.exited == []
+        assert any(e.get("title") == "RPC 事件处理异常" for e in sink.events.values())
+    finally:
+        driver.close(graceful_timeout=2.0)
 
 
 def test_stderr_is_captured_and_reported_on_error_exit(make_driver):
@@ -273,6 +316,47 @@ def test_get_state_roundtrip(make_driver):
     driver, sink = make_driver()
     state = driver.get_state()
     assert state.get("isStreaming") is False
+
+
+def test_steer_delivers_after_inflight_tool_call(make_driver):
+    driver, sink = make_driver()
+    assert driver.send_prompt("steer-tool-flow")["success"] is True
+    sink.wait_for(lambda: sink.events.get("t-call_steer_tool_1", {}).get("status") == "running")
+    response = driver.steer("redirect now")
+    assert response["success"] is True
+    assert response["command"] == "steer"
+    sink.wait_for(lambda: "idle" in sink.proto_states)
+    consumed = [e for e in sink.events.values() if e.get("consumedPrompt") == "redirect now"]
+    assert len(consumed) == 1, "steering message must be delivered exactly once"
+    # The in-flight tool call finished before the steering message arrived.
+    tool = sink.events["t-call_steer_tool_1"]
+    assert tool["status"] == "done"
+    consumed_id = next(i for i, e in sink.events.items() if e.get("consumedPrompt") == "redirect now")
+    assert sink.order.index("t-call_steer_tool_1") < sink.order.index(consumed_id)
+    assert sink.events.get("n-queue", {}).get("queue") == []
+    assistant = [i for i in sink.order if i.startswith("m-")]
+    assert sink.text_of(assistant[-1]) == "steered reply: redirect now"
+    # Steering never ends the turn; no abort was involved.
+    assert "stopped" not in [a["phase"] for a in sink.activities]
+
+
+def test_steer_rejection_is_reported_not_degraded(make_driver):
+    driver, sink = make_driver()
+    response = driver.steer("steer-fail")
+    assert response["success"] is False
+    assert "simulated steer rejection" in response["error"]
+    sink.wait_for(lambda: any(e.get("title") == "命令错误" for e in sink.events.values()))
+
+
+def test_queue_update_splits_steering_and_follow_up(make_driver):
+    driver, sink = make_driver()
+    driver._handle_event({"type": "queue_update", "steering": ["s1"], "followUp": ["f1", "f2"]})
+    event = sink.events["n-queue"]
+    assert event["queueSteering"] == ["s1"]
+    assert event["queueFollowUp"] == ["f1", "f2"]
+    assert event["queue"] == ["s1", "f1", "f2"]
+    driver._handle_event({"type": "queue_update", "steering": [], "followUp": []})
+    assert sink.events["n-queue"]["queue"] == []
 
 
 def test_response_timeout_raises(make_driver):

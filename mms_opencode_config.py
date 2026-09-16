@@ -918,6 +918,12 @@ def opencode_model_config(
         except (TypeError, ValueError):
             context_window = None
     if not context_window:
+        # The user's own `model-context-overrides.json` is the top of the shared
+        # context chain and must hold here too, not only in the launcher.
+        from mms_context_window import user_context_window_override
+
+        context_window = user_context_window_override(model, runtime=runtime)
+    if not context_window:
         context_window = opencode_capability_int(runtime, model, "context_window_tokens", "max_context_tokens")
     if not context_window and callable(context_window_resolver):
         context_window = context_window_resolver(
@@ -979,7 +985,7 @@ def opencode_model_config(
     return config
 
 
-def opencode_build_config_payload(runtime, model_name="", *, context_window_resolver=None, output_limit_resolver=None):
+def opencode_build_config_payload(runtime, model_name="", *, context_window_resolver=None, output_limit_resolver=None, vision_relay_mcp=None):
     runtime = runtime if isinstance(runtime, dict) else {}
     routes = opencode_runtime_routes(runtime, model_name)
     providers = {}
@@ -1038,6 +1044,10 @@ def opencode_build_config_payload(runtime, model_name="", *, context_window_reso
         "share": "disabled",
         "provider": providers,
     }
+    # Lets a text-only model borrow a vision model on the same channel. Absent
+    # when the selected model reads images itself, or when none here can.
+    if isinstance(vision_relay_mcp, dict) and vision_relay_mcp:
+        payload["mcp"] = dict(vision_relay_mcp)
     if routes:
         model_ref = opencode_route_model_ref(routes[0], 0)
         default_route_key = str(runtime.get("opencode_default_route_key") or "").strip()
@@ -1113,13 +1123,14 @@ def opencode_apply_bypass_env(env, runtime):
     return env
 
 
-def opencode_build_config_content(runtime, model_name="", *, context_window_resolver=None, output_limit_resolver=None):
+def opencode_build_config_content(runtime, model_name="", *, context_window_resolver=None, output_limit_resolver=None, vision_relay_mcp=None):
     return json.dumps(
         opencode_build_config_payload(
             runtime,
             model_name,
             context_window_resolver=context_window_resolver,
             output_limit_resolver=output_limit_resolver,
+            vision_relay_mcp=vision_relay_mcp,
         ),
         ensure_ascii=False,
         indent=2,

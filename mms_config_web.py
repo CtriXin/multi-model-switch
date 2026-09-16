@@ -93,12 +93,13 @@ _MIGRATION_CREDENTIAL_BOX_AESGCM_SCHEMA = "mms.config_migration_credentials.aesg
 _MIGRATION_CREDENTIAL_BOX_OPENSSL_SCHEMA = "mms.config_migration_credentials.openssl-cbc-hmac.v1"
 _MIGRATION_CREDENTIAL_BOX_SCHEMA = _MIGRATION_CREDENTIAL_BOX_AESGCM_SCHEMA
 
+# Keys are `[1m]`-free: a selector is the same model as its base name, so it
+# never needs a duplicate row (issue #230).
 _KNOWN_VISION_MODELS = {
     "gpt-5.3-codex",
     "gpt-5.4",
     "gpt-5.5",
     "k3",
-    "k3[1m]",
     "kimi-k3",
     "k2.6",
     "k2.6-code-preview",
@@ -665,7 +666,10 @@ def _preview_bundle_config_from_verified_files(verified_files: dict[str, Any], *
                 "enabled": profile.get("enabled", True) is not False,
                 "role": _safe_text(profile.get("role") or "auto"),
                 "priority": int(profile.get("priority") or 0),
-                "models_endpoint": _safe_text(profile.get("models_endpoint") or "manual"),
+                # An unset endpoint means "/models" everywhere else (config
+                # normalisation, the CLI probe, the publish plan). Only an
+                # explicit "manual" turns model discovery off.
+                "models_endpoint": _safe_text(profile.get("models_endpoint") or "/models"),
                 "protocols": protocols,
                 "supported_clis": _normalize_model_list(profile.get("supported_clis")),
                 "openai_base_url": openai_base_url,
@@ -5566,7 +5570,7 @@ def _preferences_target_path(*, config_path: str = "", preferences_path: str = "
     paths = getattr(mms_core, "PREFERENCES_PATHS", None)
     if isinstance(paths, list) and paths:
         return os.path.abspath(os.path.expanduser(str(paths[0])))
-    return os.path.abspath(os.path.expanduser("~/.config/mms/preferences.toml"))
+    return os.path.abspath(os.path.expanduser("~/.config/mms-next/preferences.toml"))
 
 
 def _preferences_lock_path(*, config_path: str = "", preferences_path: str = "") -> str:

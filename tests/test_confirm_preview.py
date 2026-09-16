@@ -37,7 +37,7 @@ def test_build_confirm_preview_catalog_omits_retired_nsr_hooks_for_codex():
     assert preview["hooks"]["nsr"] == []
 
 
-def test_build_confirm_preview_catalog_collects_preview_sections(monkeypatch, tmp_path):
+def test_build_confirm_preview_catalog_excludes_retired_caveman(monkeypatch, tmp_path):
     base_hook = tmp_path / "rtk-rewrite.sh"
     base_hook.write_text("#!/bin/sh\n", encoding="utf-8")
     caveman_hook = tmp_path / "caveman-activate.js"
@@ -171,19 +171,19 @@ def test_build_confirm_preview_catalog_collects_preview_sections(monkeypatch, tm
     assert preview["allow_execution_surfaces"] is True
     mcp_titles = {item["title"] for item in preview["mcp"]["always"]}
     skill_titles = {item["title"] for item in preview["skills"]["always"]}
-    caveman_skill_titles = {item["title"] for item in preview["skills"]["caveman"]}
+    caveman_skill_titles = {item["title"] for item in preview["skills"].get("caveman", [])}
     ecc_skill_titles = {item["title"] for item in preview["skills"]["ecc"]}
     hook_titles = {item["title"] for item in preview["hooks"]["always"]}
-    caveman_hook_titles = {item["title"] for item in preview["hooks"]["caveman"]}
+    caveman_hook_titles = {item["title"] for item in preview["hooks"].get("caveman", [])}
     ecc_hook_titles = {item["title"] for item in preview["hooks"]["ecc"]}
 
     assert "brainkeeper" in mcp_titles
     assert skill_titles >= {"web-access", "codegraph", "toon", "token-saver", "auto-github-contributor"}
-    assert caveman_skill_titles >= {"caveman", "caveman-review"}
+    assert caveman_skill_titles == set()
     assert len(preview["skills"]["ecc"]) == 1
     assert next(iter(ecc_skill_titles)).startswith("ECC")
     assert "RTK Bash 改写" in hook_titles
-    assert "Caveman 激活" in caveman_hook_titles
+    assert caveman_hook_titles == set()
     assert "ecc-stop" in ecc_hook_titles or any(title.startswith("ECC") for title in ecc_hook_titles)
 
     brainkeeper_item = next(item for item in preview["mcp"]["always"] if item["title"] == "brainkeeper")
@@ -264,7 +264,7 @@ def test_build_confirm_preview_catalog_collects_omc_bundle(monkeypatch, tmp_path
     assert any(label == "路径" and value for label, value in mcp_item["details"])
 
 
-def test_build_confirm_preview_catalog_collects_opencode_assets(monkeypatch, tmp_path):
+def test_build_confirm_preview_catalog_collects_opencode_assets_without_caveman(monkeypatch, tmp_path):
     caveman_root = tmp_path / "caveman"
     _write_skill(caveman_root, "caveman")
     web_access = _write_skill(tmp_path / "web-access-root", "web-access")
@@ -294,5 +294,5 @@ def test_build_confirm_preview_catalog_collects_opencode_assets(monkeypatch, tmp
         "toon",
         "token-saver",
     }
-    assert {item["title"] for item in preview["skills"]["caveman"]} == {"caveman"}
+    assert preview["skills"].get("caveman", []) == []
     assert any(item["title"] == "RTK OpenCode plugin" for item in preview["hooks"]["always"])

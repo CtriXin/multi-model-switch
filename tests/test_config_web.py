@@ -1,4 +1,5 @@
 import json
+import signal
 import threading
 from http.server import ThreadingHTTPServer
 from urllib.request import Request, urlopen
@@ -1095,6 +1096,41 @@ def test_config_web_preview_bundle_config_from_verified_files_replaces_redacted_
     provider = result["providers"][0]
     assert provider["secret_ref"] == "pending-webui:demo:api_key"
     assert provider["has_api_key"] is True
+    # The profile above never set models_endpoint: discovery stays available,
+    # matching the "/models" default the CLI and the publish plan use.
+    assert provider["models_endpoint"] == "/models"
+
+
+def test_config_web_preview_bundle_config_keeps_explicit_manual_models_endpoint(tmp_path):
+    config_root = tmp_path / "mms-next"
+    generated_dir = config_root / "generated"
+    generated_dir.mkdir(parents=True)
+    profile_path = generated_dir / "provider-profiles.generated.json"
+    router_path = generated_dir / "model-routes.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "profiles": {
+                    "relay": {"name": "Relay", "protocols": ["openai_chat_completions"], "models_endpoint": "manual"},
+                    "empty": {"name": "Empty", "protocols": ["openai_chat_completions"], "models_endpoint": ""},
+                },
+                "provider": {"default": "relay"},
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    router_path.write_text(json.dumps({"routes": {}}), encoding="utf-8")
+
+    result = mms_config_web._preview_bundle_config_from_verified_files(
+        {"profile": {"path": str(profile_path)}, "router": {"path": str(router_path)}},
+        config_root=str(config_root),
+    )
+
+    endpoints = {item["id"]: item["models_endpoint"] for item in result["providers"]}
+    # A relay kept in manual mode on purpose stays manual; a profile that was
+    # published without the field (registry writes "") is not turned manual.
+    assert endpoints == {"relay": "manual", "empty": "/models"}
 
 
 def test_config_web_snapshot_includes_read_only_model_source_status(tmp_path):
@@ -2659,7 +2695,10 @@ def test_config_web_registry_v2_save_plan_blocks_stable_root(tmp_path):
     )
     v2_plan = plan["registry_v2_save_plan"]
 
-    assert v2_plan["root"]["mode"] == "stable"
+    # Every root is preview mode now; the retired legacy directory is still
+    # refused as a write target (#177).
+    assert v2_plan["root"]["mode"] == "preview"
+    assert v2_plan["root"]["legacy_root"] is True
     assert v2_plan["would_write"]["db_candidate_revision"] is False
     assert v2_plan["would_write"]["secret_backend"] is False
     assert v2_plan["would_write"]["generated_latest_approved_bundle"] is False
@@ -2988,14 +3027,16 @@ def test_config_web_save_uses_audited_writers(monkeypatch, tmp_path):
     )
     encoded = json.dumps(result, ensure_ascii=False)
 
-    assert result["ok"] is True
-    assert config_path.exists()
-    assert credentials_path.exists()
-    assert "sk-super-secret-value" in credentials_path.read_text(encoding="utf-8")
-    assert policy_path.exists()
-    assert (tmp_path / "config-audit.jsonl").exists()
-    assert "setup-web-ui:interactive-save" in (tmp_path / "config-audit.jsonl").read_text(encoding="utf-8")
-    assert result["save_report"]["config"]["bak_path"].endswith(".bak")
+    # The legacy audited config.toml save went with the stable root (#177):
+    # every root is preview mode, so /api/save is refused and nothing is written.
+    assert result["ok"] is False
+    assert result["status"] == "blocked"
+    assert "preview root" in result["errors"][0]
+    assert "sk-super-secret-value" not in credentials_path.read_text(encoding="utf-8")
+    assert "sk-super-secret-value" not in encoded
+    assert not (tmp_path / "config-audit.jsonl").exists()
+    assert not list(tmp_path.glob("*.bak"))
+    return
     bak_paths = list((tmp_path / "backups").rglob("*.bak"))
     assert any(path.name == "config.toml.bak" for path in bak_paths)
     assert any(path.name == "credentials.sh.bak" for path in bak_paths)
@@ -3133,8 +3174,12 @@ def test_config_web_migration_export_import_uses_openssl_when_cryptography_missi
         preferences_path=str(preferences_path),
         command_name="mms",
     )
+    # Every root is preview mode (#177): the import lands in the registry
+    # path, not in a legacy credentials.sh next to config.toml.
     assert applied["ok"] is True
-    assert "sk-openssl-migration-secret" in credentials_path.read_text(encoding="utf-8")
+    assert applied["status"] == "imported"
+    assert applied["summary"]["credential_updates"] == 1
+    assert not credentials_path.exists()
     assert "sk-openssl-migration-secret" not in json.dumps(applied, ensure_ascii=False)
 
 
@@ -3367,8 +3412,10 @@ def test_config_web_migration_start_status_ready_when_provider_is_complete(tmp_p
         command_name="mmz1",
     )
 
-    assert status["ready_to_work"] is True
-    assert status["blockers"] == []
+    # Every root is preview mode (#177): a provider in config.toml alone is not
+    # ready until the latest-approved bundle is published and verified.
+    assert status["ready_to_work"] is False
+    assert [item["id"] for item in status["blockers"]] == ["bundle_not_verified"]
     assert status["copy_command"] == "mmz1"
 
 
@@ -4899,11 +4946,11 @@ def test_config_web_mmf_official_overrides_use_provider_profiles(monkeypatch, tm
     assert gemini["official_reasoning_effort"] == "high"
 
     deepseek = result["model_capabilities"]["deepseek-v4-pro"]
-    assert deepseek["context_window_tokens"] == 1_000_000
-    assert deepseek["max_output_tokens"] == 384_000
+    assert deepseek["context_window_tokens"] == 1_048_576
+    assert deepseek["max_output_tokens"] == 393_216
 
     k3 = result["model_capabilities"]["k3"]
-    assert k3["context_window_tokens"] == 262_144
+    assert k3["context_window_tokens"] == 1_048_576
     assert k3["max_output_tokens"] == 131_072
     assert k3["vision"] is True
     assert k3["reasoning_effort"] == "max"
@@ -5133,3 +5180,83 @@ def test_config_web_save_preserves_openrouter_vision_when_mmf_overlay_is_partial
     assert caps["tool_use"] is True
     assert caps["reasoning"] is True
     assert caps["thinking"] is True
+
+
+def test_config_web_shutdown_survives_repeat_sigint(monkeypatch):
+    """Regression: a second Ctrl-C during cleanup must not escape as a traceback.
+
+    The cleanup path keeps the main thread in an interruptible wait for the
+    shutdown helper. A SIGINT landing there used to be raised out of the
+    ``except KeyboardInterrupt`` clause, so it escaped ``serve_config_web`` as a
+    traceback instead of exiting cleanly.
+    """
+    original_handler = signal.getsignal(signal.SIGINT)
+    real_join = threading.Thread.join
+
+    def join_with_second_sigint(self, timeout=None):
+        if self.name == "mms-setup-web":
+            # First Ctrl-C: interrupts the wait for the serving thread.
+            raise KeyboardInterrupt
+        # Second Ctrl-C: lands while the main thread waits for cleanup.
+        signal.raise_signal(signal.SIGINT)
+        return real_join(self, timeout)
+
+    # Pin the handler so the test does not depend on ambient signal state.
+    signal.signal(signal.SIGINT, signal.default_int_handler)
+    monkeypatch.setattr(threading.Thread, "join", join_with_second_sigint)
+    try:
+        app = mms_config_web_server.ConfigWebApp({}, command_name="mms")
+        try:
+            url = mms_config_web_server.serve_config_web(
+                app, host="127.0.0.1", port=0, open_browser=False
+            )
+        except BaseException as exc:
+            raise AssertionError(
+                f"second SIGINT escaped the cleanup path as {type(exc).__name__}"
+            ) from exc
+    finally:
+        signal.signal(signal.SIGINT, original_handler)
+
+    assert url.startswith("http://127.0.0.1:")
+
+
+def test_config_web_announces_that_pilot_replaced_it(capsys):
+    """The page still runs, but it must stop presenting itself as the way in.
+
+    Pilot writes the same config root, so channels and models edited there are
+    already what the terminal launches with. Users kept configuring here and
+    then wondering which of the two pages was real.
+    """
+    rc = mms_config_web.run_config_web(
+        {"providers": []},
+        ["--print-summary"],
+        command_name="mmf",
+        config_path="/tmp/config.toml",
+        preferences_path="/tmp/preferences.toml",
+    )
+
+    assert rc == 0
+    captured = capsys.readouterr()
+    # The notice goes to stderr so a piped --print-summary stays valid JSON.
+    assert json.loads(captured.out)["schema"] == "mms.setup_web.snapshot.v2"
+    assert "mmf config web 已降级" in captured.err
+    assert "mmf web" in captured.err
+
+
+def test_config_web_gate_cards_do_not_name_the_retired_config_root():
+    """A gate card tells the user which files an action writes.
+
+    Config moved to ~/.config/mms-next; these cards still named ~/.config/mms,
+    so the human gate was disclosing a path nothing writes any more.
+    """
+    import mms_config_web_settings
+
+    catalog = mms_config_web_settings._settings_gate_catalog("mms")
+    offenders = [
+        f"{gate_id}: {target}"
+        for gate_id, gate in catalog.items()
+        for target in gate.get("writes", [])
+        if "~/.config/mms/" in target
+    ]
+
+    assert not offenders, "gate cards name the retired config root: " + "; ".join(offenders)

@@ -15,11 +15,13 @@ interface Model { id: string; name: string; family: string; providerId: string; 
 interface Service { id: string; name: string; kind: string; status: 'configured'|'needs_key'|'error'; modelCount: number; detail: string }
 interface Preset { id: string; name: string; description: string; harness: Harness; modelId: string; providerId: string; channel: string; available: boolean; reason?: string }
 interface Session { id: string; title: string; workspaceId: string; harness: Harness; modelName: string; providerName: string; channel: string; state: State; activity?: Activity | null; updatedAt: string; owner: 'web'|'glint'|'external'; capabilities: {send: boolean; stop: boolean; approve: boolean}; summary?: string }
-interface Event { id: string; sequence: number; kind: 'user'|'assistant'|'tool'|'approval'|'notice'; text: string; title?: string; status?: 'running'|'done'|'error'; approvalId?: string; decision?: 'allow'|'deny'; createdAt: string }
+interface Event { id: string; sequence: number; kind: 'user'|'assistant'|'tool'|'approval'|'notice'; text: string; title?: string; status?: 'running'|'done'|'error'; approvalId?: string; decision?: 'allow'|'deny'; createdAt: string; updatedAt?: string }
 interface Artifact { id: string; name: string; kind: 'markdown'|'text'|'csv'|'html'|'image'; path: string; sha256: string; revision: number; versionCount: number; status: 'current'|'changed'|'missing'|'unavailable'; source: 'tool'|'observed'|'legacy' }
 interface SessionDetail { session: Session; events: Event[]; artifacts: Artifact[]; artifactNotice?: string }
 interface Diagnostic { code: string; message: string }
 ```
+
+Event.createdAt 是事件首次写入时间，updatedAt 是最后一次写入时间；界面用 updatedAt 与本轮首条 user 事件的 createdAt 计算回复用时，旧持久化记录没有 updatedAt 时不显示用时，也不回填猜测值。
 
 所有字段是普通文本，不渲染任意 HTML。id 必须稳定且不能包含 secret；model id 应区分同名不同 provider。available 表示当前 Web 路径可用，不是 provider 已实测连通；不能从有 Key 推导真实执行通过。Session state 来自进程/protocol，不能来自模型自述。列表可以包含非 Web owner，但不可给其伪造 send/stop 权限。
 
@@ -73,7 +75,7 @@ launch `{requestId,workspaceId,presetId,title,prompt}`；send `{requestId,text}`
 
 ## HTTP（主导所有）
 
-- `GET /api/v1/bootstrap`：`{version:'1',mode:'live',capabilities:{catalogRead,configure,launch},models,services,presets,workspaces,diagnostics,sessions,csrfToken}`。
+- `GET /api/v1/bootstrap`：`{version:'1',mode:'live',capabilities:{catalogRead,configure,launch},platform:{os,shell,home,configRoot,stateRoot,tempRoot,pathStyle,processControl,filePicker},browser:[{backend,supported,loggedIn,reason?,requires?}],models,services,presets,workspaces,diagnostics,sessions,csrfToken}`。`platform` 与 `browser` 是描述性 capability，不代表登录态已建立；未知登录态返回 `"unknown"`。
 - `GET /api/v1/sessions/:id`：SessionDetail。
 - `POST /api/v1/sessions`：launch。
 - `POST /api/v1/sessions/:id/messages`、`/stop`、`/approvals/:approvalId`：上述方法。
@@ -91,6 +93,7 @@ launch `{requestId,workspaceId,presetId,title,prompt}`；send `{requestId,text}`
 
 - WebApplication 未提供 config_root 时，使用 state_root/config 完成新用户设置。CatalogService 自身的 config_root=None 仍表示禁用目录，不偷偷发现 HOME。
 - POST /workspaces 接收 {path}，返回 Workspace；POST /workspaces/choose 在 macOS 打开本机文件夹选择器，返回 {path}，取消返回空 path。只由用户点击触发。
+- POST /workspaces/locate 接收 {name, children}，返回 {matches, sure}。用于浏览器只给出目录名的拖放：按已知工作目录、zoxide、系统索引和有界扫描查找同名目录，用 children 交集排序。sure 为 true 表示可直接引用，false 时由用户在“引用文件夹”中选择。只读取目录名，扫描有深度、数量和时间上限。
 - 自动模型组合 id 为 web:pi:<providerId>:<modelId>，由当前可用目录派生，不写回 MMS presets。
 - Event 增加 arguments、method、options、placeholder、prefill、answer。method 为 confirm/select/input/editor；select 回答必须是服务端收到的原始选项。任何问题都不自动代答。
 - send capability 包含可从私有原生 history 恢复的会话。恢复沿用该会话快照中的模型/通道，不自动换路由或使用全局 OAuth。
@@ -111,6 +114,28 @@ launch `{requestId,workspaceId,presetId,title,prompt}`；send `{requestId,text}`
 - Event 增加 thinking、usage、nativeTimestamp、attachments、references。Thinking 在 text_delta/thinking_delta 和 message_end 中同步；旧会话按匹配的原生 assistant 历史补齐。
 - 图片能力拒绝在记录新消息前完成。CSRF 明确拒绝后前端只刷新 token 并重试一次，不对未知网络失败盲目重发。上传内容不打印到日志。
 - 工作配方是前端导出/导入的 `mms-work-recipe-v1` 文件，只白名单读取 title/prompt/preferredModel/planning，不自动提交、启动或写入配置。
+
+## 2026-09-12 `/btw` 旁问（side-questions）
+
+- `POST /sessions/:id/side-questions {question, idempotencyKey?, sourceHint?}`：创建会话拥有的旁问。`sourceHint` 仅接受 `state|completion`；缺省按问题是否询问状态来路由。相同 `idempotencyKey` 返回原旁问，不重复创建。
+- `GET /sessions/:id/side-questions`、`GET /sessions/:id/side-questions/:btwId`：列表与单条；`POST /sessions/:id/side-questions/:btwId/cancel`：取消未完成的旁问，已完成行幂等返回原状。
+- 旁问行包含 `btwId/mainSessionId/owner=sidecar/status/answer/source/contextRevision/contextScope/routeSnapshot/usage/redactionSummary/error/createdAt/acceptedAt/startedAt/completedAt`；状态机 `prepared → accepted → running → completed|failed|cancelled|uncertain`。
+- 隔离不变量：旁问不进入主 transcript 事件流、不进入 follow-up 队列、不调用 driver、不改变模型/通道/effort；主 session 的 `last_sequence` 不因旁问改变。`SessionDetail.sideQuestions` 只读返回旁问记录。
+- `state` 来源是确定性的会话快照回答（阶段、耗时、最近工具、队列、审批、错误）；`completion` 来源是只读旁路请求，只接收预算化且脱敏的上下文快照与 cancel event，不经过 driver、不写工作区、不追加主 transcript。默认走**会话自己的路由**：从该 session 私有 `resume.json` 读回它启动时的 provider / model / key，发一次无状态非流式 completion；路由声明 `anthropic_messages` 且带 `anthropic_base_url` 时用 `/v1/messages`，否则退到 `chat/completions`，且不做任何 endpoint 探测。宿主注入的 `sidecar_runner` 优先于会话路由。两者都不可用时 fail closed：记录 `failed` 且原因可见，主任务不受影响。
+- bootstrap `capabilities.sidecarCompletion` 表示**本 build 能否尝试**模型旁问，不表示某个会话一定能答；单个会话能否回答取决于它自己的路由，由该旁问行的 `error` 说明。
+- 脱敏：question/answer/error/context 均按会话 secrets 掩码，`redactionSummary.secretsMasked` 记录次数。
+- 2026-09-14 上下文摘录：`completion` 快照另带 `recentTurns`，即 session 事件镜像里最近至多 6 轮 user/assistant 文本（每轮 ≤1200 字、合计 ≤5000 字，经 secrets 脱敏），不含工具输出正文、thinking、附件或文件；不读取真实配置、密钥或 Pi 的 `conversation.jsonl`。行上的 `contextScope {recentTurns,totalTurns,truncated}` 说明摘录覆盖了几轮、是否截断；`state` 行为 `null`。
+- 2026-09-14 session view 新增 `lastEventAt`（最近一次 transcript 写入）与 `heartbeatAt`（最近一次 driver 从 Pi 进程送达的回调：event/activity/state/approval/exit；未收到过为 `null`）。两者都是已发生事件的时间戳，随 session 持久化并在重启后按记录恢复；没有完成百分比或推测进度。
+- 生命周期边界：主任务 stop 不取消进行中的旁问；服务 `close()` 把进行中旁问标为 `uncertain`；进程重启后加载时把进行中行标为 `cancelled`，已完成行保留。fork 只携带已完结的旁问。
+
+### 2026-09-14 原生 `/btw` 扩展优先（btwNative）
+
+- 会话启动/adopt/resume 后，host 调一次 RPC `get_commands`：命令集同时含 `btw` 与 `btw:cancel`（fork 独有，上游原包无 headless）才把 `session.btwNative` 置 `true` 并写入 session view；探测失败或扩展缺席为 `false`，不阻塞会话，也不伤装。下次 adopt/resume 会重探。
+- `btwNative=true` 的会话，`completion` 旁问优先走扩展：host 只向 driver 发一条 `/btw <问题>` prompt（问题取自脱敏后的行文本、压成单行），扩展在 Pi 进程内用主会话分支上下文回答，经 `BTW_EVENT:` notify 回报 `accepted/running/delta/completed/failed/cancelled`；行上的 `runner` 字段区分 `pi-extension` 与 `host`，`contextScope` 为扩展报告的分支范围 `{mode,entries,chars,truncated,leafId}`。
+- 降级：扩展拒绝 prompt（`success:false`）、driver 交付失败或超时窗内无终态事件时，记录 `fallbackReason` 并**只退一次** host 旁路（会话自身路由或 sidecar_runner），不循环；无终态事件后迟到的扩展事件不会重开已完结的行。扩展未被检测到时不属于降级：直接走 host 旁路，`fallbackReason` 为 `null`。
+- 取消：对 `runner=pi-extension` 的进行中行，取消会先尽力向 driver 发 `/btw:cancel <扩展 id>`，然后行立即落 `cancelled`（幂等）；扩展侧的 `cancelled` 事件随后到达时被吸收。
+- 隔离不变量不变并加强：native 路径下 driver 只收到 `/btw …` 这一条 prompt；主 transcript 不新增任何 user 事件，`last_sequence`、队列、模型/effort 不变（回归测试断言）。
+- 行新增字段：`runner`（`host|pi-extension`，旧持久化行缺省按 host 展示）、`fallbackReason`（string|null）；session view 新增 `btwNative`（boolean）。
 
 ## Prelaunch selection (2026-09-08)
 

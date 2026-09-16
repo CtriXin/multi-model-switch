@@ -12,7 +12,7 @@ from pathlib import Path
 
 from mms_state_io import resolve_mms_config_dir
 
-DEFAULT_PRIMARY_CONFIG_DIR = Path(os.path.expanduser("~/.config/mms"))
+DEFAULT_PRIMARY_CONFIG_DIR = Path(os.path.expanduser("~/.config/mms-next"))
 PRIMARY_CONFIG_DIR = DEFAULT_PRIMARY_CONFIG_DIR
 DEFAULT_PROJECTS_DIR = DEFAULT_PRIMARY_CONFIG_DIR / "projects"
 PROJECTS_DIR = DEFAULT_PROJECTS_DIR

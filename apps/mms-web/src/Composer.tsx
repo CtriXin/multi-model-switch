@@ -1,7 +1,7 @@
 import { appendGuidePrompt } from "./guide-content";
 import { readDraft, saveDraft, discardDraft } from "./drafts";
 import { useEffect, useRef, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
+import type { FormEvent, ReactNode, RefObject } from "react";
 import {
   CircleAlert,
   ArrowUp,
@@ -19,15 +19,21 @@ import { Popover } from "./Popover";
 import { SkillPicker } from "./SkillPicker";
 import type { Skill } from "./SkillPicker";
 import { request } from "./api";
-import type { Attachment, FileSelection } from "./types";
+import { SKILL_PREFERENCES_EVENT } from "./SkillSources";
+import type { Attachment, FileSelection, Workspace, SendMode } from "./types";
 import { FilesPanel } from "./FilesPanel";
 import { localFilePaths } from "./local-file-paths";
 import { requiredSkillMatches } from "./recipe-core";
+import { sendsOnEnter } from "./composer-keys";
+import { readBtwCommand } from "./side-questions";
 const noRequiredSkills: string[] = [];
-import { droppedItems } from "./dropped-items";
+import { droppedItems, folderChildren } from "./dropped-items";
 import { WorkspaceDialog } from "./LaunchOptions";
 
 export interface MessageExtras {
+  /** How this message should reach the session. The service decides what it
+   *  can honour; the composer only offers what it said it supports. */
+  mode: SendMode;
   skillInvocation?: string;
   skills: string[];
   attachments: string[];
@@ -46,6 +52,7 @@ const commands: CommandItem[] = [
   { name: "thinking", description: "调整思考等级，例如 /thinking high" },
   { name: "compact", description: "压缩上下文；可在命令后补充保留要求" },
   { name: "clear-queue", description: "清空尚未执行的补充消息" },
+  { name: "btw", description: "旁问，不打断当前任务" },
   { name: "name", description: "重命名会话，例如 /name 产品方案" },
   { name: "fork", description: "从当前进度创建独立会话分支" },
   { name: "export", description: "下载这段对话的 Markdown" },
@@ -63,6 +70,7 @@ export function Composer({
   sessionId,
   sessionAlive,
   onCommand,
+  sideQuestion,
   initialText = "",
   requiredSkillNames = noRequiredSkills,
   selectionRequest,
@@ -71,6 +79,9 @@ export function Composer({
   guideHandled,
   draftKey: providedDraftKey,
   placeholder = "继续补充你的想法…",
+  scroll,
+  queue,
+  enterToSend = true,
 }: {
   initialText?: string;
   requiredSkillNames?: string[];
@@ -90,7 +101,21 @@ export function Composer({
   workspaceId?: string;
   sessionId?: string;
   sessionAlive?: boolean;
+  /** Transcript scroller; enables the scroll-aware fold when provided. */
+  scroll?: RefObject<HTMLDivElement | null>;
   onCommand?: (command: string, args: string) => Promise<boolean>;
+  /** `/btw`. Asking goes to the session's side-question API, never to
+   *  `send`, so a question can never become a main turn by accident. */
+  sideQuestion?: {
+    ask: (question: string) => Promise<boolean>;
+    /** Said up front when only state questions can be answered here. */
+    limitation?: string;
+  };
+  /** Whether the service accepts a steering message on this session. */
+  steerAvailable?: boolean;
+  /** Messages waiting to be delivered, docked on top of the input. */
+  queue?: ReactNode;
+  enterToSend?: boolean;
 }) {
   const draftKey =
     providedDraftKey ||
@@ -105,7 +130,7 @@ export function Composer({
   const [skillsReady, setSkillsReady] = useState(false);
   const requiredSkillKey = requiredSkillNames.join("|");
   const [skillsOpen, setSkillsOpen] = useState(false);
-  const [folderDrops, setFolderDrops] = useState<string[]>([]);
+  const [folderDrops, setFolderDrops] = useState<{ name: string; matches: Workspace[] }[]>([]);
   function toggleSkill(id: string) {
     if (lock.current) return;
     setSelectedSkills((old) =>
@@ -114,6 +139,12 @@ export function Composer({
         : [...old, id].slice(0, 20),
     );
   }
+  const [skillsRevision, setSkillsRevision] = useState(0);
+  useEffect(() => {
+    const bump = () => setSkillsRevision(n => n + 1);
+    window.addEventListener(SKILL_PREFERENCES_EVENT, bump);
+    return () => window.removeEventListener(SKILL_PREFERENCES_EVENT, bump);
+  }, []);
   useEffect(() => {
     let cancelled = false;
     setSkills([]);
@@ -137,7 +168,7 @@ export function Composer({
     return () => {
       cancelled = true;
     };
-  }, [workspaceId, requiredSkillKey]);
+  }, [workspaceId, requiredSkillKey, skillsRevision]);
   const requirementIssues = requiredSkillNames.length ? (skillsReady ? requiredSkillMatches(requiredSkillNames, skills, selectedSkills).issues : [skillError || "正在核对模板所需的 Skills。"]) : [];
   const [text, setText] = useState(() => {
     const original = draft?.text ?? initialText;
@@ -146,6 +177,9 @@ export function Composer({
   });
   const [fileSelections, setFileSelections] = useState<FileSelection[]>(draft?.fileSelections || []);
   const [submitting, setSubmitting] = useState(false);
+  // A busy session queues; an idle one starts a turn. Redirecting the work is
+  // done on the queued message afterwards, not chosen here beforehand.
+  const sendMode: SendMode = running ? "followUp" : "direct";
   const [attachments, setAttachments] = useState<Attachment[]>(
     draft?.attachments || [],
   );
@@ -174,8 +208,9 @@ export function Composer({
   const [error, setError] = useState("");
   useEffect(() => {
     const controller = new AbortController();
-    for (const attachment of draft?.attachments || []) {
+    for (const attachment of attachments) {
       if (draft?.thumbnails[attachment.id]) continue;
+      if (!attachment.mimeType.startsWith("image/")) continue;
       request<{ dataUrl?: string }>(
         "/attachments/" + encodeURIComponent(attachment.id),
         undefined,
@@ -196,14 +231,80 @@ export function Composer({
         });
     }
     return () => controller.abort();
+  }, [draftKey, attachments]);
+  // Recipe variables and restored drafts can already contain absolute paths.
+  // Resolve those lines once so the composer can show the same removable
+  // preview cards as a direct file drop.
+  useEffect(() => {
+    if (draft?.attachments?.length || !initialText) return;
+    const paths = initialText.split(/\r?\n/).flatMap((line) => localFilePaths(line));
+    if (!paths.length || !workspaceId) return;
+    const controller = new AbortController();
+    request<{ attachments: Attachment[] }>("/files/reference-local", { paths }, controller.signal)
+      .then((result) => {
+        if (controller.signal.aborted) return;
+        setAttachments((old) => {
+          const known = new Set(old.map((item) => item.localPath));
+          return [...old, ...result.attachments.filter((item) => !known.has(item.localPath))].slice(0, 8);
+        });
+      })
+      .catch(() => {});
+    return () => controller.abort();
   }, [draftKey]);
   const [help, setHelp] = useState(false);
+  // `/btw` input state. While it is on, plain text becomes a side question
+  // instead of a message, so the composer says so and Escape leaves it.
+  const [btwMode, setBtwMode] = useState(false);
   const [files, setFiles] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [nativeCommands, setNativeCommands] = useState<CommandItem[]>([]);
   const [choice, setChoice] = useState(0);
   const [dismissed, setDismissed] = useState(false);
   const input = useRef<HTMLTextAreaElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  // Scroll-aware fold: a deliberate upward scroll in the transcript means
+  // "I am reading", so the composer folds to one line. Scrolling back down,
+  // reaching the latest message, focusing or clicking the box restores it.
+  const [collapsed, setCollapsed] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const collapsedRef = useRef(false);
+  collapsedRef.current = collapsed;
+  const canCollapseRef = useRef((): boolean => false);
+  function setCollapsedState(next: boolean) {
+    if (next) {
+      // Native top-layer popovers would stay floating over the transcript
+      // with their anchor folded away; dismiss them instead.
+      formRef.current
+        ?.querySelectorAll<HTMLElement>("[popover]")
+        .forEach((p) => {
+          try {
+            if (p.matches(":popover-open")) p.hidePopover();
+          } catch {
+            /* engines without the popover API */
+          }
+        });
+    }
+    setCollapsed(next);
+  }
+  // The box grew with neither the text nor the window: three rows with an
+  // inner scrollbar while the page below it sat empty. It now follows the
+  // content up to a share of the viewport, and stops following as soon as the
+  // person drags the corner, so a chosen height is not overwritten on typing.
+  const dragged = useRef(false);
+  function fitToContent() {
+    const el = input.current;
+    if (!el || dragged.current || collapsedRef.current) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, Math.round(window.innerHeight * 0.4))}px`;
+  }
+  // Keyed on the text rather than the change handler, so a restored draft, an
+  // imported template and an inserted file path all size the box too.
+  useEffect(fitToContent, [text]);
+  useEffect(() => {
+    const refit = () => fitToContent();
+    window.addEventListener("resize", refit);
+    return () => window.removeEventListener("resize", refit);
+  }, []);
   const consumedSelection = useRef("");
   const consumedGuide = useRef("");
   useEffect(() => {
@@ -244,6 +345,70 @@ export function Composer({
     else if (!files) dialog.current?.close();
   }, [files]);
   const menu = !dismissed && /^\/[\w:-]*$/.test(text);
+  // Anything that needs the reader's attention or holds an open surface
+  // vetoes the fold; evaluated lazily so the scroll listener never sees
+  // stale state.
+  canCollapseRef.current = () =>
+    !focused &&
+    !menu &&
+    !skillsOpen &&
+    !files &&
+    !help &&
+    !btwMode &&
+    !submitting &&
+    !uploading &&
+    !localFilesBusy &&
+    !error &&
+    !uploadErrors.length &&
+    !requirementIssues.length &&
+    !(disabled && reason);
+  useEffect(() => {
+    const el = scroll?.current;
+    if (!el) return;
+    let last = el.scrollTop;
+    let up = 0;
+    let down = 0;
+    const onScroll = () => {
+      const top = el.scrollTop;
+      const delta = top - last;
+      last = top;
+      const gap = el.scrollHeight - top - el.clientHeight;
+      // Hysteresis: fold only after a real upward intent, unfold eagerly.
+      if (delta < 0) {
+        up += -delta;
+        down = 0;
+      } else if (delta > 0) {
+        down += delta;
+        up = 0;
+      }
+      // The fold itself shrinks the composer and grows the scroller's
+      // clientHeight, moving the gap by ~100px. Gating every transition on
+      // the scroll direction — unfold only on a real downward delta, fold
+      // only when the gap clearly exceeds the layout shift — keeps that
+      // self-inflicted movement from bouncing the state back and forth.
+      if (delta > 0 && gap < 48) {
+        up = down = 0;
+        setCollapsedState(false);
+        return;
+      }
+      if (up > 48 && gap > 240 && canCollapseRef.current()) {
+        setCollapsedState(true);
+        up = 0;
+      } else if (down > 24) {
+        setCollapsedState(false);
+        down = 0;
+      }
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, [scroll]);
+  // A guard flipping on (error, picker, upload…) cancels the fold at once.
+  useEffect(() => {
+    if (collapsed && !canCollapseRef.current()) setCollapsedState(false);
+  });
+  useEffect(() => {
+    if (!collapsed) fitToContent();
+  }, [collapsed]);
   const items = [
     ...commands.filter((c) => sessionId || ["help", "files"].includes(c.name)),
     ...nativeCommands.filter(
@@ -272,6 +437,18 @@ export function Composer({
     setDismissed(true);
     input.current?.focus();
   }
+  function enterSideQuestion() {
+    if (!sideQuestion) throw new Error("先开始一个会话，再使用旁问。");
+    setBtwMode(true);
+    setDismissed(true);
+    requestAnimationFrame(() => input.current?.focus());
+  }
+  async function askSideQuestion(question: string) {
+    if (!sideQuestion) throw new Error("先开始一个会话，再使用旁问。");
+    const text = question.trim();
+    if (!text) throw new Error("请输入旁问内容。");
+    return sideQuestion.ask(text);
+  }
   function reference(path: string) {
     setReferences((old) => [...new Set([...old, path])].slice(0, 20));
     setFiles(false);
@@ -297,6 +474,28 @@ export function Composer({
       element?.setSelectionRange(before.length + inserted.length, before.length + inserted.length);
     });
   }
+  /**
+   * A dropped folder carries no path, so ask the local service to find it by
+   * name and contents. Only when that is ambiguous does the picker open.
+   */
+  async function referenceFolders(entries: FileSystemDirectoryEntry[]) {
+    const unresolved: { name: string; matches: Workspace[] }[] = [];
+    for (const entry of entries) {
+      let found: { matches: Workspace[]; sure: boolean } | undefined;
+      try {
+        found = await request<{ matches: Workspace[]; sure: boolean }>("/workspaces/locate", {
+          name: entry.name,
+          children: await folderChildren(entry),
+        });
+      } catch {
+        found = undefined;
+      }
+      if (found?.sure && found.matches[0]) await addLocalFiles([found.matches[0].path]);
+      else unresolved.push({ name: entry.name, matches: found?.matches || [] });
+    }
+    setFolderDrops(unresolved);
+  }
+
   async function addLocalFiles(paths?: string[]) {
     if (uploadLock.current) return;
     uploadLock.current = true;
@@ -366,7 +565,7 @@ export function Composer({
       }
       setAttachments((old) => [...old.filter(a => referencedInText(a)), ...imported]);
       insertPaths(imported.flatMap(item => item.localPath ? [item.localPath] : []));
-      if (imported.length) setFilePathHint("文件已保存到项目的 .pilot/attachments，路径已插入正文，可在其他会话继续引用。");
+      if (imported.length) setFilePathHint("文件已保存到项目的 .pilot/attachments，路径已插入正文，可在其他会话继续引用。30 天内没有任何会话引用的副本会自动清理。");
     } catch (e) {
       failures.push((e as Error).message);
     } finally {
@@ -407,13 +606,29 @@ export function Composer({
         ? null
         : outgoing.match(/^\/(\S+)(?:\s+([\s\S]*))?$/);
       let ok = false;
-      if (match && commands.some((c) => c.name === match[1])) {
+      if (btwMode && !match) {
+        // In the side-question input, ordinary text never reaches `send`.
+        ok = await askSideQuestion(outgoing);
+        if (ok) {
+          setText("");
+          setBtwMode(false);
+        }
+      } else if (match && commands.some((c) => c.name === match[1])) {
         if (match[1] === "help") {
           setHelp(true);
           ok = true;
         } else if (match[1] === "files") {
           setFiles(true);
           ok = true;
+        } else if (match[1] === "btw") {
+          const intent = readBtwCommand(match[2] || "");
+          if (intent.kind === "compose") {
+            enterSideQuestion();
+            ok = true;
+          } else {
+            ok = await askSideQuestion(intent.question);
+            if (ok) setBtwMode(false);
+          }
         } else if (onCommand) ok = await onCommand(match[1], match[2] || "");
         else throw new Error("先开始一个会话，再使用这个命令。");
         if (ok) setText("");
@@ -423,6 +638,7 @@ export function Composer({
             "当前执行工具未提供这个命令。输入 / 查看可用命令，普通路径可用 @ 引用。",
           );
         ok = await send(outgoing || "请查看附件。", {
+          mode: sendMode,
           attachments: attachments.filter(a => referencedInText(a, outgoing)).map((a) => a.id),
           references,
           skills: outgoingSkills,
@@ -450,7 +666,8 @@ export function Composer({
   return (
     <>
       {!!folderDrops.length && <WorkspaceDialog key={folderDrops.length}
-        initialQuery={folderDrops[0]} reference={async path => { await addLocalFiles([path]); }}
+        initialQuery={folderDrops[0].name} suggestions={folderDrops[0].matches}
+        reference={async path => { await addLocalFiles([path]); }}
         close={() => setFolderDrops(old => old.slice(1))} />}
       {skillsOpen && (
         <SkillPicker
@@ -469,11 +686,21 @@ export function Composer({
         />
       )}
       <form
+        ref={formRef}
         className={
           "composer " +
+          (collapsed ? "collapsed " : "") +
           (disabled ? "unavailable " : "") +
           (dragging ? "dragging" : "")
         }
+        onMouseDownCapture={(e) => {
+          if (!collapsed) return;
+          // Buttons (send/stop) keep working in the folded state.
+          if ((e.target as HTMLElement).closest("button")) return;
+          e.preventDefault();
+          setCollapsedState(false);
+          requestAnimationFrame(() => input.current?.focus());
+        }}
         onSubmit={submit}
         onDragEnter={(e) => {
           if (e.dataTransfer.types.some(type => type === "Files" || type === "text/uri-list")) {
@@ -505,7 +732,7 @@ export function Composer({
             const dropped = droppedItems(e.dataTransfer);
             // Finish ordinary imports before opening a directory picker, so its
             // input cannot race an upload or overwrite the current draft.
-            void upload(dropped.files).then(() => setFolderDrops(dropped.folders.slice(0, 8)));
+            void upload(dropped.files).then(() => referenceFolders(dropped.folders.slice(0, 8)));
           }
         }}
       >
@@ -515,9 +742,10 @@ export function Composer({
             引用文件或文件夹
           </div>
         )}
-        {(attachments.some(a => !a.localPath) || references.length > 0) && (
+        {queue}
+        {(attachments.filter(a => referencedInText(a)).length > 0 || references.length > 0) && (
           <div className="attachment-list">
-            {attachments.filter(a => !a.localPath).map((a) => (
+            {attachments.filter(a => referencedInText(a)).map((a) => (
               <div className="attachment-chip" key={a.id}>
                 {thumbnails[a.id] ? (
                   <img src={thumbnails[a.id]} alt={a.name} />
@@ -536,9 +764,17 @@ export function Composer({
                 <button
                   type="button"
                   aria-label={"移除附件 " + a.name}
-                  onClick={() =>
-                    setAttachments((old) => old.filter((x) => x.id !== a.id))
-                  }
+                  onClick={() => {
+                    if (a.localPath) {
+                      const quoted = JSON.stringify(a.localPath);
+                      setText((old) => old.split(/\r?\n/).filter((line) => {
+                        const value = line.trim();
+                        return value !== a.localPath && value !== quoted;
+                      }).join("\n").replace(/\n{3,}/g, "\n\n").trim());
+                    }
+                    setAttachments((old) => old.filter((x) => x.id !== a.id));
+                    setThumbnails((old) => { const next = { ...old }; delete next[a.id]; return next; });
+                  }}
                 >
                   <X size={13} />
                 </button>
@@ -580,6 +816,47 @@ export function Composer({
               ))}
           </div>
         )}
+        {collapsed &&
+          (running ||
+            !!text.trim() ||
+            attachments.some((a) => referencedInText(a)) ||
+            !!references.length ||
+            !!fileSelections.length ||
+            !!selectedSkills.length) && (
+            <div className="composer-summary">
+              {running && (
+                <span className="chip live">
+                  <LoaderCircle size={11} className="spin" />
+                  执行中…
+                </span>
+              )}
+              {!!text.trim() && (
+                <span className="chip">草稿 {text.trim().length} 字</span>
+              )}
+              {attachments.filter((a) => referencedInText(a)).length +
+                references.length >
+                0 && (
+                <span className="chip">
+                  <Paperclip size={11} />
+                  {attachments.filter((a) => referencedInText(a)).length +
+                    references.length}{" "}
+                  个附件
+                </span>
+              )}
+              {!!fileSelections.length && (
+                <span className="chip">
+                  <AtSign size={11} />
+                  {fileSelections.length} 个选段
+                </span>
+              )}
+              {!!selectedSkills.length && (
+                <span className="chip">
+                  <BookOpen size={11} />
+                  {selectedSkills.length} 个 Skills
+                </span>
+              )}
+            </div>
+          )}
         <div className="composer-editor">
           {menu && (
             <div className="command-menu" role="listbox" aria-label="可用命令">
@@ -602,9 +879,29 @@ export function Composer({
               )}
             </div>
           )}
+          {btwMode && (
+            <div className="composer-btw" role="status">
+              <strong>BTW · 不影响主任务</strong>
+              <span>
+                这条问题单独回答，不进入主任务的上下文，也不会排队或改变正在
+                执行的步骤。按 Esc 退回普通输入。
+              </span>
+              {!!sideQuestion?.limitation && <em>{sideQuestion.limitation}</em>}
+              <button
+                type="button"
+                aria-label="退出旁问输入"
+                onClick={() => {
+                  setBtwMode(false);
+                  input.current?.focus();
+                }}
+              >
+                <X size={14} />
+              </button>
+            </div>
+          )}
           <textarea
             ref={input}
-            aria-label="任务内容"
+            aria-label={btwMode ? "旁问内容" : "任务内容"}
             value={text}
             readOnly={submitting}
             onChange={(e) => {
@@ -614,10 +911,27 @@ export function Composer({
               if (/(^|\s)@$/.test(e.target.value) && workspaceId)
                 setFiles(true);
             }}
+            onMouseDown={(e) => {
+              // The only pointer target inside a textarea that is not text is
+              // the resize corner, so a press there means a manual height.
+              const el = e.currentTarget;
+              const box = el.getBoundingClientRect();
+              if (box.right - e.clientX < 18 && box.bottom - e.clientY < 18)
+                dragged.current = true;
+            }}
+            onFocus={() => {
+              setFocused(true);
+              setCollapsedState(false);
+            }}
+            onBlur={() => setFocused(false)}
             placeholder={
-              running ? "补充一条消息，将在当前执行完成后处理…" : placeholder
+              btwMode
+                ? "问一个问题，不打断当前任务…"
+                : running
+                  ? "补充一条消息，将在当前执行完成后处理…"
+                  : placeholder
             }
-            rows={3}
+            rows={2}
             maxLength={50000}
             onPaste={(e) => {
               const paths = localFilePaths(
@@ -650,9 +964,20 @@ export function Composer({
                 else if (e.key === "ArrowUp")
                   setChoice((c) => (c + items.length - 1) % items.length);
                 else insertCommand(items[Math.min(choice, items.length - 1)]);
-              } else if (e.key === "Enter" && !e.shiftKey) {
+              } else if (sendsOnEnter(e, enterToSend)) {
                 e.preventDefault();
                 void submit();
+              } else if (e.key === "Escape") {
+                if (btwMode) {
+                  // Leaving the side-question input sends nothing and keeps
+                  // every question already asked.
+                  e.preventDefault();
+                  setBtwMode(false);
+                  return;
+                }
+                // The fold only engages while unfocused; Escape explicitly
+                // hands focus back to the transcript.
+                e.currentTarget.blur();
               }
             }}
           />
@@ -761,8 +1086,16 @@ export function Composer({
                 localFilesBusy ||
                 (!text.trim() && !attachments.some(a => referencedInText(a)))
               }
-              title={running ? "加入待发送队列" : "发送任务"}
-              aria-label={running ? "加入队列" : "发送任务"}
+              title={
+                btwMode
+                  ? "发送旁问，不打断当前任务"
+                  : running
+                    ? "加入待发送队列，可在队列里改为立即引导"
+                    : "发送任务"
+              }
+              aria-label={
+                btwMode ? "发送旁问" : running ? "加入待发送队列" : "发送任务"
+              }
             >
               {busy || submitting ? (
                 <LoaderCircle size={18} className="spin" />
@@ -833,8 +1166,10 @@ export function Composer({
         )}
         {help && (
           <p className="composer-help">
-            Enter 发送，Shift + Enter 换行。粘贴文件路径或截图，@
-            引用工作文件；输入 / 后可用方向键与 Enter
+            {enterToSend
+              ? "Enter 发送，Shift + Enter 换行。"
+              : "Enter 换行，⌘/Ctrl + Enter 发送。"}
+            粘贴文件路径或截图，@ 引用工作文件；输入 / 后可用方向键与 Enter
             选择命令。运行中可以补充消息或停止。
             <button
               type="button"

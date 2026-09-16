@@ -189,19 +189,19 @@ def test_rescue_config_root_uses_real_home_not_gateway_session(monkeypatch, tmp_
     from mms_rescue import resolve_real_mms_config_dir
 
     real_home = tmp_path / "home"
-    session_home = real_home / ".config" / "mms" / "codex-gateway" / "s" / "12345"
+    session_home = real_home / ".config" / "mms-next" / "codex-gateway" / "s" / "12345"
     monkeypatch.delenv("MMS_REAL_HOME", raising=False)
     monkeypatch.delenv("REAL_HOME", raising=False)
     monkeypatch.delenv("ORIGINAL_HOME", raising=False)
     monkeypatch.setenv("HOME", str(session_home))
 
-    assert resolve_real_mms_config_dir() == real_home / ".config" / "mms"
+    assert resolve_real_mms_config_dir() == real_home / ".config" / "mms-next"
 
 
 def test_rescue_config_root_prefers_real_home_env(tmp_path):
     from mms_rescue import resolve_real_mms_config_dir
 
-    session_home = tmp_path / ".config" / "mms" / "codex-gateway" / "s" / "12345"
+    session_home = tmp_path / ".config" / "mms-next" / "codex-gateway" / "s" / "12345"
     mms_real = tmp_path / "mms-real"
     real = tmp_path / "real"
     original = tmp_path / "original"
@@ -211,16 +211,16 @@ def test_rescue_config_root_prefers_real_home_env(tmp_path):
         "MMS_REAL_HOME": str(mms_real),
         "REAL_HOME": str(real),
         "ORIGINAL_HOME": str(original),
-    }) == mms_real / ".config" / "mms"
+    }) == mms_real / ".config" / "mms-next"
     assert resolve_real_mms_config_dir({
         "HOME": str(session_home),
         "REAL_HOME": str(real),
         "ORIGINAL_HOME": str(original),
-    }) == real / ".config" / "mms"
+    }) == real / ".config" / "mms-next"
     assert resolve_real_mms_config_dir({
         "HOME": str(session_home),
         "ORIGINAL_HOME": str(original),
-    }) == original / ".config" / "mms"
+    }) == original / ".config" / "mms-next"
 
 
 def test_bridge_rescue_config_root_failure_does_not_fallback_to_stable(monkeypatch, tmp_path):
@@ -524,27 +524,26 @@ def test_responses_proxy_hot_fallback_prefers_anthropic_messages_for_deepseek(mo
 
     repo = tmp_path / "repo"
     config_root = tmp_path / "mms-config"
-    (config_root / "generated").mkdir(parents=True)
     repo.mkdir()
-    (config_root / "generated" / "model-routes.json").write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "routes": {
-                    "deepseek-v4-flash": {
-                        "primary": {
-                            "provider_id": "newapi-deepseek",
-                            "anthropic_base_url": "https://deepseek.example",
-                            "openai_base_url": "https://deepseek.example",
-                            "api_key": "sk-deepseek-test",
-                            "model_id": "deepseek-v4-flash",
-                        },
-                        "fallbacks": [],
-                    }
-                },
-            }
-        ),
-        encoding="utf-8",
+    # Routes only come from the verified latest-approved bundle: every config root is
+    # a preview root now (single config root, MMS_CONFIG_ROOT_MODE ignored).
+    _write_latest_approved_router_manifest(
+        config_root,
+        router_payload={
+            "version": 1,
+            "routes": {
+                "deepseek-v4-flash": {
+                    "primary": {
+                        "provider_id": "newapi-deepseek",
+                        "anthropic_base_url": "https://deepseek.example",
+                        "openai_base_url": "https://deepseek.example",
+                        "api_key": "sk-deepseek-test",
+                        "model_id": "deepseek-v4-flash",
+                    },
+                    "fallbacks": [],
+                }
+            },
+        },
     )
 
     class FakeResponse:
@@ -628,28 +627,27 @@ def test_responses_proxy_hot_fallback_uses_messages_for_cache_sensitive_openai_o
 
     repo = tmp_path / "repo"
     config_root = tmp_path / "mms-config"
-    (config_root / "generated").mkdir(parents=True)
     repo.mkdir()
-    (config_root / "generated" / "model-routes.json").write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "routes": {
-                    "deepseek-v4-flash": {
-                        "primary": {
-                            "provider_id": "newapi-deepseek",
-                            "openai_base_url": "https://deepseek.example/v1",
-                            "api_key": "sk-deepseek-test",
-                            "model_id": "deepseek-v4-flash",
-                            "protocol": "openai_chat_completions",
-                            "cache_sensitive_transport": True,
-                        },
-                        "fallbacks": [],
-                    }
-                },
-            }
-        ),
-        encoding="utf-8",
+    # Routes only come from the verified latest-approved bundle: every config root is
+    # a preview root now (single config root, MMS_CONFIG_ROOT_MODE ignored).
+    _write_latest_approved_router_manifest(
+        config_root,
+        router_payload={
+            "version": 1,
+            "routes": {
+                "deepseek-v4-flash": {
+                    "primary": {
+                        "provider_id": "newapi-deepseek",
+                        "openai_base_url": "https://deepseek.example/v1",
+                        "api_key": "sk-deepseek-test",
+                        "model_id": "deepseek-v4-flash",
+                        "protocol": "openai_chat_completions",
+                        "cache_sensitive_transport": True,
+                    },
+                    "fallbacks": [],
+                }
+            },
+        },
     )
 
     class FakeResponse:
@@ -1110,26 +1108,25 @@ def test_generate_rescue_summary_uses_anthropic_messages_route(monkeypatch, tmp_
 
     config_root = tmp_path / "mms-config"
     rescue_dir = tmp_path / "repo" / ".mms" / "rescue" / "event"
-    (config_root / "generated").mkdir(parents=True)
-    (config_root / "generated" / "model-routes.json").write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "routes": {
-                    "deepseek-v4-flash": {
-                        "primary": {
-                            "provider_id": "newapi-deepseek",
-                            "anthropic_base_url": "https://deepseek.example",
-                            "openai_base_url": "https://deepseek.example/v1",
-                            "api_key": "sk-deepseek-test",
-                            "model_id": "deepseek-v4-flash",
-                        },
-                        "fallbacks": [],
-                    }
-                },
-            }
-        ),
-        encoding="utf-8",
+    # Routes only come from the verified latest-approved bundle: every config root is
+    # a preview root now (single config root, MMS_CONFIG_ROOT_MODE ignored).
+    _write_latest_approved_router_manifest(
+        config_root,
+        router_payload={
+            "version": 1,
+            "routes": {
+                "deepseek-v4-flash": {
+                    "primary": {
+                        "provider_id": "newapi-deepseek",
+                        "anthropic_base_url": "https://deepseek.example",
+                        "openai_base_url": "https://deepseek.example/v1",
+                        "api_key": "sk-deepseek-test",
+                        "model_id": "deepseek-v4-flash",
+                    },
+                    "fallbacks": [],
+                }
+            },
+        },
     )
     calls = []
 

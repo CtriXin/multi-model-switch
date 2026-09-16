@@ -3,8 +3,13 @@ import { ArrowRight, Search, X } from "lucide-react";
 import { guideTopics, matchingTopics } from "./guide-content";
 import type { GuideAction } from "./guide-content";
 import "./guide.css";
+import { request } from "./api";
 
 const seenKey = "mms-web-tour-seen-v1";
+function markSeen(persist: boolean) {
+  try { localStorage.setItem(seenKey, "1"); } catch { /* One attempt per page load. */ }
+  if (persist) void request("/ui-preferences", { tourSeen: true }).catch(() => { /* browser cache still prevents a replay on this origin */ });
+}
 export function HelpGuide({ ready, modelReady, open, setOpen, hasSession, navigate, startTour, startConnection }: {
   ready: boolean; modelReady: boolean; open: boolean; setOpen: (open: boolean) => void;
   hasSession: boolean; navigate: (action: GuideAction) => void; startTour: () => void;
@@ -19,17 +24,27 @@ export function HelpGuide({ ready, modelReady, open, setOpen, hasSession, naviga
   useEffect(() => {
     if (!ready || attempted.current) return;
     attempted.current = true;
-    try { if (localStorage.getItem(seenKey)) return; } catch { /* Help remains usable without storage. */ }
-    try { localStorage.setItem(seenKey, "1"); } catch { /* One attempt per page load. */ }
-    startTour();
+    let cancelled = false;
+    // The install-level flag lives in the Pilot state root, so a new port or
+    // browser does not replay the first-run tour; localStorage is only a cache.
+    void (async () => {
+      let seenOnServer: boolean | null = null;
+      try { seenOnServer = (await request<{ tourSeen: boolean }>("/ui-preferences")).tourSeen; } catch { /* fall back to the browser cache */ }
+      if (cancelled) return;
+      let seenLocally = false;
+      try { seenLocally = !!localStorage.getItem(seenKey); } catch { /* Help remains usable without storage. */ }
+      if (seenOnServer) { markSeen(false); return; }
+      markSeen(true);
+      if (seenLocally) return;
+      startTour();
+    })();
+    return () => { cancelled = true; };
   }, [ready, startTour]);
   useEffect(() => {
     if (!open) return;
     returnFocus.current = document.activeElement as HTMLElement;
     dialog.current?.showModal();
-    if (modelReady) {
-      try { localStorage.setItem(seenKey, "1"); } catch { /* One attempt per page load. */ }
-    }
+    if (modelReady) markSeen(true);
     return () => {
       dialog.current?.close();
       if (returnFocus.current?.isConnected) returnFocus.current.focus();

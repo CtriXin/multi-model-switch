@@ -269,7 +269,12 @@ def public_remind(args: argparse.Namespace) -> int:
     state = load_state()
     if not due(args, state):
         return 0
-    version_path = real_home() / ".config" / "mms" / "version.json"
+    version_path = real_home() / ".config" / "mms-next" / "version.json"
+    if not version_path.exists():
+        # Installs from before the single-root move still record it here.
+        legacy = real_home() / ".config" / "mms" / "version.json"
+        if legacy.exists():
+            version_path = legacy
     installed = "unknown"
     try:
         data = json.loads(version_path.read_text(encoding="utf-8"))

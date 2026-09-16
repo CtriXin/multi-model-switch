@@ -11,11 +11,20 @@ from .runtime import real_home
 from .starter_skills import starter_skills
 
 
-def effective_paths(cwd, home):
-    return [item["path"] for item in effective_entries(cwd, home)]
+def effective_paths(cwd, home, include_external=False):
+    return [item["path"] for item in effective_entries(cwd, home, include_external=include_external)]
 
 
-def effective_entries(cwd, home):
+def bundled_skill_roots():
+    """Skills MMS ships and injects into Pi sessions (weber, grill-me, toon)."""
+    try:
+        import mms_pi_support
+        return list(mms_pi_support._pi_bundled_skill_roots())
+    except Exception:
+        return []
+
+
+def effective_entries(cwd, home, *, include_external=False):
     # Matches mms_pi_support._pi_materialize_skill_overlay: top-level names
     # override global -> repository root -> cwd, with .agents after .pi.
     directories = []
@@ -25,10 +34,20 @@ def effective_entries(cwd, home):
         if (current / ".git").exists() or current.parent == current:
             break
         current = current.parent
-    sources = [(Path(home) / ".agents/skills", False, "共享")]
+    sources = []
+    if include_external:
+        sources.extend([
+            (Path(home) / ".claude/skills", False, "Claude 全局"),
+            (Path(home) / ".codex/skills", False, "Codex 全局"),
+            (Path(home) / ".config/opencode/skills", False, "OpenCode 全局"),
+        ])
+    sources.append((Path(home) / ".agents/skills", False, "共享"))
     for directory in reversed(directories):
         sources.extend([(directory / ".pi/skills", True, "项目"), (directory / ".agents/skills", False, "项目")])
     entries = {}
+    # Lowest precedence, mirroring mms_pi_support._pi_materialize_skill_overlay.
+    for name, root in bundled_skill_roots():
+        entries[name] = {"path": root, "source": "Pilot 内置", "sourceRoot": str(Path(root).parent), "overrides": []}
     for root, markdown, scope in sources:
         if not root.is_dir():
             continue
@@ -42,9 +61,35 @@ def effective_entries(cwd, home):
     return list(entries.values())
 
 
+def _pi_skills_module(executable):
+    """Resolve Pi's native skills module for POSIX and npm Windows layouts."""
+    executable_path = Path(executable).resolve()
+    dist = next((path for path in executable_path.parents if path.name == "dist"), None)
+    candidates = [dist / "core/skills.js"] if dist else []
+    candidates.append(executable_path.parent / "node_modules/@earendil-works/pi-coding-agent/dist/core/skills.js")
+    return next((path for path in candidates if path.is_file()), Path("/nonexistent"))
+
+
 class SkillCatalog:
     def __init__(self, catalog, state_root):
         self.catalog, self.root = catalog, Path(state_root) / "skill-reader"
+
+    @property
+    def preferences_path(self):
+        return self.root / "preferences.json"
+
+    def preferences(self):
+        try:
+            value = json.loads(self.preferences_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            value = {}
+        return {"mergeExternal": value.get("mergeExternal") is True}
+
+    def set_preferences(self, payload):
+        from .runtime import private_json
+        value = {"mergeExternal": payload.get("mergeExternal") is True} if isinstance(payload, dict) else {"mergeExternal": False}
+        private_json(self.preferences_path, value)
+        return value
 
     def snapshot(self, workspace_id):
         workspace = next((w for w in self.catalog._workspaces() if w["id"] == workspace_id), None)
@@ -53,20 +98,33 @@ class SkillCatalog:
         executable, node = pi_runtime()
         if not node:
             raise WebError("SKILLS_UNAVAILABLE", "需要可用的 Pi 才能读取 skills。", 409)
-        dist = next((p for p in Path(executable).resolve().parents if p.name == "dist"), None)
-        module = dist / "core/skills.js" if dist else Path("/nonexistent")
+        module = _pi_skills_module(executable)
         if not module.is_file():
             raise WebError("SKILLS_UNAVAILABLE", "当前 Pi 版本未提供 skills 读取接口。", 409)
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        origins = effective_entries(workspace["path"], real_home())
-        with tempfile.TemporaryDirectory(dir=self.root, prefix="overlay-") as temporary:
-            overlay = Path(temporary)
-            for origin in origins:
-                entry = origin["path"]
-                (overlay / Path(entry).name).symlink_to(entry)
+        origins = effective_entries(workspace["path"], real_home(), include_external=self.preferences()["mergeExternal"])
+        if os.name == "nt":
+            # Windows may reject symlink creation without Developer Mode or
+            # elevation. Pi accepts individual skill directories/Markdown files.
+            # Load only the entries selected by MMS; scanning their parent roots
+            # would reintroduce overridden skills and unrelated bundled siblings.
+            paths = [origin["path"] for origin in reversed(origins)]
+            request = {"module": str(module), "cwd": workspace["path"],
+                       "agentDir": str(self.root), "paths": paths}
             result = subprocess.run([node, str(Path(__file__).with_name("skill_catalog.mjs"))],
-                input=json.dumps({"module":str(module), "cwd":workspace["path"], "agentDir":str(self.root), "paths":[str(overlay)]}),
-                text=True, capture_output=True, timeout=15, env={**os.environ, "HOME":str(self.root)})
+                input=json.dumps(request), text=True, encoding="utf-8", errors="replace",
+                capture_output=True, timeout=15, env={**os.environ, "HOME": str(self.root)})
+        else:
+            with tempfile.TemporaryDirectory(dir=self.root, prefix="overlay-") as temporary:
+                overlay = Path(temporary)
+                for origin in origins:
+                    entry = origin["path"]
+                    (overlay / Path(entry).name).symlink_to(entry)
+                request = {"module": str(module), "cwd": workspace["path"],
+                           "agentDir": str(self.root), "paths": [str(overlay)]}
+                result = subprocess.run([node, str(Path(__file__).with_name("skill_catalog.mjs"))],
+                    input=json.dumps(request), text=True, encoding="utf-8", errors="replace",
+                    capture_output=True, timeout=15, env={**os.environ, "HOME": str(self.root)})
         if result.returncode:
             raise WebError("SKILLS_UNAVAILABLE", "无法读取当前 Pi skills，请检查安装。", 409)
         result = json.loads(result.stdout)

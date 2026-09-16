@@ -21,8 +21,9 @@ Design boundaries:
 """
 
 from __future__ import annotations
+from .file_lock import LOCK_EX, LOCK_NB, LOCK_SH, LOCK_UN, flock
 
-import fcntl
+
 import hashlib
 import json
 import os
@@ -246,6 +247,25 @@ class CatalogService:
     def _local_setup(self) -> bool:
         return bool(self._config_root and self._config_root.resolve() == (self._state_root / "config").resolve())
 
+    def _registry_published_root(self) -> bool:
+        """True when the config root keeps v2 registry truth rather than config.toml.
+
+        The marker is the root manifest, written only by the v2 initializer,
+        which refuses stable roots. A published bundle alone is not enough: a
+        stable root can export one while config.toml remains its truth.
+        """
+        if self._config_root is None:
+            return False
+        return (self._config_root / "root-manifest.json").is_file()
+
+    def _registry_owned(self) -> bool:
+        """True when saves publish through the Registry, including first-run mms-next."""
+        if self._local_setup() or self._registry_published_root():
+            return True
+        if self._config_root is None:
+            return False
+        return self._config_root.resolve() == (self._real_home() / ".config/mms-next").resolve()
+
     def _load_bundle(self, diagnostics: list) -> dict:
         """Load the verified latest-approved bundle; secrets stay in-process."""
         root = self._require_config_root()
@@ -255,7 +275,7 @@ class CatalogService:
 
             bundle = mms_registry.load_latest_approved_bundle(config_dir=root, include_secret=True)
         except FileNotFoundError:
-            if self._local_setup():
+            if self._registry_owned():
                 return {}
             diagnostics.append(
                 {
@@ -319,7 +339,7 @@ class CatalogService:
         root = self._require_config_root()
         if payload.get("command") == "resolve-launch":
             from .runtime import snapshot_config
-            root = snapshot_config(root, self._state_root, published_credentials_only=self._local_setup())
+            root = snapshot_config(root, self._state_root, published_credentials_only=self._registry_owned())
             payload = {**payload, "config_root": str(root)}
         env = {
             "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
@@ -338,14 +358,17 @@ class CatalogService:
         (self._state_root / "launch-home").mkdir(parents=True, exist_ok=True)
         process = subprocess.run(
             [sys.executable, str(_WORKER_PATH)],
-            input=json.dumps(payload, ensure_ascii=False),
+            # The worker speaks UTF-8 JSON on both ends (its result stream is
+            # dup'ed with encoding="utf-8"). text=True would decode with the
+            # locale codepage — cp936 on a Chinese Windows machine — and crash
+            # the whole send/configure path on any non-ASCII content.
+            input=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
             capture_output=True,
-            text=True,
             env=env,
             cwd=str(_REPO_ROOT),
             timeout=timeout,
         )
-        stdout = (process.stdout or "").strip()
+        stdout = (process.stdout or b"").decode("utf-8", errors="replace").strip()
         if not stdout:
             raise WebError(
                 "WORKER_FAILED",
@@ -372,9 +395,10 @@ class CatalogService:
         if self._config_root is None:
             return {"catalogRead": False, "configure": False}
         read = (self._config_root / "config.toml").exists() or (self._config_root / "generated").exists()
-        if self._is_protected_real_root() or self._state_root_protected():
-            # Real MMS roots may be displayed but never written by the web UI;
-            # a state root inside the protected subtree is equally fail-closed.
+        if self._state_root_protected():
+            return {"catalogRead": read, "configure": False}
+        if self._is_protected_real_root() and not self._registry_owned():
+            # Only the shared mms-next root may be initialized by Web on first run.
             return {"catalogRead": read, "configure": False}
         return {"catalogRead": read, "configure": True}
 
@@ -395,7 +419,7 @@ class CatalogService:
             }
 
         cfg = self._raw_config()
-        if not cfg and not self._local_setup():
+        if not cfg and not self._registry_owned():
             diagnostics.append(
                 {"code": "CONFIG_MISSING", "message": "config root 下缺少 config.toml 或文件不可读"}
             )
@@ -471,7 +495,7 @@ class CatalogService:
             return leaves
 
         def _provider_has_key(provider_id: str) -> bool:
-            if self._local_setup() and bundle:
+            if self._registry_owned() and bundle:
                 return any(leaf.get("api_key") for leaf in _provider_leaves(provider_id))
             prefix = re.sub(r"[^A-Za-z0-9]+", "_", provider_id).upper().strip("_") or "DEFAULT"
             return bool(credentials.get(f"MMS_PROVIDER_{prefix}_API_KEY")
@@ -482,7 +506,7 @@ class CatalogService:
             configured = (credentials.get(f"MMS_PROVIDER_{prefix}_BASE_URL")
                           or credentials.get(f"MMS_PROVIDER_{prefix}_OPENAI_BASE_URL")
                           or credentials.get(f"MMS_PROVIDER_{prefix}_ANTHROPIC_BASE_URL"))
-            if configured and not (self._local_setup() and bundle):
+            if configured and not (self._registry_owned() and bundle):
                 return configured
             return next((leaf.get("openai_base_url") or leaf.get("anthropic_base_url")
                          for leaf in _provider_leaves(provider_id)
@@ -798,10 +822,14 @@ class CatalogService:
             "models": models,
             "services": services,
             "presets": presets,
-            "workspaces": [w for w in self._workspaces() if not w.get("hidden")],
+            "workspaces": self.workspaces(),
             "diagnostics": diagnostics,
             "revision": self._config_revision(),
         }
+
+    def workspaces(self) -> list[dict]:
+        """The registered folders, without the removed ones. Read-only."""
+        return [w for w in self._workspaces() if not w.get("hidden")]
 
     def _workspaces(self) -> list[dict]:
         workspaces: list[dict] = []
@@ -848,7 +876,7 @@ class CatalogService:
             )
 
     def _published_config(self, cfg: dict, bundle: dict) -> dict:
-        if not self._local_setup() or not bundle:
+        if not self._registry_owned() or not bundle:
             return cfg
         payloads = bundle.get("payloads") or {}
         profiles = (payloads.get("profile") or {}).get("profiles") or {}
@@ -907,7 +935,7 @@ class CatalogService:
         name, base_url, api_key, models, warnings = self._validate_service_payload(payload)
 
         bundle = self._load_bundle([])
-        published = self._local_setup() and bool(bundle)
+        published = self._registry_owned() and bool(bundle)
         cfg = self._published_config(self._raw_config(), bundle)
         providers = cfg.get("providers") if isinstance(cfg.get("providers"), list) else []
         providers_by_id = {
@@ -950,7 +978,7 @@ class CatalogService:
                 {
                     "label": "模型列表模式",
                     "before": "",
-                    "after": "manual（由这份列表手工维护）",
+                    "after": "manual（保存后自动同步能力；模型列表可在高级设置中刷新）",
                 }
             )
         else:
@@ -1056,7 +1084,7 @@ class CatalogService:
         self._state_root.mkdir(parents=True, exist_ok=True)
         lock_path = self._state_root / "apply.lock"
         with open(lock_path, "a+", encoding="utf-8") as lock_file:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            flock(lock_file.fileno(), LOCK_EX)
             try:
                 # Re-read and re-validate the preview inside the apply lock.
                 record = _load_record()
@@ -1076,7 +1104,7 @@ class CatalogService:
                             "providerId": record.get("providerId"),
                             "service": record.get("service"),
                             "expectedRevision": record.get("revision"),
-                            "standalone": self._local_setup(),
+                            "standalone": self._registry_owned(),
                         }
                     )
                 except WebError as exc:
@@ -1098,7 +1126,7 @@ class CatalogService:
                 consumed_record["resultRevision"] = self._config_revision()
                 self._secure_write_json(record_path, consumed_record)
             finally:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                flock(lock_file.fileno(), LOCK_UN)
 
         provider_id = record.get("providerId")
         try:
@@ -1108,8 +1136,22 @@ class CatalogService:
             # The write is already committed. A failed catalog read must not
             # invite a second save or claim that no configuration was written.
             presets = []
+        capability_sync = {"synced": False, "applied": 0}
+        if self._registry_owned() and provider_id:
+            try:
+                from .model_settings import ModelSettings
+                capability_sync = ModelSettings(self).auto_refresh(
+                    provider_id,
+                    list(record.get("service", {}).get("models") or []),
+                )
+                presets = [p["id"] for p in self.snapshot()["presets"]
+                           if p.get("providerId") == provider_id and p.get("available")]
+            except Exception as exc:
+                # The route write already committed; capability sync is best effort.
+                capability_sync = {"synced": False, "applied": 0,
+                                   "warnings": [f"自动能力同步未完成：{type(exc).__name__}"]}
         return {"applied": True, "message": "配置已应用", "providerId": provider_id,
-                "presetIds": presets}
+                "presetIds": presets, "capabilitySync": capability_sync}
 
     def configuration_discard(self, payload: dict) -> dict:
         """Drop an abandoned preview, including its temporary key, under the apply lock."""
@@ -1120,7 +1162,7 @@ class CatalogService:
             raise WebError("PREVIEW_NOT_FOUND", "预览标识无效。", status=404)
         self._state_root.mkdir(parents=True, exist_ok=True)
         with open(self._state_root / "apply.lock", "a+", encoding="utf-8") as handle:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            flock(handle.fileno(), LOCK_EX)
             try:
                 path = self._previews_dir / f"{preview_id}.json"
                 if path.exists():
@@ -1129,7 +1171,7 @@ class CatalogService:
                     if not record.get("consumed"):
                         path.unlink()
             finally:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                flock(handle.fileno(), LOCK_UN)
         return {"discarded": True}
 
     # ── launch resolution (INTERNAL ONLY) ─────────────────────────────────
@@ -1233,7 +1275,7 @@ class CatalogService:
         registry = self._state_root / "workspaces.json"
         self._state_root.mkdir(parents=True, exist_ok=True)
         with open(self._state_root / "workspaces.lock", "a+") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
+            flock(lock, LOCK_EX)
             items = self._workspaces()
             items = [w for w in items if w["id"] not in ("default", workspace["id"])]
             private_json(registry, [*items, workspace])
@@ -1264,7 +1306,7 @@ class CatalogService:
         registry = self._state_root / "workspaces.json"
         self._state_root.mkdir(parents=True, exist_ok=True)
         with open(self._state_root / "workspaces.lock", "a+") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
+            flock(lock, LOCK_EX)
             items = self._workspaces()
             if not any(item["id"] == workspace_id for item in items):
                 raise WebError("WORKSPACE_NOT_FOUND", "这个工作空间已不存在，请刷新。", 404)

@@ -24,7 +24,7 @@ dialog:has(.project-materials) { width: min(920px, calc(100vw - 32px)); }
 .material-editor > label { display: flex; flex-direction: column; gap: 7px; font-size: max(11px, 0.8571rem); }
 .material-editor input:not([type=checkbox]), .material-editor textarea { width: 100%; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); padding: 9px 10px; font: inherit; line-height: 1.6; box-sizing: border-box; }
 .material-editor textarea { min-height: 220px; resize: vertical; }
-.material-editor > .material-toggle { flex-direction: row; align-items: center; }
+.material-editor > .material-toggle { flex-direction: row; align-items: center; justify-content: space-between; }
 .material-editor-actions { display: flex; justify-content: flex-end; gap: 10px; }
 .material-editor-actions button[type=submit] { background: var(--accent); color: white; border-color: var(--accent); }
 .context-usage { margin: 12px 0 3px; font-size: max(11px, 0.7857rem); color: var(--muted); border-top: 1px solid var(--line); padding-top: 9px; }

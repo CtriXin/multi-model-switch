@@ -21,10 +21,19 @@
   align-items: center;
   min-width: 0;
 }
+/* Two lines, not one. A single line cut two titles that share an opening
+   phrase down to the same string, which is the case a session list has to
+   tell apart; the second line is where the difference usually is. */
 .session-title-row strong {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  /* A path or URL has no space to break at, so let it break anywhere rather
+     than push the row wider than the sidebar. */
+  overflow-wrap: anywhere;
   flex: 1;
 }
 .session-link-copy {
@@ -81,7 +90,8 @@
   inset: 0;
   border-radius: inherit;
   pointer-events: none;
-  border: 1px solid var(--accent);
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
   animation: result-flash 2.2s ease-out both;
 }
 @keyframes result-flash {

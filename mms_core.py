@@ -166,6 +166,7 @@ from mms_state_io import (
     resolve_mms_config_dir,
     resolve_real_user_home,
 )
+from mms_state_io import GATEWAY_SESSION_MARKER_ROOTS as _GATEWAY_SESSION_MARKER_ROOTS
 from mms_state_io import resolve_current_workdir as _safe_getcwd
 
 # Provider 调试日志（按需写入文件，不影响 TUI 输出）
@@ -209,7 +210,7 @@ PREFERENCES_PATHS = [
     os.path.join(PRIMARY_CONFIG_DIR, "preferences.toml"),
 ]
 PREFERENCES_DOC_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs", "MMS_USER_PREFERENCES.md")
-PREFERENCES_EXAMPLE_TOML = """# ~/.config/mms/preferences.toml
+PREFERENCES_EXAMPLE_TOML = """# ~/.config/mms-next/preferences.toml
 # User-owned preference overlay. Install/update never overwrites this file.
 
 [launch]
@@ -218,11 +219,11 @@ disabled_clis = []            # e.g. ["pi", "agy"] hides/disables these MMS laun
 [launch.defaults]
 thinking_mode = "enable"      # enable | disable
 reasoning_effort = "high"     # low | medium | high | xhigh
-caveman_mode = "enable"       # enable | disable
-caveman_level = "light"       # light | standard | full
+# Caveman is retired globally; legacy fields are ignored.
 nsr_mode = "enable"           # enable | disable
 agent_pack = "none"           # none | ecc | omc
 bypass = true                 # true | false
+pi_btw = true                 # true | false; MMS-bundled Pi /btw side-question extension
 
 [launch.cli.codex]
 reasoning_effort = "high"
@@ -230,9 +231,10 @@ reasoning_effort = "high"
 [launch.cli.claude]
 agent_pack = "ecc"
 
+[launch.cli.pi]
+pi_btw = true
+
 [launch.cli.agy]
-caveman_mode = "enable"
-caveman_level = "light"
 
 [session_surfaces.disabled]
 skills = []                   # e.g. ["agent-browser", "token-saver"]
@@ -250,7 +252,6 @@ managed_root = "~/.local/share/mms/assets"
 # codegraph = "~/my-skills/codegraph"
 # token_saver = "~/my-skills/token-saver"
 # toon = "~/my-skills/toon"
-# caveman = "~/my-packs/caveman"
 # nsr = "~/my-packs/non-stop-run"
 # ecc = "~/.mms/agent-packs/everything-claude-code"
 # omc = "~/.mms/agent-packs/oh-my-claudecode"
@@ -270,38 +271,31 @@ SNAPSHOT_IGNORED_FILES = (
 
 _CONFIG_WRITE_PROCESS_LOCK = threading.Lock()
 
-_GATEWAY_SESSION_MARKERS = (
-    os.path.join(".config", "mms", "codex-gateway", "s") + os.sep,
-    os.path.join(".config", "mms", "claude-gateway", "s") + os.sep,
+_GATEWAY_SESSION_MARKERS = tuple(
+    marker for marker, _ in _GATEWAY_SESSION_MARKER_ROOTS if "accounts" not in marker
 )
 
 
-def _base_user_config_path_from_gateway(config_path):
-    if mms_config_root_is_explicit():
-        return ""
-    normalized = os.path.normpath(str(config_path or ""))
-    for marker in _GATEWAY_SESSION_MARKERS:
-        idx = normalized.find(marker)
-        if idx == -1:
-            continue
-        base_home = normalized[:idx]
-        if base_home:
-            return os.path.join(base_home, ".config", "mms", "config.toml")
-    return ""
-
-
 def _base_user_primary_dir_from_gateway(path):
+    """Map a gateway session path back to the config root that owns it."""
     if mms_config_root_is_explicit():
         return ""
     normalized = os.path.normpath(str(path or ""))
-    for marker in _GATEWAY_SESSION_MARKERS:
+    for marker, root_name in _GATEWAY_SESSION_MARKER_ROOTS:
+        if "accounts" in marker:
+            continue
         idx = normalized.find(marker)
         if idx == -1:
             continue
         base_home = normalized[:idx]
         if base_home:
-            return os.path.join(base_home, ".config", "mms")
+            return os.path.join(base_home, ".config", root_name)
     return ""
+
+
+def _base_user_config_path_from_gateway(config_path):
+    base_dir = _base_user_primary_dir_from_gateway(config_path)
+    return os.path.join(base_dir, "config.toml") if base_dir else ""
 
 
 def _merge_base_user_broker_profiles(cfg, config_path):
@@ -1207,11 +1201,12 @@ _REASONING_MODEL_HINTS = (
     "minimax-m2", "deepseek-reasoner", "doubao-thinking",
 )
 _TOOL_USE_FAMILIES = {"Claude", "GPT", "Gemini", "Qwen", "Kimi", "GLM", "MiniMax"}
+# Keys are `[1m]`-free: a selector is the same model as its base name, and
+# `_model_supports_vision` normalizes the suffix off before looking here.
 _VISION_CAPABLE_MODEL_NAMES = {
     "mimo-v2.5",
     "mimo-v2-omni",
     "k3",
-    "k3[1m]",
     "kimi-k3",
     "k2.6",
     "k2.6-code-preview",
@@ -2257,31 +2252,10 @@ def _provider_map(cfg):
 
 
 def _model_context_window(model_name):
-    clean = str(model_name or "").replace("[1m]", "").strip()
-    if not clean:
-        return None
-    try:
-        from mms_capability_resolver import resolve_model_capabilities
+    """The model's context window, from the one resolver every harness uses."""
+    from mms_context_window import resolve_context_window
 
-        caps = resolve_model_capabilities(clean)
-        if caps.get("sources", {}).get("context_window_tokens") in {"approved_facts", "model_policy", "manual_override"}:
-            window = int(caps.get("context_window_tokens"))
-            if window > 0:
-                return window
-    except Exception:
-        pass
-    try:
-        from mms_launchers import _MODEL_CONTEXT_WINDOWS
-    except Exception:
-        return None
-    window = _MODEL_CONTEXT_WINDOWS.get(clean)
-    if window is not None:
-        return window
-    lower = clean.lower()
-    for key, value in _MODEL_CONTEXT_WINDOWS.items():
-        if key.lower() == lower:
-            return value
-    return None
+    return resolve_context_window(model_name)
 
 
 def _native_clis_for_model(model_name):
@@ -2417,10 +2391,11 @@ def _model_capability_tags(model_name):
 
 
 def _model_supports_vision(model_name):
-    normalized = str(model_name or "").strip().lower()
-    if not normalized:
+    from mms_context_window import normalize_model_selector
+
+    model_id = normalize_model_selector(model_name)
+    if not model_id:
         return False
-    model_id = normalized.rsplit("/", 1)[-1]
     if model_id in _VISION_CAPABLE_MODEL_NAMES:
         return True
     return any(hint in model_id for hint in _VISION_CAPABLE_MODEL_HINTS)
@@ -2622,7 +2597,7 @@ This folder stores the real MMS user config.
 - Applies to the whole MMS config tree, including `config.toml`, `override.toml`, `credentials.sh`, `usage.json`, `accounts/**`, `env/**`, and any account state under this folder.
 - Agents may inspect, diff, and propose changes, but must not auto-apply user config edits without human confirmation.
 - Any proposed change must show target path, affected fields/files, before/after values, and reason.
-- If the process is running inside an isolated HOME or gateway session, still resolve and protect the real user config under `~/.config/mms`.
+- If the process is running inside an isolated HOME or gateway session, still resolve and protect the real user config under `~/.config/mms-next`.
 """
 
 
@@ -3483,18 +3458,17 @@ def _sanitize_launch_preferences(payload):
     effort = _pref_reasoning_effort(payload.get("reasoning_effort"))
     if effort:
         result["reasoning_effort"] = effort
-    caveman_mode = _pref_enable_disable(payload.get("caveman_mode"))
-    if caveman_mode:
-        result["caveman_mode"] = caveman_mode
-    caveman_level = _pref_caveman_level(payload.get("caveman_level"))
-    if caveman_level:
-        result["caveman_level"] = caveman_level
+    # Caveman is retired; legacy preference keys are intentionally ignored.
     nsr_mode = _pref_enable_disable(payload.get("nsr_mode"))
     if nsr_mode:
         result["nsr_mode"] = nsr_mode
     bypass = _pref_bool(payload.get("bypass"))
     if bypass is not None:
         result["bypass"] = bypass
+    # pi only: whether MMS injects its bundled @ctrixin/pi-btw extension.
+    pi_btw = _pref_bool(payload.get("pi_btw"))
+    if pi_btw is not None:
+        result["pi_btw"] = pi_btw
 
     agent_pack = _pref_agent_pack(payload.get("agent_pack"))
     if not agent_pack and _pref_enable_disable(payload.get("omc_mode")) == "enable":
@@ -7462,6 +7436,45 @@ def _probe_async_min_interval(cfg=None):
     return _PROBE_ASYNC_MIN_INTERVAL
 
 
+def _listing_model_details(payload):
+    """Per-model facts an upstream /models listing reported, worth keeping.
+
+    Only the context-window fields, so a provider that publishes a window for a
+    model MMS has never heard of still sizes it correctly (issue #230). Nothing
+    here is interpreted; `mms_context_window` decides what to do with it.
+    """
+    from mms_context_window import REMOTE_LISTING_CONTEXT_KEYS
+
+    items = payload.get("data") if isinstance(payload, dict) else None
+    details = {}
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        model_id = str(item.get("id") or "").strip()
+        if not model_id:
+            continue
+        row = {}
+        for field in REMOTE_LISTING_CONTEXT_KEYS:
+            try:
+                value = int(item.get(field))
+            except (TypeError, ValueError):
+                continue
+            if value > 0:
+                row[field] = value
+        top_provider = item.get("top_provider")
+        if isinstance(top_provider, dict):
+            for field in REMOTE_LISTING_CONTEXT_KEYS:
+                try:
+                    value = int(top_provider.get(field))
+                except (TypeError, ValueError):
+                    continue
+                if value > 0:
+                    row.setdefault("top_provider", {})[field] = value
+        if row:
+            details[model_id] = row
+    return details
+
+
 def _probe_file_cache_path(provider_id):
     return os.path.join(_PROBE_FILE_CACHE_DIR, f"models_{provider_id}.json")
 
@@ -7533,17 +7546,18 @@ def _save_probe_file_cache(provider_id, result):
     try:
         os.makedirs(_PROBE_FILE_CACHE_DIR, exist_ok=True)
         path = _probe_file_cache_path(provider_id)
+        payload = {
+            "raw_models": result.get("raw_models") or [],
+            "working_url": result.get("working_url"),
+            "base_source": base_source or "remote",
+            "error": result.get("error"),
+            "error_kind": result.get("error_kind"),
+        }
+        model_details = result.get("model_details")
+        if isinstance(model_details, dict) and model_details:
+            payload["model_details"] = model_details
         with open(path, "w") as f:
-            json.dump(
-                {
-                    "raw_models": result.get("raw_models") or [],
-                    "working_url": result.get("working_url"),
-                    "base_source": base_source or "remote",
-                    "error": result.get("error"),
-                    "error_kind": result.get("error_kind"),
-                },
-                f,
-            )
+            json.dump(payload, f)
     except Exception:
         pass
 
@@ -7823,6 +7837,7 @@ def _probe_models(provider, emit_output=True, force_refresh=False, skip_cache=Fa
                     models.sort()
                     result["raw_models"] = models
                     result["models"] = models
+                    result["model_details"] = _listing_model_details(data)
                     result["working_url"] = try_url
                     attempts.append({"url": f"{try_url}{models_endpoint}", "status": f"ok ({len(models)} models)"})
                     if try_url != base_url and emit_output:
@@ -9265,6 +9280,8 @@ def _confirm_context_lines(cli, runtime):
 
 
 def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_nsr=False, has_ecc=False, has_omc=False):
+    # Caveman is retired globally; ignore legacy callers that still pass it.
+    has_caveman = False
     runtime = runtime if isinstance(runtime, dict) else {}
     allow_execution_surfaces = not (
         (cli == "claude" and runtime.get("auth_mode") == "oauth")
@@ -9272,9 +9289,9 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_nsr=F
     )
     preview = {
         "allow_execution_surfaces": allow_execution_surfaces,
-        "mcp": {"always": [], "caveman": [], "nsr": [], "ecc": [], "omc": []},
-        "skills": {"always": [], "caveman": [], "nsr": [], "ecc": [], "omc": []},
-        "hooks": {"always": [], "caveman": [], "nsr": [], "ecc": [], "omc": []},
+        "mcp": {"always": [], "nsr": [], "ecc": [], "omc": []},
+        "skills": {"always": [], "nsr": [], "ecc": [], "omc": []},
+        "hooks": {"always": [], "nsr": [], "ecc": [], "omc": []},
     }
 
     if cli not in {"claude", "codex", "opencode", "pi", "agy"}:
@@ -13608,7 +13625,8 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     "no_proxy_conflicts": [],
                 }
         context_lines = _confirm_context_lines(cli, runtime_runtime)
-        has_caveman = _caveman_available_for_cli(cli)
+        # Caveman is retired globally; legacy assets/preferences are inert.
+        has_caveman = False
         has_nsr = _nsr_available_for_cli(cli)
         has_ecc = (
             cli == "claude"
@@ -13715,6 +13733,9 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             return True
         if action == "b":
             continue
+        # Legacy TUI implementations may return a Caveman toggle even though
+        # the control is no longer exposed; never carry it into runtime.
+        caveman_enabled = False
         if cli in {"claude", "codex", "opencode", "pi", "agy"}:
             runtime_runtime["bypass"] = bool(bypass)
         if bypass:
@@ -13851,7 +13872,7 @@ def handle_env_command(cfg, argv):
     )
     parser.add_argument("preset_name", help="预设名称")
     parser.add_argument("--apply", action="store_true",
-                        help="写入 ~/.config/mms/env/<preset>.sh")
+                        help="写入 ~/.config/mms-next/env/<preset>.sh")
     parser.add_argument("--provider", help="临时覆盖预设中的 provider")
     args = parser.parse_args(argv)
 
@@ -15067,7 +15088,7 @@ def _display_preferences_path():
         marker = "active" if os.path.exists(path) else "create-if-needed"
         console.print(f"  {path}  [dim]({marker})[/dim]")
     console.print(f"[dim]文档: {PREFERENCES_DOC_PATH}[/dim]")
-    console.print("[yellow]Human gate:[/yellow] agents may inspect/propose, but must not auto-write real ~/.config/mms/** without human confirmation.")
+    console.print("[yellow]Human gate:[/yellow] agents may inspect/propose, but must not auto-write real ~/.config/mms-next/** without human confirmation.")
 
 
 def _display_preferences_example():
@@ -15077,7 +15098,7 @@ def _display_preferences_example():
 def _display_human_gate_help():
     command = current_command()
     console.print("[bold]MMS Human Gate[/bold]")
-    console.print("- real config tree `~/.config/mms/**` is human-only for agents.")
+    console.print("- real config tree `~/.config/mms-next/**` is human-only for agents.")
     console.print("- allowed for agents: inspect, explain, generate manual diff, print examples.")
     console.print("- blocked without human confirmation: writing config.toml, preferences.toml, override.toml, credentials.sh, accounts/**, env/**, usage/account state, or Claude config.")
     console.print("- required write flow: plan -> backup -> human double check -> audited write -> post-write human double check.")
@@ -15097,17 +15118,17 @@ def _display_preferences_help():
     console.print(f"  {command} config human-gate")
     console.print("\n[bold]Allowed keys:[/bold]")
     console.print("  launch.disabled_clis: hide/disable MMS launch targets such as pi or agy")
-    console.print("  launch.defaults: thinking_mode, reasoning_effort, caveman_mode, caveman_level, nsr_mode, agent_pack, bypass")
+    console.print("  launch.defaults: thinking_mode, reasoning_effort, nsr_mode, agent_pack, bypass, pi_btw")
     console.print("  launch.cli.<claude|codex|opencode|pi|agy>: same launch keys")
     console.print("  session_surfaces.disabled: skills, mcp, hooks")
     console.print("  assets: managed_enabled, managed_root")
-    console.print("  assets.roots: web_access, weber, agent_browser, codegraph, token_saver, toon, caveman, nsr, ecc, omc, auto_github_contributor")
+    console.print("  assets.roots: web_access, weber, agent_browser, codegraph, token_saver, toon, nsr, ecc, omc, auto_github_contributor")
     console.print("\n[bold]Denied / ignored:[/bold]")
     console.print("  api_key, base_url, proxy, account identity, provider routes, OAuth tokens, credentials, Claude config, real HOME/XDG/auth state")
     console.print("\n[bold]Overlay order:[/bold]")
     console.print("  config.toml -> override.toml -> preferences.toml launch allowlist -> confirm screen changes -> launcher")
     console.print(f"[dim]Full doc: {PREFERENCES_DOC_PATH}[/dim]")
-    console.print("[yellow]Human gate:[/yellow] agents can propose edits, but must not auto-write real ~/.config/mms/** without human confirmation.")
+    console.print("[yellow]Human gate:[/yellow] agents can propose edits, but must not auto-write real ~/.config/mms-next/** without human confirmation.")
 
 
 
@@ -15699,13 +15720,105 @@ def _load_config_or_preview_bundle():
     return load_config()
 
 
+def _bootstrap_preview_root_config(ui_language=None):
+    """Configure an empty v2 root, writing DB truth instead of config.toml.
+
+    Collects one channel interactively. The legacy ~/.config/mms root is never
+    read: Pilot (`mms web`) and this prompt are the only ways to fill the root.
+    Returns the freshly loaded runtime config, or None when the caller should
+    fall back to the read-only preview guidance.
+    """
+    if not sys.stdin.isatty():
+        return None
+    _ensure_rich()
+    language = normalize_language(ui_language) or "zh"
+    set_language(language)
+    title = display_title()
+
+    console.print(Panel(
+        f"[bold cyan]{_L(f'欢迎使用 {title} — AI Coding CLI 统一启动器', f'Welcome to {title} — unified AI coding CLI launcher')}[/bold cyan]\n\n"
+        f"{_L('首次使用，需要配置 API 地址和认证信息；也可以运行', 'First-time setup needs an API endpoint and credentials; alternatively run')} `{current_command()} web` {_L('在 Pilot 页面里完成', 'and finish it in Pilot')}\n"
+        f"{_L('这个配置根使用配置库真值，填写的内容会写入配置库和 secret backend', 'This config root keeps DB truth; your answers go into the registry database and the secret backend')}",
+        title=f"{title} Setup",
+    ))
+
+    cfg = _default_config()
+    cfg.setdefault("ui", {})["language"] = language
+    provider = get_provider_definition(cfg)
+    base_url, api_key, openai_base_url, anthropic_base_url = _prompt_provider_credentials(provider)
+
+    provider_ctx = dict(provider)
+    provider_ctx["base_url"] = base_url
+    provider_ctx["openai_base_url"] = openai_base_url
+    provider_ctx["anthropic_base_url"] = anthropic_base_url
+    provider_ctx["api_key"] = api_key
+    console.print(f"\n{_L('正在测试连接...', 'Testing the connection...')}", style="dim")
+    probe = _probe_models(provider_ctx)
+    models = probe.get("models") or []
+    if not models:
+        console.print(
+            f"[red]{_L('没有取到模型列表，配置未写入。请确认地址和 API Key 后重试。', 'No model list was returned; nothing was written. Check the endpoint and API key, then retry.')}[/red]"
+        )
+        return None
+    console.print(f"[green]✓ {_L('连接成功！发现', 'Connected. Found')} {len(models)} {_L('个可用模型', 'models')}[/green]")
+
+    working_url = str(probe.get("working_url") or "").strip()
+    if working_url and working_url != _provider_openai_base_url(provider_ctx):
+        console.print(f"[yellow]→ {_L('自动修正地址为', 'Corrected endpoint to')} {working_url}[/yellow]")
+        openai_base_url = working_url
+        base_url = working_url
+
+    payload_provider = dict(provider)
+    payload_provider.update({
+        "openai_base_url": openai_base_url,
+        "anthropic_base_url": anthropic_base_url,
+        "default_openai_base_url": openai_base_url,
+        "default_anthropic_base_url": anthropic_base_url,
+        "fallback_models": list(models),
+    })
+    cfg["providers"] = [payload_provider]
+    credential_updates = [{
+        "provider_id": payload_provider["id"],
+        "base_url": str(openai_base_url or anthropic_base_url or base_url).rstrip("/"),
+        "openai_base_url": str(openai_base_url).rstrip("/"),
+        "anthropic_base_url": str(anthropic_base_url).rstrip("/"),
+        "api_key": api_key,
+    }]
+
+    import mms_root_bootstrap
+
+    try:
+        summary = mms_root_bootstrap.bootstrap_v2_root(
+            config_dir=PRIMARY_CONFIG_DIR,
+            config_payload=cfg,
+            credential_updates=credential_updates,
+            command_name=current_command(),
+        )
+    except Exception as exc:
+        console.print(f"[red]{_L('写入配置库失败', 'Writing the config database failed')}: {type(exc).__name__}: {exc}[/red]")
+        return None
+    if not summary.get("ok"):
+        detail = str(summary.get("error") or "") or ", ".join(summary.get("blocked_reasons") or []) or "unknown"
+        console.print(f"[red]{_L('写入配置库失败', 'Writing the config database failed')}: {detail}[/red]")
+        return None
+
+    console.print(f"\n[green]✓ {_L('配置已写入', 'Config written to')} {PRIMARY_CONFIG_DIR}[/green]")
+    console.print(
+        f"[dim]{_L('模型与凭据保存在配置库和 secret backend，没有写入 config.toml。', 'Models and credentials live in the registry database and secret backend; config.toml was not written.')}[/dim]\n"
+    )
+    return _load_config_or_preview_bundle()
+
+
 def _load_command_config():
     cfg = _load_config_or_preview_bundle()
     if cfg is None:
         if _preview_root_missing_legacy_config():
-            _exit_preview_legacy_config_disabled(["launch"])
-        cfg = _default_config()
-        save_config(cfg)
+            cfg = _bootstrap_preview_root_config()
+            if cfg is None:
+                _exit_preview_legacy_config_disabled(["launch"])
+        else:
+            cfg = _default_config()
+            save_config(cfg)
     return apply_local_overrides(cfg)
 
 
@@ -15835,7 +15948,9 @@ def _handle_session_info(session_id, cli_name):
 
 
 def _session_gateway_roots(cli_name):
-    real_home = resolve_real_user_home()
+    # Sessions are created under the selected config root (MMS_CONFIG_ROOT honoured),
+    # so prune must look at that same root instead of always at the real HOME one.
+    config_root = resolve_mms_config_dir()
     gateway_names = []
     if cli_name in {"all", "claude"}:
         gateway_names.append(("claude", "claude-gateway"))
@@ -15844,7 +15959,7 @@ def _session_gateway_roots(cli_name):
     if cli_name in {"all", "opencode"}:
         gateway_names.append(("opencode", "opencode-gateway"))
     return [
-        (cli, os.path.join(real_home, ".config", "mms", gateway_name, "s"))
+        (cli, os.path.join(config_root, gateway_name, "s"))
         for cli, gateway_name in gateway_names
     ]
 
@@ -16042,9 +16157,9 @@ def _codex_resume_roots():
 
     for env_name in ("MMS_CODEX_RESUME_WRITEBACK_ROOT", "CODEX_HOME"):
         add(os.environ.get(env_name))
-    real_home = resolve_real_user_home()
-    add(os.path.join(real_home, ".config", "mms", "codex-gateway", ".codex"))
-    add(os.path.join(real_home, ".codex"))
+    # Same root the gateway session was created under, not a hard-coded real-HOME one.
+    add(os.path.join(resolve_mms_config_dir(), "codex-gateway", ".codex"))
+    add(os.path.join(resolve_real_user_home(), ".codex"))
     return roots
 
 
@@ -16997,7 +17112,7 @@ def _exit_preview_legacy_config_disabled(args_rest=None):
     console.print("[red]Preview root uses v2 DB truth; legacy config.toml writes are disabled.[/red]")
     console.print(f"[dim]config_root={root}[/dim]")
     console.print(f"[cyan]下一步:[/cyan] {current_command()} config doctor --json")
-    console.print("[dim]准备预览 root: mmf preview prepare --from ~/.config/mms --json[/dim]")
+    console.print(f"[dim]在 Pilot 里添加通道: {current_command()} web[/dim]")
     console.print(
         f"[dim]已审核 plan 后写入预览 DB: {current_command()} config apply-plan "
         "--plan-json <plan.json> --apply --confirm-preview-apply --json[/dim]"
@@ -17365,7 +17480,7 @@ def main():
     parser.add_argument("--export", nargs="?", const="claude", metavar="CLI",
                         help="输出指定 CLI 的 export 环境变量命令")
     parser.add_argument("--apply", action="store_true",
-                        help="配合 --export 使用，写入 ~/.config/mms/env/<cli>.sh")
+                        help="配合 --export 使用，写入 ~/.config/mms-next/env/<cli>.sh")
     parser.add_argument("--account", help="临时使用指定官方账号档案启动")
     parser.add_argument("--provider", help="临时使用指定模型源启动")
     parser.add_argument("--profile", dest="opencode_profile", help="直接指定 OpenCode mode，例如 agent / review / committee / debate / omo / raw")
@@ -17505,9 +17620,13 @@ def main():
 
     # Load or create config
     if user_cfg is None:
+        startup_language = _resolve_ui_language(None, args.lang or lang_override)
         if _preview_root_missing_legacy_config():
-            _exit_preview_legacy_config_disabled(["launch"])
-        user_cfg = setup_wizard(_resolve_ui_language(None, args.lang or lang_override))
+            user_cfg = _bootstrap_preview_root_config(startup_language)
+            if user_cfg is None:
+                _exit_preview_legacy_config_disabled(["launch"])
+        else:
+            user_cfg = setup_wizard(startup_language)
 
     cfg = apply_local_overrides(user_cfg)
     set_language(_resolve_ui_language(cfg, args.lang or lang_override))

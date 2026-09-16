@@ -86,6 +86,33 @@ def ready(spec, process, source, *, probation):
     return None
 
 
+def install_alongside(spec):
+    """Copy the verified release over the installation the old server ran from.
+
+    Returns False when there is nothing safe to replace (a source checkout, an
+    unwritable directory) or the copy failed and was rolled back; the caller
+    then keeps the staged-copy pointer.
+    """
+    from .update_install import describe, install
+
+    source = Path(str(spec.get('oldSource') or ''))
+    operation_root = Path(spec['armed']).parent
+    verdict = describe(source) if str(source) else {'updatesCli': False, 'reason': '没有记录安装目录。'}
+    if not verdict.get('updatesCli'):
+        private_json(operation_root/'installation.json', {'installed': False, 'reason': verdict.get('reason', '')})
+        return False
+    try:
+        names = install(Path(spec['source']), source, operation_root/'installation-backup')
+    except Exception as exc:
+        private_json(operation_root/'installation.json',
+                     {'installed': False, 'reason': f'{type(exc).__name__}: {str(exc)[:400]}',
+                      'backup': str(operation_root/'installation-backup')})
+        return False
+    private_json(operation_root/'installation.json',
+                 {'installed': True, 'root': str(source), 'version': spec['target'], 'paths': names})
+    return True
+
+
 def run(spec_path):
     spec = read_json(spec_path)
     from .install_lock import acquire_runtime_lease
@@ -115,7 +142,14 @@ def _run(spec, spec_path):
     except OSError:
         pass
     if csrf:
-        private_json(Path(spec['state'])/'updates/active.json', {'source':spec['source'], 'version':spec['target']})
+        # Replacing the installation is what keeps `mms` and Pilot on one
+        # version. When it is refused or fails, the staged copy still serves
+        # the web app through the pointer, exactly as before.
+        marker = Path(spec['state'])/'updates/active.json'
+        if install_alongside(spec):
+            marker.unlink(missing_ok=True)
+        else:
+            private_json(marker, {'source':spec['source'], 'version':spec['target']})
         try:
             http(spec['port'], 'update/commit', {'token':spec['token']}, csrf)
         except Exception:

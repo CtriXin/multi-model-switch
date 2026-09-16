@@ -85,7 +85,7 @@ def resolve_consumer_config_root(
         if value:
             return Path(value).expanduser()
     if allow_default_root:
-        return Path.home() / ".config" / "mms"
+        return Path.home() / ".config" / "mms-next"
     raise ConsumerBundleError("MMS_CONFIG_ROOT is required for consumer bundle resolution")
 
 

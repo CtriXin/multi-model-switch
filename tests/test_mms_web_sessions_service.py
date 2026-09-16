@@ -20,6 +20,34 @@ sys.path.insert(0, str(REPO_ROOT))
 from mms_web.drivers.base import DriverClosedError, RpcTimeoutError  # noqa: E402
 from mms_web.errors import WebError  # noqa: E402
 from mms_web.sessions import SessionService  # noqa: E402
+from mms_web.session_actions import history  # noqa: E402
+
+
+def test_native_history_is_read_as_utf8(tmp_path):
+    path = tmp_path / "conversation.jsonl"
+    path.write_text(
+        json.dumps({"message": {"role": "assistant", "content": [{"type": "text", "text": "你好 👋"}]}}, ensure_ascii=False)
+        + "\n",
+        encoding="utf-8",
+    )
+
+    rows = history(path)
+
+    assert rows[0]["message"]["content"][0]["text"] == "你好 👋"
+
+
+def test_native_history_ignores_a_partial_utf8_tail(tmp_path):
+    path = tmp_path / "conversation.jsonl"
+    complete = json.dumps(
+        {"message": {"role": "assistant", "content": [{"type": "text", "text": "完成"}]}},
+        ensure_ascii=False,
+    ).encode("utf-8")
+    path.write_bytes(complete + b'\n{"message": {"content": "' + bytes([0xE4]))
+
+    rows = history(path)
+
+    assert len(rows) == 1
+    assert rows[0]["message"]["content"][0]["text"] == "完成"
 
 
 class FakeCatalog:
@@ -54,11 +82,26 @@ class FakeDriver:
         self.fail_next_prompt: dict | None = None
         self.timeout_next_prompt = False
         self.reject_ui: WebError | None = None
+        # get_commands answer; tests set [{"name": "btw"}, ...] to enable
+        # the native path.
+        self.commands: list[dict] = []
 
     # driver API used by SessionService
 
     def alive(self) -> bool:
         return self._alive
+
+    def request(self, command: dict, *, timeout: float | None = None) -> dict:
+        ctype = command.get("type")
+        if ctype == "get_commands":
+            return {"type": "response", "command": "get_commands", "success": True,
+                    "data": {"commands": [dict(item) for item in self.commands]}}
+        if ctype == "prompt":
+            return self.send_prompt(str(command.get("message") or ""))
+        return {"type": "response", "success": False, "error": f"unsupported: {ctype}"}
+
+    def get_commands(self, *, timeout: float | None = None) -> list[dict]:
+        return [dict(item) for item in self.commands]
 
     def send_prompt(self, text: str) -> dict:
         if self.timeout_next_prompt:
@@ -100,8 +143,14 @@ class FakeDriver:
     def emit_approval(self, service, session, approval_id="ap-1", method="confirm"):
         service._apply_approval_pending(session, approval_id, method, "title")
 
+    def emit_side_question_event(self, payload: dict) -> None:
+        """Simulate a BTW_EVENT: notify delivered by a Pi extension."""
+        if self._sink is None:
+            raise RuntimeError("FakeDriver has no sink")
+        self._sink.side_question_event(payload)
 
-def make_service(tmp_path: Path, catalog=None, real_launch: bool = True, monkeypatch=None, **kwargs) -> tuple[SessionService, list[FakeDriver]]:
+
+def make_service(tmp_path: Path, catalog=None, real_launch: bool = True, monkeypatch=None, driver_commands=None, **kwargs) -> tuple[SessionService, list[FakeDriver]]:
     catalog = catalog or FakeCatalog()
     drivers: list[FakeDriver] = []
     if monkeypatch is not None:
@@ -111,6 +160,8 @@ def make_service(tmp_path: Path, catalog=None, real_launch: bool = True, monkeyp
 
     def driver_factory(plan, sink):
         driver = FakeDriver(sink=sink)
+        if driver_commands is not None:
+            driver.commands = [dict(item) for item in driver_commands]
         drivers.append(driver)
         return driver
 
@@ -154,7 +205,14 @@ def test_capabilities_require_real_launch_and_seam(tmp_path, seeded_seam):
 
 def test_launch_disabled_without_real_launch(tmp_path, seeded_seam):
     service, _ = make_service(tmp_path, real_launch=False)
-    assert service.capabilities() == {"launch": False}
+    # The blocker travels with the flag now: a page full of unavailable models
+    # has to be able to say what is missing.
+    # sidecarCompletion is a build capability, not a launch one: an existing
+    # session can still be asked a question after new launches are blocked.
+    assert service.capabilities() == {"launch": False,
+                                      "launchReason": "没有选定 MMS 配置根，无法启动会话。",
+                                      "sideQuestions": True,
+                                      "sidecarCompletion": True}
     with pytest.raises(WebError) as err:
         launch_ok(service)
     assert err.value.status == 409
@@ -170,7 +228,7 @@ def test_launch_success_shape(tmp_path, seeded_seam):
     assert session["modelName"] == "fake-sonnet"
     assert session["providerName"] == "Fake Provider"
     assert session["state"] == "running"
-    assert session["capabilities"] == {"send": True, "stop": True, "approve": False}
+    assert session["capabilities"] == {"send": True, "stop": True, "approve": False, "steer": True, "queueControl": True}
     assert session["title"] == "帮我看一下这个问题"
     kinds = [event["kind"] for event in detail["events"]]
     assert kinds.count("user") == 1
@@ -374,7 +432,7 @@ def test_persistence_and_restart_snapshot(tmp_path, seeded_seam):
     listed = service2.list_sessions()
     assert len(listed) == 1
     assert listed[0]["state"] == "stopped", "restart must not pretend the child runs"
-    assert listed[0]["capabilities"] == {"send": False, "stop": False, "approve": False}
+    assert listed[0]["capabilities"] == {"send": False, "stop": False, "approve": False, "steer": False, "queueControl": False}
     detail2 = service2.get_session(session_id)
     texts = [e["text"] for e in detail2["events"] if e["kind"] == "user"]
     assert texts == ["第一轮", "第二轮"]

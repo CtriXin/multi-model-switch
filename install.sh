@@ -52,16 +52,27 @@ INSTALL_CLI_EXPLICIT=0
 CHECK_ONLY=0
 CLEANUP_ONLY=0
 LAUNCH_WEB_MODE="ask"
+# --keep-running-pilot is accepted for compatibility only; it changes nothing
+# (see guard_live_pilot_install / usage text below). Installation never stops
+# a running Pilot, so there is no stop-and-reopen path to configure here.
+KEEP_RUNNING_PILOT=0
 PRINT_ONLY_VERSION=0
 DRY_RUN=0
 
 REAL_HOME_CANDIDATE="${REAL_HOME:-${MMS_REAL_HOME:-${ORIGINAL_HOME:-}}}"
 REAL_HOME="${REAL_HOME_CANDIDATE:-$HOME}"
-if [[ "$REAL_HOME" == */.config/mms/* ]]; then
+# A session HOME can sit under either config root, so strip both.
+if [[ "$REAL_HOME" == */.config/mms-next/* ]]; then
+    REAL_HOME="${REAL_HOME%%/.config/mms-next/*}"
+elif [[ "$REAL_HOME" == */.config/mms/* ]]; then
     REAL_HOME="${REAL_HOME%%/.config/mms/*}"
 fi
-if [ -z "$REAL_HOME_CANDIDATE" ] && [[ "$HOME" == */.config/mms/* ]]; then
-    REAL_HOME="${HOME%%/.config/mms/*}"
+if [ -z "$REAL_HOME_CANDIDATE" ]; then
+    if [[ "$HOME" == */.config/mms-next/* ]]; then
+        REAL_HOME="${HOME%%/.config/mms-next/*}"
+    elif [[ "$HOME" == */.config/mms/* ]]; then
+        REAL_HOME="${HOME%%/.config/mms/*}"
+    fi
 fi
 
 MMS_HOME="$REAL_HOME/.mms"
@@ -72,9 +83,14 @@ MMS_UV_BIN="$MMS_UV_BIN_DIR/uv"
 MMS_UV_PYTHON_DIR="$MMS_HOME/uv-python/install"
 MMS_UV_PYTHON_BIN_DIR="$MMS_HOME/uv-python/bin"
 MMS_UV_CACHE_DIR="$MMS_HOME/uv-cache"
-CREDENTIALS_PATH="$REAL_HOME/.config/mms/credentials.sh"
-CONFIG_PATH="$REAL_HOME/.config/mms/config.toml"
-VERSION_META_PATH="$REAL_HOME/.config/mms/version.json"
+# The default config root is mms-next, which keeps v2 DB truth. The legacy
+# root stays readable for import and for reading an older install's metadata.
+CONFIG_ROOT="$REAL_HOME/.config/mms-next"
+LEGACY_CONFIG_ROOT="$REAL_HOME/.config/mms"
+CREDENTIALS_PATH="$CONFIG_ROOT/credentials.sh"
+CONFIG_PATH="$CONFIG_ROOT/config.toml"
+VERSION_META_PATH="$CONFIG_ROOT/version.json"
+LEGACY_VERSION_META_PATH="$LEGACY_CONFIG_ROOT/version.json"
 
 cleanup() {
     if [ -n "$SOURCE_TMP_DIR" ] && [ -d "$SOURCE_TMP_DIR" ]; then
@@ -176,25 +192,16 @@ bundled_session_asset_present() {
     local asset="$1"
     local assets_root="$MMS_HOME/assets/session-assets"
     case "$asset" in
-        caveman)
-            [ -f "$assets_root/packs/caveman/skills/caveman/SKILL.md" ] \
-                && [ -f "$assets_root/packs/caveman/hooks/caveman-activate.js" ] \
-                && [ -f "$assets_root/packs/caveman/hooks/caveman-mode-tracker.js" ]
-            ;;
-        token-saver)
-            [ -f "$assets_root/skills/token-saver/SKILL.md" ]
+        grill-me)
+            [ -f "$assets_root/skills/grill-me/SKILL.md" ]
             ;;
         toon)
             [ -f "$assets_root/skills/toon/SKILL.md" ]
             ;;
-        web-access)
-            [ -f "$assets_root/skills/web-access/SKILL.md" ]
-            ;;
         weber)
-            [ -f "$assets_root/skills/weber/SKILL.md" ]
-            ;;
-        agent-browser)
-            [ -f "$assets_root/skills/agent-browser/SKILL.md" ]
+            [ -f "$assets_root/skills/weber/SKILL.md" ] \
+                && [ -f "$assets_root/skills/weber/backends-web-access/SKILL.md" ] \
+                && [ -f "$assets_root/skills/weber/backends-agent-browser/SKILL.md" ]
             ;;
         nsr)
             [ -f "$MMS_HOME/hooks/nsr-builtin-hook.py" ] \
@@ -215,14 +222,11 @@ print_bundled_session_asset_status() {
     local asset label path mode
     local assets_root="$MMS_HOME/assets/session-assets"
     echo "$(t "内建 session assets" "Bundled session assets")"
-    for asset in caveman token-saver toon web-access weber agent-browser nsr; do
+    for asset in grill-me toon weber nsr; do
         case "$asset" in
-            caveman) label="Caveman"; path="$assets_root/packs/caveman"; mode="$(t "按 session 注入；默认随偏好/确认页启用" "session-local; enabled by preference/confirm screen")" ;;
-            token-saver) label="token-saver"; path="$assets_root/skills/token-saver"; mode="$(t "默认可用" "available by default")" ;;
+            grill-me) label="grill-me"; path="$assets_root/skills/grill-me"; mode="$(t "默认可用；需要时显式调用" "available by default; invoke when needed")" ;;
             toon) label="TOON"; path="$assets_root/skills/toon"; mode="$(t "默认可用" "available by default")" ;;
-            web-access) label="web-access"; path="$assets_root/skills/web-access"; mode="$(t "默认可用" "available by default")" ;;
-            weber) label="weber"; path="$assets_root/skills/weber"; mode="$(t "默认可用" "available by default")" ;;
-            agent-browser) label="agent-browser"; path="$assets_root/skills/agent-browser"; mode="$(t "Codex/Antigravity 默认可用" "available by default for Codex/Antigravity")" ;;
+            weber) label="weber"; path="$assets_root/skills/weber"; mode="$(t "默认可用（含 web-access / agent-browser backend）" "available by default (includes web-access / agent-browser backends)")" ;;
             nsr) label="NSR"; path="$MMS_HOME/hooks/nsr-stop-wrapper.py"; mode="$(t "显式 /nsr 手动工作；自动 hook 已退休" "explicit /nsr manual work; automatic hooks retired")" ;;
         esac
         if bundled_session_asset_present "$asset"; then
@@ -263,7 +267,7 @@ download_url_to_file() {
 usage() {
     cat <<EOF
 $(t "用法:" "Usage:")
-  bash install.sh [--channel stable|dev|canary] [--dry-run] [--no-shell-rc] [--no-launch-web] [--launch-web] [--run-setup] [--ensure-node22] [--lang zh|en] [--install-cli name[,name2]]
+  bash install.sh [--channel stable|dev|canary] [--dry-run] [--no-shell-rc] [--no-launch-web] [--launch-web] [--keep-running-pilot] [--run-setup] [--ensure-node22] [--lang zh|en] [--install-cli name[,name2]]
   bash install.sh --ref <tag-or-branch>
   bash install.sh --stable
   bash install.sh --dev
@@ -286,9 +290,12 @@ $(t "说明:" "Notes:")
   - $(t "--lang 可设置默认 UI 语言（zh / en）" "--lang sets the default UI language (zh / en)")
   - $(t "安装过程零交互：不询问可选包，也不询问 UI 语言；唯一的提问是装完之后要不要打开 MMS Web" "The install is non-interactive: no optional-pack questions and no UI language prompt; the only question comes after everything is installed and just offers to open MMS Web")
   - $(t "--launch-web 跳过提问直接打开，--no-launch-web 完全不打开；没有终端时不提问，只打印命令" "--launch-web opens it without asking, --no-launch-web never opens it; with no terminal available nothing is asked and the command is printed instead")
+  - $(t "检测到 Pilot 正在运行时会暂停安装，不关闭 Pilot 或其会话" "When a Pilot is running, installation pauses without stopping Pilot or its sessions")
+  - $(t "请在 Pilot 页面里用“更新”，或先运行 mms web stop（多实例用 --all）退出后再重新执行本命令" "Use Update inside Pilot, or run mms web stop (--all for multiple instances) to exit it, then re-run this command")
+  - $(t "--keep-running-pilot 仅为兼容旧脚本保留，不改变任何行为：安装始终不会关闭正在运行的 Pilot" "--keep-running-pilot is kept only for compatibility with older scripts; it changes nothing — installation never stops a running Pilot either way")
   - $(t "MMS Web 在后台运行，安装进程随即退出；PATH 默认写入 shell 配置，--no-shell-rc 可关闭" "MMS Web runs in the background and the installer exits right after; PATH is written to your shell config by default and --no-shell-rc turns that off")
   - $(t "pi 是必装项，pilot web 端依赖它；缺失的 claude/codex/opencode 会自动补装，已安装的不会被改动" "pi is mandatory because the pilot web app depends on it; missing claude/codex/opencode are installed automatically while existing ones are left untouched")
-  - $(t "内建能力（网页访问、浏览器自动化、省 token 工具、Caveman、NSR）随 MMS 一起安装，只在 MMS 启动的会话里生效" "Built-in tools (web access, browser automation, token savers, Caveman, NSR) ship with MMS and only apply inside sessions MMS starts")
+  - $(t "内建能力（weber 网页路由、grill-me、TOON、NSR）随 MMS 一起安装，只在 MMS 启动的会话里生效" "Built-in tools (weber web routing, grill-me, TOON, NSR) ship with MMS and only apply inside sessions MMS starts")
   - $(t "--install-cli 可显式指定要补装的 CLI：claude/codex/opencode/pi（逗号分隔）；能用 npm 的 CLI 均走 npm package" "--install-cli explicitly selects which CLIs to install: claude/codex/opencode/pi (comma-separated); CLIs with npm packages are installed through npm")
   - $(t "默认安装 Fira Code 与 JetBrains Mono 到用户字体目录，供 Web 字体选择使用；已装则跳过，--no-coding-fonts 可关闭" "Fira Code and JetBrains Mono are installed into the user font directory for the Web font picker; already-installed families are skipped, and --no-coding-fonts turns this off")
   - $(t "--write-shell-rc 支持 bash/zsh/fish；Ghostty/iTerm/Terminal 重开 tab 后即可直接输入 mms" "--write-shell-rc supports bash/zsh/fish; reopen Ghostty/iTerm/Terminal tabs to type mms directly")
@@ -656,6 +663,13 @@ find_cli_binary() {
     local command_name="$1"
     local candidate=""
     local dir=""
+    local npm_prefix=""
+
+    # npm's global prefix is user-configurable (fnm, nvm, Homebrew, etc.);
+    # checking only a fixed PATH misses a successful install.
+    if command -v npm >/dev/null 2>&1; then
+        npm_prefix="$(npm prefix -g 2>/dev/null || true)"
+    fi
 
     if [ -z "$command_name" ]; then
         return 1
@@ -675,6 +689,7 @@ find_cli_binary() {
         "$REAL_HOME/.bun/bin" \
         "$REAL_HOME/.cargo/bin" \
         "$REAL_HOME/.nvm/versions/node/"*/bin \
+        "${npm_prefix:+$npm_prefix/bin}" \
         "/usr/bin" \
         "/bin"; do
         [ -d "$dir" ] || continue
@@ -958,13 +973,16 @@ install_named_cli() {
         return 0
     fi
 
-    npm_global_install_with_nvm_fallback "$label" "$package_spec" || true
+    if ! npm_global_install_with_nvm_fallback "$label" "$package_spec"; then
+        echo "✗ $(t "$label 安装命令失败；本次安装已停止" "$label install command failed; installation stopped")"
+        return 1
+    fi
     if cli_path="$(find_cli_binary "$command_name" 2>/dev/null)"; then
         echo "✓ $label ($cli_path)"
         return 0
     fi
 
-    echo "⚠ $(t "$label 安装未完成；MMS 仍可安装，之后可重新运行 --install-cli $cli_name。" "$label install did not complete; MMS is still installed, rerun --install-cli $cli_name later.")"
+    echo "✗ $(t "$label 安装后未找到可执行文件；本次安装已停止。请检查 Node/npm PATH 后重试。" "$label was not found after install; installation stopped. Check the Node/npm PATH and retry.")"
     return 1
 }
 
@@ -1047,7 +1065,9 @@ install_requested_clis() {
 
     IFS=',' read -r -a _requested_cli_items <<< "$INSTALL_CLI_LIST"
     for cli_name in "${_requested_cli_items[@]}"; do
-        install_named_cli "$cli_name" || true
+        if ! install_named_cli "$cli_name"; then
+            return 1
+        fi
     done
 }
 
@@ -1119,12 +1139,18 @@ warm_pi_runtime_cache() {
     echo "$(t "正在准备 pi 运行环境，第一次会下载，请稍候..." "Preparing the pi runtime; the first run downloads it, please wait...")"
     mkdir -p "$cache_dir"
     if NPM_CONFIG_UPDATE_NOTIFIER=false npx -y --cache "$cache_dir" "$PI_CLI_PACKAGE_SPEC" --version >/dev/null 2>&1; then
-        echo "✓ $(t "pi 运行时 cache 已就绪" "pi runtime cache ready"): $cache_dir"
-        return 0
+        if "$MMS_HOME/scripts/pi-cli-wrapper.sh" --version >/dev/null 2>&1; then
+            echo "✓ $(t "pi 运行时 cache 已就绪" "pi runtime cache ready"): $cache_dir"
+            return 0
+        fi
     fi
 
-    echo "⚠ $(t "pi 运行时预热未成功；pilot 首次启动时会重试下载" "pi runtime warmup did not succeed; the first pilot launch retries the download")"
-    return 0
+    # The wrapper resolves an installed pi on PATH or under npm's global
+    # prefix before it ever needs the cache, so reaching here means no pi is
+    # runnable at all — not merely that npx declined to fill the cache.
+    echo "✗ $(t "pi 运行时未就绪：PATH 上没有可运行的 pi，npm 全局目录下也没有，缓存预热同样没产出" "The pi runtime is not ready: no runnable pi on PATH, none under npm's global prefix, and the cache warmup produced nothing")"
+    echo "  $(t "先确认 pi 可用再重装：npm install -g" "Make pi runnable, then reinstall: npm install -g") $PI_CLI_PACKAGE_SPEC"
+    return 1
 }
 
 append_claude_hook_command() {
@@ -1707,13 +1733,20 @@ PY
 
 current_installed_ref() {
     local installed_ref=""
+    local meta_path="$VERSION_META_PATH"
 
-    if [ ! -f "$VERSION_META_PATH" ]; then
+    # An install made before the default root moved recorded its metadata in
+    # the legacy root; reading it keeps upgrades from looking like fresh ones.
+    if [ ! -f "$meta_path" ] && [ -f "$LEGACY_VERSION_META_PATH" ]; then
+        meta_path="$LEGACY_VERSION_META_PATH"
+    fi
+
+    if [ ! -f "$meta_path" ]; then
         return 0
     fi
 
     if command -v python3 >/dev/null 2>&1; then
-        installed_ref="$(python3 - "$VERSION_META_PATH" <<'PY'
+        installed_ref="$(python3 - "$meta_path" <<'PY'
 import json
 import sys
 
@@ -1731,7 +1764,28 @@ PY
         return 0
     fi
 
-    sed -n 's/.*"installed_ref"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$VERSION_META_PATH" | head -n 1
+    sed -n 's/.*"installed_ref"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$meta_path" | head -n 1
+}
+
+# A legacy root may still contain gateway/session runtime data, so the
+# installer must never remove it wholesale. Warn only when it has recognizable
+# MMS configuration files and leave inspection/backup to the user.
+legacy_mms_root_has_config() {
+    [ -d "$LEGACY_CONFIG_ROOT" ] || return 1
+    local name
+    for name in config.toml credentials.sh model-routes.json model-routes.lineup.json model-policy.json provider-profiles.json version.json; do
+        [ -f "$LEGACY_CONFIG_ROOT/$name" ] && return 0
+    done
+    return 1
+}
+
+print_legacy_mms_root_notice() {
+    legacy_mms_root_has_config || return 0
+    echo "⚠ $(t "检测到旧版 MMS 配置：$LEGACY_CONFIG_ROOT" "Legacy MMS configuration detected: $LEGACY_CONFIG_ROOT")"
+    echo "  $(t "当前版本只使用 ~/.config/mms-next，不会自动读取、迁移或删除旧配置。" "The current version only uses ~/.config/mms-next. It will not read, migrate, or delete the legacy config automatically.")"
+    echo "  $(t "请先确认新 Pilot 已正常工作，再手动处理旧目录；其中可能还有旧 gateway/session 运行数据。" "Confirm the new Pilot works before handling the old directory; it may still contain gateway/session runtime data.")"
+    echo "  $(t "查看当前配置根：mms config root --json" "Inspect the active config root: mms config root --json")"
+    echo "  $(t "无需先卸载 mms；安装器会更新原命令。不要直接删除或移动整个旧目录，以免影响仍在使用它的会话。" "No need to uninstall mms first; the installer updates the existing command. Do not delete or move the whole legacy directory while sessions may still use it.")"
 }
 
 # An explicit --ref pins a version outright, so reporting a channel there would
@@ -1753,15 +1807,31 @@ print_planned_version() {
 # A newcomer running the plain command does not need the channel/ref matrix;
 # one line saying what is being installed is enough. The full overview stays for
 # --version, --check, and anyone who picked a channel or ref explicitly.
+# Decide by outcome, not by arguments. Landing on the newest stable release is
+# the ordinary case and deserves one line, however the caller expressed it: the
+# npm wrapper resolves the release itself and pins --ref so the script and the
+# sources it installs cannot drift apart, and that pin must not be mistaken for
+# a user deliberately choosing an unusual version.
 print_install_headline() {
     local installed_ref=""
+    local stable_ref=""
 
-    if [ -n "$REQUESTED_INSTALL_CHANNEL" ] || [ -n "$INSTALL_REF" ]; then
-        print_version_overview
-        return 0
-    fi
+    case "$REQUESTED_INSTALL_CHANNEL" in
+        dev|canary)
+            print_version_overview
+            return 0
+            ;;
+    esac
 
     ensure_install_ref_resolved
+    if [ -n "$INSTALL_REF" ]; then
+        stable_ref="$(resolve_latest_release_tag || true)"
+        if [ -z "$stable_ref" ] || [ "$RESOLVED_INSTALL_REF" != "$stable_ref" ]; then
+            print_version_overview
+            return 0
+        fi
+    fi
+
     installed_ref="$(current_installed_ref || true)"
     if [ -z "$installed_ref" ]; then
         echo "$(t "安装最新版本" "Installing the latest version"): ${RESOLVED_INSTALL_REF:-local-source}"
@@ -1794,35 +1864,6 @@ print_version_overview() {
     echo "  $(t "安装通道" "Install channel"): $(install_channel_label)"
 }
 
-legacy_config_has_route_candidates() {
-    "$(_python_bin)" - "$REAL_HOME/.config/mms" <<'PY' >/dev/null 2>&1
-import sys
-import tomllib
-from pathlib import Path
-
-root = Path(sys.argv[1]).expanduser()
-config_path = root / "config.toml"
-if not config_path.exists():
-    raise SystemExit(1)
-try:
-    config = tomllib.loads(config_path.read_text(encoding="utf-8"))
-except Exception:
-    raise SystemExit(1)
-
-providers = config.get("providers")
-if not isinstance(providers, list):
-    raise SystemExit(1)
-
-for provider in providers:
-    if not isinstance(provider, dict) or provider.get("enabled") is False:
-        continue
-    for key in ("fallback_models", "extra_models"):
-        models = provider.get(key)
-        if isinstance(models, list) and any(str(item).strip() for item in models):
-            raise SystemExit(0)
-raise SystemExit(1)
-PY
-}
 
 run_install_check() {
     local node_label=""
@@ -1830,6 +1871,7 @@ run_install_check() {
     local cli_path=""
 
     print_version_overview
+    print_legacy_mms_root_notice
 
     if find_supported_python >/dev/null 2>&1; then
         PYTHON_CMD="$(find_supported_python)"
@@ -1903,8 +1945,8 @@ print_dry_run_plan() {
     echo "• $(t "MMS 安装目录" "MMS install dir"): $MMS_HOME"
     echo "• $(t "命令目录" "command dir"): $BIN_DIR"
     echo "• $(t "虚拟环境" "virtualenv"): $VENV_DIR"
-    echo "• $(t "配置目录" "config dir"): $REAL_HOME/.config/mms"
-    echo "• $(t "会安装内建能力：网页访问、浏览器自动化、省 token 工具、Caveman、NSR" "would install the built-in tools: web access, browser automation, token savers, Caveman, NSR")"
+    echo "• $(t "配置目录" "config dir"): $CONFIG_ROOT"
+    echo "• $(t "会安装内建能力：weber 网页路由、grill-me、TOON、NSR" "would install the built-in tools: weber web routing, grill-me, TOON, NSR")"
 
     if [ -n "$INSTALL_CLI_LIST" ]; then
         echo "• $(t "会安装 CLI" "would install CLI"): $INSTALL_CLI_LIST"
@@ -1949,46 +1991,132 @@ print(path)
 PY
 )" || return 1
     exec 9>"$lock_path"
-    if ! "$(_python_bin)" - "$MMS_HOME" <<'PY'
-import fcntl, os, subprocess, sys
+
+    local report="" status=0
+    set +e
+    report="$(inspect_live_pilot)"
+    status=$?
+    set -e
+    if [ "$status" -eq 0 ]; then
+        return 0
+    fi
+    if [ "$status" -ne 3 ]; then
+        echo "$report" >&2
+        return 1
+    fi
+
+    # Installation must never terminate a running Pilot: doing so also kills
+    # conversations it owns. This holds for every case status 3 reports,
+    # whether or not a stoppable server was found, and regardless of
+    # --keep-running-pilot (accepted for compatibility only; it never changes
+    # this outcome). The user must use Update inside Pilot, or stop it
+    # themselves and retry.
+    echo "⚠ $(t "Pilot 正在运行，已暂停安装；没有关闭进程或清理会话。" "Pilot is running. Installation paused; nothing was stopped or removed.")"
+    echo "  $(t "请在 Pilot 页面里用“更新”完成安全升级，或先执行 mms web stop 退出后再重新运行本命令。" "Use Update inside Pilot for a safe upgrade, or run mms web stop to exit it, then re-run this install command.")"
+    echo "  $(t "本机有多个实例时用 mms web stop --all" "Use mms web stop --all when several local instances are running")"
+    printf '%s\n' "$report" | sed -n 's/^server /  /p;s/^other /  /p'
+    return 1
+}
+
+# Prints one "server <pid>" line per stoppable Pilot server and one "other
+# <pid> <command>" line per process that merely uses this installation.
+# Exit 0 when the installation is free, 3 when it is in use.
+inspect_live_pilot() {
+    "$(_python_bin)" - "$MMS_HOME" "${MMS_WEB_DEFAULT_PORT:-${MMS_WEB_PORT_BASE:-8765}}" <<'PY'
+import fcntl, os, shlex, subprocess, sys
 from pathlib import Path
+
+root = Path(sys.argv[1]).resolve()
+port = int(sys.argv[2] or 0)
+lease_held = False
 try:
     fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)
 except OSError:
-    raise SystemExit(1)
-# Older Pilot releases have no lease. Detect their actual process cwd as well
-# as explicit source paths, without touching any process or conversation.
-root = Path(sys.argv[1]).resolve()
+    lease_held = True
+
 try:
     rows = subprocess.check_output(['ps', '-ax', '-o', 'pid=', '-o', 'command='], text=True, timeout=5).splitlines()
 except (OSError, subprocess.SubprocessError):
-    raise SystemExit('Cannot verify running Pilot processes; installation stopped')
+    print('Cannot verify running Pilot processes; installation stopped')
+    raise SystemExit(2)
+
+
+def uses_installation(pid, command):
+    if str(root) + '/' in command:
+        return True
+    try:
+        proc_cwd = Path('/proc') / pid / 'cwd'
+        if proc_cwd.exists():
+            return proc_cwd.resolve() == root
+        result = subprocess.run(['lsof', '-a', '-p', pid, '-d', 'cwd', '-Fn'], capture_output=True, text=True, timeout=3)
+        names = [line[1:] for line in result.stdout.splitlines() if line.startswith('n')]
+        return bool(names) and Path(names[0]).resolve() == root
+    except (OSError, subprocess.SubprocessError):
+        print('Cannot verify a running Pilot process; installation stopped')
+        raise SystemExit(2)
+
+
+def is_server(command):
+    """A Pilot server, not a session it spawned."""
+    try:
+        argv = shlex.split(command)
+    except ValueError:
+        argv = command.split()
+    for index, token in enumerate(argv):
+        if token == '-m' and index + 1 < len(argv) and argv[index + 1] == 'mms_web':
+            return True
+        if Path(token).name in ('mms-web', 'MMS Pilot.command'):
+            return True
+        # `mms web` runs the server in-process, so the argv is the CLI entry
+        # followed by the web subcommand.
+        if Path(token).name == 'mms' and index + 1 < len(argv) and argv[index + 1] in ('web', 'webui', 'setup.web', 'setup-web'):
+            return True
+    return False
+
+
+def listening_on_port():
+    """PIDs bound to the Pilot port. A Pilot from another install, or one that
+    updated itself from the page, serves here with a different source path;
+    leaving it alive would make the fresh install start a second Pilot."""
+    if port <= 0:
+        return set()
+    try:
+        out = subprocess.run(['lsof', '-nP', '-iTCP:%d' % port, '-sTCP:LISTEN', '-Fp'],
+                             capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    return {line[1:] for line in out.splitlines() if line.startswith('p')}
+
+
+port_holders = listening_on_port()
+servers = []
+others = []
 for row in rows:
     parts = row.strip().split(None, 1)
     if len(parts) != 2:
         continue
     pid, command = parts
+    if pid == str(os.getpid()):
+        continue
     if not any(word in command for word in ('-m mms_web', '/mms-web', '/mms web')):
         continue
-    if str(root) + '/' in command:
-        raise SystemExit(1)
-    try:
-        proc_cwd = Path('/proc') / pid / 'cwd'
-        if proc_cwd.exists():
-            cwd = proc_cwd.resolve()
-        else:
-            result = subprocess.run(['lsof', '-a', '-p', pid, '-d', 'cwd', '-Fn'], capture_output=True, text=True, timeout=3)
-            names = [line[1:] for line in result.stdout.splitlines() if line.startswith('n')]
-            cwd = Path(names[0]).resolve() if names else None
-        if cwd == root:
-            raise SystemExit(1)
-    except (OSError, subprocess.SubprocessError):
-        raise SystemExit('Cannot verify a running Pilot process; installation stopped')
+    if pid in port_holders:
+        servers.append((pid, command))
+        continue
+    if not uses_installation(pid, command):
+        continue
+    (servers if is_server(command) else others).append((pid, command))
+
+if not servers and not others and not lease_held:
+    raise SystemExit(0)
+for pid, _command in servers:
+    print(f'server {pid}')
+for pid, command in others:
+    print(f'other {pid} {command[:120]}')
+if lease_held and not servers and not others:
+    print('other - a Pilot holds the installation lease')
+raise SystemExit(3)
 PY
-    then
-        echo "⚠ $(t "Pilot 正在使用此安装目录，已暂停安装；没有关闭进程或清理会话。请在页面的‘更新’入口完成安全更新，或自行退出服务后再运行本命令。" "Pilot is using this installation. Nothing was stopped or removed. Use Update in Pilot, or exit the service yourself before rerunning this command.")"
-        return 1
-    fi
 }
 
 # The installer ends by offering to open MMS Web. The server is started
@@ -2021,7 +2149,7 @@ confirm_open_web() {
 
 # Report the port of an MMS Web instance that is already serving, if any.
 running_mms_web_port() {
-    "$(_python_bin)" - "$MMS_WEB_DEFAULT_PORT" "$MMS_WEB_PORT_SEARCH_LIMIT" "$MMS_HOME" "${XDG_DATA_HOME:-$REAL_HOME/.local/share}/mms-web/config" <<'PY'
+    "$(_python_bin)" - "$MMS_WEB_DEFAULT_PORT" "$MMS_WEB_PORT_SEARCH_LIMIT" "$MMS_HOME" "$CONFIG_ROOT" <<'PY'
 import hashlib
 import re
 from pathlib import Path
@@ -2392,6 +2520,11 @@ while [[ $# -gt 0 ]]; do
         --launch-web)
             LAUNCH_WEB_MODE="always"
             ;;
+        --keep-running-pilot)
+            # Compatibility no-op: installation never stops a running Pilot
+            # regardless of this flag. Setting it changes nothing.
+            KEEP_RUNNING_PILOT=1
+            ;;
         --no-launch-web)
             LAUNCH_WEB_MODE="never"
             ;;
@@ -2519,13 +2652,14 @@ echo "  $(t "MMS 一键安装" "MMS one-line installer")"
 echo "===================================="
 echo ""
 print_install_headline
+print_legacy_mms_root_notice
 echo ""
 
 if [ -n "$INSTALL_CLI_LIST" ]; then
     echo "• $(t "附带安装 CLI" "Optional CLI install"): $INSTALL_CLI_LIST"
 fi
 
-echo "• $(t "内建能力" "Built-in tools"): $(t "网页访问、浏览器自动化、省 token 工具等随 MMS 一起安装" "web access, browser automation, token-saving tools and more come with MMS")"
+echo "• $(t "内建能力" "Built-in tools"): $(t "weber 网页路由、grill-me、TOON、NSR 随 MMS 一起安装" "weber routing, grill-me, TOON and NSR come with MMS")"
 echo "  $(t "它们只在 MMS 启动的会话里生效，不会改动你已有的全局配置。" "They only apply inside sessions MMS starts, and none of your existing global config is modified.")"
 
 if [ "$ENSURE_NODE22" -eq 1 ]; then
@@ -2597,6 +2731,14 @@ for f in "$SOURCE_DIR"/mms_*.py; do
 done
 [ -f "$SOURCE_DIR/config.example.toml" ] && cp "$SOURCE_DIR/config.example.toml" "$MMS_HOME/"
 echo "✓ $(t "文件已复制到" "Files copied to") $MMS_HOME"
+# An earlier in-page update leaves a pointer to a staged copy under the Web
+# state directory, and startup follows it. Left in place, this install would
+# look like it changed nothing at all in the browser.
+WEB_STATE_ROOT="${XDG_DATA_HOME:-$REAL_HOME/.local/share}/mms-web"
+if [ -f "$WEB_STATE_ROOT/updates/active.json" ]; then
+    rm -f "$WEB_STATE_ROOT/updates/active.json"
+    echo "• $(t "已清除网页端的暂存版本指针，本次安装的版本直接生效" "Cleared the staged web-update pointer so this install takes effect")"
+fi
 write_version_metadata
 repair_managed_claude_settings
 cleanup_legacy_global_session_hooks
@@ -2624,17 +2766,34 @@ rewrite_shebang "$MMS_HOME/mms" "$PYTHON_PATH"
 
 # ── 4.5 安装必需 CLI（pi 必装，缺失的 claude/codex/opencode 自动补装）──
 install_coding_fonts || echo "⚠ Coding fonts unavailable; continuing MMS installation."
-install_requested_clis
-warm_pi_runtime_cache || true
+if ! install_requested_clis; then
+    echo "✗ $(t "所需 CLI 未全部安装，未完成安装" "Required CLI installation did not complete")" >&2
+    exit 1
+fi
+if ! warm_pi_runtime_cache; then
+    echo "✗ $(t "Pi 运行环境未就绪，未完成安装" "Pi runtime is not ready; installation is incomplete")" >&2
+    exit 1
+fi
 
 # ── 5. 建立命令入口 ──
 echo ""
 mkdir -p "$BIN_DIR"
 
-# 创建 primary symlink；legacy ccs / mmc 已下线，仅保留 mms / mmf / mmslogs 入口。
+# 创建公开 primary symlink。普通 stable 安装只提供 mms；mmf 是维护者的
+# 本地 dev 入口，只有用户明确安装 dev/canary 时才由安装器创建。
 ln -sf "$MMS_HOME/mms" "$BIN_DIR/mms"
 [ -f "$MMS_HOME/mms-web" ] && ln -sf "$MMS_HOME/mms-web" "$BIN_DIR/mms-web"
-[ -f "$MMS_HOME/mmf" ] && ln -sf "$MMS_HOME/mmf" "$BIN_DIR/mmf"
+if [ "$INSTALL_CHANNEL" = "dev" ] || [ "$INSTALL_CHANNEL" = "canary" ]; then
+    [ -f "$MMS_HOME/mmf" ] && ln -sf "$MMS_HOME/mmf" "$BIN_DIR/mmf"
+elif [ -L "$BIN_DIR/mmf" ]; then
+    mmf_target="$(readlink "$BIN_DIR/mmf" 2>/dev/null || true)"
+    case "$mmf_target" in
+        "$MMS_HOME/mmf")
+            rm -f "$BIN_DIR/mmf"
+            echo "• $(t "已移除旧的 MMS 公共 mmf 链接；本地 mmf 保持不变" "Removed the old MMS-owned public mmf link; local mmf entries are untouched"): $BIN_DIR/mmf"
+            ;;
+    esac
+fi
 # Remove stale MMS-owned legacy ccs/mmc artifacts from previous installs without touching unrelated user commands.
 rm -f "$MMS_HOME/mmc"
 if [ -L "$BIN_DIR/mmc" ]; then
@@ -2665,7 +2824,7 @@ fi
 if [ -e "$MMS_HOME/mmslogs" ]; then
     ln -sf "$MMS_HOME/mmslogs" "$BIN_DIR/mmslogs"
 fi
-if [ -f "$MMS_HOME/mmf" ]; then
+if [ "$INSTALL_CHANNEL" = "dev" ] || [ "$INSTALL_CHANNEL" = "canary" ]; then
     echo "✓ $(t "命令已链接到" "Commands linked to") $BIN_DIR/mms, $BIN_DIR/mmf"
 else
     echo "✓ $(t "命令已链接到" "Command linked to") $BIN_DIR/mms"
@@ -2712,18 +2871,12 @@ if [ -x "$BIN_DIR/mms" ]; then
     if [ "$PREVIEW_CHANNEL_INSTALL" -eq 1 ]; then
         if [ "$LAUNCH_WEB_MODE" = "always" ]; then
             echo "  $(t "Pilot 正在打开；请在 WebUI 添加 provider 和 API Key。" "Pilot is opening; add a provider and API key in the WebUI.")"
-        elif legacy_config_has_route_candidates; then
-            echo ""
-            echo "  $(t "下一步（首次 preview/mmf 只做这两行）:" "Next step (first preview/mmf run: only do these two lines):")"
-            echo "    $NEXT_MMF_CMD preview prepare"
-            echo "    $NEXT_MMF_CMD"
-            echo "  $(t "说明：prepare 只读取 ~/.config/mms，并写入 ~/.config/mms-next；不会改 stable 配置。" "Note: prepare only reads ~/.config/mms and writes ~/.config/mms-next; stable config is not modified.")"
         else
             echo ""
-            echo "  $(t "下一步（全新机器先配通道）:" "Next step (fresh machine: configure providers first):")"
+            echo "  $(t "下一步（先配通道）:" "Next step (configure providers first):")"
             echo "    $NEXT_MMF_CMD config web"
             echo "    $NEXT_MMF_CMD"
-            echo "  $(t "说明：没有检测到可迁移的旧模型路由，先在 WebUI 添加 provider/API Key 并保存。" "Note: no migratable legacy model routes were detected; add providers/API keys in the WebUI first.")"
+            echo "  $(t "说明：所有入口只读 ~/.config/mms-next；旧的 ~/.config/mms 不再被读取，请在 WebUI 添加 provider/API Key 并保存。" "Note: every entrance reads only ~/.config/mms-next; the old ~/.config/mms is no longer read, so add providers/API keys in the WebUI and save.")"
         fi
         [ "$LAUNCH_WEB_MODE" = "always" ] || echo ""
         echo "  $(t "以后需要排查时再运行:" "Only run this later when debugging:") $NEXT_MMF_CMD config doctor"

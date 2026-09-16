@@ -129,7 +129,7 @@ def public_rows(rows):
 # own figure, and so never outranks the other two.
 REFRESH_SOURCES = {
     "official": ({"mmf_official_overrides": True}, "MMF 官方数据", 3),
-    "approved": ({}, "本地已知快照", 2),
+    "approved": ({"refresh_sources": False}, "本地已知快照", 2),
     "catalog": ({"openrouter_catalog": True}, "OpenRouter 目录", 1),
 }
 # Read without touching the network by default. OpenRouter is fetched only
@@ -220,16 +220,44 @@ def refresh_proposal(known, merged, reports):
             "reports": reports}
 
 
+def _delete_channel_draft(rows, remove_id, revision):
+    """Drop one channel from the draft so the audited writer records provider_removed.
+
+    Kept channels keep their published routes untouched: no route scope is set, so
+    the preview writer preserves their existing model rows. Refuses to remove the
+    last channel, which would leave no usable model.
+    """
+    victim = next((p for p in rows if p["id"] == remove_id), None)
+    if victim is None:
+        raise WebError("PROVIDER_NOT_FOUND", "这个通道已不存在，请刷新。", 404)
+    remaining = [p for p in rows if p["id"] != remove_id]
+    if not remaining:
+        raise WebError("LAST_CHANNEL", "这是最后一个通道，删除后将没有可用模型。请先连接另一个通道。", 409)
+    for p in remaining:
+        # Preserve every published route on the channels we keep; deletion of one
+        # channel must not rewrite another channel's model list.
+        p["fallback_models"] = list(p.get("approved_route_models") or p.get("fallback_models") or [])
+        p["models"] = [{"id": m["id"], "visible": m.get("visible", True)} for m in p["models"]]
+    changes = [{"kind": "channel-remove", "model": victim.get("name") or remove_id, "channels": [remove_id]}]
+    payload = {"draft": {"providers": remaining}, "expected_bundle_revision": revision}
+    return payload, changes
+
+
 def draft_for(rows, request, revision):
     provider_id = request.get("providerId")
     rows = copy.deepcopy(rows)
     target = next((p for p in rows if p["id"] == provider_id), None)
     if target is None:
         raise WebError("PROVIDER_NOT_FOUND", "这个通道已不存在，请刷新。", 404)
+    remove_id = str(request.get("removeProviderId") or "").strip()
+    if remove_id:
+        return _delete_channel_draft(rows, remove_id, revision)
     selected = request.get("models")
     if not isinstance(selected, list) or len(selected) > 5000 or not all(isinstance(m, str) and m.strip() == m and 0 < len(m) <= 200 and not any(ord(c) < 32 for c in m) for m in selected):
         raise WebError("INVALID_MODELS", "请填写有效的模型 ID。", 400)
     selected = list(dict.fromkeys(selected))
+    if not selected:
+        raise WebError("NO_MODELS", "每个通道至少保留一个模型；如需停用整个通道，请删除通道。", 409)
     original = {m["id"] for m in target["models"] if m.get("visible", True)}
     known = {m["id"]: m for m in public_rows([target])[0]["models"]}
     changes = []
@@ -280,8 +308,9 @@ def draft_for(rows, request, revision):
     if changed_routes:
         # Unchanged hidden routes remain published. Only explicitly deselected
         # visible models are removed; adding one model must not prune history.
-        retained = set(target.get("approved_route_models") or []) - (original - set(selected))
-        target["models"] = [{"id": m, "visible": True} for m in sorted(retained | set(selected))]
+        # The selected list is authoritative for the current channel. Hidden
+        # history is retained in policy, but never re-enters this route.
+        target["models"] = [{"id": m, "visible": True} for m in selected]
         target["hidden_models"] = sorted((set(target.get("hidden_models", [])) | (original - set(selected))) - set(selected))
         target["extra_models"] = []
         target["fallback_models"] = []
@@ -398,9 +427,10 @@ def run(request):
         if not plan.get("ok") or guard:
             raise WebError("CONFIG_PLAN_BLOCKED", "MMF 未允许这组修改，未保存。请检查是否移除了全部可用模型，或重新加载配置后再试。", 409)
         return {"changes": changes}
-    if action != "apply" or request.get("confirmPhrase") != "写入预览DB":
-        raise WebError("CONFIRM_REQUIRED", "请先检查变更并输入确认文字。", 409)
-    payload.update(confirm_v2_preview=True, confirm_phrase=request["confirmPhrase"])
+    confirmed = request.get("confirmed") is True
+    if action != "apply" or (not confirmed and request.get("confirmPhrase") != "写入预览DB"):
+        raise WebError("CONFIRM_REQUIRED", "请先在确认弹窗中确认变更。", 409)
+    payload.update(confirm_v2_preview=True, confirm_phrase="写入预览DB")
     result = web.apply_registry_v2_preview_plan(cfg, payload, config_path=str(root / "config.toml"))
     if not result.get("ok"):
         raise WebError("CONFIG_APPLY_FAILED", "MMF 配置保存未通过，请重新加载配置检查。失败详情已保留在本地记录。", 409)
@@ -411,7 +441,7 @@ if __name__ == "__main__":
     from mms_web.catalog_worker import _result_stream, _emit
     stream = _result_stream()
     try:
-        _emit(stream, {"ok": True, **run(json.load(sys.stdin))})
+        _emit(stream, {"ok": True, **run(json.loads(sys.stdin.buffer.read().decode("utf-8")))})
     except WebError as error:
         _emit(stream, {"ok": False, "code": error.code, "message": error.message, "status": error.status})
     except Exception:
