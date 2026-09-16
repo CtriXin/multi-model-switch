@@ -89,6 +89,34 @@ export function Status({
   );
 }
 
+export const activityHints: Record<string, string> = {
+  idle: "就绪 · 随时发送消息",
+  running: "正在规划与执行…",
+  thinking: "正在思考…",
+  responding: "正在输出回复…",
+  tool: "正在执行终端工具…",
+  waiting: "等待你的回答",
+  compacting: "正在整理上下文…",
+  retrying: "正在自动重试…",
+  completed: "本轮执行完成",
+  closed: "进程已结束",
+  stopped: "已停止",
+  error: "查看上方错误详情后再继续",
+  disconnected: "连接恢复后更新；保留最近内容",
+};
+
+export function turnWorkingHint(session: Session, disconnected = false): string {
+  if (disconnected) return "状态未同步，等待重新连接…";
+  const { phase } = sessionStatus(session, disconnected);
+  if (phase === "tool" && session.activity?.toolName) {
+    return `正在执行工具 · ${session.activity.toolName}`;
+  }
+  if (phase === "waiting") {
+    return session.activity?.method === "confirm" ? "等待确认工具操作" : "等待你的回答";
+  }
+  return activityHints[phase] || "正在处理中…";
+}
+
 export function CurrentActivity({
   session,
   disconnected,
@@ -97,21 +125,11 @@ export function CurrentActivity({
   disconnected: boolean;
 }) {
   const { phase } = sessionStatus(session, disconnected);
-  const hints: Record<string, string> = {
-    idle: "就绪 · 随时发送消息",
-    running: "正在规划与执行…",
-    thinking: "正在思考…",
-    responding: "正在输出回复…",
-    tool: "正在执行终端工具…",
-    waiting: "等待你的回答",
-    compacting: "正在整理上下文…",
-    retrying: "正在自动重试…",
-    completed: "本轮执行完成",
-    closed: session.capabilities.send ? "发送消息可继续本次对话" : "仍可查看历史记录",
-    stopped: "本轮已停止",
-    error: "查看上方错误详情后再继续",
-    disconnected: "连接恢复后更新；保留最近内容",
-  };
+  const closedHint = session.capabilities.send
+    ? "发送消息可继续本次对话"
+    : "仍可查看历史记录";
+  const hintText =
+    phase === "closed" ? closedHint : activityHints[phase];
   return (
     <div
       className={`current-activity ${phase}`}
@@ -120,7 +138,9 @@ export function CurrentActivity({
       aria-atomic="true"
     >
       <Status session={session} disconnected={disconnected} />
-      {!["completed", "stopped", "waiting"].includes(phase) && <span className="activity-hint">{hints[phase]}</span>}
+      {!["completed", "stopped", "waiting"].includes(phase) && hintText && (
+        <span className="activity-hint">{hintText}</span>
+      )}
     </div>
   );
 }

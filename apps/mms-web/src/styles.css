@@ -1640,6 +1640,31 @@ dialog:has(.dialog-body.sheet) .dialog-body.sheet > header {
   color: var(--amber);
   margin-bottom: 18px;
 }
+.inline-alert-retryable {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.inline-retry-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--amber) 15%, var(--surface));
+  color: var(--amber);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 150ms ease-out;
+}
+.inline-retry-button:hover {
+  background: color-mix(in srgb, var(--amber) 25%, var(--surface));
+  border-color: var(--amber);
+}
 .form-error {
   color: var(--danger);
   margin-top: 15px;
@@ -3395,23 +3420,29 @@ dialog:has(> .dialog-body .model-explorer) > .dialog-body > header {
   border-left: 1px solid var(--line);
 }
 .model-picker-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 7px 10px;
+  padding: 7px 12px;
   min-height: 40px;
   text-align: left;
+  box-sizing: border-box;
 }
-.model-picker-trigger strong {
-  display: block;
-  font-size: max(11px, 0.7857rem);
-  font-weight: 600;
+.model-picker-trigger span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.model-picker-trigger small {
-  display: block;
-  font-size: max(11px, 0.6429rem);
+.model-picker-trigger svg {
+  flex-shrink: 0;
   color: var(--muted);
-  margin-top: 3px;
+  margin-left: 8px;
 }
 .effort-field {
   display: flex;

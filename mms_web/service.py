@@ -447,13 +447,18 @@ def _doctor_post(base_url: str, path: str, payload: dict, csrf_token: str,
 def doctor(*, state_root: Path, port_base: int, limit: int, restart: bool = False,
            as_json: bool = False, model_smoke: bool = False) -> int:
     """Self-check the Windows lifecycle without changing config or credentials."""
+    restart_port = port_base
     if restart:
+        current = _mine(discover(port_base, limit, state_root))
+        if current and current.get("port"):
+            # Keep existing tabs valid when a health check restarts Pilot.
+            restart_port = int(current["port"])
         stop(state_root=state_root, port_base=port_base, limit=limit, everyone=False, quiet=True)
     started = False
     try:
         instance = _mine(discover(port_base, limit, state_root))
         if instance is None:
-            instance = start(state_root=state_root, port_base=port_base, limit=limit,
+            instance = start(state_root=state_root, port_base=restart_port if restart else port_base, limit=limit,
                              open_browser=False, quiet=True)
             started = True
     except (SystemExit, OSError) as error:
@@ -685,8 +690,10 @@ def run(verb: str, argv: list[str]) -> int:
             print(json.dumps(stopped, ensure_ascii=False))
         return 0
     if verb == "restart":
+        current = _mine(discover(args.port, limit, state_root))
+        restart_port = int(current["port"]) if current and current.get("port") else args.port
         stop(state_root=state_root, port_base=args.port, limit=limit, everyone=False, quiet=args.json)
-        mine = start(state_root=state_root, port_base=args.port, limit=limit, open_browser=args.open,
+        mine = start(state_root=state_root, port_base=restart_port, limit=limit, open_browser=args.open,
                      extra_args=extra, quiet=args.json)
         if args.json:
             print(json.dumps(mine, ensure_ascii=False))

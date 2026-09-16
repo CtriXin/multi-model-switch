@@ -1,9 +1,10 @@
 import { useEffect, useState, type ComponentProps } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { EventView } from "./components";
+import { EventView, Logo, harnessNames } from "./components";
 import { ToolGroup } from "./ToolEvent";
-import type { SessionEvent } from "./types";
+import type { SessionDetail, SessionEvent } from "./types";
 import { deliveryLabel, steerBadge, steerLinks } from "./message-control";
+import { turnWorkingHint } from "./SessionStatus";
 
 type Props = Omit<ComponentProps<typeof EventView>, "event" | "continuation" | "intermediate"> & {autoCollapseProcess: boolean};
 
@@ -19,6 +20,55 @@ function ProcessEvents({events, ...props}: Props & {events: SessionEvent[]}) {
     : <EventView key={event.id} {...props} event={event} continuation intermediate />)}</>;
 }
 
+function findActiveAnswer(events: SessionEvent[]): SessionEvent | undefined {
+  const lastAssistant = [...events].reverse().find(e => e.kind === "assistant" && !!e.text.trim());
+  if (!lastAssistant) return undefined;
+  const assistantIndex = events.indexOf(lastAssistant);
+  const subsequentTools = events.slice(assistantIndex + 1).some(e => e.kind === "tool");
+  if (subsequentTools) return undefined;
+  return lastAssistant;
+}
+
+function TurnWorkingStatus({
+  detail,
+  disconnected = false,
+}: {
+  detail: SessionDetail;
+  disconnected?: boolean;
+}) {
+  const session = detail.session;
+  const author = harnessNames[session.harness] || "AI";
+  const model = session.modelName;
+  const statusText = turnWorkingHint(session, disconnected);
+
+  return (
+    <article
+      className="message assistant turn-working-message"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+    >
+      <div className="message-avatar">
+        <Logo small />
+      </div>
+      <div className="message-body">
+        <div className="message-author">
+          {author}
+          {model && <span>{model}</span>}
+        </div>
+        <div className="turn-working-indicator">
+          <span className="activity-bars" aria-hidden="true">
+            <i />
+            <i />
+            <i />
+          </span>
+          <span className="turn-working-label">{statusText}</span>
+        </div>
+      </div>
+    </article>
+  );
+}
+
 function Turn({events, completed, forced, report, steered, ...props}: Props & {
   events: SessionEvent[]; completed: boolean; forced: {collapsed: boolean; revision: number} | null;
   report: (id: string, collapsed: boolean) => void;
@@ -27,7 +77,9 @@ function Turn({events, completed, forced, report, steered, ...props}: Props & {
   const [choice, setChoice] = useState<{collapsed: boolean; revision: number} | null>(null);
   const revision = forced?.revision || 0;
   const user = events[0]?.kind === "user" ? events[0] : null;
-  const answer = completed ? [...events].reverse().find(e => e.kind === "assistant" && !!e.text.trim()) : undefined;
+  const completedAnswer = completed ? [...events].reverse().find(e => e.kind === "assistant" && !!e.text.trim()) : undefined;
+  const streamingAnswer = !completed ? findActiveAnswer(events) : undefined;
+  const answer = completedAnswer || streamingAnswer;
   const collapsed = choice?.revision === revision ? choice.collapsed
     : forced ? forced.collapsed : props.autoCollapseProcess && completed && !!answer;
   const answerIndex = answer ? events.indexOf(answer) : events.length;
@@ -42,6 +94,8 @@ function Turn({events, completed, forced, report, steered, ...props}: Props & {
   // anything is still open, including turns opened one at a time.
   const turnId = events[0]?.id || "";
   const hasProcess = !!process.length;
+  const isWorking = !completed && !answer && (collapsed || !hasProcess);
+  const isRunning = !completed;
   useEffect(() => {
     if (hasProcess) report(turnId, collapsed);
   }, [report, turnId, collapsed, hasProcess]);
@@ -49,6 +103,7 @@ function Turn({events, completed, forced, report, steered, ...props}: Props & {
     {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
     {collapsed ? "展开过程" : "收起过程"}
     <span>{count ? `${count} 次工具调用` : "思考与执行记录"}</span>
+    {isRunning && collapsed && <span className="turn-process-live-dot" title="正在执行中" aria-label="正在执行中" />}
     {!!failures && <span className="process-failure">{failures} 项失败</span>}
   </button>;
   return <section className="conversation-turn">
@@ -57,7 +112,11 @@ function Turn({events, completed, forced, report, steered, ...props}: Props & {
       {controls}
       <ProcessEvents {...props} events={collapsed ? pinned : process} />
     </div>}
-    {answer && <EventView {...props} event={{...answer, thinking: undefined}} turnStartedAt={user?.createdAt} />}
+    {answer ? (
+      <EventView {...props} event={{...answer, thinking: undefined}} turnStartedAt={user?.createdAt} />
+    ) : isWorking ? (
+      <TurnWorkingStatus detail={props.detail} disconnected={props.disconnected} />
+    ) : null}
     {(() => {
       // The steer may have landed in an intermediate answer that the collapsed
       // process hides, so the note belongs to the turn the reader is looking at.

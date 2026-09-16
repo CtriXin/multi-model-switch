@@ -1,4 +1,4 @@
-import type { Bootstrap, SessionDetail, SessionEvent } from "./types";
+import type { Bootstrap, SessionDetail, SessionEvent, UpdateHistoryItem } from "./types";
 
 const time = "2026-09-08T09:00:00Z";
 // Preview turns carry plausible clocks so the timestamp and reply duration
@@ -141,7 +141,23 @@ export const previewBootstrap: Bootstrap = {
   version: "1",
   mode: "preview",
   csrfToken: "",
-  capabilities: { catalogRead: true, configure: false, launch: true },
+  platform: {
+    os: "darwin",
+    shell: "/bin/zsh",
+    home: "/Users/preview",
+    configRoot: "/Users/preview/.config/mms-next",
+    stateRoot: "/Users/preview/.local/share/mms",
+    tempRoot: "/tmp",
+    pathStyle: "posix",
+    processControl: "macOS launchd / loopback process",
+    filePicker: "native",
+  },
+  browser: [
+    { backend: "chrome", supported: true, loggedIn: true },
+    { backend: "edge", supported: true, loggedIn: false, reason: "未检测到已登录的 Edge 账号" },
+    { backend: "chromium", supported: false, loggedIn: "unknown", reason: "未安装 Chromium 独立运行时" },
+  ],
+  capabilities: { catalogRead: true, configure: false, launch: true, discoverModels: true, modelSettings: true },
   workspaces: [
     { id: "product", name: "产品工作室", path: "~/Projects/product-studio" },
     { id: "website", name: "官网", path: "~/Projects/website" },
@@ -225,3 +241,22 @@ export const previewBootstrap: Bootstrap = {
   sessions: Object.values(previewDetails).map((detail) => detail.session),
   diagnostics: [],
 };
+
+export const previewUpdateHistory: UpdateHistoryItem[] = [
+  {
+    version: "4.16.0",
+    notes: "# v4.16.0 · 运行环境诊断与外观微调\n\n- 设置面板新增「运行环境」Tab，整合系统与浏览器能力探测。\n- 优化深色模式对比度，提供更清晰的状态指示。\n- 统一全站设置与通道配置边距，优化滚动交互体验。",
+    upgradeNotice: "升级后如果遇到浏览器扩展连接异常，请在「运行环境」Tab 重新检查调试端口状态。",
+    publishedAt: "2026-09-12T12:00:00Z",
+  },
+  {
+    version: "4.15.2",
+    notes: "# v4.15.2 · 稳定性修复\n\n- 优化 Pi 会话长轮次恢复逻辑。\n- 完善本地文件拖拽定位准确率。",
+    publishedAt: "2026-09-10T08:30:00Z",
+  },
+  {
+    version: "4.15.0",
+    notes: "# v4.15.0 · 多通道管理与 Effort 档位支持\n\n- 通道模型支持自定义 Effort 预设。\n- 增强安全更新事务回滚保障机制。",
+    publishedAt: "2026-09-05T14:00:00Z",
+  },
+];

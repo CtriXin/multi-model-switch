@@ -1,6 +1,8 @@
 .channel-models {
-  max-width: 960px;
-  padding: 8px 14px 32px 0;
+  width: 100%;
+  max-width: none;
+  padding: 0 0 32px 0;
+  box-sizing: border-box;
 }
 .channel-models h2 {
   margin: 26px 0 6px;
@@ -318,12 +320,19 @@
 }
 .channel-save {
   position: sticky;
-  top: 0;
-  z-index: 2;
-  padding: 10px 0;
-  margin: 0 0 16px;
-  border-bottom: 1px solid var(--line);
+  bottom: 0;
+  z-index: 10;
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 0;
+  margin-top: 18px;
+  border-top: 1px solid var(--line);
   background: var(--surface);
+  box-shadow: 0 -4px 16px color-mix(in srgb, var(--ink) 4%, transparent);
   font-size: max(11px, 0.9286rem);
   color: var(--muted);
 }

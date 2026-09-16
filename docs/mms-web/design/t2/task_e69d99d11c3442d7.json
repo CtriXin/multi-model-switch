@@ -1,0 +1,62 @@
+{
+  "id": "task_e69d99d11c3442d7",
+  "botId": "bot_506a0079d1f04419",
+  "prompt": "在工作目录写入文件 c.txt，内容恰为 world（不要附加换行或其它字符），完成后确认文件已写入。",
+  "parentTaskId": "task_04438b1016e04447",
+  "status": "completed",
+  "runAt": null,
+  "children": [],
+  "result": "已在工作目录写入 c.txt，内容恰为 world（5 字节，无换行，xxd 校验通过）。",
+  "error": null,
+  "acceptedAt": null,
+  "waitReason": null,
+  "turn": 1,
+  "createdAt": "2026-09-12T08:31:44.435+00:00",
+  "updatedAt": "2026-09-12T08:32:46.749+00:00",
+  "priority": 50,
+  "queueReason": null,
+  "coordinatorPlan": {
+    "version": 2,
+    "mode": "direct",
+    "ownerBotId": "bot_506a0079d1f04419",
+    "reason": "目标是单一原子任务（写入 c.txt 内容 world 并确认），无需不同角色独立协作，由负责的写手C直接完成最可靠。",
+    "steps": [
+      {
+        "id": "s1",
+        "kind": "execute",
+        "botId": "bot_506a0079d1f04419",
+        "goal": "",
+        "dependsOn": [],
+        "presetId": null,
+        "status": "pending",
+        "taskId": null
+      }
+    ],
+    "candidates": [],
+    "merge": "owner",
+    "modelDecision": true,
+    "source": "model",
+    "status": "auto"
+  },
+  "executionMode": "direct",
+  "collaborationRequested": false,
+  "outcome": {
+    "summary": "已在工作目录写入 c.txt，内容恰为 world（5 字节，无换行，xxd 校验通过）。",
+    "evidence": null,
+    "changes": null,
+    "pending": null,
+    "next": null,
+    "raw": "已在工作目录写入 c.txt，内容恰为 world（5 字节，无换行，xxd 校验通过）。"
+  },
+  "startedAt": "2026-09-12T08:32:13.350+00:00",
+  "cancelRequested": false,
+  "waitRequested": false,
+  "forceStopSent": false,
+  "cancelAt": null,
+  "completedAt": "2026-09-12T08:32:46.748+00:00",
+  "planResolved": true,
+  "planDecidedAt": "2026-09-12T08:32:26.188+00:00",
+  "orchestrationPolicy": "direct-first",
+  "processId": 56805,
+  "model": "glm-5.3"
+}

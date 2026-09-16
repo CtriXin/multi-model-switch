@@ -133,3 +133,7 @@ issue/
 .impeccable/design.json
 .impeccable/live/
 .review-hub/
+
+# Task-local verification outputs may contain private runtime snapshots.
+.stride-output/
+.stride-input/
