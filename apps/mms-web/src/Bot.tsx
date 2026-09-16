@@ -1527,6 +1527,10 @@ export function BotChat({
     !dismissedPendingTaskIds.includes(bot.pendingQuestion.taskId)
   );
 
+  const isTaskRunning = Boolean(
+    task && ["queued", "starting", "running"].includes(task.status),
+  );
+
   useEffect(() => {
     if (hasPendingQuestion) {
       setHighlightQuestionCard(true);
@@ -2422,12 +2426,41 @@ export function BotChat({
                 </div>
               </div>
             )}
-            {conversationTask.error && cleanTranscriptText(conversationTask.error) && (
+            {conversationTask.error && cleanTranscriptText(conversationTask.error) ? (
               <div className="bot-chat-error">
                 <CircleAlert size={14} />
                 <span>执行失败：{cleanTranscriptText(conversationTask.error)}</span>
+                {onRetry && (conversationTask.status === "failed" || conversationTask.status === "interrupted") && (
+                  <button
+                    type="button"
+                    className="bot-chat-error-retry"
+                    onClick={() => onRetry(conversationTask)}
+                    disabled={disabled}
+                    title="重试此任务"
+                  >
+                    <RotateCcw size={12} />
+                    <span>重试</span>
+                  </button>
+                )}
               </div>
-            )}
+            ) : (conversationTask.status === "failed" || conversationTask.status === "interrupted") ? (
+              <div className="bot-chat-error">
+                <CircleAlert size={14} />
+                <span>任务执行中断或失败</span>
+                {onRetry && (
+                  <button
+                    type="button"
+                    className="bot-chat-error-retry"
+                    onClick={() => onRetry(conversationTask)}
+                    disabled={disabled}
+                    title="重试此任务"
+                  >
+                    <RotateCcw size={12} />
+                    <span>重试</span>
+                  </button>
+                )}
+              </div>
+            ) : null}
             {conversationArtifacts.length > 0 && (
               <div className="bot-chat-artifacts">
                 {conversationArtifacts.map((artifact) =>
@@ -2476,52 +2509,25 @@ export function BotChat({
         })}
       </div>
       {previewArtifact && <BotArtifactPreview artifact={previewArtifact} onClose={() => setPreviewArtifact(null)} />}
-      {task && (
-        <div className="bot-chat-actions">
-          {["queued", "scheduled", "starting", "running", "waiting"].includes(
-            task.status,
-          ) &&
-            onCancel && (
-              <button
-                type="button"
-                className="bot-chat-secondary"
-                onClick={onCancel}
-                disabled={disabled}
-              >
-                <Square size={13} />
-                取消
-              </button>
-            )}
-          {(task.status === "waiting" || task.status === "scheduled") &&
-            onWake &&
-            // While the question card is asking about this very task, waking it
-            // without an answer would only drop it back into the same wait, so
-            // the card's 回复 / 选项 / 结束等待 are the single prompt here.
-            !(task.waitQuestion && bot?.pendingQuestion?.taskId === task.id) && (
-              <button
-                type="button"
-                className="bot-chat-secondary"
-                onClick={onWake}
-                disabled={disabled}
-              >
-                <Play size={13} />
-                {task.status === "scheduled" ? "立即唤醒" : "唤醒"}
-              </button>
-            )}
-          {(task.status === "failed" || task.status === "interrupted") &&
-            onRetry && (
-              <button
-                type="button"
-                className="bot-chat-secondary"
-                onClick={() => onRetry(task)}
-                disabled={disabled}
-              >
-                <RotateCcw size={13} />
-                重试
-              </button>
-            )}
-        </div>
-      )}
+      {task && (task.status === "waiting" || task.status === "scheduled") &&
+        onWake &&
+        // While the question card is asking about this very task, waking it
+        // without an answer would only drop it back into the same wait, so
+        // the card's 回复 / 选项 / 结束等待 are the single prompt here.
+        !(task.waitQuestion && bot?.pendingQuestion?.taskId === task.id) && (
+          <div className="bot-chat-actions">
+            <button
+              type="button"
+              className="bot-chat-secondary"
+              onClick={onWake}
+              disabled={disabled}
+            >
+              <Play size={13} />
+              {task.status === "scheduled" ? "立即唤醒" : "唤醒"}
+            </button>
+          </div>
+        )}
+
       <div className="bot-chat-composer-container">
         {hasPendingQuestion && bot?.pendingQuestion && (
           <div
@@ -2617,23 +2623,36 @@ export function BotChat({
               )}
             </div>
             <div className="bot-chat-send-group">
-              <button
-                className="bot-chat-send"
-                type="submit"
-                disabled={disabled || busy || !value.trim() || !bot}
-                aria-label={busy ? "发送中" : hasPendingQuestion ? "回复" : runAt ? "定时执行" : "发送"}
-                title={busy ? "发送中" : hasPendingQuestion ? "回复" : runAt ? "定时执行" : "发送"}
-              >
-                {busy ? (
-                  <LoaderCircle className="bot-spin" size={15} />
-                ) : (
-                  <Send size={15} />
-                )}
-              </button>
+              {isTaskRunning && onCancel ? (
+                <button
+                  className="bot-chat-send stop"
+                  type="button"
+                  onClick={onCancel}
+                  disabled={disabled}
+                  aria-label="停止执行"
+                  title="停止执行"
+                >
+                  <Square size={13} fill="currentColor" />
+                </button>
+              ) : (
+                <button
+                  className="bot-chat-send"
+                  type="submit"
+                  disabled={disabled || busy || !value.trim() || !bot}
+                  aria-label={busy ? "发送中" : hasPendingQuestion ? "回复" : runAt ? "定时执行" : "发送"}
+                  title={busy ? "发送中" : hasPendingQuestion ? "回复" : runAt ? "定时执行" : "发送"}
+                >
+                  {busy ? (
+                    <LoaderCircle className="bot-spin" size={15} />
+                  ) : (
+                    <Send size={15} />
+                  )}
+                </button>
+              )}
               <button
                 type="button"
                 className="bot-chat-schedule-trigger"
-                disabled={disabled || busy || !bot}
+                disabled={disabled || busy || !bot || isTaskRunning}
                 aria-label="定时执行选项"
                 title="定时选项"
                 onClick={(e) => {

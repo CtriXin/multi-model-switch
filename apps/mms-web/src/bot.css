@@ -983,11 +983,38 @@
 .bot-chat-error {
   margin-left: var(--bot-gutter);
   display: inline-flex;
-  align-items: flex-start;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   color: var(--bot-danger);
   font-size: 13px;
   line-height: 1.5;
+}
+
+.bot-chat-error-retry {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  background: transparent;
+  color: var(--bot-danger);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  margin-left: 6px;
+  transition: all 120ms ease;
+}
+
+.bot-chat-error-retry:hover:not(:disabled) {
+  background: var(--bot-danger);
+  color: var(--inverse);
+}
+
+.bot-chat-error-retry:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Artifacts row at --bot-gutter */
@@ -1681,6 +1708,16 @@
   background: var(--accent-hover);
 }
 
+.bot-chat-send.stop {
+  background: var(--bot-danger);
+  color: var(--inverse);
+}
+
+.bot-chat-send.stop:hover:not(:disabled) {
+  opacity: 0.92;
+  filter: brightness(1.08);
+}
+
 .bot-chat-send:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
@@ -2026,6 +2063,9 @@
 
 .bot-create-dialog {
   width: min(460px, 100%);
+  max-height: min(90vh, 740px);
+  overflow-y: auto;
+  box-sizing: border-box;
   display: grid;
   gap: 14px;
   padding: 22px;
@@ -2270,8 +2310,8 @@
   align-items: center;
   justify-content: center;
   gap: 12px;
-  margin-top: 6px;
-  padding-top: 2px;
+  margin-top: 8px;
+  padding: 6px 0;
 }
 
 .bot-color-option {
@@ -2555,6 +2595,27 @@
   background: var(--soft);
   color: var(--ink);
   font-size: 13px;
+}
+
+.bot-chat-notice-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  margin-left: 6px;
+  transition: all 120ms ease;
+}
+
+.bot-chat-notice-action:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .bot-chat-actions {

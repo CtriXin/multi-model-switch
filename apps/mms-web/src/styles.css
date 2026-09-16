@@ -3420,23 +3420,29 @@ dialog:has(> .dialog-body .model-explorer) > .dialog-body > header {
   border-left: 1px solid var(--line);
 }
 .model-picker-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 7px 10px;
+  padding: 7px 12px;
   min-height: 40px;
   text-align: left;
+  box-sizing: border-box;
 }
-.model-picker-trigger strong {
-  display: block;
-  font-size: max(11px, 0.7857rem);
-  font-weight: 600;
+.model-picker-trigger span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.model-picker-trigger small {
-  display: block;
-  font-size: max(11px, 0.6429rem);
+.model-picker-trigger svg {
+  flex-shrink: 0;
   color: var(--muted);
-  margin-top: 3px;
+  margin-left: 8px;
 }
 .effort-field {
   display: flex;
