@@ -251,6 +251,7 @@ export function App() {
   const [guideStep, setGuideStep] = useState<TourStep | null>(null);
   const [guideSettingsKey, setGuideSettingsKey] = useState(0);
   const [guideRequest, setGuideRequest] = useState<{ nonce: string; text: string }>();
+  const [resendRequest, setResendRequest] = useState<{ nonce: string; text: string }>();
   const [selectedId, setSelectedId] = useState("");
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [sessionError, setSessionError] = useState("");
@@ -2037,6 +2038,12 @@ export function App() {
                         action={runAction}
                         detail={detail}
                         busy={busy}
+                        onResend={(text) =>
+                          setResendRequest({
+                            nonce: String(Date.now()),
+                            text,
+                          })
+                        }
                         approve={(id, decision, value) =>
                           void runAction(
                             "/sessions/" +
@@ -2198,6 +2205,8 @@ export function App() {
                       />
                     }
                     key={detail.session.id}
+                    guideRequest={resendRequest}
+                    guideHandled={() => setResendRequest(undefined)}
                     selectionRequest={selectionRequest?.sessionId === detail.session.id ? selectionRequest : undefined}
                     selectionHandled={() => setSelectionRequest(undefined)}
                     workspaceId={detail.session.workspaceId}

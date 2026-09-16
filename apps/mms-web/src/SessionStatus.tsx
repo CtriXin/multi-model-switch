@@ -1,4 +1,4 @@
-import type { Session } from "./types";
+import type { Session, SessionEvent } from "./types";
 import {
   Check,
   CircleAlert,
@@ -42,6 +42,56 @@ export function sessionStatus(session: Session, disconnected = false) {
       ? `${label} · ${session.activity.toolName}`
       : label;
   return { phase, label, detail };
+}
+
+export const BUSY_PHASES = new Set([
+  "running",
+  "thinking",
+  "responding",
+  "tool",
+  "waiting",
+  "compacting",
+  "retrying",
+]);
+
+export function sessionIsBusy(session: Session, _disconnected = false): boolean {
+  const { phase } = sessionStatus(session, false);
+  return BUSY_PHASES.has(phase);
+}
+
+export function isTurnInterrupted(
+  events: SessionEvent[],
+  session?: Session,
+  isLatestTurn = false,
+  isSteered = false,
+): boolean {
+  const hasAnswer = events.some(e => e.kind === "assistant" && !!e.text.trim());
+  if (hasAnswer) return false;
+  if (isSteered) return false;
+
+  const hasForceEndedTool = events.some(
+    e => e.kind === "tool" && (e.status === "error" || e.status === "cancelled") &&
+      typeof e.text === "string" && e.text.includes("本轮已结束，未收到此工具的完成回报。")
+  );
+  if (hasForceEndedTool) return true;
+
+  if (isLatestTurn && session) {
+    const isAbnormalTerminal = ["stopped", "error", "closed"].includes(session.state);
+    if (isAbnormalTerminal && !sessionIsBusy(session)) {
+      return true;
+    }
+  }
+
+  const hasResumeNotice = events.some(
+    e => e.kind === "notice" && typeof e.text === "string" && e.text.includes("已恢复上次的上下文，可以继续工作。")
+  );
+  if (hasResumeNotice) return true;
+
+  return false;
+}
+
+export function turnInterruptedNotice(_events?: SessionEvent[]): string {
+  return "本轮执行被中断，未产生回复。发送新消息可继续对话。";
 }
 
 export function Status({
