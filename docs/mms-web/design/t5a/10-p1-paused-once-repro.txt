@@ -1,20 +1,18 @@
-[bot wakeEnabled=False / re-arm wakeEnabled=True] due + paused, tick() x3:
-  schedule: {'enabled': True, 'nextRunAt': '2026-09-16T07:12:32.695526+00:00', 'lastRunAt': None, 'lastSkip': {'at': '2026-09-16T07:12:33.695+00:00', 'reason': 'paused', 'skipped': 0}}
-  tasks: 0
-  nextRunAt kept: True
-  no rewrite on later ticks: True
-[bot wakeEnabled=False / re-arm wakeEnabled=True] re-armed, tick():
-  schedule: {'enabled': True, 'nextRunAt': None, 'lastRunAt': '2026-09-16T07:12:33.699+00:00', 'lastSkip': None}
-  tasks: 1
-  late note: ['这条定时原定 2026-09-16T07:12:32.695526+00:00 触发，因暂停或上一轮未结束而延后，现在补触发。']
+[bot wakeEnabled=False, then back to True]
+  created nextRunAt: 2026-09-16T10:27:35.136403+00:00
+  after 1 tick:    {'enabled': True, 'nextRunAt': '2026-09-16T10:27:35.136403+00:00', 'lastRunAt': None, 'lastTaskId': None, 'lastSkip': {'at': '2026-09-16T10:27:36.136+00:00', 'reason': 'paused', 'skipped': 0}, 'updatedAt': '2026-09-16T10:27:36.136+00:00'} | tasks: 0
+  after 3 ticks:   {'enabled': True, 'nextRunAt': '2026-09-16T10:27:35.136403+00:00', 'lastRunAt': None, 'lastTaskId': None, 'lastSkip': {'at': '2026-09-16T10:27:36.136+00:00', 'reason': 'paused', 'skipped': 0}, 'updatedAt': '2026-09-16T10:27:36.136+00:00'} | tasks: 0
+  nextRunAt kept: True | parked row not rewritten: True
+  after re-arm:    {'enabled': True, 'nextRunAt': None, 'lastRunAt': '2026-09-16T10:27:36.140+00:00', 'lastTaskId': 'task_4a537409265042f4', 'lastSkip': None, 'updatedAt': '2026-09-16T10:27:36.140+00:00'}
+  fired task: [('task_4a537409265042f4', '提醒', 'running')]
+  system note: ['这条定时原定 2026-09-16T10:27:35.136403+00:00 触发，因暂停或上一轮未结束而延后，现在补触发。']
 
-[schedule enabled=False / re-arm enabled=True] due + paused, tick() x3:
-  schedule: {'enabled': False, 'nextRunAt': '2026-09-16T07:12:32.703789+00:00', 'lastRunAt': None, 'lastSkip': {'at': '2026-09-16T07:12:33.705+00:00', 'reason': 'paused', 'skipped': 0}}
-  tasks: 0
-  nextRunAt kept: True
-  no rewrite on later ticks: True
-[schedule enabled=False / re-arm enabled=True] re-armed, tick():
-  schedule: {'enabled': True, 'nextRunAt': None, 'lastRunAt': '2026-09-16T07:12:33.707+00:00', 'lastSkip': None}
-  tasks: 1
-  late note: ['这条定时原定 2026-09-16T07:12:32.703789+00:00 触发，因暂停或上一轮未结束而延后，现在补触发。']
+[schedule enabled=False, then back to True]
+  created nextRunAt: 2026-09-16T10:27:35.145432+00:00
+  after 1 tick:    {'enabled': False, 'nextRunAt': '2026-09-16T10:27:35.145432+00:00', 'lastRunAt': None, 'lastTaskId': None, 'lastSkip': {'at': '2026-09-16T10:27:36.147+00:00', 'reason': 'paused', 'skipped': 0}, 'updatedAt': '2026-09-16T10:27:36.147+00:00'} | tasks: 0
+  after 3 ticks:   {'enabled': False, 'nextRunAt': '2026-09-16T10:27:35.145432+00:00', 'lastRunAt': None, 'lastTaskId': None, 'lastSkip': {'at': '2026-09-16T10:27:36.147+00:00', 'reason': 'paused', 'skipped': 0}, 'updatedAt': '2026-09-16T10:27:36.147+00:00'} | tasks: 0
+  nextRunAt kept: True | parked row not rewritten: True
+  after re-arm:    {'enabled': True, 'nextRunAt': None, 'lastRunAt': '2026-09-16T10:27:36.149+00:00', 'lastTaskId': 'task_8e029f983ae843ea', 'lastSkip': None, 'updatedAt': '2026-09-16T10:27:36.149+00:00'}
+  fired task: [('task_8e029f983ae843ea', '提醒', 'running')]
+  system note: ['这条定时原定 2026-09-16T10:27:35.145432+00:00 触发，因暂停或上一轮未结束而延后，现在补触发。']
 

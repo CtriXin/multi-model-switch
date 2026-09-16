@@ -1,0 +1,32 @@
+### P1 mutation test (owner's hard requirement)
+
+Mutation: delete the P1 parked branch from tick() in mms_web/bots.py (the block that keeps a due once and writes lastSkip), restoring the old unconditional advance().
+Command: python3 -m pytest -q tests/test_mms_web_bots.py -k 'once_schedule_keeps or busy_skip_defers'
+
+tests/test_mms_web_bots.py:857: AssertionError
+_________ test_busy_skip_defers_a_once_schedule_instead_of_dropping_it _________
+
+tmp_path = PosixPath('/private/var/folders/f_/5d2twg6n6jg7wry6_mg4m15c0000gn/T/pytest-of-xin/pytest-997/test_busy_skip_defers_a_once_s0')
+
+    def test_busy_skip_defers_a_once_schedule_instead_of_dropping_it(tmp_path):
+        executor = ScriptedPlanExecutor()
+        rt = runtime(tmp_path, executor)
+        try:
+            worker = bot(rt, "忙碌 Bot", "ws-busy-once")
+            running = rt.create_task({"requestId": "busy-once", "botId": worker["id"], "prompt": "长任务"})
+            rt._tasks[running["id"]].update(status="running", sessionId="session-long")
+            past = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+            once = rt.create_schedule(worker["id"], {"prompt": "一次提醒", "rule": {"kind": "once", "at": past}})
+            rt.tick(); drain_launch(rt)
+            assert [task["prompt"] for task in rt.list_tasks(bot_id=worker["id"])] == ["长任务"]
+            row = rt._schedules[once["id"]]
+>           assert row["nextRunAt"] == once["nextRunAt"] and row["lastSkip"]["reason"] == "busy"
+E           AssertionError: assert (None == '2026-09-16T10:26:23.147922+00:00')
+
+tests/test_mms_web_bots.py:890: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_mms_web_bots.py::test_paused_once_schedule_keeps_its_only_chance_until_rearmed
+FAILED tests/test_mms_web_bots.py::test_busy_skip_defers_a_once_schedule_instead_of_dropping_it
+2 failed, 63 deselected in 0.17s
+
+---- restoring the fix ----
