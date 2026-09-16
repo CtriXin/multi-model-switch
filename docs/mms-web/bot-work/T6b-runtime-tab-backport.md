@@ -86,28 +86,43 @@ Task: Stride 370e87ec37e741df
 
 `grep -n "Bot\|bot" apps/mms-web/src/SettingsPage.tsx apps/mms-web/src/ModelExplorer.tsx` → **零命中**。`SettingsPage.tsx` 的全部 import：`react`、`lucide-react`、`./types`（`Bootstrap`）、`./RemoteAccess`、`./Models`、`./App`（`FONT_FAMILIES`）、`./components`（`AppVersion`、`Dialog`）、`./SkillSources`。没有 `bot.css`，没有 `bot-*` class，服务端那条路径上没有 `mms_web/bot*`。
 
-## 对 owner 给的文件清单的订正
+## 本包的改动面：两个文件
 
-owner 列的是「至少包括 `SettingsPage.tsx`、`ModelExplorer.tsx`、`channel-models.css`、`guide.css`、`mms_web/updates.py`、`tests/test_mms_web_updates.py`」。逐条核对后：
+**这是一次纯前端回流。**
 
-| 文件 | 是不是运行环境 tab 的一部分 |
+| 文件 | 改什么 |
 | --- | --- |
-| `apps/mms-web/src/SettingsPage.tsx` | **是**，核心 |
-| **`apps/mms-web/src/studio.css`** | **是，而且是 tab 唯一需要的 CSS——owner 的清单里漏了它** |
-| `apps/mms-web/src/ModelExplorer.tsx` | **否**。那 18 行是 launch-facts 出错时的内联"重试"按钮（`RotateCcw` import、`retry` state、`useLaunchFacts(value, workspaceId, retry)`），配套 `styles.css` 的 `.inline-alert-retryable` / `.inline-retry-button`。独立的小改进，**回流与否另说，默认不带** |
-| `apps/mms-web/src/channel-models.css` | **否**。1-6 行 `.channel-models` 全宽、321 行 `.channel-save` 吸底，是设置表单布局的顺带改进 |
-| `apps/mms-web/src/guide.css` | **否**。81 行全是 `.guide-updates` / `.update-history-*`，属于 `/update/history` |
-| `mms_web/updates.py` | **否**。只有 `release_history()`，属于 `/update/history` |
-| `tests/test_mms_web_updates.py` | **否**。同上 |
+| `apps/mms-web/src/SettingsPage.tsx` | `Cpu` import、第 4 个 tab 按钮、tab 正文、三元链结构对齐 |
+| `apps/mms-web/src/studio.css` | 搬 `1093-1181` 那块运行环境样式，删掉 4.22 被取代的旧 `.platform-capability` 简写（`1476-1479`） |
 
-**本包的实际改动面是两个文件：`apps/mms-web/src/SettingsPage.tsx` + `apps/mms-web/src/studio.css`。** 其余的要么不属于这个 tab，要么另开包。
+加上新增的测试文件和文档。**没有 Python 改动**——4.22 的 `server.py:17/118` 和 `types.ts:240-258` 已就绪，`mms_platform.py` 两线逐字节相同。如果你发现自己在改 `mms_web/`，停下来重新确认。
 
-### ⚠️ `studio.css` 的 diff 里混了两条 Bot 规则，**绝对不许抄过去**
+### 以下都不属于这个 tab，本包不要碰
 
-- `origin/dev-pre:apps/mms-web/src/studio.css:41-51` —— 主题过渡选择器列表里的 `.bot-workspace`
-- `origin/dev-pre:apps/mms-web/src/studio.css:448-449` —— `.sidebar-footer.has-bots-entry`、`.sidebar-footer.has-bots-entry .bot-entry`
+逐个查过，它们只是当初和 tab 在同一个 merge 里进来的，彼此没有依赖：
 
-这两条和运行环境 tab 毫无关系，只是恰好在同一个文件里。**抄进 4.22.x 就破了"4.22.x 无 Bot"这条硬约束。**
+| 文件 | 它其实是什么 |
+| --- | --- |
+| `apps/mms-web/src/ModelExplorer.tsx` | launch-facts 出错时的内联"重试"按钮（`RotateCcw`、`retry` state），配套 `styles.css` 的 `.inline-alert-retryable` / `.inline-retry-button` |
+| `apps/mms-web/src/channel-models.css` | 设置表单布局（`.channel-models` 全宽、`.channel-save` 吸底） |
+| `apps/mms-web/src/guide.css` | 全是 `.guide-updates` / `.update-history-*`，属于 `/update/history` |
+| `mms_web/updates.py` | 只有 `release_history()`，属于 `/update/history` |
+| `tests/test_mms_web_updates.py` | 同上 |
+
+### ⛔ `studio.css` 的 diff 里混着两条 Bot 规则 —— 绝对不许抄
+
+这是本包最容易踩的坑。搬 `studio.css` 的时候，**这两条不在 `1093-1181` 范围内，但会出现在你 diff 的视野里**：
+
+- `origin/dev-pre:apps/mms-web/src/studio.css:41-51` —— 主题过渡选择器列表里的 **`.bot-workspace`**
+- `origin/dev-pre:apps/mms-web/src/studio.css:448-449` —— **`.sidebar-footer.has-bots-entry`**、**`.sidebar-footer.has-bots-entry .bot-entry`**
+
+它们和运行环境 tab 毫无关系，只是恰好在同一个文件里。**抄进 4.22.x 就直接破了"4.22.x 必须保持无 Bot"这条硬约束**，而且 CSS 不会报错，只会静悄悄地留在那里等着被 `grep -i bot` 抓到。**搬完 `studio.css` 立刻 `grep -in bot apps/mms-web/src/studio.css`，必须零命中。**
+
+### 范围外项：`/api/v1/update/history`
+
+调查结论是它**自包含且 Bot-free**（`updates.py:89` 的本地 glob + `server.py` 三行自包含路由 + 只被 `HelpGuide.tsx` 调用，依赖 `release-notes.ts` / `semver-sort.ts` / `guide.css`，一个 Bot 符号都没有）。
+
+**但本包不做。** 它不是运行环境 tab 的依赖，**可以另开一个包独立回流**。本包的实现者不要顺手把它带上。
 
 ## 硬约束：只回流 tab 本身，不带 Bot 工作台任何部分
 
@@ -146,13 +161,9 @@ owner 列的是「至少包括 `SettingsPage.tsx`、`ModelExplorer.tsx`、`chann
 
 ### C. 加一条"4.22.x 上不存在任何 Bot 模块"的断言
 
-`tests/test_mms_web_windows_imports.py` 在两条线上**逐字节相同**（65 行）。**先说清楚一件事：那里面并没有现成的"no Bot modules"断言。** owner 记得的那条约定，实际是一次 docstring 的去 Bot 化——commit `92df3582 test(windows): drop the Bot module names from the fcntl docstring`，它的说明就是可引用的先例：
+**这条断言仓库里还不存在，本包从零写。** 不要去 `tests/test_mms_web_windows_imports.py` 里找一条现成的"no Bot modules"断言——**那里面没有**。那个文件钉的是 fcntl 契约（65 行，两条线逐字节相同），它和 Bot 唯一的关系是 commit `92df3582` 把 docstring 里提到的 Bot 文件名删掉了，因为 4.21 线上那些文件不存在。**那是一次 docstring 清理，不是断言。**
 
-> The 4.21 line has no mms_web/bots.py or bot_memory.py, so naming them as
-> the original offenders points at files that do not exist here. The
-> contract the test pins is unchanged.
-
-所以本包要**新写**这条断言。可复用的脚手架就在同一个文件里：`ROOT` 和 `IMPORT_GRAPH` 在 **17-22** 行，`failures = {…}; assert not failures, f"…: {failures}"` 的写法在 **48-54** 行。
+可复用的只是**写法**，就在那个文件里：`ROOT` 和 `IMPORT_GRAPH` 的构造在 **17-22** 行，`failures = {…}; assert not failures, f"…: {failures}"` 的断言惯例在 **48-54** 行。照这个形状写你自己的新断言。
 
 断言至少覆盖：
 
@@ -186,6 +197,8 @@ list((ROOT / "tests").glob("test_*bot*.py")) == []
 owner 定的流向是"4.x 的所有改动默认进入 5.x"，所以这次回流之后 4.22.x 上的 `SettingsPage.tsx` 会再往 5.x 流一次。**5.x 上已经有这个 tab 了**，所以合的时候大概率是一次 no-op 或小冲突——**要在交付里提醒下一个做合流的人注意这一点**，别把 4.22 那份（可能被你改过结构的）盖掉 5.x 那份。
 
 ## 只许改
+
+**只有两个产品文件**（其余是新增的测试与文档）：
 
 - `apps/mms-web/src/SettingsPage.tsx`
 - `apps/mms-web/src/studio.css`
@@ -226,8 +239,9 @@ python3 scripts/regression_fresh_user_gate.py
 # 6. 专门的无 Bot 断言
 PYTHONPATH=. python3 -m pytest -q tests/test_mms_4_22_no_bot.py
 
-# 7. 手工复核（应当返回零条）
+# 7. 手工复核（两条都应当返回零命中）
 git ls-tree -r --name-only HEAD | grep -i bot
+grep -in bot apps/mms-web/src/studio.css
 ```
 
 **4.22.x 侧的基线（2026-09-16 核对，跑之前先 `npm install`）：**
@@ -277,7 +291,8 @@ PYTHONPATH=$PWD python3 -P -m mms_web --port 61755 \
 硬约束（**逐条说明**）：
 
 - [ ] **逐文件说明：动了哪些文件，为什么每一处都与 Bot 无关。** 不接受概括性结论。
-- [ ] `studio.css` 里那两条 Bot 规则（dev-pre 的 41-51、448-449）**没有**被抄过来。逐条确认。
+- [ ] `studio.css` 里那两条 Bot 规则（dev-pre 的 41-51 的 `.bot-workspace`、448-449 的 `.sidebar-footer.has-bots-entry`）**没有**被抄过来。逐条确认。
+- [ ] `grep -in bot apps/mms-web/src/studio.css` **零命中**。
 - [ ] `git ls-tree -r --name-only HEAD | grep -i bot` 返回零条。
 - [ ] `mms_web/browser_provider.py` 不存在于本分支。
 - [ ] `tests/test_mms_4_22_no_bot.py` 存在且通过，覆盖 `mms_web/bot*.py` / `Bot*.tsx` / `bot*.css` / `test_*bot*.py` 四类 glob 加 `SettingsPage.tsx` 不含 `bot` 子串。
@@ -341,5 +356,5 @@ Bot 隔离说明：逐文件说明为什么每一处都与 Bot 无关；git ls-t
 3. **无 Bot 断言放哪里。** 本包默认新开 `tests/test_mms_4_22_no_bot.py`，理由是 `test_mms_web_windows_imports.py` 钉的是 fcntl 契约，两者正交。如果 owner 希望合并进去，请确认。
 4. **`ModelExplorer.tsx` 的内联重试按钮要不要顺带回流。** 它不是 tab 的一部分，但当初是同一个 merge 进来的，配套 `styles.css` 的 `.inline-alert-retryable` / `.inline-retry-button`。本包默认**不带**。
 5. **`channel-models.css` 的设置表单布局改进要不要顺带回流。** 同上，默认不带。
-6. **`/api/v1/update/history` 要不要另开一个包回流。** 调查结论是它干净、可独立、Bot-free。本包不做，但建议排一个。
+6. **`/api/v1/update/history` 已定为本包范围外。** 调查结论是它干净、可独立、Bot-free，可以另开一个包回流。这里只是提醒排期，本包不做。
 7. **`studio.css` 的设置壳布局重写（4.22 的 1012-1017 → 5.x 的 1028-1046）要不要一起带。** 5.x 的测试会盯这段的滚动 / 内距行为。本包默认只带 tab 必需的 1093-1181，如果摘出来的测试要求那段布局，会在实现时暴露——到时按实际情况处置并在交付里说明。

@@ -30,8 +30,8 @@ Bot 是长期存在的员工，用户用聊天交代事情。MMS 只做身份、
 | T5a | 定时换成独立 schedule 实体 + 真周期调度，迁移旧 `runAt` 机制，命令清单从 parser 生成 | `T5a-schedule-backend.md` | k3 / deepseek | 新增 `mms_web/bot_schedules.py`、`bots.py` 最小接线、`bot_client.py`、`bot_executor.py` 提示词、`server.py` 路由 |
 | T5b | 定时的选择器（一次/每天/每周/每 N 小时）与管理列表 | `T5b-schedule-ui.md` | gemini3.6，T5a 之后 | `Bot.tsx` composer 与面板、新增 `BotSchedulePanel.tsx`、`bot-schedules.ts`、`bot-visual-system.ts` |
 | T5c | 在对话里换 Bot 的模型，下一轮生效 | `T5c-model-switch-by-dialogue.md` | k3 / deepseek，T5a 之后 | `bot_client.py` parser、`bots.py` `worker` 与启动优先级、`Bot.tsx` / `BotStudio.tsx` 最小接线 |
-| T6a | 4.x ↔ 5.x 双向切换门禁：schema 不许升、降级不许报错、fresh-user gate 加双向切换场景 | `T6a-channel-switch-gate.md` | k3 / deepseek | `scripts/regression_fresh_user_gate.py`、新增契约测试。**base 是 4.22.x 线** |
-| T6b | 把「运行环境」设置 tab 从 5.x 回流到 4.22.x，且不带进任何 Bot | `T6b-runtime-tab-backport.md` | gemini3.6 | `SettingsPage.tsx`、`studio.css`、新增无 Bot 断言。**base 是 4.22.x 线** |
+| T6a | 4.x ↔ 5.x 双向切换门禁 + **修掉降级泄漏内部会话**：4.22 忽略不认识的会话所有者、schema 不许升、fresh-user gate 加双向切换场景 | `T6a-channel-switch-gate.md` | k3 / deepseek | `mms_web/sessions.py` 与 `server.py` 各一处、`scripts/regression_fresh_user_gate.py`、新增契约与前向兼容测试。**base 是 4.22.x 线** |
+| T6b | 把「运行环境」设置 tab 从 5.x 回流到 4.22.x，且不带进任何 Bot | `T6b-runtime-tab-backport.md` | gemini3.6 | **纯前端，只有** `SettingsPage.tsx` + `studio.css`，加一条无 Bot 断言。**base 是 4.22.x 线** |
 | T4 | 落地与交付链 | `T4-landing-governance.md` | Claude（本会话） | rebase、issue、PR 拆分、全量回归、fresh-user gate |
 
 建议只是建议，派发给谁由用户决定。
