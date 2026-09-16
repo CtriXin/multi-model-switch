@@ -232,6 +232,7 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
         "codex",
         "opencode",
         "pi",
+        "grok",
         "agy",
     ]
     assert "preference_snippet" in snapshot["session_assets"]
@@ -2051,6 +2052,10 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
 
 def test_config_web_allows_pi_in_supported_clis():
     assert "pi" in mms_config_web._ALLOWED_CLIS
+
+
+def test_config_web_allows_grok_in_supported_clis():
+    assert "grok" in mms_config_web._ALLOWED_CLIS
 
 
 def test_config_web_fetch_models_does_not_persist_to_fallback_models():

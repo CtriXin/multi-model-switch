@@ -16,7 +16,7 @@ import tomllib
 from typing import Any
 
 
-CLI_ORDER = ("claude", "codex", "opencode", "pi", "agy")
+CLI_ORDER = ("claude", "codex", "opencode", "pi", "grok", "agy")
 SURFACE_KINDS = ("skills", "mcp", "hooks")
 PACK_SCOPES = ("always", "nsr", "ecc", "omc")
 
@@ -25,6 +25,7 @@ _CLI_LABELS = {
     "codex": "Codex",
     "opencode": "OpenCode",
     "pi": "Pi",
+    "grok": "Grok",
     "agy": "Antigravity",
 }
 

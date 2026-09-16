@@ -37,7 +37,7 @@ jobs:
         run: corepack enable
 
       - name: Install Python test tools
-        run: python3 -m pip install pytest httpx rich
+        run: python3 -m pip install pytest httpx rich tomli-w
 
       - name: Prepare trusted Digger run directory
         run: |
@@ -322,7 +322,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install Python test tools
-        run: python3 -m pip install pytest httpx rich
+        run: python3 -m pip install pytest httpx rich tomli-w
 
       - name: Fail only on tests this PR breaks
         env:

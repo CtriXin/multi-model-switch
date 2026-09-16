@@ -75,7 +75,7 @@ _SAFE_TOKEN_COUNT_KEYS = {
     "tokens",
 }
 _ALLOWED_PROTOCOLS = ("anthropic_messages", "openai_chat_completions")
-_ALLOWED_CLIS = ("claude", "codex", "opencode", "pi", "agy")
+_ALLOWED_CLIS = ("claude", "codex", "opencode", "pi", "grok", "agy")
 _ALLOWED_ROLES = ("primary", "auto", "fallback")
 _FALLBACK_MODEL_FAMILIES = ("Claude", "GPT", "Gemini", "DeepSeek", "Qwen", "Kimi", "Mimo", "MiniMax", "GLM")
 _OPENCODE_ROSTER_PRESETS = ("builder", "executor", "explore", "bughunt", "vision", "reviewer", "spec", "fixer")

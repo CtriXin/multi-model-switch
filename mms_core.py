@@ -780,7 +780,7 @@ def _preset_has_visible_model_options(preset):
     return _model_info_has_visible_models(_preset_model_info(preset))
 
 
-CLI_NAMES = ["claude", "codex", "opencode", "pi", "agy"]
+CLI_NAMES = ["claude", "codex", "opencode", "pi", "grok", "agy"]
 CLI_MODEL_FAMILY_HINTS = {}
 LB_SLOT_NAMES = ("heavy", "medium", "light")
 
@@ -8492,7 +8492,7 @@ def _provider_supports_cli_name(provider, cli_name):
     protocols = provider.get("protocols", [])
     if isinstance(protocols, str):
         protocols = [protocols]
-    if cli_name == "pi" and "pi" not in supported_clis:
+    if cli_name in {"pi", "grok"} and cli_name not in supported_clis:
         if "openai_chat_completions" in protocols and any(
             item in supported_clis for item in ("codex", "opencode", "claude")
         ):
@@ -8511,7 +8511,7 @@ def _provider_supports_cli_name(provider, cli_name):
 
 def _provider_supports_model_for_cli(provider, cli_name, model_name=None):
     normalized_model = str(model_name or "").strip()
-    if cli_name == "pi" and normalized_model:
+    if cli_name in {"pi", "grok"} and normalized_model:
         from mms_launchers import _pi_model_available_for_runtime
 
         if not _pi_model_available_for_runtime(provider, normalized_model):
@@ -10012,7 +10012,7 @@ def confirm_launch(cli, model_info, once=False, runtime=None):
         model_display = model_info or "官方默认"
 
     mode_str = "一次性命令" if once else "交互会话"
-    env_str = "临时注入，仅当前 CLI 进程可见" if cli in ("claude", "codex", "opencode", "pi", "agy") else "无需额外注入"
+    env_str = "临时注入，仅当前 CLI 进程可见" if cli in ("claude", "codex", "opencode", "pi", "grok", "agy") else "无需额外注入"
     source_line = ""
     if runtime:
         source_kind = _runtime_source_kind_label(runtime)
@@ -13736,7 +13736,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
         # Legacy TUI implementations may return a Caveman toggle even though
         # the control is no longer exposed; never carry it into runtime.
         caveman_enabled = False
-        if cli in {"claude", "codex", "opencode", "pi", "agy"}:
+        if cli in {"claude", "codex", "opencode", "pi", "grok", "agy"}:
             runtime_runtime["bypass"] = bool(bypass)
         if bypass:
             if cli == "claude" and runtime_runtime and runtime_runtime.get("auth_mode") in {"oauth", "api_key"}:
@@ -13753,7 +13753,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             runtime_runtime["agent_pack"] = agent_pack if agent_pack in {"ecc", "omc"} else "none"
             runtime_runtime["ecc_mode"] = "enable" if agent_pack == "ecc" else "disable"
             runtime_runtime["omc_mode"] = "enable" if agent_pack == "omc" else "disable"
-        if cli in {"claude", "codex", "opencode", "pi", "agy"}:
+        if cli in {"claude", "codex", "opencode", "pi", "grok", "agy"}:
             runtime_runtime["caveman_mode"] = "enable" if caveman_enabled else "disable"
             runtime_runtime["caveman_level"] = _normalize_caveman_level(caveman_level, default=default_caveman_level)
             runtime_runtime["nsr_mode"] = "enable" if (has_nsr and nsr_enabled) else "disable"
@@ -17469,7 +17469,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("target", nargs="?", default=None,
-                        help="CLI 名称(claude/codex/opencode/pi/agy)")
+                        help="CLI 名称(claude/codex/opencode/pi/grok/agy)")
     parser.add_argument("--preset", help="使用指定预设直接启动")
     parser.add_argument("--once", nargs="?", const=True, default=False,
                         help="一次性会话模式（可附带 CLI 名称）")
