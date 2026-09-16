@@ -141,15 +141,14 @@ export function upsertSideQuestion(
   );
 }
 
-/** Open while the answer is arriving, and open for the newest question.
+/** Open while the answer is arriving, and open once until seen / handled.
  *
- *  Folding the moment an answer lands means reading the thing you just asked
- *  takes another click. So the latest question stays open until the next one
- *  takes its place, and everything behind it folds to one line. A card the
- *  reader has toggled keeps their choice instead of this.
+ *  In-flight questions always expand so progress is visible. Settled questions
+ *  expand once until the user has seen or folded them, after which they stay
+ *  in the user's chosen fold state.
  */
-export function defaultExpanded(row: SideQuestion, newest = false): boolean {
-  return isInFlight(row) || newest;
+export function defaultExpanded(row: SideQuestion, seen = false): boolean {
+  return isInFlight(row) || !seen;
 }
 
 export function sourceLabel(row: SideQuestion): string {
@@ -230,3 +229,71 @@ export function routeLine(row: SideQuestion): string {
     .filter(Boolean)
     .join(" · ");
 }
+
+export const btwSeenStorageKey = "mms-web-btw-seen-v1";
+
+export function makeBtwChoiceKey(
+  sessionId: string | undefined,
+  btwId: string,
+): string {
+  return sessionId ? `${sessionId}|${btwId}` : btwId;
+}
+
+/** Resolve whether a card should be expanded based on user choices and default semantics. */
+export function resolveCardExpanded(
+  row: SideQuestion,
+  choices: Record<string, boolean>,
+  sessionId?: string,
+): boolean {
+  const key = makeBtwChoiceKey(sessionId, row.btwId);
+  const choice = choices[key];
+  if (typeof choice === "boolean") return choice;
+  // If never chosen/folded by user, it expands automatically (seen = false)
+  return defaultExpanded(row, false);
+}
+
+/** Read persisted card choices. Key format: `${sessionId}|${btwId}`.
+ *  Value is boolean: true = user explicitly opened; false = user folded/seen. */
+export function readBtwSeen(
+  storage?: Pick<Storage, "getItem">,
+): Record<string, boolean> {
+  try {
+    const s = storage ?? (typeof window !== "undefined" ? window.localStorage : undefined);
+    if (!s) return {};
+    const raw = JSON.parse(s.getItem(btwSeenStorageKey) || "{}");
+    const clean: Record<string, boolean> = {};
+    if (raw && typeof raw === "object") {
+      for (const [key, val] of Object.entries(raw)) {
+        if (
+          typeof key === "string" &&
+          key.length < 200 &&
+          typeof val === "boolean"
+        ) {
+          clean[key] = val;
+        }
+      }
+    }
+    return clean;
+  } catch {
+    return {};
+  }
+}
+
+/** Persist card choices, keeping at most the newest 1000 entries. */
+export function saveBtwSeen(
+  map: Record<string, boolean>,
+  storage?: Pick<Storage, "setItem">,
+): void {
+  try {
+    const s = storage ?? (typeof window !== "undefined" ? window.localStorage : undefined);
+    if (!s) return;
+    const entries = Object.entries(map).slice(-1000);
+    s.setItem(
+      btwSeenStorageKey,
+      JSON.stringify(Object.fromEntries(entries)),
+    );
+  } catch {
+    /* best effort: private browsing or quota exceeded */
+  }
+}
+
