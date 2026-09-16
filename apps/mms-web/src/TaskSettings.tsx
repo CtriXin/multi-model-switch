@@ -5,6 +5,7 @@ import { EffortSelect } from "./ModelExplorer";
 import { availableRoutesForModel, channelLabel } from "./modelSelection";
 import { QuickModelMenu } from "./QuickModelMenu";
 import { Popover } from "./Popover";
+import type { WorkIdentity } from "./work-identities";
 
 export function TaskSettings({
   presets,
@@ -20,6 +21,11 @@ export function TaskSettings({
   planning,
   setPlanning,
   settings,
+  identity,
+  identities,
+  onApplyIdentity,
+  onSaveIdentity,
+  onClearIdentity,
 }: {
   presets: Preset[];
   models: Model[];
@@ -34,6 +40,11 @@ export function TaskSettings({
   planning: boolean;
   setPlanning: (on: boolean) => void;
   settings: () => void;
+  identity?: WorkIdentity;
+  identities?: WorkIdentity[];
+  onApplyIdentity?: (id: string) => boolean | void | Promise<boolean>;
+  onSaveIdentity?: (draft: { name: string; persona: string }) => void;
+  onClearIdentity?: () => void;
 }) {
   const preset = presets.find((p) => p.id === value);
   const extraChannels = availableRoutesForModel(presets, preset).length > 1;
@@ -43,10 +54,12 @@ export function TaskSettings({
       className="task-settings-trigger"
       label={
         <>
-          <span className="task-model-name">{preset?.name || "选择模型"}</span>
-          {extraChannels && preset && (
+          <span className="task-model-name">{identity?.name || preset?.name || "选择模型"}</span>
+          {identity ? (
+            <span className="task-route-name">{preset?.name}</span>
+          ) : extraChannels && preset ? (
             <span className="task-route-name">{channelLabel(preset, models)}</span>
-          )}
+          ) : null}
           {planning && <span className="task-plan">规划</span>}
           <ChevronDown size={13} />
         </>
@@ -54,7 +67,9 @@ export function TaskSettings({
     >
       {(close, open) => open ? (
         <QuickModelMenu presets={presets} models={models} value={value} favorites={favorites}
-          change={change} close={close} notice={planning ? "当前为只读规划模式。" : undefined}>
+          change={change} close={close} notice={planning ? "当前为只读规划模式。" : undefined}
+          identities={identities} activeIdentityId={identity?.id} onApplyIdentity={onApplyIdentity}
+          onSaveIdentity={onSaveIdentity} onClearIdentity={onClearIdentity}>
           <div className="task-setting-row" data-guide="effort">
             <span>思考强度</span>
             {facts ? (
@@ -102,6 +117,7 @@ export function SessionSettings({
   action,
   more,
   presets, models, favorites, toggleFavorite,
+  identity, identities, onApplyIdentity, onSaveIdentity, onClearIdentity,
 }: {
   detail: SessionDetail;
   busy: boolean;
@@ -109,6 +125,11 @@ export function SessionSettings({
   more: () => void;
   presets: Preset[]; models: Model[]; favorites: string[];
   toggleFavorite: (id: string) => void;
+  identity?: WorkIdentity;
+  identities?: WorkIdentity[];
+  onApplyIdentity?: (id: string) => boolean | void | Promise<boolean>;
+  onSaveIdentity?: (draft: { name: string; persona: string }) => void;
+  onClearIdentity?: () => void;
 }) {
   const r = detail.runtime;
   const locked = busy || !r?.alive || !!r?.stale || ["running", "waiting"].includes(detail.session.state);
@@ -122,12 +143,14 @@ export function SessionSettings({
       className="task-settings-trigger"
       label={
         <>
-          <span className="task-model-name">{detail.session.modelName}</span>
-          {extraChannels && (
+          <span className="task-model-name">{identity?.name || detail.session.modelName}</span>
+          {identity ? (
+            <span className="task-route-name">{detail.session.modelName}</span>
+          ) : extraChannels ? (
             <span className="task-route-name">
               {detail.session.providerName || detail.session.channel}
             </span>
-          )}
+          ) : null}
           {r?.planning && <span className="task-plan">规划</span>}
           <ChevronDown size={13} />
         </>
@@ -137,6 +160,9 @@ export function SessionSettings({
         <QuickModelMenu presets={presets.filter(p => p.harness === "pi")} models={models}
           value={detail.session.presetId || ""} favorites={favorites} close={close}
           change={presetId => action(`/sessions/${detail.session.id}/model`, {presetId})}
+          identities={identities} activeIdentityId={identity?.id}
+          onApplyIdentity={onApplyIdentity}
+          onSaveIdentity={onSaveIdentity} onClearIdentity={onClearIdentity} sessionScoped
           disabled={busy || ["running", "waiting"].includes(detail.session.state) || !detail.session.capabilities.send}
           notice={busy || ["running", "waiting"].includes(detail.session.state)
             ? "本轮完成或停止后可切换模型。"

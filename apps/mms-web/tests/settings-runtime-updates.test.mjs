@@ -118,6 +118,14 @@ test("daily model UI hides provider slugs and uses 高级选项", () => {
   assert.match(selection, /export function channelLabel/);
 });
 
+test("work identities are first-class in the model menu", () => {
+  const quick = fs.readFileSync(path.join(srcDir, "QuickModelMenu.tsx"), "utf-8");
+  const app = fs.readFileSync(path.join(srcDir, "App.tsx"), "utf-8");
+  assert.match(quick, /工作身份/);
+  assert.match(quick, /保存当前为工作身份/);
+  assert.match(app, /applyPersona\(text, shownIdentity\)/);
+});
+
 test("Bot settings live in the right-hand 设定 drawer", () => {
   const bot = fs.readFileSync(path.join(srcDir, "Bot.tsx"), "utf-8");
   const panel = fs.readFileSync(path.join(srcDir, "BotPresetPanel.tsx"), "utf-8");

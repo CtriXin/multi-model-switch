@@ -73,6 +73,16 @@ import type { LaunchFacts } from "./ModelExplorer";
 import { VendorMark, vendorTint } from "./VendorMark";
 import type { RecipeDraft } from "./Recipe";
 import { SettingsPage } from "./SettingsPage";
+import {
+  applyPersona,
+  createIdentity,
+  identityMatches,
+  readActiveIdentityId,
+  readIdentities,
+  saveActiveIdentityId,
+  saveIdentities,
+  type WorkIdentity,
+} from "./work-identities";
 import { TaskSettings, SessionSettings } from "./TaskSettings";
 import { Popover } from "./Popover";
 import { useLaunchFacts, readRoutePreferences } from "./ModelExplorer";
@@ -275,6 +285,8 @@ export function App() {
   const [settingsEdit, setSettingsEdit] = useState<{dirty: boolean; busy: boolean; save?: () => void}>({dirty: false, busy: false});
   const [pendingNavigation, setPendingNavigation] = useState<(() => void) | null>(null);
   const [botsReturnId, setBotsReturnId] = useState("");
+  const [identities, setIdentities] = useState<WorkIdentity[]>(() => readIdentities());
+  const [activeIdentityId, setActiveIdentityId] = useState(() => readActiveIdentityId());
   const [search, setSearch] = useState(false);
   const [query, setQuery] = useState("");
   const [attention, setAttention] = useState<
@@ -478,6 +490,8 @@ export function App() {
   useEffect(() => {
     if (presetId) saveSetting("mms-web-preset", presetId);
   }, [presetId]);
+  useEffect(() => { saveIdentities(identities); }, [identities]);
+  useEffect(() => { saveActiveIdentityId(activeIdentityId); }, [activeIdentityId]);
   useEffect(() => {
     if (workspaceId) saveSetting("mms-web-workspace", workspaceId);
   }, [workspaceId]);
@@ -856,6 +870,32 @@ export function App() {
       setPresetId(id);
       setEffortChoice({ id: "", level: "" });
     }
+    const current = identities.find((item) => item.id === activeIdentityId);
+    if (current && current.presetId !== id) setActiveIdentityId("");
+  }
+  const activeIdentity = identities.find((item) => item.id === activeIdentityId);
+  const shownIdentity = identityMatches(activeIdentity, presetId, effort) ? activeIdentity : undefined;
+  function applyIdentity(id: string) {
+    const next = identities.find((item) => item.id === id);
+    if (!next) return false;
+    setPresetId(next.presetId);
+    setEffortChoice({ id: next.presetId, level: next.effort || "" });
+    setActiveIdentityId(next.id);
+    return true;
+  }
+  function saveCurrentIdentity(draft: { name: string; persona: string }) {
+    const created = createIdentity({
+      name: draft.name,
+      presetId,
+      effort,
+      persona: draft.persona,
+    });
+    if (!created) return;
+    setIdentities((list) => [created, ...list.filter((item) => item.id !== created.id)].slice(0, 12));
+    setActiveIdentityId(created.id);
+  }
+  function clearIdentity() {
+    setActiveIdentityId("");
   }
 
   const artifact =
@@ -1806,8 +1846,9 @@ export function App() {
                     const issues = [...modelRequirementIssues(recipe.recipe, facts.model), ...requiredSkillMatches(recipe.recipe.requiredSkills, found.skills, extras.skills).issues];
                     if (issues.length) throw new Error(issues.join(" "));
                   }
+                  const prompt = applyPersona(text, shownIdentity);
                   const ok = await runAction("/sessions", {
-                    workspaceId, presetId, title: text.length > 42 ? text.slice(0, 42) + "…" : text, prompt: text,
+                    workspaceId, presetId, title: text.length > 42 ? text.slice(0, 42) + "…" : text, prompt,
                     planMode, thinkingLevel: effort || undefined, ...extras,
                     ...(recipe ? { recipeRequirements: { ...recipe.recipe.modelRequirements, skills: recipe.recipe.requiredSkills } } : {}),
                   }, true);
@@ -1825,12 +1866,18 @@ export function App() {
                   toggleFavorite={favorite}
                   facts={launchFacts.facts}
                   effort={effort}
-                  setEffort={(level) =>
-                    setEffortChoice({ id: presetId, level })
-                  }
+                  setEffort={(level) => {
+                    setEffortChoice({ id: presetId, level });
+                    if (activeIdentity && (activeIdentity.effort || "") !== (level || "")) setActiveIdentityId("");
+                  }}
                   planning={planMode}
                   setPlanning={setPlanMode}
                   settings={() => navigate("models")}
+                  identity={shownIdentity}
+                  identities={identities}
+                  onApplyIdentity={applyIdentity}
+                  onSaveIdentity={saveCurrentIdentity}
+                  onClearIdentity={clearIdentity}
                 />
               </Composer>
               {launchFacts.error && (
@@ -1959,6 +2006,11 @@ export function App() {
             setSelectToCopy={setSelectToCopy}
             enterToSend={enterToSend}
             setEnterToSend={setEnterToSend}
+            identities={identities}
+            onDeleteIdentity={(id) => {
+              setIdentities((list) => list.filter((item) => item.id !== id));
+              if (activeIdentityId === id) setActiveIdentityId("");
+            }}
             presetId={presetId}
             selectPreset={selectTaskPreset}
             workspaceId={workspaceId}
@@ -2121,6 +2173,7 @@ export function App() {
                   <CurrentActivity
                     session={detail.session}
                     disconnected={!connected || statusesStale || !!sessionError}
+                    identityName={shownIdentity?.name}
                   />
                   <div className="session-workbar">
                     <button
@@ -2322,6 +2375,21 @@ export function App() {
                       detail={detail}
                       busy={busy}
                       action={runAction}
+                      identity={shownIdentity}
+                      identities={identities}
+                      onApplyIdentity={async (id) => {
+                        const next = identities.find((item) => item.id === id);
+                        if (!next) return false;
+                        const switched = await runAction(`/sessions/${detail.session.id}/model`, { presetId: next.presetId });
+                        if (!switched) return false;
+                        if (next.effort) {
+                          await runAction(`/sessions/${detail.session.id}/control`, { action: "thinking", value: next.effort });
+                        }
+                        applyIdentity(id);
+                        return true;
+                      }}
+                      onSaveIdentity={saveCurrentIdentity}
+                      onClearIdentity={clearIdentity}
                       more={() => {
                         setPanel(true);
                         setPanelTab("runtime");

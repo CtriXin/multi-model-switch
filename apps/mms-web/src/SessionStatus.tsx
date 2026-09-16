@@ -120,9 +120,11 @@ export function turnWorkingHint(session: Session, disconnected = false): string 
 export function CurrentActivity({
   session,
   disconnected,
+  identityName,
 }: {
   session: Session;
   disconnected: boolean;
+  identityName?: string;
 }) {
   const { phase } = sessionStatus(session, disconnected);
   const closedHint = session.capabilities.send
@@ -130,7 +132,7 @@ export function CurrentActivity({
     : "仍可查看历史记录";
   const hintText =
     phase === "closed" ? closedHint : activityHints[phase];
-  const route = [session.modelName, session.providerName || session.channel]
+  const route = [identityName, session.modelName, session.providerName || session.channel]
     .filter(Boolean)
     .join(" · ");
   return (

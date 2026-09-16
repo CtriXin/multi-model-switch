@@ -5,9 +5,13 @@ import type { Model, Preset } from "./types";
 import { readRoutePreferences } from "./ModelExplorer";
 import { channelLabel, modelKey, selectModelRoute } from "./modelSelection";
 import { VendorMark } from "./VendorMark";
+import type { WorkIdentity } from "./work-identities";
 import "./quick-model.css";
 
-export function QuickModelMenu({ presets, models, value, favorites, change, close, disabled = false, notice, children }: {
+export function QuickModelMenu({
+  presets, models, value, favorites, change, close, disabled = false, notice, children,
+  identities = [], activeIdentityId = "", onApplyIdentity, onSaveIdentity, onClearIdentity, sessionScoped = false,
+}: {
   presets: Preset[];
   models: Model[];
   value: string;
@@ -17,8 +21,17 @@ export function QuickModelMenu({ presets, models, value, favorites, change, clos
   disabled?: boolean;
   notice?: string;
   children: ReactNode;
+  identities?: WorkIdentity[];
+  activeIdentityId?: string;
+  onApplyIdentity?: (id: string) => boolean | void | Promise<boolean>;
+  onSaveIdentity?: (draft: { name: string; persona: string }) => void;
+  onClearIdentity?: () => void;
+  sessionScoped?: boolean;
 }) {
   const [query, setQuery] = useState("");
+  const [savingIdentity, setSavingIdentity] = useState(false);
+  const [identityName, setIdentityName] = useState("");
+  const [identityPersona, setIdentityPersona] = useState("");
   // Picking a model and tuning it are two things, not one panel with both.
   // Showing the list and the options together put a scrollable list inside a
   // scrollable popover, so the two are now states of the same surface.
@@ -46,6 +59,17 @@ export function QuickModelMenu({ presets, models, value, favorites, change, clos
       else if (dismiss) close();
     } catch (e) {
       setError(e instanceof Error ? e.message : "切换未完成，请重试。");
+    } finally { setPending(false); }
+  }
+
+  async function chooseIdentity(id: string) {
+    if (pending || disabled || !onApplyIdentity) return;
+    setPending(true); setError("");
+    try {
+      if (await onApplyIdentity(id) === false) setError("身份未切换完成，请查看错误提示后重试。");
+      else close();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "身份未切换完成，请重试。");
     } finally { setPending(false); }
   }
 
@@ -92,6 +116,29 @@ export function QuickModelMenu({ presets, models, value, favorites, change, clos
             }} />
         </label>
         <div className="quick-model-list" role="group" aria-label="可选模型" onKeyDown={moveFocus}>
+          {!query.trim() && identities.length > 0 && (
+            <div className="quick-identity-list" role="group" aria-label="工作身份">
+              <p className="quick-identity-caption">工作身份</p>
+              {identities.map((identity) => {
+                const preset = presets.find((item) => item.id === identity.presetId);
+                return (
+                  <button
+                    type="button"
+                    key={identity.id}
+                    className="quick-model-option"
+                    aria-pressed={identity.id === activeIdentityId}
+                    disabled={disabled || pending || !preset?.available}
+                    title={preset?.available ? `${preset.name}${identity.persona ? " · 带人设" : ""}` : "这个身份的模型目前不可用"}
+                    onClick={() => void chooseIdentity(identity.id)}
+                  >
+                    <span>{identity.name}</span>
+                    <small className="quick-model-channel">{preset?.name || "模型已失效"}</small>
+                    {identity.id === activeIdentityId && <Check size={15} />}
+                  </button>
+                );
+              })}
+            </div>
+          )}
           {shown.map(([key, options]) => {
             const preset = selectModelRoute(options, favorites, preferences, value);
             const active = !!selected && modelKey(selected) === key;
@@ -127,6 +174,69 @@ export function QuickModelMenu({ presets, models, value, favorites, change, clos
           </select>
         </label>
         {children}
+        {onSaveIdentity && (
+          savingIdentity ? (
+            <div className="quick-identity-form">
+              <label className="task-setting-row">
+                <span>身份名称</span>
+                <input
+                  aria-label="工作身份名称"
+                  maxLength={24}
+                  value={identityName}
+                  onChange={(e) => setIdentityName(e.target.value)}
+                  placeholder="例如：写代码"
+                />
+              </label>
+              <label className="task-setting-row">
+                <span>人设</span>
+                <input
+                  aria-label="工作身份人设"
+                  maxLength={200}
+                  value={identityPersona}
+                  onChange={(e) => setIdentityPersona(e.target.value)}
+                  placeholder="可选，只用于新会话"
+                />
+              </label>
+              <div className="quick-identity-form-actions">
+                <button type="button" className="button" onClick={() => setSavingIdentity(false)}>取消</button>
+                <button
+                  type="button"
+                  className="button primary"
+                  disabled={!identityName.trim()}
+                  onClick={() => {
+                    onSaveIdentity({ name: identityName, persona: identityPersona });
+                    setSavingIdentity(false);
+                    setIdentityName("");
+                    setIdentityPersona("");
+                  }}
+                >
+                  保存身份
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="popover-footer"
+              disabled={disabled || !selected?.available}
+              onClick={() => {
+                setIdentityName(selected?.name || "");
+                setIdentityPersona("");
+                setSavingIdentity(true);
+              }}
+            >
+              保存当前为工作身份
+            </button>
+          )
+        )}
+        {activeIdentityId && onClearIdentity && (
+          <button type="button" className="popover-footer" onClick={onClearIdentity}>
+            不用工作身份
+          </button>
+        )}
+        {sessionScoped && (
+          <p className="popover-note">当前会话会切换模型和思考强度；人设只用于新会话。</p>
+        )}
       </fieldset>}
     </div>
   </div>;

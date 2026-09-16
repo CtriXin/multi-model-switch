@@ -1,11 +1,12 @@
 import { type ReactNode, useState } from "react";
-import { Sun, Moon, Monitor, Minus, Plus, SlidersHorizontal, Palette, Laptop, Copy } from "lucide-react";
+import { Sun, Moon, Monitor, Minus, Plus, SlidersHorizontal, Palette, Laptop, Copy, Trash2 } from "lucide-react";
 import type { Bootstrap } from "./types";
 import { RemoteAccessSection } from "./RemoteAccess";
 import { Models } from "./Models";
 import { FONT_FAMILIES } from "./App";
 import { AppVersion, Dialog } from "./components";
 import { SkillSourcesSetting } from "./SkillSources";
+import type { WorkIdentity } from "./work-identities";
 
 export function SettingsPage({
   openUpdates,
@@ -37,6 +38,7 @@ export function SettingsPage({
   selectToCopy, setSelectToCopy,
   enterToSend, setEnterToSend,
   requestNavigation, editStateChanged, startTask,
+  identities = [], onDeleteIdentity,
 }: {
   openUpdates: () => void;
   updateAvailable: boolean;
@@ -77,6 +79,8 @@ export function SettingsPage({
   setSelectToCopy: (on: boolean) => void;
   enterToSend: boolean;
   setEnterToSend: (on: boolean) => void;
+  identities?: WorkIdentity[];
+  onDeleteIdentity?: (id: string) => void;
 }) {
   const [tab, setTab] = useState("models");
   return (
@@ -312,6 +316,36 @@ export function SettingsPage({
           </label>
           <RemoteAccessSection startTask={startTask} />
           <SkillSourcesSetting />
+          <div className="preference-row" style={{ alignItems: "flex-start" }}>
+            <div>
+              <h2>工作身份</h2>
+              <p>把模型、通道、思考强度和一句人设存成可切换的身份。点输入框模型名即可切换；人设只加在新会话第一句。</p>
+              {identities.length ? (
+                <div className="identity-settings-list">
+                  {identities.map((identity) => (
+                    <div className="identity-settings-item" key={identity.id}>
+                      <span>
+                        <strong>{identity.name}</strong>
+                        <small>{identity.persona || "无人设"}</small>
+                      </span>
+                      {onDeleteIdentity && (
+                        <button
+                          type="button"
+                          className="icon-button"
+                          aria-label={`删除身份 ${identity.name}`}
+                          onClick={() => onDeleteIdentity(identity.id)}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="muted">还没有身份。在模型菜单的高级选项里保存当前组合。</p>
+              )}
+            </div>
+          </div>
           <p className="settings-footnote">
             Bot 的默认模型和通知在 Bot 工作台的「设定 / 记忆」里修改。快捷键见右上角 ?。
           </p>

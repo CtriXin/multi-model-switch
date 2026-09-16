@@ -1040,6 +1040,10 @@ body,
 .runtime-diagnostics summary:focus-visible {
   color: var(--ink);
 }
+.identity-settings-list { display: grid; gap: 8px; margin-top: 10px; }
+.identity-settings-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.identity-settings-item span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.identity-settings-item small { color: var(--muted); font-size: max(11px, 0.7857rem); }
 .settings-shell .settings-page,
 .settings-shell .general-settings {
   flex: 1;
