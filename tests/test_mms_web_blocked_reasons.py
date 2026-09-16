@@ -79,6 +79,11 @@ def test_output_never_leaks_plan_internals_or_paths():
 @pytest.fixture
 def two_channel_settings(tmp_path, monkeypatch):
     """Real worker path: an approved bundle where channel-b owns unique routes."""
+    # The worker subprocess saves through mms_core.save_config, which hard-exits
+    # without tomli-w. install.sh ships it, but the ubuntu digger job installs
+    # only pytest/httpx/rich, so the whole ModelSettings worker path fails there
+    # at base (31 pre-existing failures in test_mms_web_model_settings.py).
+    pytest.importorskip("tomli_w", reason="ModelSettings worker 子进程需要 tomli-w（install.sh 安装的运行依赖）")
     from test_mms_web_configuration_flow import model_service
     upstream = model_service()
     url, records = upstream.__enter__()
