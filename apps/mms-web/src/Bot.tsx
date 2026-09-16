@@ -45,6 +45,7 @@ import {
   getPresetSummary,
   WIZARD_POOL,
   SKIPPED_WIZARD_PROMPT,
+  parseMessageOptions,
 } from "./bot-presets";
 import type {
   OnboardingAnswers,
@@ -1422,6 +1423,58 @@ function getChainedParentTaskId(
   return null;
 }
 
+function BotMessageBody({
+  content,
+  onSelectOption,
+  onOpenConfig,
+  disabled,
+}: {
+  content: string;
+  onSelectOption?: (option: string) => void;
+  onOpenConfig?: () => void;
+  disabled?: boolean;
+}) {
+  const { body, options, suggestsConfig } = useMemo(
+    () => parseMessageOptions(content),
+    [content],
+  );
+
+  return (
+    <div className="bot-chat-event-body">
+      <RichText text={body} repair />
+      {options.length > 0 && onSelectOption && (
+        <div className="bot-chat-quick-options" role="group" aria-label="快捷选项">
+          {options.map((option, idx) => (
+            <button
+              key={idx}
+              type="button"
+              className="bot-chat-quick-option"
+              disabled={disabled}
+              onClick={() => onSelectOption(option)}
+              title={`快捷回复：${option}`}
+            >
+              {option}
+            </button>
+          ))}
+        </div>
+      )}
+      {suggestsConfig && onOpenConfig && (
+        <div style={{ marginTop: 8 }}>
+          <button
+            type="button"
+            className="bot-chat-quick-action"
+            onClick={onOpenConfig}
+            title="打开工作预设与配置面板"
+          >
+            <Settings2 size={12} />
+            <span>打开工作预设与配置</span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function BotChat({
   bot,
   bots,
@@ -1829,9 +1882,8 @@ export function BotChat({
     return conversationTasks.filter((t) => !absorbedIds.has(t.id));
   }, [conversationTasks, absorbedTasksByParent]);
 
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    const content = value.trim();
+  async function sendMessage(textToSend: string) {
+    const content = textToSend.trim();
     if (!content || busy || disabled || !bot) return;
 
     if (hasPendingQuestion && bot?.pendingQuestion) {
@@ -1876,6 +1928,11 @@ export function BotChat({
     } finally {
       setBusy(false);
     }
+  }
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    await sendMessage(value);
   }
   return (
     <>
@@ -2349,9 +2406,12 @@ export function BotChat({
                   seed={bot?.id}
                   active={conversationTask.status === "running"}
                 />
-                <div className="bot-chat-event-body">
-                  <RichText text={event.content} repair />
-                </div>
+                <BotMessageBody
+                  content={event.content}
+                  onSelectOption={sendMessage}
+                  onOpenConfig={onUpdateBot ? () => setOnboardingEditing(true) : undefined}
+                  disabled={busy || disabled || isTaskRunning}
+                />
               </div>
             ))}
             {communicationGroups.map((group) => {
@@ -2421,9 +2481,12 @@ export function BotChat({
             {resultText && (
               <div className="bot-chat-message bot-chat-event bot-chat-final">
                 <PixelAvatar className="bot-chat-event-avatar" avatarId={bot.avatarId} color={bot.avatarColor} seed={bot.id} />
-                <div className="bot-chat-event-body">
-                  <RichText text={resultText} repair />
-                </div>
+                <BotMessageBody
+                  content={resultText}
+                  onSelectOption={sendMessage}
+                  onOpenConfig={onUpdateBot ? () => setOnboardingEditing(true) : undefined}
+                  disabled={busy || disabled || isTaskRunning}
+                />
               </div>
             )}
             {conversationTask.error && cleanTranscriptText(conversationTask.error) ? (

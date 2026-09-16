@@ -618,3 +618,48 @@ export function buildPreset({
   return parts.join("\n");
 }
 
+/**
+ * 解析 Bot 回复中的选项行与可操作指引。
+ * 例如：
+ * 选项：要 | 不要
+ * 选项：直接顺延、先给建议
+ * 可选项：开启，关闭
+ */
+export function parseMessageOptions(content: string): {
+  body: string;
+  options: string[];
+  suggestsConfig?: boolean;
+} {
+  if (!content) return { body: "", options: [] };
+  const lines = content.trim().split("\n");
+  let options: string[] = [];
+  const bodyLines: string[] = [];
+
+  const optionRegex = /^\s*(?:选项|可选项)\s*[:：]\s*(.+)$/;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const match = line.match(optionRegex);
+    if (match && options.length === 0) {
+      const rawOptions = match[1]
+        .split(/[|｜、,，/]/)
+        .map((opt) => opt.trim())
+        .filter(Boolean);
+      if (rawOptions.length > 0 && rawOptions.length <= 6) {
+        options = rawOptions;
+        continue;
+      }
+    }
+    bodyLines.push(line);
+  }
+
+  const cleanBody = bodyLines.join("\n").trim();
+  const suggestsConfig = /(?:Bot\s*配置|工作预设|在\s*Web\s*UI.*(?:改|配置)|设置里改)/i.test(content);
+
+  return {
+    body: cleanBody || content,
+    options,
+    suggestsConfig,
+  };
+}
+

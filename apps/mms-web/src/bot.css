@@ -3210,6 +3210,63 @@
   border-color: var(--accent);
 }
 
+.bot-chat-quick-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.bot-chat-quick-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
+  border-radius: 999px;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  padding: 4px 12px;
+  cursor: pointer;
+  transition: all 140ms ease-out;
+}
+
+.bot-chat-quick-option:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--inverse);
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.bot-chat-quick-option:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.bot-chat-quick-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  border: 1px dashed var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 10px;
+  cursor: pointer;
+  transition: all 140ms ease-out;
+}
+
+.bot-chat-quick-action:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
 .bot-legacy-wait-row {
   display: flex;
   align-items: center;
