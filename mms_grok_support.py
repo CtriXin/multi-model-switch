@@ -216,7 +216,14 @@ def _compat_origins_for_payload(payload):
     return origins
 
 
+def _compat_proxy_enabled():
+    raw = str(os.environ.get("MMS_GROK_COMPAT_PROXY") or "1").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
 def _install_grok_compat_proxy(payload, grok_home):
+    if not _compat_proxy_enabled():
+        return payload
     origins = _compat_origins_for_payload(payload)
     log_dir = os.path.join(grok_home, "logs")
     os.makedirs(log_dir, exist_ok=True)

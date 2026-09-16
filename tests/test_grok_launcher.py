@@ -76,8 +76,11 @@ def _patch_launch_env(monkeypatch, mms_launchers, tmp_path):
     monkeypatch.setattr(mms_launchers, "_resolve_toon_root", lambda: "")
     monkeypatch.setattr(mms_launchers, "_resolve_token_saver_root", lambda: "")
     monkeypatch.setattr(mms_launchers.os, "getpid", lambda: 4242)
+    monkeypatch.setenv("MMS_GROK_COMPAT_PROXY", "0")
+    import mms_grok_support
     monkeypatch.setattr(
-        "mms_grok_support._install_grok_compat_proxy",
+        mms_grok_support,
+        "_install_grok_compat_proxy",
         lambda payload, grok_home: payload,
     )
     return real_home, preview_root
