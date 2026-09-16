@@ -1,8 +1,9 @@
-"""Rewrite MiniMax/NewAPI responses so Grok's strict serde can read them."""
+"""Rewrite MiniMax/NewAPI OpenAI-stream responses so Grok's strict serde can read them."""
 
 from __future__ import annotations
 
 import argparse
+import codecs
 import http.client
 import json
 import os
@@ -14,6 +15,10 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import urlsplit, urlunsplit
+
+OPENAI_COMPAT_BACKENDS = ("chat_completions",)
+ANTHROPIC_COMPAT_BACKENDS = ("messages",)
+PROXIED_BACKENDS = OPENAI_COMPAT_BACKENDS + ANTHROPIC_COMPAT_BACKENDS
 
 
 HOP_BY_HOP = {
@@ -62,26 +67,49 @@ def fill_stream_choice_delta(payload):
     return payload
 
 
-def fill_thinking_signature(node):
+_ANTHROPIC_EVENT_TYPES = {
+    "message_start",
+    "message_delta",
+    "message_stop",
+    "content_block_start",
+    "content_block_delta",
+    "content_block_stop",
+    "ping",
+}
+
+
+def is_anthropic_event(payload):
+    return isinstance(payload, dict) and payload.get("type") in _ANTHROPIC_EVENT_TYPES
+
+
+def fill_missing_thinking_signature(node):
+    """Grok's messages serde requires thinking.signature on content_block_start.
+
+    Real Anthropic omits the key and later sends signature_delta. Grok fail-closes
+    on the missing field, then overwrites "" with the delta. Do not clobber a
+    signature that is already present.
+    """
     if isinstance(node, dict):
         if node.get("type") == "thinking" and "signature" not in node:
             node["signature"] = ""
-        for key in ("content", "delta", "message", "content_block", "choices"):
+        for key in ("content", "delta", "message", "content_block"):
             if key in node:
-                fill_thinking_signature(node[key])
+                fill_missing_thinking_signature(node[key])
     elif isinstance(node, list):
         for item in node:
-            fill_thinking_signature(item)
+            fill_missing_thinking_signature(item)
     return node
 
 
 def rewrite_inference_payload(payload):
     if not isinstance(payload, dict):
         return payload
+    if is_anthropic_event(payload):
+        fill_missing_thinking_signature(payload)
+        return payload
     if isinstance(payload.get("usage"), dict):
         fill_openai_usage(payload["usage"])
     fill_stream_choice_delta(payload)
-    fill_thinking_signature(payload)
     return payload
 
 
@@ -109,6 +137,40 @@ def rewrite_sse_text(text):
                 continue
         out.append(line)
     return "".join(out)
+
+
+class SseUtf8Rewriter:
+    """Decode SSE bytes incrementally so a UTF-8 character can span read1 chunks."""
+
+    def __init__(self):
+        self.decoder = codecs.getincrementaldecoder("utf-8")()
+        self.leftover = ""
+
+    def push(self, chunk, *, final=False):
+        self.leftover += self.decoder.decode(chunk or b"", final=final)
+        emitted = []
+        if "\n" in self.leftover:
+            *complete, self.leftover = self.leftover.split("\n")
+            text = rewrite_sse_text("\n".join(complete) + "\n")
+            if text:
+                emitted.append(text.encode("utf-8"))
+        if final and self.leftover:
+            text = rewrite_sse_text(self.leftover)
+            self.leftover = ""
+            if text:
+                emitted.append(text.encode("utf-8"))
+        return b"".join(emitted)
+
+
+def rewrite_sse_byte_stream(chunks):
+    rewriter = SseUtf8Rewriter()
+    pieces = []
+    chunk_list = list(chunks)
+    if not chunk_list:
+        return b""
+    for index, chunk in enumerate(chunk_list):
+        pieces.append(rewriter.push(chunk, final=index == len(chunk_list) - 1))
+    return b"".join(pieces)
 
 
 def origin_of(url):
@@ -174,24 +236,18 @@ class _CompatHandler(BaseHTTPRequestHandler):
         if "text/event-stream" in content_type:
             self.send_header("Transfer-Encoding", "chunked")
             self.end_headers()
-            leftover = ""
+            rewriter = SseUtf8Rewriter()
             while True:
                 chunk = response.read1(65536)
                 if not chunk:
+                    data = rewriter.push(b"", final=True)
+                    if data:
+                        self.wfile.write(f"{len(data):x}\r\n".encode("ascii") + data + b"\r\n")
                     break
-                leftover += chunk.decode("utf-8", "replace")
-                if "\n" not in leftover:
-                    continue
-                *complete, leftover = leftover.split("\n")
-                text = rewrite_sse_text("\n".join(complete) + "\n")
-                data = text.encode("utf-8")
+                data = rewriter.push(chunk)
                 if data:
                     self.wfile.write(f"{len(data):x}\r\n".encode("ascii") + data + b"\r\n")
                     self.wfile.flush()
-            if leftover:
-                data = rewrite_sse_text(leftover).encode("utf-8")
-                if data:
-                    self.wfile.write(f"{len(data):x}\r\n".encode("ascii") + data + b"\r\n")
             self.wfile.write(b"0\r\n\r\n")
             self.wfile.flush()
         else:
@@ -292,13 +348,22 @@ def start_compat_proxy(upstream_origin, *, parent_pid, log_path=""):
     return f"http://127.0.0.1:{port}"
 
 
-def rewrite_config_base_urls(payload, listen_origin, upstream_origin):
+def rewrite_config_base_urls(
+    payload,
+    listen_origin,
+    upstream_origin,
+    *,
+    backends=PROXIED_BACKENDS,
+):
     models = payload.get("model") if isinstance(payload, dict) else None
     if not isinstance(models, dict):
         return payload
     wanted = origin_of(upstream_origin)
+    allowed = {str(item) for item in (backends or ())}
     for table in models.values():
         if not isinstance(table, dict):
+            continue
+        if str(table.get("api_backend") or "").strip() not in allowed:
             continue
         base_url = str(table.get("base_url") or "").strip()
         if origin_of(base_url) != wanted:

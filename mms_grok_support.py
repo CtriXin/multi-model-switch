@@ -11,7 +11,14 @@ except ImportError:  # pragma: no cover - install extra, same as config writer
     tomli_w = None
 
 import mms_pi_support as _pi_support
-from mms_grok_compat import origin_of, rewrite_config_base_urls, start_compat_proxy
+from mms_grok_compat import (
+    ANTHROPIC_COMPAT_BACKENDS,
+    OPENAI_COMPAT_BACKENDS,
+    PROXIED_BACKENDS,
+    origin_of,
+    rewrite_config_base_urls,
+    start_compat_proxy,
+)
 from mms_opencode_config import opencode_config_slug as _opencode_config_slug
 from mms_state_io import atomic_write_text
 
@@ -82,20 +89,23 @@ def _grok_resolved_entry(runtime, model_name):
     resolved = _pi_support._pi_model_entry(runtime, model_name)
     protocol = str(resolved.get("protocol") or "").strip()
     if protocol != "anthropic_messages" or _grok_messages_backend_safe(model_name):
-        return resolved
+        return resolved, ""
     openai_variant = _pi_support._pi_protocol_variant(runtime, "openai_chat_completions")
     if not openai_variant:
-        return resolved
+        return resolved, ""
     rewritten = dict(resolved)
     rewritten["protocol"] = openai_variant["protocol"]
     rewritten["api"] = openai_variant["api"]
     rewritten["base_url"] = openai_variant["base_url"]
     rewritten["provider_label"] = openai_variant["label"]
-    return rewritten
+    note = (
+        f"{model_name} 走 chat_completions：该模型的 thinking 块缺少 Anthropic signature"
+    )
+    return rewritten, note
 
 
 def _grok_model_table(runtime, model_name):
-    resolved = _grok_resolved_entry(runtime, model_name)
+    resolved, note = _grok_resolved_entry(runtime, model_name)
     protocol = str(resolved.get("protocol") or "").strip()
     backend = _GROK_BACKENDS.get(protocol)
     if not backend:
@@ -130,7 +140,7 @@ def _grok_model_table(runtime, model_name):
         }
     if protocol == "responses":
         table["reasoning_summary"] = "none"
-    return table
+    return table, note
 
 
 def _grok_build_config_payload(runtime, selected_model):
@@ -148,13 +158,17 @@ def _grok_build_config_payload(runtime, selected_model):
         raise RuntimeError("Grok runtime requires at least one available model")
 
     models = {}
+    notes = []
     for model_name_item in model_names:
         catalog_key = _grok_catalog_key(model_name_item)
         if not catalog_key or catalog_key in models:
             continue
         if not _pi_support._pi_model_supported(model_name_item):
             continue
-        models[catalog_key] = _grok_model_table(runtime, model_name_item)
+        table, note = _grok_model_table(runtime, model_name_item)
+        models[catalog_key] = table
+        if note:
+            notes.append(note)
     selected_key = _grok_catalog_key(model)
     if selected_key not in models:
         raise RuntimeError(f"Grok launcher could not expose selected model '{model}'")
@@ -175,32 +189,73 @@ def _grok_build_config_payload(runtime, selected_model):
             "stream_tool_calls": False,
         },
         "model": models,
-    }, selected_key
+    }, selected_key, notes
+
+
+def _compat_origins_for_payload(payload):
+    models = payload.get("model") if isinstance(payload, dict) else {}
+    if not isinstance(models, dict):
+        return []
+    origins = []
+    for name, table in models.items():
+        if not isinstance(table, dict):
+            continue
+        backend = str(table.get("api_backend") or "").strip()
+        if backend not in PROXIED_BACKENDS:
+            continue
+        origin = origin_of(table.get("base_url"))
+        if not origin:
+            continue
+        match = next((item for item in origins if item["origin"] == origin), None)
+        if match is None:
+            match = {"origin": origin, "models": [], "backends": []}
+            origins.append(match)
+        match["models"].append(str(name))
+        if backend not in match["backends"]:
+            match["backends"].append(backend)
+    return origins
 
 
 def _install_grok_compat_proxy(payload, grok_home):
-    models = payload.get("model") if isinstance(payload, dict) else {}
-    if not isinstance(models, dict):
-        return payload
-    origins = []
-    for table in models.values():
-        origin = origin_of((table or {}).get("base_url"))
-        if origin and origin not in origins:
-            origins.append(origin)
+    origins = _compat_origins_for_payload(payload)
+    log_dir = os.path.join(grok_home, "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    log_path = os.path.join(log_dir, "compat-proxy.log")
     if not origins:
+        with open(log_path, "a", encoding="utf-8") as handle:
+            handle.write("compat proxy skipped: no proxied backends\n")
         return payload
-    listen = start_compat_proxy(
-        origins[0],
-        parent_pid=os.getpid(),
-        log_path=os.path.join(grok_home, "logs", "compat-proxy.log"),
-    )
-    return rewrite_config_base_urls(payload, listen, origins[0])
+    for item in origins:
+        listen = start_compat_proxy(
+            item["origin"],
+            parent_pid=os.getpid(),
+            log_path=log_path,
+        )
+        rewrite_config_base_urls(
+            payload,
+            listen,
+            item["origin"],
+            backends=PROXIED_BACKENDS,
+        )
+        reasons = []
+        if any(backend in OPENAI_COMPAT_BACKENDS for backend in item["backends"]):
+            reasons.append("openai_chat_completions_serde")
+        if any(backend in ANTHROPIC_COMPAT_BACKENDS for backend in item["backends"]):
+            reasons.append("anthropic_thinking_signature_placeholder")
+        with open(log_path, "a", encoding="utf-8") as handle:
+            handle.write(
+                f"compat proxy {listen} -> {item['origin']} "
+                f"reason={'+'.join(reasons)} "
+                f"backends={','.join(item['backends'])} "
+                f"models={','.join(item['models'])}\n"
+            )
+    return payload
 
 
 def _write_grok_config(grok_home, runtime, selected_model):
     if tomli_w is None:
         raise RuntimeError("Grok launcher requires tomli-w to write isolated config.toml")
-    payload, selected_key = _grok_build_config_payload(runtime, selected_model)
+    payload, selected_key, notes = _grok_build_config_payload(runtime, selected_model)
     os.makedirs(grok_home, exist_ok=True)
     payload = _install_grok_compat_proxy(payload, grok_home)
     config_path = os.path.join(grok_home, "config.toml")
@@ -208,7 +263,7 @@ def _write_grok_config(grok_home, runtime, selected_model):
     auth_path = os.path.join(grok_home, "auth.json")
     if os.path.exists(auth_path):
         os.remove(auth_path)
-    return config_path, selected_key
+    return config_path, selected_key, notes
 
 
 def _grok_scrub_inherited_env(env):
@@ -276,7 +331,7 @@ def _grok_gateway_env(runtime, model_info=None):
     launchers._cleanup_stale_sessions(sessions_dir)
 
     grok_home = os.path.join(session_home, "home")
-    config_path, selected_key = _write_grok_config(grok_home, runtime, model)
+    config_path, selected_key, notes = _write_grok_config(grok_home, runtime, model)
     persistent_sessions = os.path.join(gateway_base, "sessions")
     os.makedirs(persistent_sessions, exist_ok=True)
     session_link = os.path.join(grok_home, "sessions")
@@ -293,6 +348,8 @@ def _grok_gateway_env(runtime, model_info=None):
     env["MMS_GROK_HOME"] = grok_home
     env["MMS_GROK_CONFIG"] = config_path
     env["MMS_GROK_SELECTED_MODEL"] = selected_key
+    if notes:
+        env["MMS_GROK_PROTOCOL_NOTES"] = "\n".join(notes)
     env["MMS_HOME_ISOLATION_MODE"] = "soft"
     env["MMS_SOFT_HOME"] = "1"
     return env
@@ -309,7 +366,7 @@ def _grok_provider_export_env(runtime, model):
     )
     model_ref = _opencode_config_slug(effective_model, "model")
     grok_home = os.path.join(_grok_gateway_root(), "exports", f"{provider_ref}-{model_ref}", "home")
-    config_path, selected_key = _write_grok_config(grok_home, runtime, effective_model)
+    config_path, selected_key, notes = _write_grok_config(grok_home, runtime, effective_model)
     exports = {
         "GROK_HOME": grok_home,
         "MMS_GROK_HOME": grok_home,
@@ -318,6 +375,8 @@ def _grok_provider_export_env(runtime, model):
         "GROK_DISABLE_AUTOUPDATER": "1",
         "GROK_TELEMETRY_ENABLED": "0",
     }
+    if notes:
+        exports["MMS_GROK_PROTOCOL_NOTES"] = "\n".join(notes)
     exports.update(_grok_credential_env(runtime))
     return launchers._inject_selected_model_name(exports, effective_model, model_info=runtime)
 
@@ -334,6 +393,9 @@ def launch_grok(model_info, runtime, once=False, extra_args=None):
     model = _pi_support._pi_effective_selected_model(runtime, requested_model)
     env = _grok_gateway_env(runtime, model_info=model_info)
     selected_key = str(env.get("MMS_GROK_SELECTED_MODEL") or model).strip()
+    for note in str(env.get("MMS_GROK_PROTOCOL_NOTES") or "").splitlines():
+        if note.strip():
+            launchers.console.print(f"[dim]{note.strip()}[/dim]")
     cmd = ["grok", "-m", selected_key]
     if runtime.get("bypass"):
         cmd.append("--always-approve")

@@ -83,6 +83,114 @@ def _patch_launch_env(monkeypatch, mms_launchers, tmp_path):
     return real_home, preview_root
 
 
+def test_grok_compat_sse_utf8_survives_read1_65536_boundary():
+    import json
+
+    from mms_grok_compat import rewrite_sse_byte_stream
+
+    char = "中"
+    payload = {
+        "choices": [{"index": 0, "delta": {"content": char * 25000}}],
+        "usage": {"total_tokens": 0, "total_characters": 0},
+    }
+    raw = ("data: " + json.dumps(payload, ensure_ascii=False) + "\n\n").encode("utf-8")
+    assert len(raw) > 65536
+    cut = 65536
+    if cut < len(raw) and (raw[cut] & 0xC0) != 0x80:
+        lead = cut
+        while lead > 0 and (raw[lead] & 0xC0) != 0x80:
+            lead -= 1
+        while lead > 0 and (raw[lead] & 0xC0) == 0x80:
+            lead -= 1
+        cut = lead + 1
+    assert 0 < cut < len(raw)
+    assert (raw[cut] & 0xC0) == 0x80
+    chunks = [raw[:cut], raw[cut:]]
+    naive = chunks[0].decode("utf-8", "replace") + chunks[1].decode("utf-8", "replace")
+    naive_fffd = naive.count("\ufffd")
+    out = rewrite_sse_byte_stream(chunks)
+    text = out.decode("utf-8")
+    print(
+        f"总字节: {len(raw)}\n"
+        f"U+FFFD 个数: {naive_fffd}\n"
+        f"增量解码 U+FFFD 个数: {text.count(chr(0xFFFD))}"
+    )
+    assert naive_fffd > 0
+    assert text.count("\ufffd") == 0
+    obj = json.loads(text.split("data:", 1)[1].strip())
+    assert obj["choices"][0]["delta"]["content"].count(char) == 25000
+
+
+def test_grok_compat_does_not_inject_openai_usage_into_anthropic_sse():
+    import json
+    from mms_grok_compat import rewrite_sse_text
+
+    raw = (
+        'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},'
+        '"usage":{"output_tokens":15}}\n\n'
+    )
+    obj = json.loads(rewrite_sse_text(raw).split("data:", 1)[1].strip())
+    assert obj["usage"] == {"output_tokens": 15}
+    assert "prompt_tokens" not in obj["usage"]
+    assert "completion_tokens" not in obj["usage"]
+
+
+def test_grok_compat_fills_missing_thinking_signature_but_keeps_existing():
+    import json
+    from mms_grok_compat import rewrite_sse_text
+
+    missing = (
+        'data: {"type":"content_block_start","index":0,'
+        '"content_block":{"type":"thinking","thinking":""}}\n\n'
+    )
+    obj = json.loads(rewrite_sse_text(missing).split("data:", 1)[1].strip())
+    assert obj["content_block"]["signature"] == ""
+
+    present = (
+        'data: {"type":"content_block_start","index":0,'
+        '"content_block":{"type":"thinking","thinking":"","signature":"REAL"}}\n\n'
+    )
+    obj = json.loads(rewrite_sse_text(present).split("data:", 1)[1].strip())
+    assert obj["content_block"]["signature"] == "REAL"
+
+
+def test_rewrite_config_retargets_shared_origin_for_proxied_backends():
+    from mms_grok_compat import rewrite_config_base_urls
+
+    payload = {
+        "model": {
+            "MiniMax-M2.7": {
+                "api_backend": "chat_completions",
+                "base_url": "http://127.0.0.1:4003/v1",
+            },
+            "claude-sonnet-4-6": {
+                "api_backend": "messages",
+                "base_url": "http://127.0.0.1:4003/v1",
+            },
+        }
+    }
+    rewrite_config_base_urls(payload, "http://127.0.0.1:9", "http://127.0.0.1:4003")
+    assert payload["model"]["MiniMax-M2.7"]["base_url"] == "http://127.0.0.1:9/v1"
+    assert payload["model"]["claude-sonnet-4-6"]["base_url"] == "http://127.0.0.1:9/v1"
+
+
+def test_compat_origins_cover_each_chat_completions_origin():
+    import mms_grok_support
+
+    payload = {
+        "model": {
+            "a": {"api_backend": "chat_completions", "base_url": "http://a.example/v1"},
+            "b": {"api_backend": "chat_completions", "base_url": "http://b.example/v1"},
+            "c": {"api_backend": "messages", "base_url": "http://a.example/v1"},
+        }
+    }
+    origins = mms_grok_support._compat_origins_for_payload(payload)
+    assert [item["origin"] for item in origins] == ["http://a.example", "http://b.example"]
+    assert origins[0]["models"] == ["a", "c"]
+    assert origins[0]["backends"] == ["chat_completions", "messages"]
+    assert origins[1]["models"] == ["b"]
+
+
 def test_grok_compat_fills_minimax_stream_usage_prompt_tokens():
     from mms_grok_compat import rewrite_sse_text
 
@@ -264,6 +372,9 @@ def test_launch_grok_uses_openai_for_minimax_instead_of_unsigned_messages(monkey
     assert model["base_url"] == "http://127.0.0.1:4003/v1"
     assert "extra_headers" not in model
     assert captured["cmd"][:3] == ["grok", "-m", "MiniMax-M2.7"]
+    notes = captured["env"].get("MMS_GROK_PROTOCOL_NOTES") or ""
+    assert "MiniMax-M2.7 走 chat_completions" in notes
+    assert "signature" in notes
 
 
 def test_launch_grok_uses_anthropic_messages_backend(monkeypatch, tmp_path):
@@ -346,3 +457,18 @@ def test_runtime_resolver_finds_grok_bin_under_user_home(monkeypatch, tmp_path):
     binary.chmod(0o755)
     found = mms_runtime.resolve_cli_binary("grok", env={"PATH": "/usr/bin"}, real_home=str(tmp_path))
     assert found == str(binary)
+
+
+def test_grok_bin_is_not_on_shared_cli_search_path(tmp_path):
+    import mms_runtime
+
+    grok_bin = str(tmp_path / ".grok" / "bin")
+    shared = mms_runtime.cli_search_dirs(env={"PATH": "/usr/bin"}, real_home=str(tmp_path))
+    grok_dirs = mms_runtime.cli_search_dirs(
+        env={"PATH": "/usr/bin"},
+        real_home=str(tmp_path),
+        command_name="grok",
+    )
+    assert grok_bin not in shared
+    assert grok_bin in grok_dirs
+    assert grok_dirs.index("/opt/homebrew/bin") < grok_dirs.index(grok_bin)

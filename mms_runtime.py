@@ -79,17 +79,18 @@ def _nvm_bin_dirs(real_home):
     return [os.path.join(version, "bin") for version in versions]
 
 
-def cli_search_dirs(env=None, real_home=None):
+def cli_search_dirs(env=None, real_home=None, command_name=""):
     source = env if isinstance(env, dict) else os.environ
     home = os.path.abspath(os.path.expanduser(real_home or _real_home_from_env(source)))
     path_dirs = str(source.get("PATH") or os.defpath).split(os.pathsep)
     nvm_dirs = _nvm_bin_dirs(home)
     preferred = [
         os.path.join(home, ".local", "bin"),
-        os.path.join(home, ".grok", "bin"),
         "/opt/homebrew/bin",
         "/usr/local/bin",
     ]
+    if str(command_name or "").strip().lower() == "grok":
+        preferred.append(os.path.join(home, ".grok", "bin"))
     return _dedupe([*path_dirs, *nvm_dirs, *preferred, "/usr/bin", "/bin"])
 
 
@@ -134,7 +135,9 @@ def resolve_cli_binary(command_name, env=None, real_home=None):
     candidates = [override] if override else []
     if repo_wrapper:
         candidates.append(repo_wrapper)
-    search_path = os.pathsep.join(cli_search_dirs(source, real_home=real_home))
+    search_path = os.pathsep.join(
+        cli_search_dirs(source, real_home=real_home, command_name=name)
+    )
     found = shutil.which(name, path=search_path)
     if found:
         candidates.append(found)
