@@ -9,6 +9,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from .errors import WebError
+from .bot_client import command_catalog_text
 
 PLAN_TIMEOUT_SECONDS = 20.0
 _COMPACT_NOOP_MESSAGES = {
@@ -89,8 +90,10 @@ class PiBotExecutor:
             "只有用户需要细节或确实有多个证据时，才用简短 Markdown 列表补充路径、截图或下一步。调用 complete 的内容就是给用户看的最终回报，不要塞入 CLI 日志。\n"
             "不要修改真实模型/账号配置，不要自动发送外部消息或发布。工作目录是操作范围，不是OS沙箱。\n"
             f"内部工具命令（通过 bash 执行）：{command}\n"
-            "子命令：list；dispatch BOT_ID '任务'；message BOT_ID '消息'；reply MESSAGE_ID '回复'；inbox；"
-            "screenshot --url 'http(s)://...'；browser goto/snapshot/click/fill/press；status；complete '结果'；wait '要问用户的问题'；fail '错误'。\n"
+            "可用的内部子命令（冒号后是一句说明；'...' 表示自由文本）：\n"
+            f"{command_catalog_text()}\n"
+            "用户要求周期性、反复或每隔多久做一次的工作时，用 schedule create 建一条定时，"
+            "不要回答做不到，也不要靠自己在任务末尾重新约下一次。\n"
             "浏览器工作必须优先交给已安装的 Ego：Agent 可以直接通过 bash 使用 ego-browser nodejs 和 Ego skill 的全部公开能力；"
             "MMS 只负责把 Bot 身份、任务上下文和结果接回 Web UI。browser CLI 是兼容性薄桥，不是第二套浏览器引擎；"
             "需要协作时先 list 再 dispatch；可以分发多个任务，随后 wait 并结束本轮，"
