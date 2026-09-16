@@ -1622,7 +1622,7 @@ class BotRuntime(BotCommunications):
                     fired, reason = None, "创建任务失败"
                 if fired:
                     self._tasks[fired["id"]]["scheduleId"] = updated["id"]
-                    if (schedule.get("lastSkip") or {}).get("reason") in {"paused", "busy"}:
+                    if schedule["rule"]["kind"] == "once" and (schedule.get("lastSkip") or {}).get("reason") in {"paused", "busy"}:
                         self._message(fired["id"], "system", f"这条定时原定 {due_at} 触发，因暂停或上一轮未结束而延后，现在补触发。")
                     updated.update(lastRunAt=now(), lastTaskId=fired["id"], lastSkip=None,
                                    recentTaskIds=(updated.get("recentTaskIds") or [])[-(RECENT_TASK_LIMIT - 1):] + [fired["id"]])

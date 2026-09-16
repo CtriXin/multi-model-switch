@@ -922,3 +922,28 @@ def test_legacy_scheduled_task_at_the_limit_reports_the_truth(tmp_path):
         assert not any("已迁移成" in content for content in contents)
     finally:
         reopened.close()
+
+
+def test_a_repeating_schedule_gets_no_late_note_after_a_busy_skip(tmp_path):
+    executor = ScriptedPlanExecutor()
+    rt = runtime(tmp_path, executor)
+    try:
+        worker = bot(rt, "忙完再跑", "ws-repeating-late")
+        running = rt.create_task({"requestId": "busy-interval", "botId": worker["id"], "prompt": "长任务"})
+        rt._tasks[running["id"]].update(status="running", sessionId="session-long")
+        repeating = rt.create_schedule(worker["id"], {"prompt": "周期提醒", "rule": {"kind": "interval", "everySeconds": 300}})
+        past = lambda: (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+        rt._schedules[repeating["id"]]["nextRunAt"] = past()
+        rt.tick(); drain_launch(rt)
+        assert rt._schedules[repeating["id"]]["lastSkip"]["reason"] == "busy"
+
+        executor.outcomes[running["id"]] = "completed"
+        rt.tick(); drain_launch(rt)
+        rt._schedules[repeating["id"]]["nextRunAt"] = past()
+        rt.tick(); drain_launch(rt)
+        fired = next(task for task in rt.list_tasks(bot_id=worker["id"]) if task["prompt"] == "周期提醒")
+        # The late note belongs to one-shots only: an interval run that fires on
+        # its next due time is not late.
+        assert not any("延后" in message["content"] for message in rt.list_messages(fired["id"]))
+    finally:
+        rt.close()
