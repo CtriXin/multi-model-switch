@@ -348,6 +348,14 @@ def test_schedule_routes_round_trip_and_errors(transport, tmp_path):
     edited = json.loads(raw)
     assert edited["prompt"] == "改成每三小时" and edited["rule"] == {"kind": "interval", "everySeconds": 10800}
     assert edited["overlapPolicy"] == "queue"
+
+    # Pausing has one entry point only: /enable and /disable.  An edit that
+    # carries enabled is refused instead of silently ignored.
+    status, _, raw = request("POST", f"{base}/{schedule['id']}", {"prompt": "改说明", "enabled": False}, headers)
+    assert status == 400 and json.loads(raw)["error"]["code"] == "INVALID_REQUEST"
+    status, _, raw = request("POST", base, {"prompt": "新建带 enabled", "enabled": False,
+                                            "rule": {"kind": "interval", "everySeconds": 300}}, headers)
+    assert status == 400 and json.loads(raw)["error"]["code"] == "INVALID_REQUEST"
     assert json.loads(request("POST", f"{base}/{schedule['id']}/disable", {}, headers)[2])["enabled"] is False
     assert json.loads(request("POST", f"{base}/{schedule['id']}/enable", {}, headers)[2])["enabled"] is True
     status, _, raw = request("POST", f"{base}/{schedule['id']}/delete", {}, headers)
@@ -429,7 +437,11 @@ def test_bot_prompt_lists_every_registered_subcommand(tmp_path):
     prompt = _bot_prompt(tmp_path)
     catalog = command_catalog_text()
     assert catalog in prompt, "the generated command list must be part of the real prompt"
-    for name in registered_command_names():
+    names = registered_command_names()
+    # The parser walk uses argparse internals; if it ever returned nothing the
+    # loop below would pass silently, so pin the real registration count.
+    assert len(names) >= 20, names
+    for name in names:
         assert re.search(r"(?<![\w-])" + re.escape(name) + r"(?![\w-])", catalog), name
 
 

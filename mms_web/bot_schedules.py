@@ -334,6 +334,8 @@ def is_due(schedule: dict, now: datetime) -> bool:
 def validate_schedule(payload, existing_count: int) -> None:
     if not isinstance(payload, dict):
         raise WebError("INVALID_REQUEST", "定时内容必须是对象。", 400)
+    if "enabled" in payload:
+        raise WebError("INVALID_REQUEST", "新建时不能带 enabled；用 /disable 暂停一条定时。", 400)
     if int(existing_count) >= MAX_SCHEDULES_PER_BOT:
         raise WebError("SCHEDULE_LIMIT", "一个 Bot 最多 20 条定时。", 409)
     prompt = payload.get("prompt")
@@ -378,6 +380,10 @@ def apply_update(schedule: dict, payload: dict, *, now: datetime) -> dict:
     """Validate an edit (prompt / rule / timezone / overlapPolicy)."""
     if not isinstance(payload, dict):
         raise WebError("INVALID_REQUEST", "定时内容必须是对象。", 400)
+    if "enabled" in payload:
+        # /enable and /disable are the only way to flip it; a second, silently
+        # ignored entry point would drift apart from them.
+        raise WebError("INVALID_REQUEST", "启停定时请用 /enable 或 /disable，不要放在编辑里。", 400)
     updated = deepcopy(schedule)
     if "prompt" in payload:
         prompt = payload.get("prompt")

@@ -9,7 +9,7 @@ import pytest
 
 from mms_web import bot_schedules
 from mms_web.bot_schedules import (MAX_SCHEDULES_PER_BOT, MIN_INTERVAL_SECONDS, advance, apply_update,
-                                   build_schedule, is_due, local_timezone_name, normalize_rule,
+                                   build_schedule, defer_once, is_due, local_timezone_name, normalize_rule,
                                    normalize_timezone, parse_every, parse_weekday, sanitize_schedules)
 from mms_web.errors import WebError
 
@@ -187,7 +187,7 @@ def test_build_and_update_keep_the_contract_shape():
     assert schedule["recentTaskIds"] == [] and schedule["lastSkip"] is None
 
     updated = apply_update(schedule, {"prompt": "新说明", "rule": {"kind": "weekly", "weekday": 2, "atLocalTime": "08:00"},
-                                      "timezone": "America/New_York", "enabled": False, "botId": "bot_2"},
+                                      "timezone": "America/New_York", "botId": "bot_2"},
                            now=at(2026, 9, 18))
     assert updated["prompt"] == "新说明" and updated["rule"]["weekday"] == 2
     assert updated["timezone"] == "America/New_York"
@@ -195,6 +195,26 @@ def test_build_and_update_keep_the_contract_shape():
     assert updated["nextRunAt"].endswith("+00:00")
     with pytest.raises(WebError):
         apply_update(schedule, {"overlapPolicy": "sometimes"}, now=at(2026, 9, 18))
+    # Pausing has exactly one entry point: /enable and /disable, never an edit.
+    with pytest.raises(WebError) as failure:
+        apply_update(schedule, {"enabled": False}, now=at(2026, 9, 18))
+    assert failure.value.code == "INVALID_REQUEST"
+    with pytest.raises(WebError):
+        build_schedule("bot_1", {"prompt": "查机票", "enabled": False,
+                                  "rule": {"kind": "interval", "everySeconds": 300}},
+                       existing_count=0, now=at(2026, 9, 18))
+
+
+def test_defer_once_parks_a_due_one_shot_without_consuming_it():
+    schedule = build_schedule("bot_1", {"prompt": "提醒", "rule": {"kind": "once", "at": "2026-09-17T00:00:00+00:00"}},
+                              existing_count=0, now=at(2026, 9, 16))
+    parked = defer_once(schedule, stamp="2026-09-17T00:00:01.000+00:00", reason="paused")
+    assert parked["nextRunAt"] == schedule["nextRunAt"]
+    assert parked["lastSkip"] == {"at": "2026-09-17T00:00:01.000+00:00", "reason": "paused", "skipped": 0}
+    assert parked["updatedAt"] == "2026-09-17T00:00:01.000+00:00"
+    # Already parked for the same reason: no rewrite on every tick.
+    assert defer_once(parked, stamp="2026-09-17T00:00:02.000+00:00", reason="paused") is None
+    assert defer_once(parked, stamp="2026-09-17T00:00:03.000+00:00", reason="busy")["lastSkip"]["reason"] == "busy"
 
 
 def test_stored_rows_are_parked_instead_of_bricking_the_loop():
