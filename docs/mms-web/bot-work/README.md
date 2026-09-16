@@ -34,9 +34,13 @@ Bot 是长期存在的员工，用户用聊天交代事情。MMS 只做身份、
 | T6b | 把「运行环境」设置 tab 从 5.x 回流到 4.22.x，且不带进任何 Bot | `T6b-runtime-tab-backport.md` | gemini3.6 | **纯前端，只有** `SettingsPage.tsx` + `studio.css`，加一条无 Bot 断言。**base 是 4.22.x 线** |
 | T7a | 连接横幅与真实连接状态脱节：失败要防抖，连接噪音和操作失败必须分流 | `T7a-connection-banner.md` | gemini3.6 | **纯前端**，`App.tsx` 的 `load()` 失败处理与顶部红条、`styles.css`、新增一个单测文件。**base 是 `main`（4.22.1）** |
 | T7b | BTW 旁问卡片收起后要被记住：换成"已读/已处置"语义，状态活过卸载 | `T7b-btw-card-fold-memory.md` | gemini3.6 | **纯前端**，`SideQuestions.tsx` / `side-questions.ts` / `App.tsx` 两处最小接线 / `side-questions.test.mjs`。**base 是 `main`（4.22.1）** |
+| T7c | 把 MMF 挡下来的真实原因说给用户听：`blocked_reasons` 只当布尔值用，内容一个字都没传给用户 | `T7c-surface-blocked-reasons.md` | k3 / deepseek | **后端为主**，新增 `mms_web/config_block_reasons.py` + `model_settings_worker.py` 一句 message；前端只核对 `ChannelModels.tsx` 已有三处渲染点。**base 是 `main`（4.22.1）** |
+| T7d | 开「手机访问」不该把当前这个窗口踢掉：开关/换 token 时给当前会话种 cookie，loopback 一律不放行 | `T7d-remote-access-keeps-current-window.md` | k3 / deepseek | **后端为主**，`server.py` 的 `set_remote_access` 与响应头链路；前端 `RemoteAccess.tsx` 三处文案 + `REMOTE-ACCESS.md`。**base 是 `main`（4.22.1）** |
 | T4 | 落地与交付链 | `T4-landing-governance.md` | Claude（本会话） | rebase、issue、PR 拆分、全量回归、fresh-user gate |
 
 建议只是建议，派发给谁由用户决定。
+
+第六轮（2026-09-16）追加 **T7c / T7d**，来自 owner 当天的两条真实故障：同事在装过旧版本的电脑上删除通道，弹出一句**猜出来的**错误文案（真实原因是 MMF 的 `blocked_reasons`，算出来了却只当布尔值用）；以及打开「手机访问」开关后，本机原本开着的 `127.0.0.1` 窗口立刻被踢掉。这两个包**互相独立、可以并行**，都建议给 k3 / deepseek（都是后端为主，各带一点前端文案），**改动面零重叠、没有任何共享文件**。**两个包的实现 base 都是 `main`（4.22.1，`6c62a656`）**——实测 owner 指定的那条六文件 diff 只有 `server.py`（117 行，全是 5.x Bot 工作台接线）和 `SettingsPage.tsx`（138 行，T6b 运行环境 tab）有差异，**两处都不落在这两个包的改动面上**；`model_settings_worker.py` / `model_settings.py` / `remote_access.py` / `ChannelModels.tsx` / `RemoteAccess.tsx` / `api.ts` / `mms_registry_cli.py` / `mms_state_io.py` 以及相关测试文件 blob hash 全部逐字节相同。唯一需要留意的合流点是 T7d 选方案 B 时会碰到 `do_POST` 的收尾行（两条线不同），包里已写明怎么合。**包文档本身照旧落在 `dev`**。
 
 第五轮（2026-09-16）追加 **T7a / T7b**，来自 owner 当天的两条 Pilot 使用反馈（顶部红条反复出现、BTW 旁问卡片收起后又自己展开）。这两个包**互相独立、可以并行**，都建议给 gemini，改动面零重叠（唯一共享文件 `App.tsx`，两处相距一千多行）。**两个包的实现 base 都是 `main`（4.22.1，`6c62a656`）**——实测两个包要改的代码在 `main` 和 `dev` 上逐字节相同（`api.ts` / `SideQuestions.tsx` / `side-questions.ts` / `side-questions.test.mjs` blob hash 完全一致；`App.tsx` 的 64 行差异全是 Bot 工作台接线，`styles.css` 的 49 行差异是 `ModelExplorer` 重试按钮和 `.model-picker-trigger`，都不落在这两个包的改动面上），按 owner 定的"4.x 的所有改动默认进入 5.x"，修在 4.22.x 会自动流到 5.x。**包文档本身落在 `dev`**，因为 `docs/mms-web/bot-work/` 这棵树只存在于 `dev`，`origin/main` 上没有这个目录——和 T6a / T6b 是同一个形状。
 
@@ -60,14 +64,14 @@ owner 决定（2026-09-14）：`dev` / `main` 是 4.21.x 稳定安装线，不�
 | 分支 | 版本 | HEAD | 说明 |
 | --- | --- | --- | --- |
 | `origin/main` | **4.22.1** | `6c62a656` | **4.22.x 永久稳定线**（不含 Bot） |
-| `origin/dev` | **5.0.1** | `5bf1f31d` | **5.x 线**（Bot 工作台在这里） |
+| `origin/dev` | **5.x** | `e5d32243` | **5.x 线**（Bot 工作台在这里）。T7a / T7b 那轮记的是 `5bf1f31d`，此后 PR #276 已合入，2026-09-16 晚实测 HEAD 为 `e5d32243` |
 | `origin/dev-pre` | 5.0.x | `2b9260d8` | 重组后闲置，**不要再用作 base** |
 
 所以：**5.x 侧的包 base 用 `origin/dev`，4.22.x 侧的包 base 用 `origin/main`。**
 
-⚠️ **这张表在重组前是反过来的**（`origin/dev` = 4.22.1、`origin/main` = 4.10.0 陈旧），T5a/b/c 和 T6a/T6b 正文里写的"重组尚未完成时用 `origin/dev-pre` / `origin/dev`"是当时的临时说法。**现在按上表读**：T5a/b/c → `origin/dev`；T6a/T6b → `origin/main`；T7a/T7b → `origin/main`。那几份包里引用的 `origin/dev-pre` = `77f2fd8a`（5.x）与 `origin/dev` = `1f466eea`（4.22.1）行号基线仍然有效，只是分支名要按上表换过来，实现者在自己的 base 上复核行号。
+⚠️ **这张表在重组前是反过来的**（`origin/dev` = 4.22.1、`origin/main` = 4.10.0 陈旧），T5a/b/c 和 T6a/T6b 正文里写的"重组尚未完成时用 `origin/dev-pre` / `origin/dev`"是当时的临时说法。**现在按上表读**：T5a/b/c → `origin/dev`；T6a/T6b → `origin/main`；T7a/T7b → `origin/main`；T7c/T7d → `origin/main`。那几份包里引用的 `origin/dev-pre` = `77f2fd8a`（5.x）与 `origin/dev` = `1f466eea`（4.22.1）行号基线仍然有效，只是分支名要按上表换过来，实现者在自己的 base 上复核行号。
 
-**包文档本身统一放在 `dev` 的 `docs/mms-web/bot-work/`**，包括 base 在 `main` 的那几个（T6a / T6b / T7a / T7b）。原因：这棵文档树只存在于 `dev`，`origin/main` 上没有 `docs/mms-web/bot-work/` 目录，在 `main` 上另起一棵会在 4.x→5.x 合流时和这份 README 必然冲突。
+**包文档本身统一放在 `dev` 的 `docs/mms-web/bot-work/`**，包括 base 在 `main` 的那几个（T6a / T6b / T7a / T7b / T7c / T7d）。原因：这棵文档树只存在于 `dev`，`origin/main` 上没有 `docs/mms-web/bot-work/` 目录，在 `main` 上另起一棵会在 4.x→5.x 合流时和这份 README 必然冲突。
 
 ## 派发时给模型的开场话（直接复制）
 
