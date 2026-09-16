@@ -1,9 +1,32 @@
-import type { Preset } from "./types";
+import type { Model, Preset, Service } from "./types";
 
 export function modelKey(preset: Preset) {
   return preset.modelId.startsWith(preset.providerId + ":")
     ? preset.modelId.slice(preset.providerId.length + 1)
     : preset.name;
+}
+
+/** Friendly channel name for daily UI. Never prefer a raw provider slug when a display name exists. */
+export function channelLabel(
+  preset: Pick<Preset, "channel" | "providerId"> | undefined,
+  models: Model[] = [],
+  services: Service[] = [],
+) {
+  if (!preset) return "";
+  const id = preset.channel || preset.providerId;
+  const service = services.find((item) => item.id === id || item.id === preset.providerId);
+  if (service?.name) return service.name;
+  const model = models.find(
+    (item) => item.providerId === id || item.providerId === preset.providerId,
+  );
+  if (model?.providerName) return model.providerName;
+  return id;
+}
+
+export function availableRoutesForModel(presets: Preset[], preset: Preset | undefined) {
+  if (!preset) return [];
+  const key = modelKey(preset);
+  return presets.filter((item) => modelKey(item) === key && item.available);
 }
 
 /** Keep the explorer's existing preference order; reselecting a model keeps its current route. */

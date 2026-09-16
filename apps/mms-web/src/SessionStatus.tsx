@@ -130,6 +130,9 @@ export function CurrentActivity({
     : "仍可查看历史记录";
   const hintText =
     phase === "closed" ? closedHint : activityHints[phase];
+  const route = [session.modelName, session.providerName || session.channel]
+    .filter(Boolean)
+    .join(" · ");
   return (
     <div
       className={`current-activity ${phase}`}
@@ -138,6 +141,7 @@ export function CurrentActivity({
       aria-atomic="true"
     >
       <Status session={session} disconnected={disconnected} />
+      {route && <span className="activity-route">{route}</span>}
       {!["completed", "stopped", "waiting"].includes(phase) && hintText && (
         <span className="activity-hint">{hintText}</span>
       )}

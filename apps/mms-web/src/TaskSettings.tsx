@@ -2,6 +2,7 @@ import { ChevronDown, ArrowUpRight } from "lucide-react";
 import type { Model, Preset, SessionDetail } from "./types";
 import type { LaunchFacts } from "./ModelExplorer";
 import { EffortSelect } from "./ModelExplorer";
+import { availableRoutesForModel, channelLabel } from "./modelSelection";
 import { QuickModelMenu } from "./QuickModelMenu";
 import { Popover } from "./Popover";
 
@@ -35,6 +36,7 @@ export function TaskSettings({
   settings: () => void;
 }) {
   const preset = presets.find((p) => p.id === value);
+  const extraChannels = availableRoutesForModel(presets, preset).length > 1;
   return (
     <Popover
       title="本次任务设置"
@@ -42,6 +44,9 @@ export function TaskSettings({
       label={
         <>
           <span className="task-model-name">{preset?.name || "选择模型"}</span>
+          {extraChannels && preset && (
+            <span className="task-route-name">{channelLabel(preset, models)}</span>
+          )}
           {planning && <span className="task-plan">规划</span>}
           <ChevronDown size={13} />
         </>
@@ -107,6 +112,8 @@ export function SessionSettings({
 }) {
   const r = detail.runtime;
   const locked = busy || !r?.alive || !!r?.stale || ["running", "waiting"].includes(detail.session.state);
+  const currentPreset = presets.find((item) => item.id === detail.session.presetId);
+  const extraChannels = availableRoutesForModel(presets, currentPreset).length > 1;
   const control = (name: string, value: unknown) =>
     action(`/sessions/${detail.session.id}/control`, { action: name, value });
   return (
@@ -116,6 +123,11 @@ export function SessionSettings({
       label={
         <>
           <span className="task-model-name">{detail.session.modelName}</span>
+          {extraChannels && (
+            <span className="task-route-name">
+              {detail.session.providerName || detail.session.channel}
+            </span>
+          )}
           {r?.planning && <span className="task-plan">规划</span>}
           <ChevronDown size={13} />
         </>

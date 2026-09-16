@@ -33,7 +33,7 @@ import {
 } from "lucide-react";
 import { BotPlan } from "./BotPlan";
 import { previewType } from "./bot-artifact-preview";
-import type { BotChildResult, BotPendingQuestion, BotTaskPlan, Preset } from "./types";
+import type { BotChildResult, BotPendingQuestion, BotTaskPlan, Model, Preset } from "./types";
 import { isPreview, mutate, request } from "./api";
 import { BotPresetPanel } from "./BotPresetPanel";
 import {
@@ -593,21 +593,6 @@ export function BotCard({
           </button>
           {menuOpen && (
             <div className="bot-card-menu" role="menu">
-              {onEdit && (
-                <button
-                  type="button"
-                  className="bot-card-menu-item"
-                  role="menuitem"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setMenuOpen(false);
-                    onEdit(bot);
-                  }}
-                >
-                  <Settings2 size={13} />
-                  编辑 Bot
-                </button>
-              )}
               {onDelete && (
                 <button
                   type="button"
@@ -1494,6 +1479,7 @@ export function BotChat({
   communications = [],
   onOpenCommunications,
   presets = [],
+  models = [],
   onUpdateBot,
   onExit,
   disabled = false,
@@ -1517,6 +1503,7 @@ export function BotChat({
   communications?: BotCommunication[];
   onOpenCommunications?: (peerBotId?: string) => void;
   presets?: Preset[];
+  models?: Model[];
   onUpdateBot?: (
     botId: string,
     patch: Partial<
@@ -2126,12 +2113,12 @@ export function BotChat({
               onClick={() => {
                 setOnboardingEditing((prev) => !prev);
               }}
-              aria-label="调整工作预设"
+              aria-label="打开设定"
               aria-pressed={onboardingEditing}
-              title="工作预设"
+              title="设定"
             >
               <Settings2 size={14} />
-              <span>预设</span>
+              <span>设定</span>
             </button>
           )}
           {bot && onOpenCommunications && (
@@ -2870,6 +2857,8 @@ export function BotChat({
         onClose={() => setOnboardingEditing(false)}
         onUpdateBot={onUpdateBot}
         preview={isPreview}
+        presets={presets}
+        models={models}
       />
     )}
     </>

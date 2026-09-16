@@ -3,7 +3,7 @@ import type { KeyboardEvent, ReactNode } from "react";
 import { Check, ChevronDown, ChevronUp, Search, SlidersHorizontal } from "lucide-react";
 import type { Model, Preset } from "./types";
 import { readRoutePreferences } from "./ModelExplorer";
-import { modelKey, selectModelRoute } from "./modelSelection";
+import { channelLabel, modelKey, selectModelRoute } from "./modelSelection";
 import { VendorMark } from "./VendorMark";
 import "./quick-model.css";
 
@@ -62,7 +62,7 @@ export function QuickModelMenu({ presets, models, value, favorites, change, clos
 
   const advancedToggle = <button type="button" className="quick-model-advanced-toggle"
     data-guide="model-advanced" aria-expanded={advanced} onClick={() => setAdvanced(!advanced)}>
-    <SlidersHorizontal size={15} /><span>通道与高级选项</span>
+    <SlidersHorizontal size={15} /><span>高级选项</span>
     {advanced ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
   </button>;
 
@@ -95,12 +95,15 @@ export function QuickModelMenu({ presets, models, value, favorites, change, clos
           {shown.map(([key, options]) => {
             const preset = selectModelRoute(options, favorites, preferences, value);
             const active = !!selected && modelKey(selected) === key;
+            const extraChannels = options.filter((item) => item.available).length > 1;
+            const label = channelLabel(preset, models);
             return <button type="button" key={key} className="quick-model-option" aria-pressed={active}
               disabled={disabled || pending || !preset.available}
-              title={preset.available ? `使用通道：${preset.channel || preset.providerId}` : preset.reason || "此模型暂不可用"}
+              title={preset.available ? (extraChannels ? `将使用：${label}` : preset.name) : preset.reason || "此模型暂不可用"}
               onClick={() => void choose(preset.id, true)}>
               <VendorMark name={preset.name} family={models.find(m => m.id === preset.modelId)?.family} />
               <span>{preset.name}</span>
+              {extraChannels && preset.available && <small className="quick-model-channel">{label}</small>}
               {!preset.available ? <small>不可用</small> : active && <Check size={15} />}
             </button>;
           })}
@@ -114,12 +117,12 @@ export function QuickModelMenu({ presets, models, value, favorites, change, clos
       {advancedToggle}
       {advanced && <fieldset disabled={pending}>
         <label className="task-setting-row">
-          <span>本次通道</span>
+          <span>走哪条通道</span>
           <select aria-label="本次模型通道" value={value} disabled={disabled || !routes.length}
             onChange={e => void choose(e.target.value, false)}>
             {!selected && <option value={value}>先选择模型</option>}
             {routes.map(p => <option key={p.id} value={p.id} disabled={!p.available}>
-              {p.channel || p.providerId}{preferences[p.id]?.preferred ? " · 首选" : ""}{!p.available ? " · 不可用" : ""}
+              {channelLabel(p, models)}{p.id === value ? "（当前）" : ""}{preferences[p.id]?.preferred ? "（默认）" : ""}{!p.available ? "（不可用）" : ""}
             </option>)}
           </select>
         </label>

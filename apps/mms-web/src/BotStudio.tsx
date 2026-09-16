@@ -3,7 +3,7 @@ import type { CSSProperties } from "react";
 import { ArrowLeft, CircleAlert, LoaderCircle, RefreshCw, X } from "lucide-react";
 import { isPreview, mutate, request } from "./api";
 import type { BotNotification, BotNotificationType, Bootstrap, Preset } from "./types";
-import { AutoWakeControl, BotList, BotWorkspace, BotChat, PixelAvatar, PIXEL_AVATARS, PIXEL_AVATAR_COLORS } from "./Bot";
+import { BotList, BotWorkspace, BotChat, PixelAvatar, PIXEL_AVATARS, PIXEL_AVATAR_COLORS } from "./Bot";
 import { ModelPicker } from "./LaunchOptions";
 import { BotMemoryPanel } from "./BotMemoryPanel";
 import { BotCommunications } from "./BotCommunications";
@@ -43,6 +43,7 @@ type BotStudioProps = {
   data?: Bootstrap;
   onOpenSession?: (id: string) => void;
   onExit?: () => void;
+  returnLabel?: string;
   enterToSend?: boolean;
 };
 const emptyBootstrap: Bootstrap = {
@@ -141,6 +142,25 @@ function BotEditor({
   const [favorites, setFavorites] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const dirty =
+    name !== (bot?.name || "") ||
+    description !== (bot?.description || "") ||
+    systemPrompt !== (bot?.systemPrompt || "") ||
+    (presetId || "") !== (bot?.presetId || "") ||
+    wakeEnabled !== Boolean(bot?.wakeEnabled) ||
+    avatarId !== (bot?.avatarId || avatarId) ||
+    avatarColor !== (bot?.avatarColor || avatarColor);
+  function requestClose() {
+    if (
+      dirty &&
+      typeof window !== "undefined" &&
+      typeof window.confirm === "function" &&
+      !window.confirm("默认模型和 Bot 设定还没保存。离开将丢掉这次修改。")
+    ) {
+      return;
+    }
+    onClose();
+  }
   async function save() {
     if (!name.trim() || busy || preview) return;
     setBusy(true);
@@ -176,7 +196,7 @@ function BotEditor({
       className="bot-dialog-scrim"
       role="presentation"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
+        if (event.target === event.currentTarget) requestClose();
       }}
     >
       <section
@@ -197,7 +217,7 @@ function BotEditor({
           <button
             className="bot-icon-button"
             type="button"
-            onClick={onClose}
+            onClick={() => requestClose()}
             aria-label="关闭"
           >
             <X size={16} />
@@ -298,7 +318,7 @@ function BotEditor({
           </p>
         )}
         <div className="bot-dialog-actions">
-          <button className="bot-quiet-button" type="button" onClick={onClose}>
+          <button className="bot-quiet-button" type="button" onClick={() => requestClose()}>
             取消
           </button>
           <button
@@ -326,6 +346,7 @@ export function BotStudio({
   data = emptyBootstrap,
   onOpenSession,
   onExit,
+  returnLabel = "返回 Pilot",
   enterToSend,
 }: BotStudioProps) {
   const initial = data as BotBootstrap;
@@ -903,7 +924,6 @@ export function BotStudio({
                 ),
               );
           }}
-          onEdit={(bot) => setEditor(bot)}
           onDelete={(bot) => {
             setDeleteError("");
             setDeleteTarget(bot);
@@ -950,45 +970,15 @@ export function BotStudio({
             {notifyError}
           </p>
         )}
-        <AutoWakeControl
-          enabled={Boolean(activeBot?.wakeEnabled)}
-          onChange={(enabled) => {
-            const bot = activeBot;
-            if (bot)
-              void run<BotDefinition>(`/bots/${encodeURIComponent(bot.id)}`, {
-                name: bot.name,
-                description: bot.description,
-                systemPrompt: bot.systemPrompt,
-                presetId: bot.presetId,
-                wakeEnabled: enabled,
-              })
-                .then((saved) => {
-                  setBots((current) =>
-                    current.map((item) =>
-                      item.id === saved.id ? saved : item,
-                    ),
-                  );
-                  refreshInBackground();
-                })
-                .catch((cause) =>
-                  setLoadError(
-                    cause instanceof Error
-                      ? cause.message
-                      : "自动唤醒设置保存失败。",
-                  ),
-                );
-          }}
-          disabled={isPreview || !activeBot}
-        />
         {onExit && (
           <button
             className="bot-pilot-return"
             type="button"
             onClick={onExit}
-            title="返回 MMS Pilot"
+            title={returnLabel}
           >
             <ArrowLeft size={14} />
-            返回 Pilot
+            {returnLabel}
           </button>
         )}
       </aside>
@@ -1064,6 +1054,7 @@ export function BotStudio({
           }
           onOpenMemory={() => setMemoryOpen(true)}
           presets={data.presets}
+          models={data.models}
           onUpdateBot={async (botId, patch) => {
             const current = bots.find((item) => item.id === botId);
             if (!current) return;

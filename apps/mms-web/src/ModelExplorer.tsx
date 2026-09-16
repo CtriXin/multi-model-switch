@@ -14,7 +14,7 @@ import {
 import type { Model, Preset } from "./types";
 import { request } from "./api";
 import { VendorMark, vendorTint } from "./VendorMark";
-import { modelKey, selectModelRoute } from "./modelSelection";
+import { channelLabel, modelKey, selectModelRoute } from "./modelSelection";
 export { modelKey } from "./modelSelection";
 
 export interface LaunchFacts {
@@ -228,7 +228,7 @@ export function ModelExplorer({
       <div className="explorer-columns">
         <div className="model-groups" aria-label="模型目录">
           <p className="eyebrow">
-            {shown.length} 个模型 · {presets.length} 条通道
+            {shown.length} 个模型
           </p>
           {shown.map(([key, ps]) => (
             <button
@@ -240,7 +240,7 @@ export function ModelExplorer({
               }
               onClick={() =>
                 change(
-                  selectModelRoute(ps, favorites, prefs).id,
+                  selectModelRoute(ps, favorites, prefs, value).id,
                 )
               }
             >
@@ -261,9 +261,11 @@ export function ModelExplorer({
               <span>
                 <strong>{ps[0].name}</strong>
                 <small>
-                  {ps.length} 条通道
+                  {ps.filter((p) => p.available).length > 1
+                    ? `${ps.filter((p) => p.available).length} 个通道`
+                    : ""}
                   {ps.some((p) => favorites.includes(p.modelId))
-                    ? " · 已收藏"
+                    ? `${ps.filter((p) => p.available).length > 1 ? " · " : ""}常用`
                     : ""}
                 </small>
               </span>
@@ -283,7 +285,7 @@ export function ModelExplorer({
                     {info?.family || "模型"} / {selected.harness.toUpperCase()}
                   </span>
                   <h3>{selected.name}</h3>
-                  <p>同一个模型，查看各通道的实际能力与配置。</p>
+                  <p>同一个模型可以走不同连接。点选后用于新会话。</p>
                 </div>
                 <div className="model-facts">
                   <span>
@@ -308,8 +310,8 @@ export function ModelExplorer({
                   </span>
                 </div>
                 <div className="channel-heading">
-                  <h4>默认通道</h4>
-                  <span>{routes.length} 条</span>
+                  <h4>走哪条连接</h4>
+                  <span>{routes.length > 1 ? `${routes.length} 个` : "这条"}</span>
                 </div>
                 <div className="channel-list">
                   {routes.map((p) => (
@@ -329,10 +331,10 @@ export function ModelExplorer({
                           {p.id === value && <Check size={12} />}
                         </span>
                         <span>
-                          <strong>{p.channel || p.providerId}</strong>
+                          <strong>{channelLabel(p, models)}</strong>
                           <small>
                             {prefs[p.id]?.note || p.description}
-                            {prefs[p.id]?.preferred ? " · Web 首选" : ""}
+                            {prefs[p.id]?.preferred ? " · 默认" : ""}
                           </small>
                           {!p.available && <small>{p.reason}</small>}
                         </span>
@@ -433,7 +435,7 @@ export function ModelExplorer({
                         patch({ preferred: e.target.checked });
                       }}
                     />
-                    设为这个模型的 Web 首选通道
+                    设为这个模型的默认通道
                   </label>
                   {facts && (
                     <label>

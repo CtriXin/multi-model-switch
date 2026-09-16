@@ -1025,6 +1025,21 @@ body,
   color: var(--ink);
   border-bottom-color: var(--accent);
 }
+.runtime-diagnostics {
+  margin-top: 18px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.runtime-diagnostics summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: max(11px, 0.8571rem);
+  padding: 6px 0;
+}
+.runtime-diagnostics summary:hover,
+.runtime-diagnostics summary:focus-visible {
+  color: var(--ink);
+}
 .settings-shell .settings-page,
 .settings-shell .general-settings {
   flex: 1;

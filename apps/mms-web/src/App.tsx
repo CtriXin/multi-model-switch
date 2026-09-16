@@ -272,8 +272,9 @@ export function App() {
   const [presetId, setPresetId] = useState(() =>
     readSetting("mms-web-preset", ""),
   );
-  const [settingsEdit, setSettingsEdit] = useState({dirty: false, busy: false});
+  const [settingsEdit, setSettingsEdit] = useState<{dirty: boolean; busy: boolean; save?: () => void}>({dirty: false, busy: false});
   const [pendingNavigation, setPendingNavigation] = useState<(() => void) | null>(null);
+  const [botsReturnId, setBotsReturnId] = useState("");
   const [search, setSearch] = useState(false);
   const [query, setQuery] = useState("");
   const [attention, setAttention] = useState<
@@ -1605,7 +1606,19 @@ export function App() {
           <button
             className={"settings-entry bot-entry" + (page === "bots" ? " active" : "")}
             title="Bot 工作台"
-            onClick={() => navigate("bots")}
+            onClick={() => {
+              requestNavigation(() => {
+                setBotsReturnId(page === "session" ? selectedId : "");
+                setGuideStep(null);
+                setSettingsOpen(false);
+                setPage("bots");
+                history.replaceState(null, "", location.pathname + location.search + "#page=bots");
+                setNavOpen(false);
+                setSelectedId("");
+                setDetail(null);
+                currentSelection.current = "";
+              });
+            }}
           >
             <BotIcon size={17} />
             <span>Bot 工作台</span>
@@ -1674,6 +1687,7 @@ export function App() {
             <HelpGuide ready={isGuideReady({ loading, connected, modelReady, setupOpen, settingsOpen, page })} modelReady={modelReady} open={guideOpen} setOpen={(open) => { if (open) setGuideStep(null); setGuideOpen(open); }} hasSession={page === "session" && !!detail} navigate={guideNavigate} startTour={startIntroduction} startConnection={data.capabilities.configure ? () => requestNavigation(() => { setGuideOpen(false); setGuideStep(null); setSettingsOpen(false); setSetupOpen(true); }) : undefined} />
             {detail && (
               <Status
+                compact
                 session={detail.session}
                 disconnected={!connected || statusesStale || !!sessionError}
               />
@@ -1962,7 +1976,20 @@ export function App() {
             refresh={() => void load()}
           />
         )}
-        {page === "bots" && !settingsOpen && <BotStudio data={data} enterToSend={enterToSend} onOpenSession={openSession} onExit={() => navigate("new")} />}
+        {page === "bots" && !settingsOpen && (
+          <BotStudio
+            data={data}
+            enterToSend={enterToSend}
+            onOpenSession={openSession}
+            returnLabel={botsReturnId ? "返回对话" : "返回 Pilot"}
+            onExit={() => {
+              const id = botsReturnId;
+              setBotsReturnId("");
+              if (id) openSession(id);
+              else navigate("new");
+            }}
+          />
+        )}
         {page === "session" && (
           <div className={"session-layout " + (panel ? "with-panel" : "")}>
             <div className="conversation">
@@ -2605,11 +2632,14 @@ export function App() {
           </div>
         </Dialog>
       )}
-      {pendingNavigation && <Dialog title="保留未保存的修改？" close={() => setPendingNavigation(null)}>
-        <p>通道地址、Key、模型或 effort 还有未保存的修改。可以继续编辑，或放弃本次修改后离开。</p>
+      {pendingNavigation && <Dialog title="通道设置尚未保存" close={() => setPendingNavigation(null)}>
+        <p>模型勾选、连接信息或默认 effort 还没写入配置。离开会丢掉这次修改。</p>
         <div className="dialog-actions">
+          <button className="button" onClick={() => { const action = pendingNavigation; setPendingNavigation(null); setSettingsEdit({dirty:false,busy:false}); action(); }}>放弃修改</button>
           <button className="button" onClick={() => setPendingNavigation(null)}>继续编辑</button>
-          <button className="button primary" onClick={() => { const action = pendingNavigation; setPendingNavigation(null); setSettingsEdit({dirty:false,busy:false}); action(); }}>放弃修改并离开</button>
+          {settingsEdit.save && (
+            <button className="button primary" onClick={() => { setPendingNavigation(null); settingsEdit.save?.(); }}>检查并保存</button>
+          )}
         </div>
       </Dialog>}
     </div>

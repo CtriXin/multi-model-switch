@@ -1,5 +1,5 @@
 import { type ReactNode, useState } from "react";
-import { Sun, Moon, Monitor, Minus, Plus, SlidersHorizontal, Palette, Settings2, Cpu } from "lucide-react";
+import { Sun, Moon, Monitor, Minus, Plus, SlidersHorizontal, Palette, Laptop, Copy } from "lucide-react";
 import type { Bootstrap } from "./types";
 import { RemoteAccessSection } from "./RemoteAccess";
 import { Models } from "./Models";
@@ -59,7 +59,7 @@ export function SettingsPage({
   effortChanged: (id: string) => void;
   requestNavigation: (action: () => void) => void;
   startTask: (text: string) => void;
-  editStateChanged: (state: {dirty: boolean; busy: boolean}) => void;
+  editStateChanged: (state: {dirty: boolean; busy: boolean; save?: () => void}) => void;
   autoCollapseProcess: boolean;
   setAutoCollapseProcess: (on: boolean) => void;
   fontFamily: string;
@@ -95,21 +95,14 @@ export function SettingsPage({
           onClick={() => requestNavigation(() => setTab("appearance"))}
         >
           <Palette size={16} />
-          外观
+          外观与使用
         </button>
         <button
-          className={tab === "usage" ? "active" : ""}
-          onClick={() => requestNavigation(() => setTab("usage"))}
+          className={tab === "local" ? "active" : ""}
+          onClick={() => requestNavigation(() => setTab("local"))}
         >
-          <Settings2 size={16} />
-          使用
-        </button>
-        <button
-          className={tab === "runtime" ? "active" : ""}
-          onClick={() => requestNavigation(() => setTab("runtime"))}
-        >
-          <Cpu size={16} />
-          运行环境
+          <Laptop size={16} />
+          本机
         </button>
         <AppVersion version={data.appVersion} onClick={openUpdates} updateAvailable={updateAvailable} />
       </nav>
@@ -276,9 +269,6 @@ export function SettingsPage({
               onChange={(e) => setBoldText(e.target.checked)}
             />
           </label>
-        </section>
-      ) : tab === "usage" ? (
-        <section className="general-settings">
           <label className="preference-row">
             <div>
               <h2>按 Enter 发送</h2>
@@ -301,10 +291,6 @@ export function SettingsPage({
             <input type="checkbox" role="switch" aria-label="完成后自动收起过程" checked={autoCollapseProcess} onChange={e => setAutoCollapseProcess(e.target.checked)} />
           </label>
           <label className="preference-row">
-            <div><h2>显示命令行会话</h2><p>把用 <code>mms</code> / <code>mmf</code> 在终端里开始的会话一起列出来。它们默认只读；要在这里继续，打开会话后选「接入并继续」。关掉后立即从列表消失。</p></div>
-            <input type="checkbox" role="switch" aria-label="显示命令行会话" checked={showCliSessions} onChange={e => setShowCliSessions(e.target.checked)} />
-          </label>
-          <label className="preference-row">
             <div>
               <h2>选择即复制</h2>
               <p>选中对话里的文字后自动复制。会覆盖剪贴板里原有的内容；输入框中的选择不受影响。默认关闭。</p>
@@ -317,19 +303,21 @@ export function SettingsPage({
               onChange={(e) => setSelectToCopy(e.target.checked)}
             />
           </label>
-          <RemoteAccessSection startTask={startTask} />
-          <SkillSourcesSetting />
-          {/* State, not documentation: it says which config the running Pilot
-              reads. The shortcut and workspace explanations that used to sit
-              here are in the guide and under the input box already. */}
-          <p className="settings-footnote">
-            {data.capabilities.configure
-              ? "当前使用 Web 独立配置，可在模型与通道中连接服务。"
-              : "当前读取已有 MMF 配置。收藏、通道备注与 Web 默认值保存于此浏览器。"}
-          </p>
         </section>
       ) : (
-        <section className="general-settings runtime-settings" aria-label="运行环境设置">
+        <section className="general-settings runtime-settings" aria-label="本机设置">
+          <label className="preference-row">
+            <div><h2>显示命令行会话</h2><p>把用 <code>mms</code> / <code>mmf</code> 在终端里开始的会话一起列出来。它们默认只读；要在这里继续，打开会话后选「接入并继续」。关掉后立即从列表消失。</p></div>
+            <input type="checkbox" role="switch" aria-label="显示命令行会话" checked={showCliSessions} onChange={e => setShowCliSessions(e.target.checked)} />
+          </label>
+          <RemoteAccessSection startTask={startTask} />
+          <SkillSourcesSetting />
+          <p className="settings-footnote">
+            Bot 的默认模型和通知在 Bot 工作台的「设定 / 记忆」里修改。快捷键见右上角 ?。
+          </p>
+          <details className="runtime-diagnostics">
+            <summary>诊断信息</summary>
+            <section className="runtime-settings" aria-label="运行环境诊断">
           <div className="platform-capability" aria-label="运行环境能力">
             <div className="platform-capability-header">
               <div>
@@ -421,6 +409,14 @@ export function SettingsPage({
                 <h2>配置目录</h2>
                 <p><code>{data.platform.configRoot}</code></p>
               </div>
+              <button
+                type="button"
+                className="button subtle"
+                onClick={() => void navigator.clipboard.writeText(data.platform!.configRoot!)}
+              >
+                <Copy size={14} />
+                复制
+              </button>
             </div>
           )}
           {data.platform?.stateRoot && (
@@ -429,6 +425,14 @@ export function SettingsPage({
                 <h2>状态目录</h2>
                 <p><code>{data.platform.stateRoot}</code></p>
               </div>
+              <button
+                type="button"
+                className="button subtle"
+                onClick={() => void navigator.clipboard.writeText(data.platform!.stateRoot!)}
+              >
+                <Copy size={14} />
+                复制
+              </button>
             </div>
           )}
           <p className="settings-footnote">
@@ -436,6 +440,8 @@ export function SettingsPage({
               ? "当前使用 Web 独立配置，可在模型与通道中连接服务。"
               : "当前读取已有 MMF 配置。收藏、通道备注与 Web 默认值保存于此浏览器。"}
           </p>
+            </section>
+          </details>
         </section>
       )}
     </div>

@@ -95,11 +95,16 @@ test("进入 Bot 页关闭引导：导航到 bots 时必须关闭引导且不挂
     "navigate must clear guideStep"
   );
 
-  // 确保侧栏入口导航到 bots
+  // 确保侧栏入口进入 bots 并清掉引导
   assert.match(
     appContent,
-    /onClick=\{\(\) => navigate\("bots"\)\}/,
-    "sidebar Bot entry must invoke navigate('bots')"
+    /setPage\("bots"\)/,
+    "sidebar Bot entry must set page to bots"
+  );
+  assert.match(
+    appContent,
+    /setBotsReturnId\(page === "session" \? selectedId : ""\)/,
+    "sidebar Bot entry must remember the current session"
   );
 });
 

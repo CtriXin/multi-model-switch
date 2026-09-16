@@ -223,6 +223,10 @@
   white-space: normal;
   overflow: visible;
 }
+.activity-route {
+  font-size: max(11px, 0.7857rem);
+  color: var(--muted);
+}
 .current-activity .activity-hint {
   font-size: max(11px, 0.7857rem);
   color: var(--muted);
