@@ -85,7 +85,8 @@ export interface Session {
     turnStartedAt?: string;
   } | null;
   updatedAt: string;
-  owner: "web" | "cli" | "glint" | "external";
+  owner: "web" | "cli" | "bot" | "glint" | "external";
+  botId?: string;
   capabilities: {
     send: boolean;
     stop: boolean;
@@ -280,4 +281,116 @@ export interface ConfigPreview {
   changes: { label: string; before: string; after: string }[];
   warnings: string[];
 }
-export type Page = "new" | "models" | "session";
+export interface UpdateHistoryItem {
+  version: string;
+  notes: string;
+  upgradeNotice?: string;
+  publishedAt?: string;
+}
+export type Page = "new" | "models" | "bots" | "session";
+
+// Bot 结果送达（T3）：页面通知与 webhook 共用同一事件形状。
+export type BotNotificationType =
+  | "task.completed"
+  | "task.failed"
+  | "task.waiting"
+  | "task.retrying";
+export interface BotNotification {
+  id: string;
+  at: string;
+  type: BotNotificationType;
+  botId: string;
+  botName: string;
+  taskId: string;
+  title: string;
+  summary: string;
+  waitReason?: "approval" | "input" | null;
+  link: string;
+}
+export interface BotNotifyWebhook {
+  url: string;
+  events: BotNotificationType[];
+  secret: string;
+}
+export interface BotNotifyConfig {
+  webhooks: BotNotifyWebhook[];
+  events: BotNotificationType[];
+  timeoutSeconds?: number;
+}
+
+/** Coordinator plan attached to a Bot task (T2/T2b). */
+export type BotPlanStepStatus =
+  | "pending"
+  | "ready"
+  | "running"
+  | "done"
+  | "failed"
+  | "skipped"
+  | "dispatched" // legacy alias of running
+  | "blocked"; // legacy alias of skipped
+export interface BotPlanStepResult {
+  summary: string;
+  conclusion?: string;
+  evidence?: string;
+  artifacts?: Array<{ taskId: string; url?: string; label?: string }>;
+}
+export interface BotPlanStep {
+  id: string;
+  kind: "execute" | "delegate" | string;
+  botId: string;
+  goal?: string;
+  dependsOn?: string[];
+  presetId?: string | null;
+  status: BotPlanStepStatus | string;
+  taskId?: string | null;
+  error?: string;
+  onFailure?: "retry" | "skip" | "abort";
+  result?: BotPlanStepResult;
+  policyApplied?: boolean;
+  attempts?: number;
+}
+export type BotPlanStatus =
+  | "proposed"
+  | "auto"
+  | "approved"
+  | "rejected"
+  | "running"
+  | "merging"
+  | "done"
+  | "failed"
+  | "cancelled";
+export interface BotPlanHistoryEntry {
+  at: string;
+  from: string | null;
+  to: string;
+  by: string;
+}
+export interface BotTaskPlan {
+  version?: number;
+  mode: "direct" | "delegate";
+  reason?: string;
+  steps?: BotPlanStep[];
+  candidates?: Array<{ id: string; name: string; description?: string }>;
+  merge?: string;
+  source?: "model" | "keywords" | "fallback" | "off" | "user" | "direct-first";
+  status?: BotPlanStatus;
+  history?: BotPlanHistoryEntry[];
+  modelDecision?: boolean;
+}
+export interface BotChildResult {
+  stepId?: string;
+  botId?: string;
+  taskId?: string | null;
+  status?: string;
+  summary: string;
+  evidence?: string;
+  artifacts?: Array<{ taskId: string; url?: string; label?: string }>;
+}
+
+/** Bot pending question awaiting user reply (T3d / T3d-ui). */
+export interface BotPendingQuestion {
+  taskId: string;
+  question: string;
+  options: string[];
+  since?: string;
+}

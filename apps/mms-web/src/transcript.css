@@ -478,8 +478,11 @@
     animation: none !important;
   }
   .outline-text,
-  .conversation-content .message-actions {
+  .conversation-content .message-actions,
+  .turn-working-message,
+  .turn-process-live-dot {
     transition: none;
+    animation: none !important;
   }
 }
 
@@ -489,7 +492,7 @@
   border: 0; border-radius: 6px; background: transparent; color: var(--muted);
   font: inherit; font-size: max(11px, 0.8571rem); cursor: pointer;
 }
-.turn-process-toggle:hover, .transcript-process-actions button:hover { background: var(--surface-hover, #f3f3f7); color: var(--text); }
+.turn-process-toggle:hover, .transcript-process-actions button:hover { background: var(--surface-hover, var(--soft)); color: var(--text, var(--ink)); }
 .turn-process-toggle span { opacity: .75; font-size: max(11px, 0.7857rem); }
 .turn-process { margin: 8px 0 18px; }
 .turn-process > .turn-process-toggle { margin-left: 30px; margin-bottom: 6px; }
@@ -497,4 +500,68 @@
 .transcript-process-actions { display: flex; gap: 8px; justify-content: flex-end; margin: 14px 0; }
 @media (max-width: 600px) { .turn-process > .turn-process-toggle, .turn-process-footer { margin-left: 0; } }
 
-.turn-process-toggle .process-failure { color: var(--danger, #b42318); font-weight: 600; }
+.turn-process-toggle .process-failure { color: var(--danger); font-weight: 600; }
+
+/* Working status placeholder when process is collapsed or answer pending */
+.turn-working-message {
+  animation: turn-working-fade-in var(--duration-base, 0.16s) ease-out;
+}
+.turn-working-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 32px;
+  padding: 5px 14px 5px 10px;
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--soft) 60%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+  color: var(--muted);
+  font-size: max(11px, 0.8571rem);
+  line-height: 1.4;
+  user-select: none;
+  transition: background var(--duration-base, 0.16s) ease, border-color var(--duration-base, 0.16s) ease;
+}
+.turn-working-indicator:hover {
+  background: color-mix(in srgb, var(--soft) 90%, var(--surface));
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
+}
+.turn-working-indicator .activity-bars {
+  color: var(--accent);
+  flex-shrink: 0;
+  margin-right: 1px;
+}
+.turn-working-label {
+  color: var(--muted);
+  font-weight: 500;
+  font-size: max(11px, 0.8571rem);
+  letter-spacing: -0.01em;
+  max-width: 480px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.turn-process-live-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-left: 2px;
+  animation: pulse 1.6s ease-in-out infinite;
+  flex-shrink: 0;
+}
+@media (max-width: 600px) {
+  .turn-working-label {
+    max-width: 220px;
+  }
+}
+@keyframes turn-working-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

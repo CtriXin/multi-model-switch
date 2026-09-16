@@ -1,0 +1,89 @@
+{
+ "id": "task_0326ba1c2e2b4537",
+ "botId": "bot_a864caf4658b488c",
+ "prompt": "用三句话解释什么是 git rebase",
+ "parentTaskId": null,
+ "status": "completed",
+ "runAt": null,
+ "children": [],
+ "result": "git rebase 会把当前分支上的提交逐个取出，重新应用到目标分支的最新提交之上，相当于给这些提交换一个基线。它的典型用途是整理本地提交历史（合并、改写、重排自己的提交），以及让特性分支保持线性历史、不留多余的 merge 提交。它最大的代价是改写历史并生成新的 commit hash，所以用在已推送的公共分支上会让协作者面对分叉的历史、造成混乱。",
+ "error": null,
+ "acceptedAt": null,
+ "sessionId": "s-72b0b95712cc",
+ "waitReason": null,
+ "turn": 1,
+ "createdAt": "2026-09-15T03:51:04.300+00:00",
+ "updatedAt": "2026-09-15T03:51:07.216+00:00",
+ "priority": 50,
+ "queueReason": null,
+ "coordinatorPlan": {
+  "version": 2,
+  "mode": "direct",
+  "ownerBotId": "bot_a864caf4658b488c",
+  "reason": "普通任务由当前 Bot 直接完成。",
+  "steps": [
+   {
+    "id": "s1",
+    "kind": "execute",
+    "botId": "bot_a864caf4658b488c",
+    "goal": "",
+    "dependsOn": [],
+    "presetId": null,
+    "status": "pending",
+    "taskId": null,
+    "onFailure": "retry"
+   }
+  ],
+  "candidates": [],
+  "merge": "owner",
+  "modelDecision": false,
+  "source": "direct-first",
+  "status": "done",
+  "history": [
+   {
+    "at": "2026-09-15T03:51:04.303+00:00",
+    "from": null,
+    "to": "auto",
+    "by": "system"
+   },
+   {
+    "at": "2026-09-15T03:51:04.364+00:00",
+    "from": "auto",
+    "to": "running",
+    "by": "system"
+   },
+   {
+    "at": "2026-09-15T03:51:07.215+00:00",
+    "from": "running",
+    "to": "merging",
+    "by": "system"
+   },
+   {
+    "at": "2026-09-15T03:51:07.215+00:00",
+    "from": "merging",
+    "to": "done",
+    "by": "system"
+   }
+  ]
+ },
+ "executionMode": "direct",
+ "collaborationRequested": false,
+ "outcome": {
+  "summary": "git rebase 会把当前分支上的提交逐个取出，重新应用到目标分支的最新提交之上，相当于给这些提交换一个基线。它的典型用途是整理本地提交历史（合并、改写、重排自己的提交），以及让特性分支保持线性历史、不留多余的 merge 提交。它最大的代价是改写历史并生成新的 commit hash，所以用在已推送的公共分支上会让协作者面对分叉的历史、造成混乱。",
+  "evidence": null,
+  "changes": null,
+  "pending": null,
+  "next": null,
+  "raw": "git rebase 会把当前分支上的提交逐个取出，重新应用到目标分支的最新提交之上，相当于给这些提交换一个基线。它的典型用途是整理本地提交历史（合并、改写、重排自己的提交），以及让特性分支保持线性历史、不留多余的 merge 提交。它最大的代价是改写历史并生成新的 commit hash，所以用在已推送的公共分支上会让协作者面对分叉的历史、造成混乱。"
+ },
+ "startedAt": "2026-09-15T03:51:04.301+00:00",
+ "cancelRequested": false,
+ "waitRequested": false,
+ "forceStopSent": false,
+ "cancelAt": null,
+ "completedAt": "2026-09-15T03:51:07.215+00:00",
+ "planResolved": true,
+ "planDecidedAt": "2026-09-15T03:51:04.303+00:00",
+ "processId": 40299,
+ "model": "deepseek-v4-flash"
+}

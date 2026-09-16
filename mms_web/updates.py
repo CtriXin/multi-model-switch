@@ -86,6 +86,33 @@ def release_notes(version):
         return ''
 
 
+def release_history(root=None, limit=30):
+    """Every release note shipped with this install, newest first.
+
+    Same local source as release_notes(): the docs folder next to the code,
+    so the list is exactly what this install can say about itself and never
+    a network guess. Missing folder means an empty list, not an error.
+    """
+    base = Path(root) if root else Path(__file__).resolve().parent.parent / 'docs' / 'mms-web'
+    items = []
+    try:
+        paths = list(base.glob('RELEASE-v*.md'))
+    except OSError:
+        return []
+    for path in paths:
+        tag = path.name[len('RELEASE-v'):-len('.md')]
+        parsed = version_tuple(tag)
+        if parsed is None:
+            continue
+        try:
+            body = path.read_text(encoding='utf-8')[:16000]
+        except OSError:
+            continue
+        items.append((parsed, {'version': tag, 'notes': body, 'upgradeNotice': upgrade_notice(body)}))
+    items.sort(key=lambda item: item[0], reverse=True)
+    return [item[1] for item in items[:limit]]
+
+
 def fetch_release():
     request = urllib.request.Request(RELEASE_API, headers={'User-Agent': 'MMS-Pilot', 'Accept': 'application/vnd.github+json'})
     with urllib.request.build_opener(NoRedirect()).open(request, timeout=10) as response:

@@ -1,0 +1,88 @@
+{
+  "id": "task_4c93fc74374a41ab",
+  "botId": "bot_c21847cb0bf3405c",
+  "prompt": "让 写手B 写 d.txt 内容 foo，让 写手C 写 e.txt 内容 bar，完成后汇总",
+  "parentTaskId": null,
+  "status": "completed",
+  "runAt": null,
+  "children": [
+    "task_5a5fb92caba44311",
+    "task_94b8fe3c113047df"
+  ],
+  "result": "两个子任务均完成并经本地复核：d.txt 内容恰为 foo（3 字节），e.txt 内容恰为 bar（3 字节），od -c 校验无换行或多余字符，合计 6 字节。",
+  "error": null,
+  "acceptedAt": null,
+  "waitReason": null,
+  "turn": 2,
+  "createdAt": "2026-09-12T08:41:13.831+00:00",
+  "updatedAt": "2026-09-12T08:43:17.953+00:00",
+  "priority": 50,
+  "queueReason": null,
+  "coordinatorPlan": {
+    "version": 2,
+    "mode": "delegate",
+    "ownerBotId": "bot_c21847cb0bf3405c",
+    "reason": "两个子目标分别对应写手B和写手C的独立写文件职责，且汇总由负责 Bot 完成",
+    "steps": [
+      {
+        "id": "s1",
+        "kind": "delegate",
+        "botId": "bot_6b9734c2ec4b460f",
+        "goal": "在工作目录写 d.txt，内容恰为 foo（不带多余换行或空格），完成后报告写入结果",
+        "dependsOn": [],
+        "presetId": null,
+        "status": "done",
+        "taskId": "task_5a5fb92caba44311"
+      },
+      {
+        "id": "s2",
+        "kind": "delegate",
+        "botId": "bot_506a0079d1f04419",
+        "goal": "在工作目录写 e.txt，内容恰为 bar（不带多余换行或空格），完成后报告写入结果",
+        "dependsOn": [],
+        "presetId": null,
+        "status": "done",
+        "taskId": "task_94b8fe3c113047df"
+      }
+    ],
+    "candidates": [
+      {
+        "id": "bot_6b9734c2ec4b460f",
+        "name": "写手B",
+        "description": "负责在工作目录写文件"
+      },
+      {
+        "id": "bot_506a0079d1f04419",
+        "name": "写手C",
+        "description": "负责在工作目录写文件"
+      }
+    ],
+    "merge": "owner",
+    "modelDecision": true,
+    "source": "model",
+    "status": "approved"
+  },
+  "executionMode": "delegate",
+  "collaborationRequested": false,
+  "outcome": {
+    "summary": "两个子任务均完成并经本地复核：d.txt 内容恰为 foo（3 字节），e.txt 内容恰为 bar（3 字节），od -c 校验无换行或多余字符，合计 6 字节。",
+    "evidence": null,
+    "changes": null,
+    "pending": null,
+    "next": null,
+    "raw": "两个子任务均完成并经本地复核：d.txt 内容恰为 foo（3 字节），e.txt 内容恰为 bar（3 字节），od -c 校验无换行或多余字符，合计 6 字节。"
+  },
+  "startedAt": "2026-09-12T08:43:01.763+00:00",
+  "cancelRequested": false,
+  "waitRequested": false,
+  "forceStopSent": false,
+  "cancelAt": null,
+  "completedAt": "2026-09-12T08:43:17.952+00:00",
+  "planResolved": true,
+  "planDecidedAt": "2026-09-12T08:41:24.118+00:00",
+  "orchestrationPolicy": "plan-approve",
+  "planExecutedAt": "2026-09-12T08:42:05.962+00:00",
+  "childrenChanged": false,
+  "processId": 57227,
+  "model": "glm-5.3"
+}

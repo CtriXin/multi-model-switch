@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from mms_web.runtime import private_json
-from mms_web.updates import CHECK_INTERVAL, UpdateService, version_tuple
+from mms_web.updates import CHECK_INTERVAL, UpdateService, release_history, version_tuple
 from mms_web.update_guidance import upgrade_guidance, release_policy, INSTALL_COMMAND
 from mms_web.server import WebApplication
 
@@ -167,3 +167,20 @@ def test_ui_preferences_remember_which_notes_were_read(tmp_path):
 
     prefs.update({'whatsNewSeenVersion': 'x' * 200})
     assert len(UiPreferences(tmp_path).read()['whatsNewSeenVersion']) == 64
+
+
+def test_release_history_lists_shipped_notes_newest_first(tmp_path):
+    (tmp_path / 'RELEASE-v4.9.0.md').write_text('# v4.9.0\n\n- old', encoding='utf-8')
+    (tmp_path / 'RELEASE-v4.10.0.md').write_text('# v4.10.0\n\n## 升级须知\n\n先运行安装器。\n\n## 其他\n', encoding='utf-8')
+    (tmp_path / 'RELEASE-vnext.md').write_text('not a version', encoding='utf-8')
+    history = release_history(tmp_path)
+    assert [item['version'] for item in history] == ['4.10.0', '4.9.0']
+    assert history[0]['upgradeNotice'].strip() == '先运行安装器。'
+    assert history[1]['upgradeNotice'] == ''
+    assert release_history(tmp_path / 'missing') == []
+
+
+def test_update_history_route_reads_local_release_notes(tmp_path):
+    app = WebApplication.__new__(WebApplication)
+    with patch('mms_web.updates.release_history', return_value=[{'version': '4.20.0', 'notes': 'x', 'upgradeNotice': ''}]):
+        assert WebApplication.get(app, ["update", "history"], {}) == {'releases': [{'version': '4.20.0', 'notes': 'x', 'upgradeNotice': ''}]}
