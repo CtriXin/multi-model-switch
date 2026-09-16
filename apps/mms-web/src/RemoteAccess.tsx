@@ -101,7 +101,7 @@ export function RemoteAccessSection({ startTask }: { startTask: (text: string) =
           ) : (
             <>
               <p className="section-note">
-                带 token 的链接才能打开。共用网络里，同网段的人也能碰到这个入口。
+                带 token 的链接才能打开，本机地址也一样；当前窗口会自动保持登录，别的窗口或标签页要用新链接重新进。共用网络里，同网段的人也能碰到这个入口。
               </p>
               <div className="remote-ways" role="radiogroup" aria-label="选择一个地址">
                 {ways.map((way) => (
@@ -143,7 +143,7 @@ export function RemoteAccessSection({ startTask }: { startTask: (text: string) =
                         type="button"
                         className="button"
                         disabled={busy}
-                        title="之前发出去的链接和已打开的页面都会失效"
+                        title="之前发出去的链接和别的已打开页面会失效，当前窗口不受影响"
                         onClick={() => void change({ regenerate: true })}
                       >
                         <RefreshCw size={14} />
@@ -151,7 +151,7 @@ export function RemoteAccessSection({ startTask }: { startTask: (text: string) =
                       </button>
                     </div>
                     <p className="section-note" role="status">
-                      {notice || "换 token 会让之前发出去的链接全部失效。"}
+                      {notice || "换 token 会让之前发出去的链接和别的已打开页面失效，当前窗口不受影响。"}
                     </p>
                   </div>
                 </div>
