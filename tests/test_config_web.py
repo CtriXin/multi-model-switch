@@ -2053,6 +2053,10 @@ def test_config_web_allows_pi_in_supported_clis():
     assert "pi" in mms_config_web._ALLOWED_CLIS
 
 
+def test_config_web_allows_grok_in_supported_clis():
+    assert "grok" in mms_config_web._ALLOWED_CLIS
+
+
 def test_config_web_fetch_models_does_not_persist_to_fallback_models():
     html = _frontend_source()
 

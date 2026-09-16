@@ -86,6 +86,7 @@ def cli_search_dirs(env=None, real_home=None):
     nvm_dirs = _nvm_bin_dirs(home)
     preferred = [
         os.path.join(home, ".local", "bin"),
+        os.path.join(home, ".grok", "bin"),
         "/opt/homebrew/bin",
         "/usr/local/bin",
     ]

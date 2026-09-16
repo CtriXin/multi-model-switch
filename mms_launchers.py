@@ -132,6 +132,7 @@ from mms_context_window import (
 from mms_provider_profiles import resolve_provider_profile
 from mms_reasoning_effort import model_supports_max_reasoning_effort
 import mms_pi_support as _pi_support
+import mms_grok_support as _grok_support
 import mms_vision_relay
 from mms_runtime import cli_search_dirs, prepare_cli_command
 from mms_session_index import finalize_claude_session, list_indexed_sessions, record_claude_session_start
@@ -6912,7 +6913,7 @@ def _provider_supports_cli(provider, cli):
             continue
         normalized.add(name)
     supported_clis = normalized
-    if cli == "pi" and "pi" not in supported_clis:
+    if cli in {"pi", "grok"} and cli not in supported_clis:
         if "openai_chat_completions" in protocols and any(
             item in supported_clis for item in ("codex", "opencode", "claude")
         ):
@@ -6969,8 +6970,9 @@ def validate_provider_for_cli(cli, provider):
     if cli in {"codex", "opencode"} and not _openai_base_url(provider):
         console.print(f"[red]provider '{provider_id}' 未配置 OpenAI 地址[/red]")
         sys.exit(1)
-    if cli == "pi" and not _anthropic_base_url(provider) and not _openai_base_url(provider):
-        console.print(f"[red]provider '{provider_id}' 未配置任何可供 Pi 使用的 API 地址[/red]")
+    if cli in {"pi", "grok"} and not _anthropic_base_url(provider) and not _openai_base_url(provider):
+        label = "Pi" if cli == "pi" else "Grok"
+        console.print(f"[red]provider '{provider_id}' 未配置任何可供 {label} 使用的 API 地址[/red]")
         sys.exit(1)
 
 
@@ -11735,6 +11737,9 @@ def _pi_provider_export_env(*args, **kwargs):
 def launch_pi(*args, **kwargs):
     return _pi_support.launch_pi(*args, **kwargs)
 
+def launch_grok(*args, **kwargs):
+    return _grok_support.launch_grok(*args, **kwargs)
+
 def launch_opencode(model_info, runtime, once=False):
     """启动 OpenCode，通过 OpenAI-compatible provider 注入 session-local config。"""
     return _opencode_launch_impl(
@@ -11796,6 +11801,7 @@ LAUNCHERS = {
     "codex": launch_codex,
     "opencode": launch_opencode,
     "pi": launch_pi,
+    "grok": launch_grok,
     "gemini": launch_gemini,
     "agy": launch_agy,
 }
@@ -11877,6 +11883,9 @@ def get_export_env(cli, runtime, model_info=None):
     elif cli == "pi":
         model = _resolve_model(model_info or runtime)
         exports.update(_pi_provider_export_env(runtime, model))
+    elif cli == "grok":
+        model = _resolve_model(model_info or runtime)
+        exports.update(_grok_support._grok_provider_export_env(runtime, model))
     if cli in {"claude", "codex"}:
         _inject_host_capability_hints(exports)
     toon_script = _mms_toon_script_path()
@@ -11884,7 +11893,7 @@ def get_export_env(cli, runtime, model_info=None):
     mms_gain_script = _mms_gain_script_path()
     token_saver_script = _token_saver_script_path()
     token_gain_script = _token_gain_script_path()
-    if cli in {"claude", "codex", "opencode", "pi"}:
+    if cli in {"claude", "codex", "opencode", "pi", "grok"}:
         if toon_script:
             exports["MMS_TOON_BIN"] = toon_script
         if context_script:
