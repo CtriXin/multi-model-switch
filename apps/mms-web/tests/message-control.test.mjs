@@ -118,6 +118,13 @@ test('a message that never ran says so, and each way of not running reads differ
  assert.equal(deliveryLabel({ status: 'done', mode: 'followUp' }), '');
 });
 
+test('a delete that missed Pi still says the message already reached the model', () => {
+ assert.equal(deliveryLabel({ status: 'delivered', mode: 'steer', lateCancel: true }), '已送给模型 · 删除来晚了');
+ assert.notEqual(deliveryLabel({ status: 'delivered', mode: 'steer', lateCancel: true }), '已取消，未执行');
+ assert.equal(deliveryLabel({ status: 'delivered', mode: 'steer' }), '');
+ assert.equal(deliveryLabel({ status: 'cancelled', mode: 'steer', lateCancel: true }), '已取消，未执行');
+});
+
 test('the service is believed about which answer a steer changed', () => {
  const links = steerLinks([
   { id: 'u1', kind: 'user', mode: 'steer', createdAt: '2026-09-11T10:00:30Z' },

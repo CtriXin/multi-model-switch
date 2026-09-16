@@ -841,8 +841,15 @@ class SessionService(SessionActions, SessionSideQuestions):
             modes = dict(session.pending_modes)
             if removed:
                 event = session.event_index.get(removed)
+                text = texts.get(removed)
                 if event and event.get("status") == "queued":
-                    event["status"] = "cancelled"
+                    # Same fact as survivors: still in Pi's queue means we
+                    # withdrew it; missing means Pi already took it.
+                    if text is not None and text in waiting:
+                        event["status"] = "cancelled"
+                    else:
+                        event["status"] = "delivered"
+                        event["lateCancel"] = True
                 session.forget_pending(removed)
         restored: list[str] = []
         for queued_id in order:
