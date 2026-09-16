@@ -1,9 +1,10 @@
 import { useEffect, useState, type ComponentProps } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { EventView } from "./components";
+import { EventView, Logo, harnessNames } from "./components";
 import { ToolGroup } from "./ToolEvent";
-import type { SessionEvent } from "./types";
+import type { SessionDetail, SessionEvent } from "./types";
 import { deliveryLabel, steerBadge, steerLinks } from "./message-control";
+import { turnWorkingHint } from "./SessionStatus";
 
 type Props = Omit<ComponentProps<typeof EventView>, "event" | "continuation" | "intermediate"> & {autoCollapseProcess: boolean};
 
@@ -17,6 +18,46 @@ function ProcessEvents({events, ...props}: Props & {events: SessionEvent[]}) {
   return <>{blocks.map(({event, tools}) => tools
     ? <ToolGroup key={event.id} events={tools} detail={props.detail} disconnected={!!props.disconnected} />
     : <EventView key={event.id} {...props} event={event} continuation intermediate />)}</>;
+}
+
+function TurnWorkingStatus({
+  detail,
+  disconnected = false,
+}: {
+  detail: SessionDetail;
+  disconnected?: boolean;
+}) {
+  const session = detail.session;
+  const author = harnessNames[session.harness] || "AI";
+  const model = session.modelName;
+  const statusText = turnWorkingHint(session, disconnected);
+
+  return (
+    <article
+      className="message assistant turn-working-message"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+    >
+      <div className="message-avatar">
+        <Logo small />
+      </div>
+      <div className="message-body">
+        <div className="message-author">
+          {author}
+          {model && <span>{model}</span>}
+        </div>
+        <div className="turn-working-indicator">
+          <span className="activity-bars" aria-hidden="true">
+            <i />
+            <i />
+            <i />
+          </span>
+          <span className="turn-working-label">{statusText}</span>
+        </div>
+      </div>
+    </article>
+  );
 }
 
 function Turn({events, completed, forced, report, steered, ...props}: Props & {
@@ -42,6 +83,7 @@ function Turn({events, completed, forced, report, steered, ...props}: Props & {
   // anything is still open, including turns opened one at a time.
   const turnId = events[0]?.id || "";
   const hasProcess = !!process.length;
+  const isWorking = !completed && !answer && (collapsed || !hasProcess);
   useEffect(() => {
     if (hasProcess) report(turnId, collapsed);
   }, [report, turnId, collapsed, hasProcess]);
@@ -57,7 +99,11 @@ function Turn({events, completed, forced, report, steered, ...props}: Props & {
       {controls}
       <ProcessEvents {...props} events={collapsed ? pinned : process} />
     </div>}
-    {answer && <EventView {...props} event={{...answer, thinking: undefined}} turnStartedAt={user?.createdAt} />}
+    {answer ? (
+      <EventView {...props} event={{...answer, thinking: undefined}} turnStartedAt={user?.createdAt} />
+    ) : isWorking ? (
+      <TurnWorkingStatus detail={props.detail} disconnected={props.disconnected} />
+    ) : null}
     {(() => {
       // The steer may have landed in an intermediate answer that the collapsed
       // process hides, so the note belongs to the turn the reader is looking at.
