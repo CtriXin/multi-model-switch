@@ -20,6 +20,7 @@ from uuid import uuid4
 from .file_lock import LOCK_EX, LOCK_NB, flock
 
 from .errors import WebError
+from .bot_executor import _context_percent
 from .runtime import private_json
 from .bot_memory import BotMemoryStore, BotMemoryError
 from .bot_communications import BotCommunications
@@ -631,13 +632,11 @@ class BotRuntime(BotCommunications):
                 used_tokens = context_window = used_percent = None
                 if isinstance(usage, dict):
                     used_tokens = usage.get("usedTokens", usage.get("tokens"))
-                    used_percent = usage.get("usedPercent", usage.get("percent"))
+                    used_percent = _context_percent(usage)
                     context_window = usage.get("contextWindow")
                 context_window = context_window or model.get("contextWindow")
                 if used_percent is None and used_tokens is not None and context_window:
                     used_percent = round(float(used_tokens) / float(context_window) * 100, 1)
-                elif used_percent is not None and float(used_percent) <= 1:
-                    used_percent = round(float(used_percent) * 100, 1)
                 source = "live" if runtime.get("alive") and not runtime.get("cached") else "cached"
                 view["context"] = {**view.get("context", {}), "contextWindow": context_window, "usedTokens": used_tokens, "usedPercent": used_percent,
                                     "source": source}
