@@ -2869,12 +2869,16 @@ if [ -x "$BIN_DIR/mms" ]; then
     echo ""
 
     if [ "$PREVIEW_CHANNEL_INSTALL" -eq 1 ]; then
-        echo ""
-        echo "  $(t "下一步（先配通道）:" "Next step (configure providers first):")"
-        echo "    $NEXT_MMF_CMD config web"
-        echo "    $NEXT_MMF_CMD"
-        echo "  $(t "说明：所有入口只读 ~/.config/mms-next；旧的 ~/.config/mms 不再被读取，请在 WebUI 添加 provider/API Key 并保存。" "Note: every entrance reads only ~/.config/mms-next; the old ~/.config/mms is no longer read, so add providers/API keys in the WebUI and save.")"
-        echo ""
+        if [ "$LAUNCH_WEB_MODE" = "always" ]; then
+            echo "  $(t "Pilot 正在打开；请在 WebUI 添加 provider 和 API Key。" "Pilot is opening; add a provider and API key in the WebUI.")"
+        else
+            echo ""
+            echo "  $(t "下一步（先配通道）:" "Next step (configure providers first):")"
+            echo "    $NEXT_MMF_CMD config web"
+            echo "    $NEXT_MMF_CMD"
+            echo "  $(t "说明：所有入口只读 ~/.config/mms-next；旧的 ~/.config/mms 不再被读取，请在 WebUI 添加 provider/API Key 并保存。" "Note: every entrance reads only ~/.config/mms-next; the old ~/.config/mms is no longer read, so add providers/API keys in the WebUI and save.")"
+        fi
+        [ "$LAUNCH_WEB_MODE" = "always" ] || echo ""
         echo "  $(t "以后需要排查时再运行:" "Only run this later when debugging:") $NEXT_MMF_CMD config doctor"
     fi
 
