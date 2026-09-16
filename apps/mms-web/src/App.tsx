@@ -36,6 +36,13 @@ import {
 } from "lucide-react";
 import type { Bootstrap, Page, Session, SessionDetail, FileSelection, Workspace } from "./types";
 import { bootstrap, getSession, includeCliSessions, listSessions, isPreview, mutate, request } from "./api";
+import {
+  initialConnectionHealth,
+  recordConnectionFailure,
+  recordConnectionSuccess,
+  resolveActiveBanner,
+  type ConnectionHealth,
+} from "./connection-state";
 import { copyText } from "./clipboard";
 import { newRequestId } from "./request-id";
 import {
@@ -209,6 +216,7 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [connected, setConnected] = useState(false);
   const [statusesStale, setStatusesStale] = useState(false);
+  const [connectionHealth, setConnectionHealth] = useState<ConnectionHealth>(initialConnectionHealth);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [page, setPage] = useState<Page>("new");
@@ -415,7 +423,7 @@ export function App() {
       if (signal?.aborted) return;
       setData(result);
       setConnected(true);
-      setError("");
+      setConnectionHealth(recordConnectionSuccess());
       setWorkspaceId((old) =>
         result.workspaces.some((w) => w.id === old)
           ? old
@@ -431,7 +439,7 @@ export function App() {
     } catch (e) {
       if (!signal?.aborted) {
         setConnected(false);
-        setError((e as Error).message || "无法连接 MMS 本地服务。");
+        setConnectionHealth((prev) => recordConnectionFailure(prev));
       }
     } finally {
       if (!signal?.aborted) setLoading(false);
@@ -658,11 +666,21 @@ export function App() {
       clearTimeout(timer);
     };
   }, []);
+  useEffect(() => {
+    if (!settingsEdit.busy) {
+      setError((old) =>
+        old === "配置正在保存，请等待保存结束后离开。" ? "" : old,
+      );
+    }
+  }, [settingsEdit.busy]);
   function requestNavigation(action: () => void) {
     if (settingsEdit.busy) {
       setError("配置正在保存，请等待保存结束后离开。");
       return;
     }
+    setError((old) =>
+      old === "配置正在保存，请等待保存结束后离开。" ? "" : old,
+    );
     if (settingsEdit.dirty) {
       setPendingNavigation(() => action);
       return;
@@ -1578,11 +1596,27 @@ export function App() {
             className={
               "connection-status " + (connected && !statusesStale ? "online" : "offline")
             }
-            title={connected && !statusesStale ? "本地 Pilot Web 服务已连接" : "本地 Pilot Web 服务等待连接"}
-            aria-label={connected && !statusesStale ? "服务在线" : "服务断开，等待连接"}
+            title={
+              connected && !statusesStale
+                ? "本地 Pilot Web 服务已连接"
+                : connectionHealth.consecutiveFailures > 0
+                  ? "本地 Pilot Web 服务正在重连"
+                  : "本地 Pilot Web 服务等待连接"
+            }
+            aria-label={
+              connected && !statusesStale
+                ? "服务在线"
+                : connectionHealth.consecutiveFailures > 0
+                  ? "正在重连..."
+                  : "需要连接"
+            }
           >
             <span aria-hidden="true">{connected && !statusesStale ? "●" : "!"}</span>
-            {connected && !statusesStale ? "服务在线" : "需要连接"}
+            {connected && !statusesStale
+              ? "服务在线"
+              : connectionHealth.consecutiveFailures > 0
+                ? "正在重连..."
+                : "需要连接"}
           </span>
         </div>
       </aside>
@@ -1652,7 +1686,20 @@ export function App() {
             </a>
           </div>
         )}
-        {error && (
+        {resolveActiveBanner(error, connectionHealth) === "connection" && (
+          <div className="connection-banner" role="status">
+            <span className="connection-banner-dot" aria-hidden="true" />
+            <span className="connection-banner-text">服务离线，正在尝试重新连接...</span>
+            <button
+              type="button"
+              className="text-button"
+              onClick={() => void load()}
+            >
+              立即重试
+            </button>
+          </div>
+        )}
+        {resolveActiveBanner(error, connectionHealth) === "error" && (
           <div className="error-banner" role="alert">
             <CircleAlert size={17} />
             <span>{error}</span>
