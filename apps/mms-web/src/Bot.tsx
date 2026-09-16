@@ -2031,6 +2031,10 @@ export function BotChat({
     setOnboardingEditing(false);
     setOnboardingError("");
     setSettingNotice("");
+    setScheduleArmed(false);
+    setScheduleForm(defaultComposerForm());
+    setSchedulePanelOpen(false);
+    setError("");
   }, [bot?.id]);
   useEffect(() => {
     if (!onboardingEditing) return;
