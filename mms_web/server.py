@@ -160,6 +160,10 @@ class WebApplication:
         read with no restart and no server-side preference to keep in sync.
         """
         own = self._sessions().list_sessions() if self.sessions else []
+        # Forward compatibility: keep only sessions whose owner this line
+        # knows. Rows a newer line persisted with an unrecognised owner are
+        # ignored here rather than shown as plain chats.
+        own = [s for s in own if str(s.get("owner") or "web") == "web"]
         if not include_cli:
             return own
         # A session resumed here owns its Pi session, so drop the read-only

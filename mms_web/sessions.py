@@ -243,7 +243,7 @@ class _LiveSession:
             "updatedAt": self.updated_at,
             "lastEventAt": self.last_event_at,
             "heartbeatAt": self.native_at,
-            "owner": "web",
+            "owner": str(self.meta.get("owner") or "web"),
             "archived": bool(self.meta.get("archived")),
             "cwd": self.meta.get("cwd", ""),
             "forkedFrom": self.meta.get("forkedFrom"),
@@ -478,6 +478,17 @@ class SessionService(SessionActions, SessionSideQuestions):
 
     def get_session(self, session_id: str) -> dict:
         session = self._get(session_id)
+        # Forward compatibility: a newer line may persist sessions owned by
+        # something this line does not know. They stay out of the chat list,
+        # and this line has no legitimate reader of their details, so answer
+        # as if the id did not exist instead of presenting the session as a
+        # plain chat.
+        # CONVERGENCE: the 5.x line deliberately keeps by-id access for the
+        # sessions it owns (its workspace details resolve them by id). When
+        # this change flows into 5.x, that behaviour must override this
+        # refusal — do not let this guard replace it.
+        if str(session.meta.get("owner") or "web") != "web":
+            raise WebError("NOT_FOUND", "找不到这个会话。", 404)
         runtime = self.runtime_view(session_id) if not session.alive() or hasattr(session.driver, "request") else session.meta.get("runtimeView", {})
         with session.lock:
             backfill_history(session)
