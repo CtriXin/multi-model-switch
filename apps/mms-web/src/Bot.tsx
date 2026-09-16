@@ -32,6 +32,12 @@ import {
   Zap,
 } from "lucide-react";
 import { BotPlan } from "./BotPlan";
+import {
+  BotFleetBar,
+  availableFleetFamilies,
+  normalizeFleetPolicy,
+  type BotFleetPolicy,
+} from "./BotFleetBar";
 import { previewType } from "./bot-artifact-preview";
 import type { BotChildResult, BotPendingQuestion, BotTaskPlan, Model, Preset } from "./types";
 import { isPreview, mutate, request } from "./api";
@@ -84,6 +90,7 @@ export interface BotDefinition {
   avatarId?: string;
   avatarColor?: string;
   pendingQuestion?: BotPendingQuestion | null;
+  fleetPolicy?: BotFleetPolicy;
 }
 export interface BotTask {
   id: string;
@@ -96,6 +103,7 @@ export interface BotTask {
   runAt?: string | null;
   sessionId?: string | null;
   parentTaskId?: string | null;
+  workerKind?: string | null;
   priority?: number;
   queueReason?: string | null;
   coordinatorPlan?: BotTaskPlan | null;
@@ -146,6 +154,7 @@ export interface BotDispatchPayload {
   runAt?: string;
   wake: boolean;
   parentTaskId?: string;
+  fleetDispatch?: boolean;
 }
 export interface BotDispatchResult {
   task?: BotTask;
@@ -1153,16 +1162,12 @@ function BotConversationalWizard({
 
   useEffect(() => {
     if (isFinished) {
-      if (isNewBot && !nameInput) {
-        setNameInput(suggestedName);
-      }
       const timer = setTimeout(() => {
         nameInputRef.current?.focus();
-        nameInputRef.current?.select();
       }, 50);
       return () => clearTimeout(timer);
     }
-  }, [isFinished, isNewBot, suggestedName]);
+  }, [isFinished]);
 
   // 键盘快捷键监听 A-E
   useEffect(() => {
@@ -1342,14 +1347,14 @@ function BotConversationalWizard({
           <div className="bot-chat-message bot-chat-event bot-wizard-naming-step">
             <PixelAvatar className="bot-chat-event-avatar" avatarId={bot.avatarId} color={bot.avatarColor} seed={bot.id} />
             <div className="bot-wizard-card bot-onboarding-name-block">
-              <span className="bot-onboarding-question-title">我叫什么？</span>
+              <span className="bot-onboarding-question-title">你想叫我什么？自己起名即可。</span>
               <div className="bot-onboarding-name-row">
                 <input
                   ref={nameInputRef}
                   type="text"
                   className="bot-onboarding-name-input"
                   value={nameInput}
-                  placeholder={suggestedName}
+                  placeholder={suggestedName ? `也可以用「${suggestedName}」` : "给你的同事起个名字"}
                   disabled={disabled || busy}
                   onChange={(e) => setNameInput(e.target.value)}
                   onKeyDown={(e) => {
@@ -1516,6 +1521,7 @@ export function BotChat({
         | "avatarId"
         | "avatarColor"
         | "wakeEnabled"
+        | "fleetPolicy"
       >
     >,
   ) => Promise<void>;
@@ -1844,7 +1850,7 @@ export function BotChat({
   });
   const conversationTasks = useMemo(() => {
     return tasks
-      .filter((item) => item.botId === bot?.id)
+      .filter((item) => item.botId === bot?.id && item.workerKind !== "fleet")
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }, [tasks, bot?.id]);
 
@@ -1869,7 +1875,7 @@ export function BotChat({
     return conversationTasks.filter((t) => !absorbedIds.has(t.id));
   }, [conversationTasks, absorbedTasksByParent]);
 
-  async function sendMessage(textToSend: string) {
+  async function sendMessage(textToSend: string, extra?: { fleetDispatch?: boolean }) {
     const content = textToSend.trim();
     if (!content || busy || disabled || !bot) return;
 
@@ -1899,6 +1905,9 @@ export function BotChat({
         prompt: content,
         wake: true,
         ...(runAt ? { runAt: new Date(runAt).toISOString() } : {}),
+        ...(extra?.fleetDispatch || normalizeFleetPolicy(bot.fleetPolicy).enabled
+          ? { fleetDispatch: true }
+          : {}),
       });
       setValue("");
       setRunAt("");
@@ -2222,7 +2231,7 @@ export function BotChat({
                 .filter((message) => message.senderBotId === peerId || message.recipientBotId === peerId)
                 .sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
             }))
-            .filter((group) => group.peerId && group.messages.length);
+            .filter((group) => group.peerId && group.peerId !== bot.id && group.messages.length);
           const taskSender = conversationTask.senderBotId
             ? bots.find((item) => item.id === conversationTask.senderBotId)
             : undefined;
@@ -2276,10 +2285,14 @@ export function BotChat({
             return Array.from(lines);
           };
 
-          const latestTaskWithResult = [conversationTask, ...absorbed]
-            .slice()
-            .reverse()
-            .find((t) => t.outcome?.summary?.trim() || (t.result && !isPeerExplanation(t.result)));
+          const latestTaskWithResult =
+            conversationTask.coordinatorPlan?.mode === "fleet" &&
+            !["completed", "failed", "cancelled", "interrupted"].includes(conversationTask.status)
+              ? undefined
+              : [conversationTask, ...absorbed]
+                  .slice()
+                  .reverse()
+                  .find((t) => t.outcome?.summary?.trim() || (t.result && !isPeerExplanation(t.result)));
 
           let resultText = "";
           if (latestTaskWithResult) {
@@ -2579,6 +2592,20 @@ export function BotChat({
         )}
 
       <div className="bot-chat-composer-container">
+        {bot && onUpdateBot && (
+          <BotFleetBar
+            policy={normalizeFleetPolicy(bot.fleetPolicy)}
+            families={availableFleetFamilies(presets)}
+            presets={presets}
+            disabled={disabled}
+            busy={busy}
+            onChange={(next) => {
+              void onUpdateBot(bot.id, { fleetPolicy: next }).catch((cause) => {
+                setError(cause instanceof Error ? cause.message : "多方听意见设置未保存。");
+              });
+            }}
+          />
+        )}
         {hasPendingQuestion && bot?.pendingQuestion && (
           <div
             ref={questionCardRef}
@@ -2689,8 +2716,8 @@ export function BotChat({
                   className="bot-chat-send"
                   type="submit"
                   disabled={disabled || busy || !value.trim() || !bot}
-                  aria-label={busy ? "发送中" : hasPendingQuestion ? "回复" : runAt ? "定时执行" : "发送"}
-                  title={busy ? "发送中" : hasPendingQuestion ? "回复" : runAt ? "定时执行" : "发送"}
+                  aria-label={busy ? "发送中" : hasPendingQuestion ? "回复" : runAt ? "定时执行" : normalizeFleetPolicy(bot?.fleetPolicy).enabled ? "听一遍" : "发送"}
+                  title={busy ? "发送中" : hasPendingQuestion ? "回复" : runAt ? "定时执行" : normalizeFleetPolicy(bot?.fleetPolicy).enabled ? "按上面的设置听一遍" : "发送"}
                 >
                   {busy ? (
                     <LoaderCircle className="bot-spin" size={15} />

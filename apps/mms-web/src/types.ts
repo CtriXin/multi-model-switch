@@ -56,6 +56,8 @@ export interface Preset {
   channel: string;
   available: boolean;
   reason?: string;
+  family?: string;
+  modelName?: string;
 }
 export interface Session {
   presetId?: string;
@@ -336,11 +338,13 @@ export interface BotPlanStepResult {
 }
 export interface BotPlanStep {
   id: string;
-  kind: "execute" | "delegate" | string;
+  kind: "execute" | "delegate" | "fleet" | string;
   botId: string;
   goal?: string;
   dependsOn?: string[];
   presetId?: string | null;
+  label?: string;
+  family?: string;
   status: BotPlanStepStatus | string;
   taskId?: string | null;
   error?: string;
@@ -367,12 +371,12 @@ export interface BotPlanHistoryEntry {
 }
 export interface BotTaskPlan {
   version?: number;
-  mode: "direct" | "delegate";
+  mode: "direct" | "delegate" | "fleet";
   reason?: string;
   steps?: BotPlanStep[];
   candidates?: Array<{ id: string; name: string; description?: string }>;
   merge?: string;
-  source?: "model" | "keywords" | "fallback" | "off" | "user" | "direct-first";
+  source?: "model" | "keywords" | "fallback" | "off" | "user" | "direct-first" | "fleet" | "fleet-underfilled" | "fleet-leaf";
   status?: BotPlanStatus;
   history?: BotPlanHistoryEntry[];
   modelDecision?: boolean;
@@ -382,6 +386,7 @@ export interface BotChildResult {
   botId?: string;
   taskId?: string | null;
   status?: string;
+  label?: string;
   summary: string;
   evidence?: string;
   artifacts?: Array<{ taskId: string; url?: string; label?: string }>;

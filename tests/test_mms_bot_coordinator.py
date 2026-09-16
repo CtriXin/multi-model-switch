@@ -1,6 +1,8 @@
 from mms_web.bot_coordinator import (make_plan, parse_model_plan, build_planner_prompt, direct_plan,
-                                     looks_multi_goal, set_plan_status, transition_plan, transition_step,
-                                     normalize_step_status, MAX_PLAN_HISTORY)
+                                     looks_multi_goal, looks_fleet_review, fleet_presets, fleet_plan,
+                                     is_split_plan, normalize_fleet_policy, set_plan_status, transition_plan,
+                                     transition_step, normalize_step_status, MAX_PLAN_HISTORY,
+                                     UNDERFILLED_REASON)
 from mms_web.bot_computer import EgoComputer
 
 
@@ -130,6 +132,72 @@ def test_looks_multi_goal_negative_single_goals():
     assert not looks_multi_goal("把 report.txt 重命名为 final.txt")
     writer, checker = bot("b", "写手"), bot("c", "检查员")
     assert not looks_multi_goal("请写手整理这份文件", [writer, checker], owner_id="a")
+
+
+def test_looks_fleet_review_is_not_a_single_review():
+    assert looks_fleet_review("让几个模型评审这次改动")
+    assert looks_fleet_review("用你现在能用的模型一起看这份 diff")
+    assert looks_fleet_review("跨家族 review 一下")
+    assert not looks_fleet_review("帮我评审这段代码")
+    assert not looks_fleet_review("整理这份文件并告诉我结果")
+    assert not looks_fleet_review("")
+
+
+def test_fleet_presets_defaults_to_two_cheap_families():
+    presets = [
+        {"id": "web:pi:kimi-fast", "harness": "pi", "available": True, "family": "Kimi", "modelName": "kimi-for-coding-highspeed"},
+        {"id": "web:pi:kimi-k3", "harness": "pi", "available": True, "family": "Kimi", "modelName": "k3"},
+        {"id": "web:pi:glm-turbo", "harness": "pi", "available": True, "family": "GLM", "modelName": "glm-5-turbo"},
+        {"id": "web:pi:glm-max", "harness": "pi", "available": True, "family": "GLM", "modelName": "glm-5.2"},
+        {"id": "web:pi:opus", "harness": "pi", "available": True, "family": "Claude", "modelName": "claude-opus-4-6-thinking"},
+        {"id": "web:pi:qwen", "harness": "codex", "available": True, "family": "Qwen", "modelName": "qwen3"},
+        {"id": "web:pi:dead", "harness": "pi", "available": False, "family": "DeepSeek", "modelName": "deepseek-v4-flash"},
+        {"id": "web:pi:grok", "harness": "pi", "available": True, "family": "Grok", "modelName": "grok-4.6"},
+    ]
+    rows = fleet_presets(presets)
+    assert len(rows) == 2
+    assert {item["family"] for item in rows} == {"Kimi", "GLM"}
+    by_family = {item["family"]: item["id"] for item in rows}
+    assert by_family["Kimi"] == "web:pi:kimi-fast"
+    assert by_family["GLM"] == "web:pi:glm-turbo"
+    intense = fleet_presets(presets, policy={"intensity": "intense", "maxFamilies": 2})
+    intense_ids = {item["id"] for item in intense}
+    assert "web:pi:kimi-k3" in intense_ids or "web:pi:opus" in intense_ids
+    pinned = fleet_presets(presets, policy={"families": ["DeepSeek", "Grok"], "maxFamilies": 2})
+    assert [item["family"] for item in pinned] == ["Grok"]
+    three = fleet_presets(presets, policy={"families": ["Kimi", "GLM", "Grok"], "maxFamilies": 3})
+    assert [item["family"] for item in three] == ["Kimi", "GLM", "Grok"]
+    remembered = fleet_presets(presets, policy={
+        "families": ["Kimi", "GLM"],
+        "models": {"Kimi": "web:pi:kimi-k3", "GLM": "web:pi:glm-max"},
+    })
+    assert {item["family"]: item["id"] for item in remembered} == {
+        "Kimi": "web:pi:kimi-k3",
+        "GLM": "web:pi:glm-max",
+    }
+
+
+def test_fleet_plan_uses_owner_bot_not_new_colleagues():
+    owner = bot("a", "阿星")
+    owner["presetId"] = "web:pi:kimi"
+    presets = [
+        {"id": "web:pi:kimi", "harness": "pi", "available": True, "family": "Kimi", "modelName": "kimi-k2"},
+        {"id": "web:pi:glm", "harness": "pi", "available": True, "family": "GLM", "modelName": "glm-5"},
+    ]
+    plan = fleet_plan(owner, presets, "让几个模型评审这次改动")
+    assert plan["mode"] == "fleet"
+    assert is_split_plan(plan)
+    assert [step["botId"] for step in plan["steps"]] == ["a", "a"]
+    assert {step["presetId"] for step in plan["steps"]} == {"web:pi:kimi", "web:pi:glm"}
+    assert all(step["kind"] == "fleet" and step["label"] for step in plan["steps"])
+    thin = fleet_plan(owner, presets[:1], "让几个模型评审这次改动")
+    assert thin["mode"] == "direct"
+    assert thin["source"] == "fleet-underfilled"
+    assert thin["reason"] == UNDERFILLED_REASON
+    closed = fleet_plan(owner, presets, "让几个模型评审这次改动", {"enabled": False})
+    assert closed["mode"] == "direct" and closed["source"] == "fleet-disabled"
+    assert normalize_fleet_policy({"maxFamilies": 9})["maxFamilies"] == 9
+    assert normalize_fleet_policy({})["maxFamilies"] == 2
 
 
 def test_plan_transitions_follow_the_table_and_record_history():

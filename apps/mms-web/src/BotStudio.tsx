@@ -757,6 +757,7 @@ export function BotStudio({
           prompt: payload.prompt,
           ...(payload.runAt ? { runAt: payload.runAt } : {}),
           wake: payload.wake,
+          ...(payload.fleetDispatch ? { fleetDispatch: true } : {}),
           ...(payload.parentTaskId
             ? { parentTaskId: payload.parentTaskId }
             : {}),
@@ -1074,6 +1075,9 @@ export function BotStudio({
               wakeEnabled: patch.wakeEnabled ?? current.wakeEnabled,
               avatarId: patch.avatarId ?? current.avatarId,
               avatarColor: patch.avatarColor ?? current.avatarColor,
+              ...(patch.fleetPolicy || current.fleetPolicy
+                ? { fleetPolicy: patch.fleetPolicy ?? current.fleetPolicy }
+                : {}),
             });
             setBots((items) => items.map((item) => (item.id === saved.id ? saved : item)));
           }}

@@ -73,6 +73,13 @@ export function formatPlanTimeline(history?: BotPlanHistoryEntry[]): string {
     .join(" → ");
 }
 
+export function stepDisplayName(step: BotPlanStep, bots: BotDefinition[]): string {
+  if (step.kind === "fleet" || step.label) {
+    return step.label || step.family || step.presetId || "模型";
+  }
+  return bots.find((bot) => bot.id === step.botId)?.name || step.botId;
+}
+
 function StepRow({
   step,
   bots,
@@ -86,14 +93,15 @@ function StepRow({
 }) {
   const [expanded, setExpanded] = useState(false);
   const target = bots.find((bot) => bot.id === step.botId);
-  const botName = target?.name || step.botId;
+  const botName = stepDisplayName(step, bots);
+  const fleetStep = step.kind === "fleet";
   const summary = step.result?.summary;
-  const canExpand = Boolean(summary && (summary.length > 50 || summary.includes("\n")));
+  const canExpand = Boolean(!fleetStep && summary && (summary.length > 50 || summary.includes("\n")));
 
   return (
     <li className={`bot-plan-step bot-plan-step-${step.status || "pending"}`}>
       <span className="bot-plan-step-dot" aria-hidden="true" />
-      {target && (
+      {target && !fleetStep && (
         <PixelAvatar
           className="bot-plan-step-avatar"
           avatarId={target.avatarId}
@@ -105,7 +113,7 @@ function StepRow({
         <strong>{botName}</strong>
       </span>
       <div className="bot-plan-step-content">
-        {step.goal && <div className="bot-plan-step-goal">{step.goal}</div>}
+        {!fleetStep && step.goal && <div className="bot-plan-step-goal">{step.goal}</div>}
         {summary && (
           <div className="bot-plan-step-summary-wrap">
             <div className={`bot-plan-step-summary ${expanded ? "is-expanded" : "is-clamped"}`}>
@@ -124,7 +132,7 @@ function StepRow({
         )}
       </div>
       <div className="bot-plan-step-trailing">
-        {step.status === "failed" && (
+        {step.status === "failed" && !fleetStep && (
           <div className="bot-plan-step-btns">
             <button
               type="button"
@@ -156,12 +164,17 @@ export function BotPlan({ task, bots }: { task: BotTask; bots: BotDefinition[] }
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const plan = task.coordinatorPlan;
-  if (!plan || plan.mode !== "delegate" || !plan.steps?.length) return null;
+  if (!plan || (plan.mode !== "delegate" && plan.mode !== "fleet") || !plan.steps?.length) return null;
   const status = plan.status || "auto";
+  const fleet = plan.mode === "fleet";
+  const doneCount = plan.steps.filter((step) => ["done", "skipped", "failed"].includes(step.status || "")).length;
+  const statusLabel = fleet && status === "running"
+    ? `${doneCount}/${plan.steps.length} 已回`
+    : (planStatusLabels[status] || status);
   const statusTier = getPlanStatusTier(status);
   const timeline = formatPlanTimeline(plan.history);
-  const hasDeps = plan.steps.some((step) => (step.dependsOn?.length ?? 0) > 0 || step.presetId);
-  const hasDetails = Boolean(timeline || hasDeps);
+  const hasDeps = !fleet && plan.steps.some((step) => (step.dependsOn?.length ?? 0) > 0 || step.presetId);
+  const hasDetails = Boolean(!fleet && (timeline || hasDeps));
 
   const undoable =
     (status === "auto" || status === "approved" || status === "running") &&
@@ -186,11 +199,11 @@ export function BotPlan({ task, bots }: { task: BotTask; bots: BotDefinition[] }
   }
 
   return (
-    <div className={`bot-plan bot-plan-${status}`} aria-label="分工计划">
+    <div className={`bot-plan bot-plan-${status}`} aria-label={plan.mode === "fleet" ? "模型意见" : "分工计划"}>
       <div className="bot-plan-head">
-        <span className="bot-plan-title">分工计划</span>
+        <span className="bot-plan-title">{plan.mode === "fleet" ? "模型意见" : "分工计划"}</span>
         <span className={`bot-plan-tag bot-plan-tag-${statusTier}`}>
-          {planStatusLabels[status] || status}
+          {statusLabel}
         </span>
         {plan.reason && <span className="bot-plan-reason">{plan.reason}</span>}
         {plan.source === "fallback" && <span className="bot-plan-tag bot-plan-tag-muted">关键词兜底</span>}
@@ -234,7 +247,7 @@ export function BotPlan({ task, bots }: { task: BotTask; bots: BotDefinition[] }
           </div>
         </details>
       )}
-      {(status === "proposed" || undoable || status === "running") && (
+      {!fleet && (status === "proposed" || undoable || status === "running") && (
         <div className="bot-plan-actions">
           {status === "proposed" && (
             <button type="button" className="bot-plan-approve" onClick={() => void act("approve")} disabled={busy}>
@@ -254,6 +267,14 @@ export function BotPlan({ task, bots }: { task: BotTask; bots: BotDefinition[] }
               取消计划
             </button>
           )}
+        </div>
+      )}
+      {fleet && status === "running" && (
+        <div className="bot-plan-actions">
+          <button type="button" className="bot-plan-reject" onClick={() => void act("cancel")} disabled={busy}>
+            <X size={13} />
+            停止
+          </button>
         </div>
       )}
       {error && (

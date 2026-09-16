@@ -9,11 +9,23 @@ from mms_web.bots import (BotRuntime, collaboration_requested, is_trivial_result
 from mms_web.errors import WebError
 
 
+class FakeCatalog:
+    def __init__(self, presets=None):
+        self._presets = presets or [
+            {"id": "web:pi:kimi", "harness": "pi", "available": True, "family": "Kimi", "modelName": "kimi-k2", "name": "kimi-k2"},
+            {"id": "web:pi:glm", "harness": "pi", "available": True, "family": "GLM", "modelName": "glm-5", "name": "glm-5"},
+        ]
+
+    def snapshot(self):
+        return {"presets": self._presets}
+
+
 class FakeExecutor:
-    def __init__(self):
+    def __init__(self, catalog=None):
         self.starts = []
         self.cancels = []
         self.sessions = {}
+        self.catalog = catalog
 
     def available(self):
         return True
@@ -81,6 +93,49 @@ def test_executor_is_required_and_unavailable_does_not_simulate(tmp_path):
         with pytest.raises(WebError) as failure:
             bot(rt)
         assert failure.value.code == "BOT_EXECUTOR_UNAVAILABLE"
+    finally:
+        rt.close()
+
+
+def test_fleet_review_stays_on_one_bot_and_fans_out_live_models(tmp_path):
+    executor = FakeExecutor(FakeCatalog())
+    rt = runtime(tmp_path, executor, max_concurrent=3)
+    try:
+        owner = bot(rt, "阿星")
+        parent = rt.create_task({"requestId": "fleet-1", "botId": owner["id"],
+                                 "prompt": "让几个模型评审这次改动"})
+        with pytest.raises(WebError) as cycle:
+            rt.create_task({"requestId": "same-bot", "botId": owner["id"], "prompt": "普通子任务",
+                            "parentTaskId": parent["id"]})
+        assert cycle.value.code == "BOT_DISPATCH_CYCLE"
+        plan = rt.plan_task(parent, rt._bots[owner["id"]])
+        assert plan["mode"] == "fleet"
+        assert len(plan["steps"]) == 2
+        assert {step["botId"] for step in plan["steps"]} == {owner["id"]}
+        live = rt._tasks[parent["id"]]
+        live["status"] = "starting"
+        live["orchestrationPolicy"] = "direct-first"
+        from mms_web.bot_coordinator import transition_plan
+        transition_plan(live["coordinatorPlan"], "running", by="test")
+        rt._advance_plan(live)
+        children = [rt._tasks[cid] for cid in live["children"]]
+        assert len(children) == 2
+        assert all(child["workerKind"] == "fleet" for child in children)
+        assert {child.get("presetIdOverride") for child in children} == {"web:pi:kimi", "web:pi:glm"}
+        nested = children[0]
+        with pytest.raises(WebError) as nested_cycle:
+            rt.create_task({"requestId": "nested-fleet", "botId": owner["id"], "prompt": "再分一层",
+                            "parentTaskId": nested["id"], "workerKind": "fleet", "presetId": "web:pi:glm"})
+        assert nested_cycle.value.code == "BOT_DISPATCH_CYCLE"
+        assert rt._dispatch_blocked(children[0], children[1]) is False
+        assert rt._dispatch_blocked(parent, children[0]) is True
+        saved = rt.update_bot(owner["id"], {"fleetPolicy": {"enabled": False}})
+        assert saved["fleetPolicy"]["enabled"] is False
+        quiet = rt.create_task({"requestId": "fleet-off", "botId": owner["id"],
+                                "prompt": "让几个模型评审这次改动"})
+        off_plan = rt.plan_task(quiet, rt._bots[owner["id"]])
+        assert off_plan["mode"] == "direct"
+        assert off_plan["source"] == "fleet-disabled"
     finally:
         rt.close()
 

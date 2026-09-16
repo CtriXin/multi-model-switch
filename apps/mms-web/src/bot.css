@@ -1578,9 +1578,126 @@
 
 /* Composer */
 .bot-chat-composer-container {
+  position: relative;
+  z-index: 5;
   padding: 0 max(clamp(24px, 7vw, 140px), calc((100% - 1000px) / 2)) 20px;
   width: 100%;
   box-sizing: border-box;
+}
+
+.bot-fleet-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+
+.bot-fleet-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.bot-fleet-chip {
+  appearance: none;
+  margin: 0;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.bot-fleet-chip:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+}
+
+.bot-fleet-chip.is-on {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  color: var(--ink);
+}
+
+.bot-fleet-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.bot-fleet-chip:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.bot-fleet-preview {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.bot-fleet-family-wrap {
+  position: relative;
+}
+
+.bot-fleet-model-menu {
+  display: none;
+  position: absolute;
+  left: 0;
+  bottom: 100%;
+  z-index: 40;
+  padding: 0 0 10px;
+  background: transparent;
+  border: 0;
+}
+
+.bot-fleet-family-wrap:hover .bot-fleet-model-menu,
+.bot-fleet-family-wrap:focus-within .bot-fleet-model-menu {
+  display: block;
+}
+
+.bot-fleet-model-panel {
+  min-width: 148px;
+  max-height: 220px;
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--ink) 12%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.bot-fleet-model-item {
+  appearance: none;
+  margin: 0;
+  width: 100%;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.bot-fleet-model-item:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+
+.bot-fleet-model-item.is-on {
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
 }
 
 .bot-chat-composer {

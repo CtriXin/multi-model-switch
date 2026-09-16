@@ -21,6 +21,14 @@ Bot 可以从内部 worker 分发子任务。子任务完成后，结果消息�
 
 每个新任务都会保存一份轻量 `coordinatorPlan`：简单目标保持 direct，检测到明确协作意图时记录候选 Bot 和待确认的 delegate steps。普通 `direct-first` 请求直接进入当前 Bot 的持久会话，不启动额外 planner session；只有明确协作意图或显式选择 `plan-approve` 时才调用一次短 planner。它不会把临时 worker 变成永久 Bot。排队任务按 `priority`（0–100，数值越大越先执行）排序，并在任务详情中显示当前等待资源原因。
 
+### 同一 Bot 的多模型评审（fleet）
+
+用户跟**自己起名的那一个 Bot**说话即可。关掉时输入框上只留「多方听意见」开关。打开后选强度和模型，输入后直接发送就会听。
+
+默认开、强度「听意见」、**2 家便宜对照**。点家族芯片可多选；全选后再点是全不选。悬停家族可选具体型号并记住。子任务过程不进主聊天。
+
+不足两家时走 direct，理由是「现在只有一家能用，我自己看了，不是多方评审。」同家族只留一个通道。Grok 算独立家族。聊天里计划块标题是「模型意见」。
+
 ### Coordinator 计划层（2026-09-12，T2）
 
 计划从 Pi 提示词里拿出来，成为落库、可见、可执行的对象。需要规划时，`BotRuntime.plan_task` 用任务所属 Bot 自己的 preset 发一次短 planner 请求（用完即弃，结束后自动停止并归档，不常驻 planner session），输入是用户目标、可用 Bot 列表和该 Bot 的相关记忆摘要，要求输出严格 JSON（`mode` / `reason` / `steps[].botId/goal/dependsOn/presetId` / `merge`）。普通 `direct-first` 任务跳过这一步，直接使用持久会话；解析失败、模型不可用或超过 20 秒都退回关键词计划并标记 `source: "fallback"`，任何情况下不阻塞任务启动。

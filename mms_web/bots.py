@@ -25,7 +25,8 @@ from .runtime import private_json
 from .bot_memory import BotMemoryStore, BotMemoryError
 from .bot_communications import BotCommunications
 from .bot_coordinator import (plan_for, direct_plan, build_planner_prompt, parse_model_plan, sanitize_plan,
-                              looks_multi_goal, set_plan_status, transition_plan, transition_step,
+                              looks_multi_goal, looks_fleet_review, fleet_plan, is_split_plan,
+                              normalize_fleet_policy, set_plan_status, transition_plan, transition_step,
                               normalize_step_status)
 from . import bot_retry
 from .bot_notify import Notifier
@@ -369,7 +370,8 @@ class BotRuntime(BotCommunications):
             bot.update({"memoryEnabled": True, "memoryBudgetTokens": 2000,
                         "autoCompact": True, "compactAtPercent": 70,
                         "orchestrationPolicy": payload.get("orchestrationPolicy", "direct-first"),
-                        "planner": payload.get("planner", "model")})
+                        "planner": payload.get("planner", "model"),
+                        "fleetPolicy": normalize_fleet_policy(payload.get("fleetPolicy"))})
             if bot["orchestrationPolicy"] not in ORCHESTRATION_POLICIES:
                 raise WebError("INVALID_REQUEST", "orchestrationPolicy 必须是 direct-first、plan-approve 或 off。", 400)
             if bot["planner"] not in PLANNER_MODES:
@@ -383,13 +385,18 @@ class BotRuntime(BotCommunications):
             self._persist()
             return deepcopy(bot)
 
+    def _view_bot(self, bot):
+        row = deepcopy(bot)
+        row["fleetPolicy"] = normalize_fleet_policy(row.get("fleetPolicy"))
+        return row
+
     def get_bot(self, bot_id):
         with self._lock:
-            return deepcopy(self._bot(bot_id))
+            return self._view_bot(self._bot(bot_id))
 
     def list_bots(self):
         with self._lock:
-            bots = deepcopy(list(self._bots.values()))
+            bots = [self._view_bot(bot) for bot in self._bots.values()]
             for bot in bots:
                 bot["pendingQuestion"] = self._pending_question(bot["id"])
             return bots
@@ -436,6 +443,8 @@ class BotRuntime(BotCommunications):
                 if payload["orchestrationPolicy"] not in ORCHESTRATION_POLICIES:
                     raise WebError("INVALID_REQUEST", "orchestrationPolicy 必须是 direct-first、plan-approve 或 off。", 400)
                 updated["orchestrationPolicy"] = payload["orchestrationPolicy"]
+            if "fleetPolicy" in payload:
+                updated["fleetPolicy"] = normalize_fleet_policy(payload.get("fleetPolicy"))
             updated.update(self.executor.validate(updated))
             if updated["workspaceId"] != bot["workspaceId"] or updated["presetId"] != bot["presetId"]:
                 updated["sessionId"] = None
@@ -446,7 +455,7 @@ class BotRuntime(BotCommunications):
             except BotMemoryError as exc:
                 raise WebError("MEMORY_STORE_INVALID", "Bot 记忆记录无法更新，请检查本地状态。", 409) from exc
             self._persist()
-            return deepcopy(updated)
+            return self._view_bot(updated)
 
     def delete_bot(self, bot_id):
         """Delete a Bot and its private transcript, artifacts, memory and mailbox rows."""
@@ -505,19 +514,25 @@ class BotRuntime(BotCommunications):
             if len(self._tasks) >= MAX_TASKS:
                 raise WebError("TASK_LIMIT", "本地已保存 2,000 个任务，请归档后继续。", 409)
             parent_id = payload.get("parentTaskId")
+            fleet_leaf = bool(parent_id) and payload.get("workerKind") == "fleet"
             if parent_id:
                 parent = self._task(parent_id)
                 ancestor, depth = parent, 0
                 while ancestor:
                     depth += 1
-                    if ancestor["botId"] == bot["id"] or depth > 5:
+                    same = ancestor["botId"] == bot["id"]
+                    nested_fleet = fleet_leaf and ancestor.get("workerKind") == "fleet"
+                    if depth > 5 or (same and not fleet_leaf) or nested_fleet:
                         raise WebError("BOT_DISPATCH_CYCLE", "不能沿同一分发链再次调用同一个 Bot，最多五层。", 409)
                     ancestor = self._tasks.get(ancestor.get("parentTaskId"))
                 if len(parent.get("children", [])) >= 20:
                     raise WebError("BOT_CHILD_LIMIT", "一个任务最多分发 20 个子任务。", 409)
             run_at = parse_time(payload.get("runAt"))
             prompt = text_field(payload, "prompt", 32000, True)
-            coordinator_plan = plan_for(prompt, bot, list(self._bots.values()))
+            if fleet_leaf:
+                coordinator_plan = direct_plan(bot, "舰队子任务，由指定模型直接完成。", "fleet-leaf")
+            else:
+                coordinator_plan = plan_for(prompt, bot, list(self._bots.values()))
             task = {"id": "task_" + uuid4().hex[:16], "botId": bot["id"],
                     "prompt": prompt, "parentTaskId": parent_id,
                     "status": "scheduled" if run_at else "queued", "runAt": run_at, "children": [],
@@ -527,6 +542,16 @@ class BotRuntime(BotCommunications):
                     "coordinatorPlan": coordinator_plan}
             task["executionMode"] = coordinator_plan["mode"]
             task["collaborationRequested"] = collaboration_requested(task["prompt"])
+            if payload.get("fleetDispatch") is True:
+                task["fleetDispatch"] = True
+            if fleet_leaf:
+                task.update(workerKind="fleet", planResolved=True, executionMode="direct")
+                override = payload.get("presetId")
+                if isinstance(override, str) and override.strip():
+                    task["presetIdOverride"] = override.strip()[:500]
+                label = payload.get("label")
+                if isinstance(label, str) and label.strip():
+                    task["label"] = label.strip()[:80]
             task["outcome"] = None
             if payload.get("wake") is False and not run_at:
                 task.update(status="waiting", waitReason="manual")
@@ -536,7 +561,8 @@ class BotRuntime(BotCommunications):
             if parent_id:
                 parent = self._task(parent_id)
                 parent.setdefault("children", []).append(task["id"])
-                self._message(parent_id, "handoff", f"已分发给 {bot['name']}：{task['prompt']}", bot["id"], childTaskId=task["id"])
+                if not fleet_leaf:
+                    self._message(parent_id, "handoff", f"已分发给 {bot['name']}：{task['prompt']}", bot["id"], childTaskId=task["id"])
                 if parent["status"] in TERMINAL:
                     parent.update(status="waiting", waitReason="children", acceptedAt=None)
             self._remember(key, value, task["id"])
@@ -886,7 +912,8 @@ class BotRuntime(BotCommunications):
         # Only a task that never reached execution may be replayed. Anything
         # after that is reported to the user, because the first attempt may
         # already have changed something a silent retry would duplicate.
-        if state in {"failed", "interrupted"} and task.get("status") == "starting":
+        if (state in {"failed", "interrupted"} and task.get("status") == "starting"
+                and task.get("workerKind") != "fleet"):
             if bot_retry.classify(error_code, message, error_detail, status=error_status) == "transient":
                 retry = bot_retry.schedule(task, message, error_code=error_code, detail=error_detail)
                 if retry:
@@ -926,16 +953,15 @@ class BotRuntime(BotCommunications):
                 pass
         if task.get("parentTaskId"):
             parent = self._task(task["parentTaskId"])
-            # The peer gets a structured conclusion plus an artifact index; the
-            # model's raw report and runtime status text stay in the task log.
-            report_type, report_text = peer_report(
-                state=state, message=message, bot_name=self._bot(task["botId"])["name"],
-                outcome=task.get("outcome"), system_failure=system_failure)
-            self._message(parent["id"], report_type, report_text, task["botId"], childTaskId=task["id"],
-                          artifacts=self._peer_artifacts(task) if state == "completed" else [])
+            if task.get("workerKind") != "fleet":
+                report_type, report_text = peer_report(
+                    state=state, message=message, bot_name=self._bot(task["botId"])["name"],
+                    outcome=task.get("outcome"), system_failure=system_failure)
+                self._message(parent["id"], report_type, report_text, task["botId"], childTaskId=task["id"],
+                              artifacts=self._peer_artifacts(task) if state == "completed" else [])
             parent["childrenChanged"] = True
             parent_plan = parent.get("coordinatorPlan") or {}
-            if parent_plan.get("mode") == "delegate" and parent_plan.get("steps"):
+            if is_split_plan(parent_plan) and parent_plan.get("steps"):
                 if self._sync_plan_steps(parent, parent_plan) and parent_plan.get("status") in {"done", "failed", "cancelled"}:
                     parent["childResults"] = self._child_results(parent, parent_plan)
         if state in {"completed", "failed"}:
@@ -960,9 +986,9 @@ class BotRuntime(BotCommunications):
         if any(c["status"] not in TERMINAL for c in children):
             return False
         plan = task.get("coordinatorPlan") or {}
-        if plan.get("mode") == "delegate" and plan.get("status") in {"done", "failed", "cancelled", "rejected"}:
+        if is_split_plan(plan) and plan.get("status") in {"done", "failed", "cancelled", "rejected"}:
             return False
-        if task.get("planResolved") and plan.get("mode") == "delegate":
+        if task.get("planResolved") and is_split_plan(plan):
             # A step that is still pending/ready/running has work left; the
             # parent resumes only when the plan has nothing more to dispatch.
             if any(normalize_step_status(step.get("status")) in {"pending", "ready", "running"}
@@ -990,7 +1016,7 @@ class BotRuntime(BotCommunications):
         """Task-level mirror of steps[].result so the frontend reads it once."""
         rows = []
         seen = set()
-        if plan.get("mode") == "delegate":
+        if is_split_plan(plan):
             for step in plan.get("steps", []):
                 task_id = step.get("taskId")
                 if task_id:
@@ -998,7 +1024,8 @@ class BotRuntime(BotCommunications):
                 result = step.get("result") or {}
                 row = {"stepId": step.get("id"), "botId": step.get("botId"), "taskId": task_id,
                        "status": normalize_step_status(step.get("status")),
-                       "summary": str(result.get("summary") or step.get("error") or "")[:600]}
+                       "summary": str(result.get("summary") or step.get("error") or "")[:600],
+                       "label": step.get("label") or ""}
                 if result.get("evidence"):
                     row["evidence"] = result["evidence"]
                 if result.get("artifacts"):
@@ -1020,17 +1047,18 @@ class BotRuntime(BotCommunications):
         child_results = self._child_results(task, plan)
         lines = []
         for index, row in enumerate(child_results, 1):
-            name = str((self._bots.get(row.get("botId") or "") or {}).get("name") or row.get("botId") or "")
+            name = str(row.get("label") or (self._bots.get(row.get("botId") or "") or {}).get("name") or row.get("botId") or "")
             label = row.get("stepId") or row.get("taskId")
             lines.append(f"{index}. [{label} · {name} · {row.get('status')}] {row.get('summary') or '（无摘要）'}")
-        if task.get("planResolved") and plan.get("mode") == "delegate":
+        if task.get("planResolved") and is_split_plan(plan):
             transition_plan(plan, "merging", by="system")
             task["coordinatorPlan"] = plan
         task["childResults"] = child_results
         task["resumedAt"] = now()
+        merge_intro = "各家模型意见如下，请汇总结论和分歧，不要再分发。" if plan.get("mode") == "fleet" else "子任务均已回传，请检查成果并总结。"
         task.update(status="queued", waitReason=None, childrenChanged=False,
-                    resumeText="子任务均已回传，请检查成果并总结。\n" + "\n".join(lines))
-        self._message(task["id"], "system", "子任务已回传，自动唤醒发起 Bot。")
+                    resumeText=merge_intro + "\n" + "\n".join(lines))
+        self._message(task["id"], "system", "子任务已回传，自动唤醒发起 Bot。" if plan.get("mode") != "fleet" else "各家意见已回传，由当前 Bot 汇总。")
 
     def plan_task(self, task, bot):
         """Decide and persist the durable plan before a task's session starts.
@@ -1048,12 +1076,14 @@ class BotRuntime(BotCommunications):
             planner = bot.get("planner", "model")
             policy = bot.get("orchestrationPolicy", "direct-first")
             bots_snapshot = deepcopy(list(self._bots.values()))
+            fleet_review = live.get("workerKind") != "fleet" and (
+                live.get("fleetDispatch") is True or looks_fleet_review(prompt))
             # direct-first stays cheap: only an explicit collaboration signal
             # or a multi-goal shape pays for the throwaway model planner.
             wants_plan = bool(live.get("collaborationRequested")) or looks_multi_goal(
                 prompt, bots_snapshot, owner_id=bot.get("id"))
         memory_summary = ""
-        if planner == "model" and policy != "off" and wants_plan and bot.get("memoryEnabled", True):
+        if planner == "model" and policy != "off" and wants_plan and bot.get("memoryEnabled", True) and not fleet_review:
             try:
                 notes = self.memory.get(bot["id"], query=prompt).get("notes", [])
                 memory_summary = "\n".join(str(note.get("content") or "") for note in notes[:5])[:2000]
@@ -1061,6 +1091,8 @@ class BotRuntime(BotCommunications):
                 memory_summary = ""
         if planner == "off" or policy == "off":
             plan = direct_plan(bot, "已按设置关闭自动分工，由当前 Bot 直接完成。", "off")
+        elif fleet_review:
+            plan = fleet_plan(bot, self._pi_fleet_presets(), prompt, bot.get("fleetPolicy"))
         elif not wants_plan:
             plan = direct_plan(bot, "普通任务由当前 Bot 直接完成。", "direct-first")
         elif planner == "keywords" or not hasattr(self.executor, "plan"):
@@ -1078,7 +1110,7 @@ class BotRuntime(BotCommunications):
             if plan is None:
                 plan = plan_for(prompt, bot, bots_snapshot)
                 plan["source"] = "fallback"
-        set_plan_status(plan, "proposed" if plan["mode"] == "delegate" and policy == "plan-approve" else "auto")
+        set_plan_status(plan, "proposed" if is_split_plan(plan) and policy == "plan-approve" else "auto")
         with self._lock:
             live = self._task(task["id"])
             if live.get("planResolved"):
@@ -1105,12 +1137,36 @@ class BotRuntime(BotCommunications):
                 titles.append(title)
         return history
 
+    def _pi_fleet_presets(self):
+        catalog = getattr(self.executor, "catalog", None)
+        snapshot = catalog.snapshot() if catalog is not None and hasattr(catalog, "snapshot") else {}
+        return list(snapshot.get("presets") or []) if isinstance(snapshot, dict) else []
+
+    def _dispatch_blocked(self, candidate, peer):
+        """Same Bot / workspace stay serial, except fleet siblings of one parent."""
+        if candidate.get("id") and candidate.get("id") == peer.get("id"):
+            return False
+        same_parent_fleet = (
+            candidate.get("workerKind") == "fleet"
+            and peer.get("workerKind") == "fleet"
+            and candidate.get("parentTaskId")
+            and candidate.get("parentTaskId") == peer.get("parentTaskId")
+        )
+        if same_parent_fleet:
+            return False
+        if candidate.get("botId") and candidate.get("botId") == peer.get("botId"):
+            return True
+        try:
+            return self._bot(candidate["botId"])["workspaceId"] == self._bot(peer["botId"])["workspaceId"]
+        except Exception:
+            return True
+
     def _advance_plan(self, task):
         """Dispatch plan steps whose dependencies are done. Never recreates a
         step that already has a taskId; reconciles by (parentTaskId, step.id)
         so a restart cannot duplicate a dispatched step. Returns changed."""
         plan = task.get("coordinatorPlan") or {}
-        if plan.get("mode") != "delegate" or not task.get("planResolved"):
+        if not is_split_plan(plan) or not task.get("planResolved"):
             return False
         steps = plan.get("steps") or []
         by_id = {step.get("id"): step for step in steps}
@@ -1156,8 +1212,13 @@ class BotRuntime(BotCommunications):
                 step["status"] = "ready"
                 attempt = step.get("attempts", 1)
                 try:
-                    child = self.create_task({"botId": step["botId"], "prompt": step["goal"], "parentTaskId": task["id"],
-                                              "requestId": f"plan:{task['id']}:{step['id']}:{attempt}"})
+                    payload = {"botId": step["botId"],
+                               "prompt": step.get("workerPrompt") or step.get("goal") or "",
+                               "parentTaskId": task["id"],
+                               "requestId": f"plan:{task['id']}:{step['id']}:{attempt}"}
+                    if plan.get("mode") == "fleet":
+                        payload.update(workerKind="fleet", presetId=step.get("presetId"), label=step.get("label"))
+                    child = self.create_task(payload)
                 except WebError as exc:
                     step["status"] = "failed"
                     step["error"] = exc.message
@@ -1259,7 +1320,7 @@ class BotRuntime(BotCommunications):
                 steps[0]["status"] = "done"
             elif state in {"failed", "interrupted"}:
                 steps[0]["status"] = "failed"
-        if plan.get("mode") == "delegate" and any(
+        if is_split_plan(plan) and any(
                 normalize_step_status(step.get("status")) in {"pending", "ready", "running"} for step in steps):
             return  # Children still active; the plan settles at the merge turn.
         if state == "completed":
@@ -1301,7 +1362,7 @@ class BotRuntime(BotCommunications):
         with self._lock:
             task = self._task(task_id)
             plan = task.get("coordinatorPlan") or {}
-            if not task.get("planResolved") or plan.get("mode") != "delegate":
+            if not task.get("planResolved") or not is_split_plan(plan):
                 raise WebError("PLAN_NOT_ACTIONABLE", "这个任务没有可操作的协作计划。", 409)
             status = plan.get("status")
             if status in {"rejected", "done", "cancelled"}:
@@ -1525,7 +1586,8 @@ class BotRuntime(BotCommunications):
                         changed = True
                     continue
                 bot = self._bot(task["botId"])
-                if bot["id"] in busy_bots or bot["workspaceId"] in busy_workspaces:
+                peers = busy + [item[0] for item in launches]
+                if any(self._dispatch_blocked(task, peer) for peer in peers):
                     if task.get("queueReason") != "等待 Bot 或工作环境空闲":
                         task["queueReason"] = "等待 Bot 或工作环境空闲"
                         changed = True
@@ -1564,10 +1626,13 @@ class BotRuntime(BotCommunications):
                     with self._lock:
                         peek = self._task(task["id"])
                         multi_goal = looks_multi_goal(peek["prompt"], list(self._bots.values()), owner_id=bot.get("id"))
+                        fleet_review = peek.get("workerKind") != "fleet" and (
+                            peek.get("fleetDispatch") is True or looks_fleet_review(peek["prompt"]))
                     if (bot.get("planner", "model") == "model"
                             and bot.get("orchestrationPolicy", "direct-first") == "direct-first"
                             and not task.get("collaborationRequested")
-                            and not multi_goal):
+                            and not multi_goal
+                            and not fleet_review):
                         with self._lock:
                             live = self._task(task["id"])
                             if not live.get("planResolved"):
@@ -1592,7 +1657,7 @@ class BotRuntime(BotCommunications):
                 if live["status"] != "starting":
                     return
                 plan = deepcopy(live.get("coordinatorPlan") or {})
-                if (plan.get("mode") == "delegate" and not live.get("planExecutedAt")
+                if (is_split_plan(plan) and not live.get("planExecutedAt")
                         and live.get("orchestrationPolicy", "direct-first") != "off"):
                     if plan.get("status") == "proposed":
                         live.update(status="waiting", waitReason="plan-approval", updatedAt=now())
@@ -1755,7 +1820,7 @@ class BotRuntime(BotCommunications):
                 self._bot(task["botId"])["status"] = "idle"
             else:
                 plan = task.get("coordinatorPlan") or {}
-                plan_settled = plan.get("mode") == "delegate" and plan.get("status") in {"done", "failed", "cancelled", "rejected"}
+                plan_settled = is_split_plan(plan) and plan.get("status") in {"done", "failed", "cancelled", "rejected"}
                 if not plan_settled and any(self._task(c)["status"] not in TERMINAL for c in task.get("children", [])):
                     task.update(status="waiting", waitReason="children")
                     self._bot(task["botId"])["status"] = "idle"

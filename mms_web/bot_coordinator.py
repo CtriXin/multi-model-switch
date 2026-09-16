@@ -23,8 +23,56 @@ _COLLABORATION_HINTS = (
     r"让\s*(?!我|你|他|它|我们|自己)[\u4e00-\u9fff]{1,8}(?:帮|写|检查|处理|做|整理|核对|各)",
 )
 MAX_PLAN_STEPS = 5
+MAX_FLEET_STEPS = 12
+DEFAULT_FLEET_FAMILIES = 2
+UI_FLEET_FAMILIES = 12
 MAX_PLAN_HISTORY = 50
 ON_FAILURE_POLICIES = {"retry", "skip", "abort"}
+SPLIT_PLAN_MODES = {"delegate", "fleet"}
+FLEET_INTENSITIES = {"opinions", "intense"}
+DEFAULT_FLEET_POLICY = {
+    "enabled": True,
+    "intensity": "opinions",
+    "maxFamilies": DEFAULT_FLEET_FAMILIES,
+    "families": [],
+    "models": {},
+}
+UNDERFILLED_REASON = "现在只有一家能用，我自己看了，不是多方评审。"
+FLEET_DISABLED_REASON = "多方听意见已关闭，由当前 Bot 直接完成。"
+
+# Keep in sync with mms_web.catalog._FAMILY_RULES. Used when a preset has no
+# family yet; N is discovered at runtime, never hardcoded.
+_FAMILY_PREFIXES = (
+    ("claude", "Claude"),
+    ("gpt", "GPT"),
+    ("codex", "GPT"),
+    ("o1", "GPT"),
+    ("o3", "GPT"),
+    ("o4", "GPT"),
+    ("gemini", "Gemini"),
+    ("qwen", "Qwen"),
+    ("kimi", "Kimi"),
+    ("k2", "Kimi"),
+    ("k3", "Kimi"),
+    ("glm", "GLM"),
+    ("minimax", "MiniMax"),
+    ("deepseek", "DeepSeek"),
+    ("grok", "Grok"),
+    ("mimo", "MiMo"),
+    ("doubao", "Doubao"),
+)
+_CHEAP_MARKERS = ("flash", "turbo", "highspeed", "mini", "air", "lite", "haiku", "small", "fast")
+_INTENSE_MARKERS = ("opus", "sonnet", "thinking", "max", "pro", "heavy", "astra", "k3", "5.4", "5.6", "gpt-6")
+
+# Multi-model review on ONE named Bot. Single-model "帮我评审" must stay False.
+_FLEET_REVIEW = re.compile(
+    r"几个模型|多家模型|多个模型|各家模型|跨家族|交叉审|交叉评|"
+    r"委员会|committee review|review across|"
+    r"对比.{0,12}(意见|评审|review)|"
+    r"(用|让).{0,12}(能用的|可用的)?模型.{0,8}(一起|分别|各自)?(看|审|评)|"
+    r"一起(评审|review)",
+    re.IGNORECASE,
+)
 
 # Multi-goal shape signals: two or more list markers on their own lines,
 # inline full-width enumerations (1）2）…), circled numbers, parallel adverbs,
@@ -96,6 +144,172 @@ def looks_multi_goal(text, bots=None, owner_id=None) -> bool:
         if mentions >= 2:
             return True
     return False
+
+
+def normalize_fleet_policy(raw) -> dict:
+    """Persistable per-Bot fleet controls. Missing fields become defaults."""
+    source = raw if isinstance(raw, dict) else {}
+    intensity = source.get("intensity") if source.get("intensity") in FLEET_INTENSITIES else "opinions"
+    try:
+        maximum = int(source.get("maxFamilies") or DEFAULT_FLEET_FAMILIES)
+    except (TypeError, ValueError):
+        maximum = DEFAULT_FLEET_FAMILIES
+    maximum = min(UI_FLEET_FAMILIES, max(1, maximum))
+    families = []
+    seen = set()
+    for item in source.get("families") or []:
+        name = str(item or "").strip()
+        if not name or name in seen or name == "Other":
+            continue
+        seen.add(name)
+        families.append(name[:40])
+        if len(families) >= UI_FLEET_FAMILIES:
+            break
+    if families:
+        maximum = max(maximum, min(UI_FLEET_FAMILIES, len(families)))
+    models = {}
+    raw_models = source.get("models") if isinstance(source.get("models"), dict) else {}
+    for family, preset_id in raw_models.items():
+        key = str(family or "").strip()[:40]
+        value = str(preset_id or "").strip()[:500]
+        if not key or not value or key == "Other":
+            continue
+        models[key] = value
+    enabled = source.get("enabled")
+    return {
+        "enabled": False if enabled is False else True,
+        "intensity": intensity,
+        "maxFamilies": maximum,
+        "families": families,
+        "models": models,
+    }
+
+
+def looks_fleet_review(text) -> bool:
+    """True when the user asks this Bot to gather opinions from available models.
+
+    This is not Bot-to-Bot collaboration and does not create permanent workers.
+    """
+    prompt = str(text or "").strip()
+    return bool(prompt) and bool(_FLEET_REVIEW.search(prompt))
+
+
+def is_split_plan(plan) -> bool:
+    return isinstance(plan, dict) and plan.get("mode") in SPLIT_PLAN_MODES
+
+
+def _preset_family(preset: dict) -> str:
+    family = str(preset.get("family") or "").strip()
+    if family:
+        return family
+    lowered = str(preset.get("modelName") or preset.get("name") or "").lower()
+    for prefix, name in _FAMILY_PREFIXES:
+        if lowered.startswith(prefix):
+            return name
+    return "Other"
+
+
+def _marker_score(text: str, markers: tuple[str, ...]) -> int:
+    lowered = str(text or "").lower()
+    return sum(1 for marker in markers if marker in lowered)
+
+
+def _pick_in_family(candidates: list[dict], intensity: str) -> dict:
+    def key(preset: dict) -> tuple:
+        name = str(preset.get("modelName") or preset.get("name") or "")
+        cheap = _marker_score(name, _CHEAP_MARKERS)
+        intense = _marker_score(name, _INTENSE_MARKERS)
+        if intensity == "intense":
+            return (-intense, cheap, name.lower(), str(preset.get("id") or ""))
+        return (-cheap, intense, name.lower(), str(preset.get("id") or ""))
+    return min(candidates, key=key)
+
+
+def fleet_presets(presets: list[dict], owner_preset_id=None, policy=None) -> list[dict]:
+    """One available Pi preset per family, capped by the Bot's fleet policy."""
+    policy = normalize_fleet_policy(policy)
+    grouped: dict[str, list[dict]] = {}
+    for preset in presets or []:
+        if preset.get("harness") != "pi" or not preset.get("available") or not preset.get("id"):
+            continue
+        family = _preset_family(preset)
+        if family == "Other":
+            continue
+        row = dict(preset)
+        row["family"] = family
+        grouped.setdefault(family, []).append(row)
+    pinned = [name for name in policy["families"] if name in grouped]
+    if pinned:
+        wanted = pinned[: policy["maxFamilies"]]
+    else:
+        ranked = []
+        for family, candidates in grouped.items():
+            pick = _pick_in_family(candidates, policy["intensity"])
+            name = str(pick.get("modelName") or pick.get("name") or "")
+            cheap = _marker_score(name, _CHEAP_MARKERS)
+            intense = _marker_score(name, _INTENSE_MARKERS)
+            score = intense if policy["intensity"] == "intense" else cheap
+            ranked.append((score, family, pick))
+        ranked.sort(key=lambda item: (-item[0], item[1]))
+        wanted = [item[1] for item in ranked[: policy["maxFamilies"]]]
+    remembered = policy.get("models") if isinstance(policy.get("models"), dict) else {}
+    rows = []
+    for family in wanted:
+        candidates = grouped[family]
+        chosen_id = str(remembered.get(family) or "")
+        pick = next((item for item in candidates if item.get("id") == chosen_id), None)
+        if pick is None and chosen_id:
+            pick = next((item for item in candidates if item.get("name") == chosen_id), None)
+        if pick is None:
+            pick = _pick_in_family(candidates, policy["intensity"])
+        rows.append(pick)
+    return rows[:MAX_FLEET_STEPS]
+
+
+def fleet_plan(owner: dict, presets: list[dict], prompt: str, policy=None) -> dict:
+    """Same Bot, N model brains, no extra named colleagues."""
+    policy = normalize_fleet_policy(policy if policy is not None else owner.get("fleetPolicy"))
+    if not policy["enabled"]:
+        return direct_plan(owner, FLEET_DISABLED_REASON, "fleet-disabled")
+    rows = fleet_presets(presets, owner.get("presetId"), policy)
+    if len(rows) < 2:
+        return direct_plan(owner, UNDERFILLED_REASON, "fleet-underfilled")
+    goal = str(prompt or "").strip()[:8000]
+    steps = []
+    for index, preset in enumerate(rows, 1):
+        family = str(preset.get("family") or "Other")
+        model = str(preset.get("modelName") or preset.get("name") or preset["id"])
+        label = family if family == model else f"{family} · {model}"
+        steps.append({
+            "id": f"f{index}",
+            "kind": "fleet",
+            "botId": owner.get("id"),
+            "goal": "",
+            "workerPrompt": (
+                "用你当前的模型独立看一遍下面的目标，只写结论、风险和你不同意的地方。"
+                "不要调用其他 Bot，不要再分发。\n\n" + goal
+            ),
+            "dependsOn": [],
+            "presetId": str(preset["id"])[:500],
+            "label": label[:80],
+            "family": family,
+            "status": "pending",
+            "taskId": None,
+            "onFailure": "skip",
+        })
+    labels = "、".join(step["label"] for step in steps)
+    return {
+        "version": 2,
+        "mode": "fleet",
+        "ownerBotId": owner.get("id"),
+        "reason": f"听 {labels}。",
+        "steps": steps,
+        "candidates": [],
+        "merge": "owner",
+        "modelDecision": False,
+        "source": "fleet",
+        "fleetPolicy": policy,
+    }
 
 
 def normalize_step_status(status):

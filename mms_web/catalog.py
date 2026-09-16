@@ -65,6 +65,7 @@ _FAMILY_RULES = (
     ("glm", "GLM"),
     ("minimax", "MiniMax"),
     ("deepseek", "DeepSeek"),
+    ("grok", "Grok"),
     ("mimo", "MiMo"),
     ("doubao", "Doubao"),
 )
@@ -799,6 +800,7 @@ class CatalogService:
                 "harness": cli,
                 "modelId": model_id or model_name,
                 "modelName": model_name,
+                "family": _model_family(model_name),
                 "providerId": "" if account_id else provider_id,
                 "channel": channel,
                 "channelKind": channel_kind,
@@ -815,6 +817,8 @@ class CatalogService:
                 "id": "web:pi:" + model["id"], "name": model["name"],
                 "description": model["providerName"] + " · Pi",
                 "harness": "pi", "modelId": model["id"],
+                "modelName": model.get("name") or "",
+                "family": model.get("family") or _model_family(model.get("name") or ""),
                 "providerId": model["providerId"], "channel": model["providerId"],
                 "available": model["available"], "reason": model.get("reason", ""),
             })
