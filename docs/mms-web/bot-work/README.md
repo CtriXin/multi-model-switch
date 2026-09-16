@@ -32,9 +32,24 @@ Bot 是长期存在的员工，用户用聊天交代事情。MMS 只做身份、
 | T5c | 在对话里换 Bot 的模型，下一轮生效 | `T5c-model-switch-by-dialogue.md` | k3 / deepseek，T5a 之后 | `bot_client.py` parser、`bots.py` `worker` 与启动优先级、`Bot.tsx` / `BotStudio.tsx` 最小接线 |
 | T6a | 4.x ↔ 5.x 双向切换门禁 + **修掉降级泄漏内部会话**：4.22 忽略不认识的会话所有者、schema 不许升、fresh-user gate 加双向切换场景 | `T6a-channel-switch-gate.md` | k3 / deepseek | `mms_web/sessions.py` 与 `server.py` 各一处、`scripts/regression_fresh_user_gate.py`、新增契约与前向兼容测试。**base 是 4.22.x 线** |
 | T6b | 把「运行环境」设置 tab 从 5.x 回流到 4.22.x，且不带进任何 Bot | `T6b-runtime-tab-backport.md` | gemini3.6 | **纯前端，只有** `SettingsPage.tsx` + `studio.css`，加一条无 Bot 断言。**base 是 4.22.x 线** |
+| T7a | 连接横幅与真实连接状态脱节：失败要防抖，连接噪音和操作失败必须分流 | `T7a-connection-banner.md` | gemini3.6 | **纯前端**，`App.tsx` 的 `load()` 失败处理与顶部红条、`styles.css`、新增一个单测文件。**base 是 `main`（4.22.1）** |
+| T7b | BTW 旁问卡片收起后要被记住：换成"已读/已处置"语义，状态活过卸载 | `T7b-btw-card-fold-memory.md` | gemini3.6 | **纯前端**，`SideQuestions.tsx` / `side-questions.ts` / `App.tsx` 两处最小接线 / `side-questions.test.mjs`。**base 是 `main`（4.22.1）** |
+| T7c | 把 MMF 挡下来的真实原因说给用户听：`blocked_reasons` 只当布尔值用，内容一个字都没传给用户 | `T7c-surface-blocked-reasons.md` | k3 / deepseek | **后端为主**，新增 `mms_web/config_block_reasons.py` + `model_settings_worker.py` 一句 message；前端只核对 `ChannelModels.tsx` 已有三处渲染点。**base 是 `main`（4.22.1）** |
+| T7d | 开「手机访问」不该把当前这个窗口踢掉：开关/换 token 时给当前会话种 cookie，loopback 一律不放行 | `T7d-remote-access-keeps-current-window.md` | k3 / deepseek | **后端为主**，`server.py` 的 `set_remote_access` 与响应头链路；前端 `RemoteAccess.tsx` 三处文案 + `REMOTE-ACCESS.md`。**base 是 `main`（4.22.1）** |
+| T7e | **（本轮最高优先级）** 被中断的回合：界面看不见发生了什么——回合按位置被误判成"已完成"、三槽位落空渲染 `null`、被重启作废的消息救不回来、被打断的一轮却说"本轮已完成" | `T7e-blank-turn-after-steer.md` | gemini3.6（纯前端） | **纯前端**，`Transcript.tsx` / `SessionStatus.tsx` / `transcript.css` / `App.tsx` 三处最小接线 / `turn-working-status.test.mjs`。**base 是 `dev`（5.0.1）**，理由见包内"为什么不是 `main`" |
 | T4 | 落地与交付链 | `T4-landing-governance.md` | Claude（本会话） | rebase、issue、PR 拆分、全量回归、fresh-user gate |
 
 建议只是建议，派发给谁由用户决定。
+
+第七轮（2026-09-16）追加 **T7e**，**优先级高于 T7a / T7b / T7c / T7d**。来自 owner 当天的两张截图：一张是一次 BTW 加一条中途引导之后，transcript 最后一段**整片空白**，而 composer 上方的状态栏仍在写「执行工具 · bash　正在执行终端工具…」；另一张是一条用户消息标着「已取消，未执行」、上面一张已回答的 BTW 卡、**没有任何 assistant 回复**，状态栏却写着「本轮已完成」（owner：「这个任务都完成了 我都不知道他回复什么 结果是什么」）。前四条是烦人，这一条是**用户会对会话状态做出错误判断并因此做出错误处置**——以为卡死去杀进程，或者以为成功去找根本不存在的结果。
+
+两张截图的**放大器是同一个**：`Transcript.tsx` 把"这一回合完成没有"从**位置**推出来（`completed={index < turns.length - 1 || !active}`），把"会话忙不忙"只从 `session.state` 读（而 `SessionStatus.tsx` 读的是 `session.activity.phase`，两套数据源），然后在三个渲染槽位全部落空时**返回 `null`**。**触发器有两条**：服务重启把排队消息作废、把 `state` 改写（`sessions.py` 恢复路径 `1566-1570` + `_resume()` 置 `idle`），以及一条中途消息把回合切开。**重启那条是首选复现路径**——不需要凑 BTW 或 steer 的时序。包里除了修渲染，还硬性要求两件事：被重启作废的消息要有**重新发送**入口（现在只有一行小灰字，owner 完全没注意到），被打断的一轮**不许呈现成「本轮已完成」**。`sessions.py` 把作废消息标成 `cancelled` 的处理**本身是对的，不许改**；包里已经分析清楚服务端信息"一半够一半不够"，不够的那一半要停下来问 owner 才能动后端。
+
+**T7e 的实现 base 是 `dev`（5.0.1，`f04d740e`），不是 `main`**——这是本轮唯一一个偏离"能在 4.22.x 上修就 base 在 `main`"默认规则的包，理由三条写在包内："回合按位置推 completed"两线逐字相同，但工单点名要补单测的 `apps/mms-web/tests/turn-working-status.test.mjs`、以及"不许渲染 `null`"所依赖的 `TurnWorkingStatus` / `turnWorkingHint` / `activityHints` / `.turn-working-*` 样式**全部只存在于 5.x**（gemini 的 `88114765` / `6d9001d6`），在 `main` 上实现等于把 5.x 功能回流 4.x，方向与 owner 定的流向相反。4.22.x 侧的残留（自动折叠提前触发、中间文字被当成最终回答、无重新发送入口）已在包内"残留"一节如实记下，**是否回流由 owner 决定，不在本包**。包文档本身照旧落在 `dev`。
+
+第六轮（2026-09-16）追加 **T7c / T7d**，来自 owner 当天的两条真实故障：同事在装过旧版本的电脑上删除通道，弹出一句**猜出来的**错误文案（真实原因是 MMF 的 `blocked_reasons`，算出来了却只当布尔值用）；以及打开「手机访问」开关后，本机原本开着的 `127.0.0.1` 窗口立刻被踢掉。这两个包**互相独立、可以并行**，都建议给 k3 / deepseek（都是后端为主，各带一点前端文案），**改动面零重叠、没有任何共享文件**。**两个包的实现 base 都是 `main`（4.22.1，`6c62a656`）**——实测 owner 指定的那条六文件 diff 只有 `server.py`（117 行，全是 5.x Bot 工作台接线）和 `SettingsPage.tsx`（138 行，T6b 运行环境 tab）有差异，**两处都不落在这两个包的改动面上**；`model_settings_worker.py` / `model_settings.py` / `remote_access.py` / `ChannelModels.tsx` / `RemoteAccess.tsx` / `api.ts` / `mms_registry_cli.py` / `mms_state_io.py` 以及相关测试文件 blob hash 全部逐字节相同。唯一需要留意的合流点是 T7d 选方案 B 时会碰到 `do_POST` 的收尾行（两条线不同），包里已写明怎么合。**包文档本身照旧落在 `dev`**。
+
+第五轮（2026-09-16）追加 **T7a / T7b**，来自 owner 当天的两条 Pilot 使用反馈（顶部红条反复出现、BTW 旁问卡片收起后又自己展开）。这两个包**互相独立、可以并行**，都建议给 gemini，改动面零重叠（唯一共享文件 `App.tsx`，两处相距一千多行）。**两个包的实现 base 都是 `main`（4.22.1，`6c62a656`）**——实测两个包要改的代码在 `main` 和 `dev` 上逐字节相同（`api.ts` / `SideQuestions.tsx` / `side-questions.ts` / `side-questions.test.mjs` blob hash 完全一致；`App.tsx` 的 64 行差异全是 Bot 工作台接线，`styles.css` 的 49 行差异是 `ModelExplorer` 重试按钮和 `.model-picker-trigger`，都不落在这两个包的改动面上），按 owner 定的"4.x 的所有改动默认进入 5.x"，修在 4.22.x 会自动流到 5.x。**包文档本身落在 `dev`**，因为 `docs/mms-web/bot-work/` 这棵树只存在于 `dev`，`origin/main` 上没有这个目录——和 T6a / T6b 是同一个形状。
 
 第四轮（2026-09-16）追加 **T6a / T6b**，对应 owner 新定的发布模型（`main` = 4.22.x 永久稳定线，`dev` = 5.x，用户可在两条线之间升降级，同一台机器不能同时装两个）。这两个包的 **base 是 4.22.x 线**（重组后是 `main`；重组尚未完成时用 `origin/dev` = `1f466eea` = 4.22.1），**不是 5.x**——理由是 owner 定的流向是"4.x 的所有改动默认进入 5.x"，门禁写在 4.x 侧会自动流到 5.x，反过来则不会回到 4.x。同一轮把 T5a / T5b / T5c 按 `origin/dev-pre`（`77f2fd8a` = 5.0.1）重新定位了行号与基线，并给三个包各加了一节"与近期改动的冲突面"。
 
@@ -51,15 +66,19 @@ owner 决定（2026-09-14）：`dev` / `main` 是 4.21.x 稳定安装线，不�
 
 **2026-09-16 更新**：owner 定下新的发布模型——**`main` = 4.22.x 永久稳定线**（不含 Bot），**`dev` = 5.x**，用户可以在设置里在两条线之间升降级，同一台机器不能同时装两个。底层 mms 终端能力两条线完全相同（已验证：`mms_core.py` / `mms_launchers.py` / `mms_tui.py` / `mms` / `install.sh` / `mms_platform.py` 在 `v4.22.1` 和 `origin/dev-pre` 上逐字节相同），配置共用 `~/.config/mms-next`（Single Config Root 硬规则，见 `docs/AGENT_GUARDRAILS.md`，不许改）。
 
-**分支现状（2026-09-16 实测，重组尚未完成，别凭记忆）**：
+**分支现状（2026-09-16 晚实测，重组已经完成）**：
 
 | 分支 | 版本 | HEAD | 说明 |
 | --- | --- | --- | --- |
-| `origin/dev-pre` | **5.0.1** | `77f2fd8a` | 5.x 线。重组后成为 `dev` |
-| `origin/dev` | **4.22.1** | `1f466eea` | 4.22.x 线。重组后成为 `main` |
-| `origin/main` | 4.10.0 | `ca6c09eb` | **陈旧，重组前不要用** |
+| `origin/main` | **4.22.1** | `6c62a656` | **4.22.x 永久稳定线**（不含 Bot） |
+| `origin/dev` | **5.x** | `e5d32243` | **5.x 线**（Bot 工作台在这里）。T7a / T7b 那轮记的是 `5bf1f31d`，此后 PR #276 已合入，2026-09-16 晚实测 HEAD 为 `e5d32243`；T7e 那轮 PR #280 也已合入，**实测 HEAD = `f04d740e`（version 5.0.1），T7e 的 base 就是它** |
+| `origin/dev-pre` | 5.0.x | `2b9260d8` | 重组后闲置，**不要再用作 base** |
 
-所以：5.x 侧的包（T5a/b/c）今天 base 用 `origin/dev-pre`，4.22.x 侧的包（T6a/T6b）今天 base 用 `origin/dev`。重组完成后分别改成 `dev` 和 `main`。
+所以：**5.x 侧的包 base 用 `origin/dev`，4.22.x 侧的包 base 用 `origin/main`。**
+
+⚠️ **这张表在重组前是反过来的**（`origin/dev` = 4.22.1、`origin/main` = 4.10.0 陈旧），T5a/b/c 和 T6a/T6b 正文里写的"重组尚未完成时用 `origin/dev-pre` / `origin/dev`"是当时的临时说法。**现在按上表读**：T5a/b/c → `origin/dev`；T6a/T6b → `origin/main`；T7a/T7b → `origin/main`；T7c/T7d → `origin/main`；**T7e → `origin/dev`**（唯一的例外，理由见 T7e 包内"为什么不是 `main`"）。那几份包里引用的 `origin/dev-pre` = `77f2fd8a`（5.x）与 `origin/dev` = `1f466eea`（4.22.1）行号基线仍然有效，只是分支名要按上表换过来，实现者在自己的 base 上复核行号。
+
+**包文档本身统一放在 `dev` 的 `docs/mms-web/bot-work/`**，包括 base 在 `main` 的那几个（T6a / T6b / T7a / T7b / T7c / T7d）。原因：这棵文档树只存在于 `dev`，`origin/main` 上没有 `docs/mms-web/bot-work/` 目录，在 `main` 上另起一棵会在 4.x→5.x 合流时和这份 README 必然冲突。
 
 ## 派发时给模型的开场话（直接复制）
 
@@ -129,6 +148,19 @@ PYTHONPATH=. python3 -m pytest -q \
 | `node --test apps/mms-web/tests/*.test.mjs` | **121 pass / 0 fail**（19 个测试文件；旧包写的 114 是 gemini 新增三个测试文件之前的数） |
 | `npx tsc --noEmit -p apps/mms-web` | **0 错** |
 | `grep -ohE '#[0-9a-fA-F]{3,8}\b' apps/mms-web/src/bot*.css \| sort -u \| wc -l` | **12**（没变） |
+
+**2026-09-16 晚在重组后的两条线上实测的前端门禁基线**（T7a / T7b 用这组）：
+
+| 门禁 | `origin/main` = `6c62a656` = 4.22.1 | `origin/dev` = `5bf1f31d` = 5.0.1 |
+| --- | --- | --- |
+| `npx tsc --noEmit -p apps/mms-web` | **0 错** | **0 错** |
+| `node --test apps/mms-web/tests/*.test.mjs` | **tests 56 / pass 56 / fail 0**（7 个文件） | **tests 121 / pass 121 / fail 0**（19 个文件） |
+| `node --test apps/mms-web/tests/side-questions.test.mjs` | **17 / 17 / 0** | **17 / 17 / 0**（该文件两线逐字节相同） |
+| `npm run build --workspace @mms/web` | 通过，css 148.95 kB / js 660.01 kB | 通过，css 223.13 kB / js 793.19 kB |
+
+**2026-09-16 在 `origin/dev` = `f04d740e` = 5.0.1 上复测（T7e 用这组）**：`tsc` **0 错**；`node --test apps/mms-web/tests/*.test.mjs` **tests 121 / pass 121 / fail 0**（19 个文件）；`npm run build --workspace @mms/web` 通过，1916 modules，css **223.13 kB**（gzip 37.55）/ js **793.19 kB**（gzip 255.72）。与 `5bf1f31d` 那次逐项相同，PR #276 / #280 都是纯文档合入。
+
+`apps/mms-web/tsconfig.json` 的 `include` 只有 `["src"]`，**`tsc` 不检查 `apps/mms-web/tests/*.mjs`**。
 
 跑前端门禁之前先在 worktree 里 `npm install`。
 
