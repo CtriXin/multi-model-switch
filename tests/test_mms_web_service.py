@@ -171,6 +171,50 @@ def test_the_help_lists_every_verb_that_can_be_dispatched():
     assert "logs/mms-web.log" in text
 
 
+def test_doctor_restart_reuses_the_current_pilot_port(monkeypatch, tmp_path):
+    from mms_web import service
+
+    current = {"port": 8766, "pid": 42, "mine": True}
+    calls = []
+    mine_calls = []
+
+    def find_mine(_rows):
+        mine_calls.append(True)
+        return current if len(mine_calls) == 1 else None
+
+    monkeypatch.setattr(service, "_mine", find_mine)
+    monkeypatch.setattr(service, "discover", lambda *args: calls.append(("discover", args)) or [current])
+    monkeypatch.setattr(service, "stop", lambda **kwargs: calls.append(("stop", kwargs)))
+    monkeypatch.setattr(service, "start", lambda **kwargs: calls.append(("start", kwargs)) or {**current, "version": "test"})
+    def fake_request(base, path, timeout=8.0):
+        if path == "/api/v1/bootstrap":
+            return True, {"version": "1", "capabilities": {"launch": True}}
+        if path == "/api/v1/sessions":
+            return True, {"sessions": []}
+        return True, {"session": {"id": "session/1"}}
+
+    monkeypatch.setattr(service, "_doctor_request", fake_request)
+    assert service.doctor(state_root=tmp_path, port_base=8765, limit=20, restart=True) == 0
+    start_call = next(item for item in calls if item[0] == "start")
+    assert start_call[1]["port_base"] == 8766
+
+
+def test_restart_reuses_the_current_pilot_port(monkeypatch, tmp_path):
+    from mms_web import service
+
+    current = {"port": 8766, "pid": 42, "mine": True}
+    calls = []
+    monkeypatch.setattr(service, "_mine", lambda rows: current)
+    monkeypatch.setattr(service, "discover", lambda *args: [current])
+    monkeypatch.setattr(service, "stop", lambda **kwargs: calls.append(("stop", kwargs)))
+    monkeypatch.setattr(service, "start", lambda **kwargs: calls.append(("start", kwargs)) or current)
+    monkeypatch.setattr(service, "default_state_root", lambda: tmp_path)
+
+    assert service.run("restart", ["--state-root", str(tmp_path), "--port", "8765", "--json"]) == 0
+    start_call = next(item for item in calls if item[0] == "start")
+    assert start_call[1]["port_base"] == 8766
+
+
 def test_doctor_checks_bootstrap_sessions_and_detail_without_network(home, monkeypatch, capsys):
     from mms_web import service
 
