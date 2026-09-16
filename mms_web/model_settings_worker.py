@@ -12,6 +12,7 @@ import sys
 import tomllib
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from mms_web.config_block_reasons import describe_blocked_reasons
 from mms_web.errors import WebError
 
 
@@ -425,7 +426,7 @@ def run(request):
         plan = web.build_config_plan(cfg, payload, config_path=str(root / "config.toml"), command_name="mmf")
         guard = plan.get("registry_v2_save_plan", {}).get("blocked_reasons", [])
         if not plan.get("ok") or guard:
-            raise WebError("CONFIG_PLAN_BLOCKED", "MMF 未允许这组修改，未保存。请检查是否移除了全部可用模型，或重新加载配置后再试。", 409)
+            raise WebError("CONFIG_PLAN_BLOCKED", describe_blocked_reasons(guard), 409)
         return {"changes": changes}
     confirmed = request.get("confirmed") is True
     if action != "apply" or (not confirmed and request.get("confirmPhrase") != "写入预览DB"):
