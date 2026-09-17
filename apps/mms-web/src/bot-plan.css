@@ -91,7 +91,7 @@
   left: 0;
   bottom: 100%;
   z-index: 40;
-  padding: 0 0 10px;
+  padding: 0 0 16px;
 }
 .bot-fleet-pill-wrap:hover .bot-fleet-take-menu,
 .bot-fleet-pill-wrap:focus-within .bot-fleet-take-menu,
@@ -102,11 +102,9 @@
   display: none;
 }
 .bot-fleet-take-card {
-  min-width: 200px;
-  max-width: 240px;
-  max-height: 148px;
-  overflow: hidden;
-  padding: 8px 10px;
+  min-width: 220px;
+  max-width: 260px;
+  padding: 12px 12px 14px;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--surface);
@@ -117,21 +115,32 @@
   max-width: none;
   max-height: 220px;
   overflow: auto;
+  padding: 12px 14px 14px;
 }
-.bot-fleet-take-hint {
-  margin: 4px 0 0;
-  color: var(--muted);
-  font-size: 11px;
-}
-.bot-fleet-take-card strong {
-  display: block;
-  margin-bottom: 6px;
-  font-size: 12px;
-}
-.bot-fleet-take-card p {
+.bot-fleet-take-body p {
   margin: 0 0 6px;
   font-size: 13px;
   line-height: 1.45;
+}
+.bot-fleet-take-body p:last-child {
+  margin-bottom: 0;
+}
+.bot-fleet-take-card:not(.is-pinned-card) .bot-fleet-take-body p {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.bot-fleet-take-hint {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.3;
+}
+.bot-fleet-take-card strong {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 12px;
 }
 .bot-fleet-take-card p span {
   display: inline-block;
