@@ -1,3 +1,4 @@
+import { scheduleDialogAutofocus } from "./dialog-focus";
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowUp,
@@ -131,9 +132,17 @@ export function Dialog({
   size?: "default" | "wide" | "sheet";
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const returnFocus = useRef(typeof document === "undefined" ? null : document.activeElement as HTMLElement);
   useEffect(() => {
-    ref.current?.showModal();
-    return () => ref.current?.close();
+    const dialog = ref.current;
+    dialog?.showModal();
+    const stop = scheduleDialogAutofocus(dialog);
+    return () => {
+      stop();
+      const shouldRestore = document.activeElement === document.body || dialog?.contains(document.activeElement);
+      dialog?.close();
+      if (shouldRestore && returnFocus.current?.isConnected) returnFocus.current.focus();
+    };
   }, []);
   return (
     <dialog

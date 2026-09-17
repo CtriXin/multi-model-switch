@@ -1,3 +1,4 @@
+import { useRef, useState } from "react";
 import { ChevronDown, ArrowUpRight } from "lucide-react";
 import type { Model, Preset, SessionDetail } from "./types";
 import type { LaunchFacts } from "./ModelExplorer";
@@ -105,6 +106,17 @@ export function SessionSettings({
   presets: Preset[]; models: Model[]; favorites: string[];
   toggleFavorite: (id: string) => void;
 }) {
+  const [effortPending, setEffortPending] = useState(false);
+  const [effortError, setEffortError] = useState("");
+  const effortInFlight = useRef(false);
+  async function changeEffort(value: string) {
+    if (effortInFlight.current || busy) return;
+    effortInFlight.current = true; setEffortPending(true); setEffortError("");
+    try {
+      if (await control("thinking", value) === false) setEffortError("思考强度未更新，请重试。");
+    } catch (cause) { setEffortError(cause instanceof Error ? cause.message : "思考强度未更新，请重试。"); }
+    finally { effortInFlight.current = false; setEffortPending(false); }
+  }
   const r = detail.runtime;
   const locked = busy || !r?.alive || !!r?.stale || ["running", "waiting"].includes(detail.session.state);
   const control = (name: string, value: unknown) =>
@@ -135,8 +147,8 @@ export function SessionSettings({
             <select
               aria-label="Thinking 等级"
               value={r?.thinkingLevel || ""}
-              disabled={locked || !r?.model?.reasoning}
-              onChange={(e) => void control("thinking", e.target.value)}
+              disabled={locked || effortPending || !r?.model?.reasoning}
+              onChange={(e) => void changeEffort(e.target.value)}
             >
               <option value="" disabled>
                 尚未读取
@@ -151,6 +163,8 @@ export function SessionSettings({
               ))}
             </select>
           </label>
+          {effortPending && <p className="popover-note" role="status">正在更新思考强度…</p>}
+          {effortError && <p className="inline-alert" role="alert">{effortError}</p>}
           <label className="task-setting-row">
             <span>工作方式</span>
             <select

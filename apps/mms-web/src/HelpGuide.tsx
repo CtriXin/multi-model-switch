@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowRight, Search, X } from "lucide-react";
+import { scheduleDialogAutofocus } from "./dialog-focus";
 import { guideTopics, matchingTopics } from "./guide-content";
 import type { GuideAction } from "./guide-content";
 import "./guide.css";
@@ -44,6 +45,7 @@ export function HelpGuide({ ready, modelReady, open, setOpen, hasSession, naviga
     if (!open) return;
     returnFocus.current = document.activeElement as HTMLElement;
     dialog.current?.showModal();
+    scheduleDialogAutofocus(dialog.current);
     if (modelReady) markSeen(true);
     return () => {
       dialog.current?.close();
@@ -64,7 +66,7 @@ export function HelpGuide({ ready, modelReady, open, setOpen, hasSession, naviga
       </header>
       <div className="guide-layout">
         <nav className="guide-index" aria-label="使用引导目录">
-          <label className="guide-search"><Search size={16} /><input type="search" aria-label="搜索功能说明" placeholder="搜索功能，如 effort" value={query} onChange={event => setQuery(event.target.value)} /></label>
+          <label className="guide-search"><Search size={16} /><input data-autofocus="" type="search" aria-label="搜索功能说明" placeholder="搜索功能，如 effort" value={query} onChange={event => setQuery(event.target.value)} /></label>
           {!query.trim() && <button type="button" aria-current={section === "start" ? "page" : undefined} onClick={() => setSection("start")}>第一次使用<span>连接、选择、开始对话</span></button>}
           {topics.map(item => <button type="button" key={item.id} aria-current={section === item.id ? "page" : undefined} onClick={() => setSection(item.id)}>{item.title}</button>)}
           {!topics.length && <p className="guide-empty" role="status">没有匹配的功能。试试“模型”“路径”或“成果”。</p>}
