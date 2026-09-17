@@ -1,0 +1,1 @@
+{"ok": true, "pending": {"id": "web:pi:newapi-personal-tokyo:gemini-3.8-flash-high", "name": "gemini-3.8-flash-high", "channel": "newapi-personal-tokyo"}, "current": {"id": "web:pi:newapi-personal-tokyo:glm-5.3", "name": "glm-5.3"}, "message": "已记录，从下一个没有被计划指定模型的任务起使用 gemini-3.8-flash-high · newapi-personal-tokyo；这一轮是计划指定的 glm-5.3，不受影响。"}

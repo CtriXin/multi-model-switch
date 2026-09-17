@@ -1,6 +1,7 @@
 """Bot execution uses the same MMS/Pi sessions as Pilot conversations."""
 from __future__ import annotations
 
+import re
 import shlex
 import sys
 import os
@@ -12,6 +13,43 @@ from .errors import WebError
 from .bot_client import command_catalog_text
 
 PLAN_TIMEOUT_SECONDS = 20.0
+
+_MODEL_QUERY_TRAILING = re.compile(r"[吧。！!]+$")
+_MODEL_SEPARATORS = re.compile(r"[\s._:/-]+")
+
+
+def available_presets(catalog):
+    """Pi presets a Bot can actually launch with, from a catalog snapshot."""
+    return [p for p in (catalog or {}).get("presets", [])
+            if p.get("harness") == "pi" and p.get("available")]
+
+
+def _model_field_key(value):
+    return _MODEL_SEPARATORS.sub("", str(value or "").lower())
+
+
+def normalize_model_query(value):
+    """Normalize a spoken model name for matching.
+
+    Same rule as the frontend shortcut in apps/mms-web/src/bot-model-switch.ts,
+    and both sides are pinned to one shared sample file
+    (apps/mms-web/tests/fixtures/model-match-cases.json). Known difference:
+    Python and JS disagree on the \\s / strip / trim charset for invisible
+    control characters (BOM, NEL, FS); those inputs are listed in the
+    fixture's knownDivergent section instead of being asserted equal.
+    """
+    text = _MODEL_QUERY_TRAILING.sub("", str(value or "").strip()).lower()
+    return _MODEL_SEPARATORS.sub("", text)
+
+
+def match_presets(query, presets):
+    """Name matching over the given presets; never guesses across the list."""
+    needle = normalize_model_query(query)
+    if not needle:
+        return []
+    return [p for p in presets
+            if any(needle in _model_field_key(p.get(field))
+                   for field in ("id", "name", "modelId", "channel"))]
 _COMPACT_NOOP_MESSAGES = {
     "nothing to compact (session too small)",
     "already compacted",
@@ -57,7 +95,7 @@ class PiBotExecutor:
         catalog = self.catalog.snapshot()
         preset = next((p for p in catalog.get("presets", []) if p["id"] == bot.get("presetId")), None)
         if not bot.get("presetId"):
-            preset = next((p for p in catalog.get("presets", []) if p.get("harness") == "pi" and p.get("available")), None)
+            preset = next(iter(available_presets(catalog)), None)
         if not preset or preset.get("harness") != "pi" or not preset.get("available"):
             raise WebError("BOT_MODEL_REQUIRED", "MMS 当前没有可启动的 Pi 模型，请先配置一个模型。", 400)
         workspace_id = bot.get("workspaceId") or "default"
@@ -94,6 +132,10 @@ class PiBotExecutor:
             f"{command_catalog_text()}\n"
             "用户要求周期性、反复或每隔多久做一次的工作时，用 schedule create 建一条定时，"
             "不要回答做不到，也不要靠自己在任务末尾重新约下一次。\n"
+            "用户要求查看或更换你使用的模型时，先 model list 看当前真实可用的列表，再 model switch；"
+            "匹配不到或有多个候选时如实告诉用户，不要凭印象写模型名，也不要假装已经切换。"
+            "有多个候选时用 wait 等待用户，并另起一行用“选项：A | B”（最多 4 个）把候选给出。"
+            "model switch 从下一轮任务起生效，本轮仍使用当前模型。\n"
             "浏览器工作必须优先交给已安装的 Ego：Agent 可以直接通过 bash 使用 ego-browser nodejs 和 Ego skill 的全部公开能力；"
             "MMS 只负责把 Bot 身份、任务上下文和结果接回 Web UI。browser CLI 是兼容性薄桥，不是第二套浏览器引擎；"
             "需要协作时先 list 再 dispatch；可以分发多个任务，随后 wait 并结束本轮，"

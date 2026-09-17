@@ -1,0 +1,2 @@
+--- message | 当前运行的模型已经是 `gemini-3.8-flash-high`（渠道 newapi-personal-tokyo），无需切换，直接继续使用即可。
+--- result | 当前模型已经是 gemini-3.8-flash-high（渠道 newapi-personal-tokyo），无需切换，正在正常运行。

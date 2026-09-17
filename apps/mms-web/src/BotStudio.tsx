@@ -291,6 +291,14 @@ function BotEditor({
             disabled={preview}
           />
           <small className="bot-model-hint">模型和通道分开选择；留空时使用 MMS 默认模型。</small>
+          {bot?.model || bot?.pendingPresetId ? (
+            <small className="bot-model-hint">
+              {bot?.model ? `当前 ${bot.model}` : ""}
+              {bot?.pendingPresetId
+                ? `${bot?.model ? " · " : ""}下一轮 ${presets.find((item) => item.id === bot.pendingPresetId)?.name || bot.pendingPresetId}`
+                : ""}
+            </small>
+          ) : null}
         </label>
         <p className="bot-shared-machine-note">
           共享全局电脑 · 目录由 Bot 自己处理
@@ -1071,6 +1079,7 @@ export function BotStudio({
               description: patch.description ?? current.description,
               systemPrompt: patch.systemPrompt ?? current.systemPrompt,
               presetId: patch.presetId ?? current.presetId,
+              pendingPresetId: patch.pendingPresetId ?? current.pendingPresetId,
               wakeEnabled: patch.wakeEnabled ?? current.wakeEnabled,
               avatarId: patch.avatarId ?? current.avatarId,
               avatarColor: patch.avatarColor ?? current.avatarColor,

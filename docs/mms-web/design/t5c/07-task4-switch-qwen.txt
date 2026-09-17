@@ -1,0 +1,3 @@
+--- system | 已记录，下一轮起使用 qwen3.8-flash · newapi-personal-tokyo；本轮仍是 glm-5.3。
+--- message | 已切换：`qwen3.8-flash`（newapi-personal-tokyo，列表里唯一候选）已设为 pending，下一轮任务起生效；本轮还是 glm-5.3 在跑。
+--- result | 已切换：pending = qwen3.8-flash（web:pi:newapi-personal-tokyo:qwen3.8-flash），下一轮任务起生效；本轮仍运行 glm-5.3。qwen3.8-flash 在可用列表中只有一个候选渠道（newapi-personal-tokyo），无需选择。

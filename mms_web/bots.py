@@ -23,7 +23,7 @@ from .errors import WebError
 from . import bot_schedules
 from .bot_schedules import (MAX_SCHEDULES_PER_BOT, RECENT_TASK_LIMIT, advance, apply_update,
                             build_schedule, defer_once, format_local, is_due)
-from .bot_executor import _context_percent
+from .bot_executor import _context_percent, available_presets, match_presets
 from .runtime import private_json
 from .bot_memory import BotMemoryStore, BotMemoryError
 from .bot_communications import BotCommunications
@@ -247,6 +247,7 @@ class BotRuntime(BotCommunications):
                 bot.setdefault("compactAtPercent", 70)
                 bot.setdefault("orchestrationPolicy", "direct-first")
                 bot.setdefault("planner", "model")
+                bot.setdefault("pendingPresetId", "")
             self._migrate_wait_contracts()
             self._migrate_scheduled_tasks()
         except (OSError, ValueError, KeyError, TypeError):
@@ -367,6 +368,7 @@ class BotRuntime(BotCommunications):
             bot = {"id": "bot_" + uuid4().hex[:16], "name": text_field(payload, "name", 80, True),
                    "description": text_field(payload, "description", 1000), "systemPrompt": text_field(payload, "systemPrompt", 12000),
                    "workspaceId": text_field(payload, "workspaceId", 500) or "default", "presetId": requested_preset.strip(),
+                   "pendingPresetId": "",
                    "wakeEnabled": payload.get("wakeEnabled", True), "status": "idle", "sessionId": None,
                    "avatarId": avatar_field(payload, "avatarId", PIXEL_AVATAR_IDS, secrets.choice(PIXEL_AVATAR_IDS)),
                    "avatarColor": avatar_field(payload, "avatarColor", PIXEL_AVATAR_COLORS, secrets.choice(PIXEL_AVATAR_COLORS)),
@@ -406,17 +408,23 @@ class BotRuntime(BotCommunications):
             if active and "presetId" in payload and payload.get("presetId") not in (None, "", bot.get("presetId")):
                 raise WebError("BOT_BUSY", "Bot 正在执行当前任务，模型将在本轮结束后才能切换。", 409)
             updated = deepcopy(bot)
-            for key, limit in (("name", 80), ("description", 1000), ("systemPrompt", 12000), ("workspaceId", 500), ("presetId", 500)):
+            for key, limit in (("name", 80), ("description", 1000), ("systemPrompt", 12000), ("workspaceId", 500), ("presetId", 500), ("pendingPresetId", 500)):
                 if key in payload:
                     if key == "workspaceId" and payload[key] in (None, ""):
                         updated[key] = "default"
-                    elif key == "presetId" and payload[key] in (None, ""):
+                    elif key in {"presetId", "pendingPresetId"} and payload[key] in (None, ""):
                         updated[key] = ""
                     else:
                         updated[key] = text_field(payload, key, limit, key in {"name", "presetId"})
             for key, allowed in (("avatarId", PIXEL_AVATAR_IDS), ("avatarColor", PIXEL_AVATAR_COLORS)):
                 if key in payload:
                     updated[key] = avatar_field(payload, key, allowed, updated.get(key, allowed[0]))
+            if updated.get("pendingPresetId") and updated["pendingPresetId"] != bot.get("pendingPresetId"):
+                # 对话路径写入的待生效模型必须是当前真实可启动的 preset；
+                # 无效值直接拒绝，不让它进入状态后在启动时炸。
+                available_ids = {p.get("id") for p in available_presets(self.executor.catalog.snapshot())}
+                if updated["pendingPresetId"] not in available_ids:
+                    raise WebError("BOT_MODEL_UNAVAILABLE", f"模型 {updated['pendingPresetId']} 当前不可用。", 409)
             if "wakeEnabled" in payload:
                 if type(payload["wakeEnabled"]) is not bool:
                     raise WebError("INVALID_REQUEST", "wakeEnabled 必须是布尔值。", 400)
@@ -1752,8 +1760,39 @@ class BotRuntime(BotCommunications):
                     live["executionMode"] = "direct"
                     self._persist()
                 task = deepcopy(live)
+                # 模型来源优先级（高→低）：task 的 presetIdOverride（计划为这
+                # 一步明确指定）> bot 的 pendingPresetId（对话里刚换，本轮起生
+                # 效并消费）> bot 的 presetId（默认）。带 override 的任务不消费
+                # pending，否则用户的切换会被一个无关的计划子任务吃掉。
                 if task.get("presetIdOverride"):
                     bot = {**bot, "presetId": task["presetIdOverride"]}
+                elif bot.get("pendingPresetId"):
+                    pending = bot["pendingPresetId"]
+                    if pending == bot.get("presetId"):
+                        # 已经在用这个模型：只清 pending，不动会话。
+                        self._bot(bot["id"]).update(pendingPresetId="", updatedAt=now())
+                        self._persist()
+                    else:
+                        try:
+                            selected = self.executor.validate({**bot, "presetId": pending})
+                        except WebError:
+                            # 待生效模型在这期间变得不可用：取消这次切换，清掉
+                            # pending（不清会把 Bot 永久 brick 在失败循环里），本
+                            # 轮退回用户自己正在用的 presetId 继续跑；没换模型就
+                            # 不动 sessionId，不白扔会话历史。
+                            self._bot(bot["id"]).update(pendingPresetId="", updatedAt=now())
+                            self._message(task["id"], "system",
+                                          f"待生效模型 {self._preset_label(pending)} 当前不可用，已取消这次切换；"
+                                          f"本轮继续使用 {bot.get('model') or self._preset_label(bot.get('presetId'))}。你可以重新切换。",
+                                          bot["id"])
+                            self._persist()
+                        else:
+                            # preset 变了就要换新会话（同 update_bot 的既有语义），
+                            # 否则持久 session 仍跑旧模型，“下一轮生效”就成空话了。
+                            bot = {**bot, "presetId": pending, "sessionId": None}
+                            self._bot(bot["id"]).update(selected, pendingPresetId="", sessionId=None, updatedAt=now())
+                            self._message(task["id"], "system", f"本轮起使用模型 {selected['model']}。", bot["id"])
+                            self._persist()
             context = self.root / "contexts" / f"{task['id']}.json"
             private_json(context, {"url": self._endpoint, "token": task["token"], "taskId": task["id"], "botId": bot["id"]})
             with self._lock:
@@ -2055,6 +2094,15 @@ class BotRuntime(BotCommunications):
             if op == "delete":
                 return self.delete_schedule(task["botId"], str(payload.get("scheduleId") or ""))
             raise WebError("INVALID_REQUEST", "schedule 操作必须是 create、list、pause、resume 或 delete。", 400)
+        if action == "model":
+            if payload.get("botId") and payload["botId"] != task["botId"]:
+                raise WebError("BOT_SCOPE", "只能管理当前 Bot 自己的模型。", 403)
+            op = str(payload.get("op") or "")
+            if op == "list":
+                return self._bot_model_list(task["botId"])
+            if op == "switch":
+                return self._bot_model_switch(task, str(payload.get("query") or ""))
+            raise WebError("INVALID_REQUEST", "model 操作必须是 list 或 switch。", 400)
         if action in {"complete", "fail", "wait"}:
             content = str(payload.get("result") or payload.get("error") or payload.get("text") or payload.get("content") or payload.get("reason") or "")[:32000]
             with self._lock:
@@ -2069,3 +2117,81 @@ class BotRuntime(BotCommunications):
                 self._persist()
             return {"ok": True, "taskId": task_id, "message": "已记录，最终状态以 Pi 本轮结束为准。"}
         raise WebError("BOT_ACTION_UNKNOWN", "不支持这个 Bot 工具。", 400)
+
+    def _preset_label(self, preset_id):
+        """Display name for a preset id, falling back to the raw id."""
+        preset_id = str(preset_id or "")
+        catalog = getattr(self.executor, "catalog", None)
+        if not preset_id or catalog is None:
+            return preset_id
+        return next((str(p.get("name") or preset_id) for p in catalog.snapshot().get("presets", [])
+                     if p.get("id") == preset_id), preset_id)
+
+    def _current_preset_id(self, bot):
+        """The preset the Bot would launch with right now, or its raw presetId."""
+        try:
+            return str(self.executor.validate(bot).get("presetId") or "")
+        except WebError:
+            return str(bot.get("presetId") or "")
+
+    def _bot_model_list(self, bot_id):
+        with self._lock:
+            bot = deepcopy(self._bot(bot_id))
+        presets = available_presets(self.executor.catalog.snapshot())
+        current_id = self._current_preset_id(bot)
+        pending_id = str(bot.get("pendingPresetId") or "")
+        models = [{"id": p.get("id"), "name": p.get("name"), "channel": p.get("channel"),
+                   "modelId": p.get("modelId"),
+                   "current": p.get("id") == current_id,
+                   "pending": bool(pending_id) and p.get("id") == pending_id}
+                  for p in presets]
+        current_name = next((str(m["name"]) for m in models if m["current"]), "")
+        pending_name = next((str(m["name"]) for m in models if m["pending"]), "")
+        message = f"当前使用 {current_name or '默认模型'}，共 {len(models)} 个可切换模型。"
+        if pending_name:
+            message += f"已记录下一轮起使用 {pending_name}。"
+        return {"models": models, "current": current_id or None, "pending": pending_id or None,
+                "message": message}
+
+    def _bot_model_switch(self, task, query):
+        with self._lock:
+            bot = deepcopy(self._bot(task["botId"]))
+        snapshot = self.executor.catalog.snapshot()
+        presets = available_presets(snapshot)
+        matches = match_presets(query, presets)
+        if not matches:
+            exact = next((p for p in snapshot.get("presets", []) if p.get("id") == query.strip()), None)
+            if exact is not None:
+                raise WebError("BOT_MODEL_UNAVAILABLE", f"模型 {exact.get('name') or exact.get('id')} 当前不可用。", 409)
+            names = "、".join(str(p.get("name") or p.get("id")) for p in presets) or "无"
+            raise WebError("BOT_MODEL_NOT_FOUND", f"没有找到匹配的可用模型。当前可用：{names}。", 404)
+        if len(matches) > 1:
+            candidates = "、".join(f"{p.get('name')} · {p.get('channel')}" for p in matches[:MAX_WAIT_OPTIONS])
+            raise WebError("BOT_MODEL_AMBIGUOUS", f"有多个模型匹配，请说得更具体。候选：{candidates}。", 409)
+        preset = matches[0]
+        current_id = self._current_preset_id(bot)
+        current_name = next((str(p.get("name") or "") for p in snapshot.get("presets", [])
+                             if p.get("id") == current_id), "")
+        if preset.get("id") == current_id:
+            return {"ok": True, "pending": None,
+                    "current": {"id": current_id or None, "name": current_name},
+                    "message": f"已经在用 {preset.get('name')} 了，没有需要切换的。"}
+        override_id = str(task.get("presetIdOverride") or "")
+        override_name = next((str(p.get("name") or "") for p in snapshot.get("presets", [])
+                              if p.get("id") == override_id), "")
+        label = f"{preset.get('name')} · {preset.get('channel')}"
+        if override_id:
+            message = (f"已记录，从下一个没有被计划指定模型的任务起使用 {label}；"
+                       f"这一轮是计划指定的 {override_name or override_id}，不受影响。")
+        else:
+            message = f"已记录，下一轮起使用 {label}；本轮仍是 {current_name or '当前模型'}。"
+        with self._lock:
+            live = self._bot(task["botId"])
+            live["pendingPresetId"] = preset.get("id")
+            live["updatedAt"] = now()
+            self._message(task["id"], "system", message, task["botId"])
+            self._persist()
+        return {"ok": True,
+                "pending": {"id": preset.get("id"), "name": preset.get("name"), "channel": preset.get("channel")},
+                "current": {"id": current_id or None, "name": current_name},
+                "message": message}

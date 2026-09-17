@@ -9,11 +9,20 @@ from mms_web.bots import (BotRuntime, collaboration_requested, is_trivial_result
 from mms_web.errors import WebError
 
 
+class FakeCatalog:
+    def snapshot(self):
+        return {"presets": [
+            {"id": "pi:fake", "name": "fake-model", "channel": "c1", "modelId": "fake", "harness": "pi", "available": True},
+            {"id": "pi:beta", "name": "Beta", "channel": "c1", "modelId": "beta", "harness": "pi", "available": True},
+        ], "workspaces": [{"id": "ws-1"}, {"id": "default"}]}
+
+
 class FakeExecutor:
     def __init__(self):
         self.starts = []
         self.cancels = []
         self.sessions = {}
+        self.catalog = FakeCatalog()
 
     def available(self):
         return True
@@ -93,6 +102,18 @@ def test_bot_defaults_to_direct_first_and_tasks_do_not_orchestrate_implicitly(tm
         assert worker["orchestrationPolicy"] == "direct-first"
         assert task["executionMode"] == "direct"
         assert task["collaborationRequested"] is False
+    finally:
+        rt.close()
+
+
+def test_bot_pending_preset_id_defaults_empty_and_round_trips(tmp_path):
+    rt = runtime(tmp_path)
+    try:
+        worker = bot(rt)
+        assert worker["pendingPresetId"] == ""
+        updated = rt.update_bot(worker["id"], {"pendingPresetId": "pi:beta"})
+        assert updated["pendingPresetId"] == "pi:beta"
+        assert rt.get_bot(worker["id"])["pendingPresetId"] == "pi:beta"
     finally:
         rt.close()
 

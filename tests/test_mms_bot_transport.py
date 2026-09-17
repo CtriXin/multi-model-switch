@@ -452,3 +452,12 @@ def test_bot_prompt_covers_schedule_and_memory_and_keeps_handwritten_policy(tmp_
     # Converting the command list to generated text must not eat the policy lines.
     assert "不要循环轮询" in prompt
     assert "complete 不是用户验收" in prompt
+
+
+def test_bot_prompt_teaches_honest_model_switching(tmp_path):
+    prompt = _bot_prompt(tmp_path)
+    # The generated catalog carries the new commands; the handwritten line
+    # pins the behavior: look first, never invent a name, next round only.
+    assert "model list" in prompt and "model switch" in prompt
+    assert "不要凭印象写模型名" in prompt
+    assert "下一轮任务起生效" in prompt

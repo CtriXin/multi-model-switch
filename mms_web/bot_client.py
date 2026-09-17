@@ -274,6 +274,13 @@ def _build_parser() -> argparse.ArgumentParser:
     schedule_delete = add("delete", "删除一条定时", "schedule delete SCHEDULE_ID", target=operations, label="schedule delete")
     schedule_delete.add_argument("schedule_id")
 
+    model = with_request_id(commands.add_parser("model", help="查看或切换这个 Bot 使用的模型"))
+    model_operations = model.add_subparsers(dest="model_op", required=True)
+    add("list", "列出当前实际可切换的模型", "model list", target=model_operations, label="model list")
+    model_switch = add("switch", "切换这个 Bot 的默认模型，下一轮任务起生效", "model switch <名称或关键词>",
+                       target=model_operations, label="model switch")
+    model_switch.add_argument("query", nargs="+")
+
     for name, help_text in (
         ("complete", "标记当前轮次完成"),
         ("fail", "标记当前轮次失败"),
@@ -313,6 +320,14 @@ def _command_payload(args: argparse.Namespace, context: dict[str, str]) -> tuple
     command = args.command
     if command == "schedule":
         return _schedule_payload(args, context)
+    if command == "model":
+        payload: dict[str, Any] = {"op": str(args.model_op), "botId": context["botId"], "taskId": context["taskId"]}
+        if args.model_op == "switch":
+            query = _text(args.query)
+            if not query:
+                raise BotClientError("model switch 需要模型名称或关键词")
+            payload["query"] = query
+        return "model", payload
     if command == "list":
         return "list", {"botId": context["botId"], "taskId": context["taskId"]}
     if command == "memory-list":

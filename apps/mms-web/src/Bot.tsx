@@ -53,6 +53,7 @@ import type {
   WizardAnswerEntry,
   WizardQuestion,
 } from "./bot-presets";
+import { resolveModelSwitch } from "./bot-model-switch";
 import "./bot.css";
 
 export type BotStatus = "idle" | "busy" | "paused";
@@ -72,11 +73,13 @@ export interface BotDefinition {
   description: string;
   systemPrompt: string;
   presetId: string | null;
+  pendingPresetId?: string | null;
   workspaceId: string | null;
   status: BotStatus;
   wakeEnabled: boolean;
   sessionId?: string | null;
-  modelName?: string;
+  model?: string;
+  channel?: string;
   memoryEnabled?: boolean;
   memoryBudgetTokens?: number;
   autoCompact?: boolean;
@@ -776,7 +779,7 @@ export function DispatchForm({
           {bots.map((bot) => (
             <option key={bot.id} value={bot.id}>
               {bot.name}
-              {bot.modelName ? ` · ${bot.modelName}` : ""}
+              {bot.model ? ` · ${bot.model}` : ""}
             </option>
           ))}
         </select>
@@ -1002,19 +1005,13 @@ function canPreviewArtifact(artifact: BotArtifact) {
   return previewType(artifact).kind !== "unsupported";
 }
 
-function parseBotSettingCommand(content: string, presets: Preset[]) {
+function parseBotSettingCommand(content: string, presets: Preset[], currentPresetId?: string | null) {
   const name = content.match(/(?:把|将)?(?:我的)?(?:bot\s*)?(?:名字|名称)(?:改成|改为|叫|设为)\s*[“「\"]?(.+?)[”」\"]?$/i)
     || content.match(/^(?:你|bot)?(?:以后)?叫\s*[“「\"]?(.+?)[”」\"]?$/i);
   if (name?.[1]?.trim()) return { patch: { name: name[1].trim() }, message: `好，之后我就叫「${name[1].trim()}」。` };
   const model = content.match(/(?:把|将)?(?:默认)?模型(?:改成|改为|换成|用|设为)\s*[“「\"]?(.+?)[”」\"]?$/i)
     || content.match(/^(?:切换(?:到)?|换(?:成)?|用)\s*([a-z][a-z0-9._ -]*\d[a-z0-9._ -]*?)(?:吧|模型)?[。！!]?$/i);
-  if (model?.[1]?.trim()) {
-    const query = model[1].trim().replace(/[吧。！!]+$/, "").toLowerCase().replace(/[\s._:/-]+/g, "");
-    const preset = presets.find((item) => item.harness === "pi" && item.available && [item.id, item.name, item.modelId, item.channel]
-      .some((value) => value.toLowerCase().replace(/[\s._:/-]+/g, "").includes(query)));
-    if (!preset) return { patch: null, message: `我没找到「${model[1].trim()}」这个可用模型，你可以说得更具体一点。` };
-    return { patch: { presetId: preset.id }, message: `好，默认模型切换为 ${preset.name} · ${preset.channel}。` };
-  }
+  if (model?.[1]?.trim()) return resolveModelSwitch(model[1], presets, currentPresetId);
   return null;
 }
 
@@ -1511,6 +1508,7 @@ export function BotChat({
         BotDefinition,
         | "name"
         | "presetId"
+        | "pendingPresetId"
         | "systemPrompt"
         | "description"
         | "avatarId"
@@ -1881,7 +1879,7 @@ export function BotChat({
     setBusy(true);
     setError("");
     try {
-      const setting = parseBotSettingCommand(content, presets);
+      const setting = parseBotSettingCommand(content, presets, bot?.presetId);
       if (setting && onUpdateBot) {
         if (!setting.patch) {
           setSettingNotice(setting.message);
@@ -2050,6 +2048,14 @@ export function BotChat({
                 />
               )}
             </div>
+            {bot && (bot.model || bot.pendingPresetId) && (
+              <p className="bot-chat-model-line" title="当前模型与下一轮待生效模型">
+                {bot.model ? `当前 ${bot.model}` : ""}
+                {bot.pendingPresetId
+                  ? `${bot.model ? " · " : ""}下一轮 ${presets.find((item) => item.id === bot.pendingPresetId)?.name || bot.pendingPresetId}`
+                  : ""}
+              </p>
+            )}
             {editingDesc && bot ? (
               <div className="bot-chat-desc-edit-wrap">
                 <input

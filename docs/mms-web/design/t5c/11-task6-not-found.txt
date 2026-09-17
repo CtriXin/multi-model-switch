@@ -1,0 +1,2 @@
+--- system | 本轮起使用模型 glm-5.3。
+--- message | 当前 61 个可用模型里没有“蓝 pencilsMax”这个名字（相近的只有 MiniMax / qwen max 系列），我先不乱切，正在等你确认目标。你可以直接回复确切模型名，或从 MiniMax-M3、qwen3.7-max、qwen3.8-max-preview 里挑一个。
