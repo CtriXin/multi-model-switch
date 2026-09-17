@@ -1,6 +1,6 @@
 {
   "name": "multi-model-switch",
-  "version": "5.0.4",
+  "version": "5.0.6",
   "private": true,
   "type": "module",
   "workspaces": [

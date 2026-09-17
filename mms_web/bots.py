@@ -1046,6 +1046,29 @@ class BotRuntime(BotCommunications):
         if state in {"completed", "failed"}:
             self._notify(task, "task.completed" if state == "completed" else "task.failed")
 
+    def _release_finished_one_off_sessions(self):
+        """Let go of sessions that only one finished task ever used.
+
+        A plan step that names a model runs on a session _launch never adopts
+        into the Bot, so nothing else would stop it: without this it would
+        linger like the throwaway planner session does. Runs outside the lock
+        because it talks to the session service, and it also sweeps the
+        residue of a restart, where a one-off session outlived its task.
+        """
+        with self._lock:
+            finished = [deepcopy(t) for t in self._tasks.values()
+                        if t.get("ephemeralSession") and t.get("sessionId") and t["status"] in TERMINAL]
+            for task in finished:
+                self._task(task["id"])["ephemeralSession"] = False
+        release = getattr(self.executor, "release_session", None)
+        if not callable(release):
+            return
+        for task in finished:
+            try:
+                release(task["sessionId"], f"release-{task['id']}")
+            except Exception:
+                pass
+
     def _notify(self, task, event_type, wait_reason=None, note=""):
         """Best-effort delivery; a broken receiver never fails the task."""
         try:
@@ -1555,6 +1578,7 @@ class BotRuntime(BotCommunications):
     def tick(self):
         if self._load_error or self._stop.is_set():
             return
+        self._release_finished_one_off_sessions()
         with self._lock:
             polling = [deepcopy(t) for t in self._tasks.values() if t.get("sessionId") and (t["status"] == "running" or (t["status"] == "waiting" and t.get("waitReason") in {"approval", "stopping", "connection"}))]
         for task in polling:
@@ -1773,8 +1797,13 @@ class BotRuntime(BotCommunications):
                 # 一步明确指定）> bot 的 pendingPresetId（对话里刚换，本轮起生
                 # 效并消费）> bot 的 presetId（默认）。带 override 的任务不消费
                 # pending，否则用户的切换会被一个无关的计划子任务吃掉。
-                if task.get("presetIdOverride"):
-                    bot = {**bot, "presetId": task["presetIdOverride"]}
+                one_off = bool(task.get("presetIdOverride"))
+                own_preset = str(bot.get("presetId") or "")
+                if one_off:
+                    # 计划为这一步指定的模型跑在它自己的、一次性会话里：Bot 的主
+                    # 对话是用户和它的连续历史，既不该被子步骤换成别的模型，也不
+                    # 该被切碎或被占用（详见 BOTS.md「计划步骤指定模型」）。
+                    bot = {**bot, "presetId": task["presetIdOverride"], "sessionId": None}
                 elif bot.get("pendingPresetId"):
                     pending = bot["pendingPresetId"]
                     if pending == bot.get("presetId"):
@@ -1829,8 +1858,17 @@ class BotRuntime(BotCommunications):
                 if live_plan and live_plan.get("mode") == "direct" and live_plan.get("status") == "auto":
                     transition_plan(live_plan, "running", by="system")
                 self._mailbox_receipt(live, "delivered")
-                self._bot(bot["id"])["sessionId"] = outcome["sessionId"]
+                if one_off:
+                    # 这次 launch 出来的会话属于本条任务（task["sessionId"] 已由
+                    # 上面的 update(outcome) 记下）；不回写 bot，主对话不被占用。
+                    live["ephemeralSession"] = True
+                else:
+                    self._bot(bot["id"])["sessionId"] = outcome["sessionId"]
                 self._message(task["id"], "progress", "Pi 已接收任务。", bot["id"])
+                if one_off and task["presetIdOverride"] != own_preset:
+                    # 计划里写的是哪个模型、这一轮实际用哪个，用户要能看见。
+                    self._message(task["id"], "system",
+                                  f"本轮由计划指定使用模型 {self._preset_label(task['presetIdOverride'])}。", bot["id"])
                 cancelled = live.get("cancelRequested") or self._stop.is_set()
                 self._persist()
             if cancelled:
