@@ -84,7 +84,7 @@
   margin-bottom: 8px;
 }
 .remote-actions .button,
-.preference-row > .button {
+.remote-away .button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -93,6 +93,10 @@
 @media (max-width: 640px) {
   .remote-share {
     flex-direction: column;
+  }
+  .remote-away {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
 /* The name a tunnel only reveals once it is running. Sits with the addresses
@@ -154,4 +158,26 @@
 .tunnel-list button:hover:not(:disabled) {
   color: var(--ink);
   background: var(--soft);
+}
+/* Going out is the same switch, one more way in. It sits under the
+   remembered names rather than pretending to be a second setting. */
+.remote-away {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.remote-away h3 {
+  font-size: max(11px, 0.9286rem);
+  font-weight: 550;
+}
+.remote-away p {
+  color: var(--muted);
+  font-size: max(12px, 0.8571rem);
+  line-height: 1.6;
+  margin-top: 3px;
+  max-width: 52ch;
 }

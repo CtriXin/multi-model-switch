@@ -72,7 +72,7 @@ export function RemoteAccessSection({ startTask }: { startTask: (text: string) =
           <p>
             {state?.enabled
               ? `已开启 —— 正在监听 ${state.listening.join("、") || "（暂无地址）"}。`
-              : "已关闭 —— 未监听任何网络端口。"}
+              : "已关闭 —— 只有这台电脑能打开。同一网络、虚拟网、或你自己的公网通道，都从这里开。"}
           </p>
         </div>
         <input
@@ -118,6 +118,11 @@ export function RemoteAccessSection({ startTask }: { startTask: (text: string) =
                   </button>
                 ))}
               </div>
+              {ways.some((way) => way.kind === "address" && way.detail.includes("虚拟网")) && (
+                <p className="section-note">
+                  列表里的虚拟网地址，对面设备装了同一个网就能用，不必再配公网通道。
+                </p>
+              )}
               {active && (
                 <div className="remote-share">
                   <QrCode value={active.url} />
@@ -164,23 +169,34 @@ export function RemoteAccessSection({ startTask }: { startTask: (text: string) =
               这些地址没能开出入口：{Object.keys(state.unavailable).join("、")}
             </p>
           )}
+          <div className="remote-away">
+            <div>
+              <h3>出门也要用</h3>
+              <p>
+                {state.hostnames.length > 0
+                  ? "已经记住公网名字。通道换了就改上面的域名；要重新配通道再找 Pilot。"
+                  : "公网访问需要你自己的通道。有现成名字就贴进上面的隧道域名；没有就让 Pilot 帮你挑一条。我们不提供通道。"}
+              </p>
+            </div>
+            <button
+              type="button"
+              className="button"
+              disabled={busy}
+              onClick={() =>
+                startTask(
+                  tunnelTask(state.port, {
+                    hostnames: state.hostnames,
+                    listening: state.listening,
+                  }),
+                )
+              }
+            >
+              <Wand2 size={14} />
+              交给 Pilot 配
+            </button>
+          </div>
         </div>
       )}
-      <div className="preference-row">
-        <div>
-          <h2>出门也要用</h2>
-          <p>需要你自己的域名和一条公网通道。我们不提供支持。</p>
-        </div>
-        <button
-          type="button"
-          className="button"
-          disabled={!state}
-          onClick={() => startTask(tunnelTask(state?.port || 8765))}
-        >
-          <Wand2 size={14} />
-          交给 Pilot 配
-        </button>
-      </div>
     </>
   );
 }

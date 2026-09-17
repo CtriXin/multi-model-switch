@@ -130,7 +130,7 @@ def help_text(command: str | None = None) -> str:
         f"例子\n{examples}\n\n"
         f"选项\n{options}\n\n"
         "后台启动的日志在 <state-root>/logs/mms-web.log。\n"
-        "手机或另一台电脑访问：设置 → 使用 → 让手机或另一台电脑访问。\n"
+        "手机或另一台电脑访问：设置 → 使用 → 让手机或另一台电脑访问；出门用的域名在开关打开之后填。\n"
         f"每个命令还有自己的 --help，例如 {name} stop --help。\n"
         "更多说明：docs/mms-web/GETTING-STARTED.md"
     )

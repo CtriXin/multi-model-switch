@@ -4,8 +4,18 @@
  *  what the person already has, and most people have nothing. So it starts by
  *  asking, and the branch for "nothing at all" is a real one: a quick tunnel
  *  needs no account and no domain, and Pilot polls rather than streaming, so
- *  the one thing quick tunnels cannot do does not matter here. */
-export function tunnelTask(port: number) {
+ *  the one thing quick tunnels cannot do does not matter here.
+ *
+ *  Names and listen addresses the settings page already knows go in the
+ *  background, after the questions. Putting them in the ask would teach the
+ *  model to skip the two questions that were measured. */
+export function tunnelTask(port: number, facts?: { hostnames?: string[]; listening?: string[] }) {
+  const names = (facts?.hostnames || []).map((name) => name.trim()).filter(Boolean);
+  const listening = (facts?.listening || []).map((address) => address.trim()).filter(Boolean);
+  const remembered = names.length
+    ? `设置页已经记住的隧道域名：${names.join("、")}。配完后核对这些名字还要不要用，不要当第一次。`
+    : "设置页还没有记住任何隧道域名。";
+  const listeners = listening.length ? `当前正在监听：${listening.join("、")}。` : "";
   return [
     "【第一步只做一件事：问我下面两个问题，然后停下等我回答。",
     "不要执行任何命令，不要安装任何东西，不要读取或修改任何配置。】",
@@ -15,6 +25,9 @@ export function tunnelTask(port: number) {
     "2. 我有没有自己的服务器？有没有装 Tailscale 之类的虚拟网？",
     "",
     "———— 以下是背景，等我回答完再用 ————",
+    "",
+    remembered,
+    ...(listeners ? [listeners] : []),
     "",
     "目标：配好从外网访问这台电脑上的 MMS Pilot。",
     `Pilot 现在跑在 127.0.0.1:${port}，只有同一个网络里的设备能连。`,

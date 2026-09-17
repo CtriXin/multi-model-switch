@@ -1,4 +1,4 @@
-"""The task the remote-access row hands to an agent.
+"""The task the remote-access panel hands to an agent.
 
 Its whole job is to make the agent ask two questions and stop. That held
 against seven models across seven vendors, and what made it hold was the
@@ -51,3 +51,5 @@ def test_the_probe_reads_the_same_task_the_button_sends():
     component = (ROOT / "apps/mms-web/src/RemoteAccess.tsx").read_text(encoding="utf-8")
     assert 'from "./tunnel-task"' in component
     assert "tunnelTask(" in component
+    assert "hostnames: state.hostnames" in component
+    assert "listening: state.listening" in component
