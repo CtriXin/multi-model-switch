@@ -26,8 +26,8 @@ from .bot_memory import BotMemoryStore, BotMemoryError
 from .bot_communications import BotCommunications
 from .bot_coordinator import (plan_for, direct_plan, build_planner_prompt, parse_model_plan, sanitize_plan,
                               looks_multi_goal, looks_fleet_review, fleet_plan, is_split_plan,
-                              normalize_fleet_policy, set_plan_status, transition_plan, transition_step,
-                              normalize_step_status)
+                              normalize_fleet_policy, parse_fleet_verdict, set_plan_status, transition_plan,
+                              transition_step, normalize_step_status, FLEET_MERGE_INTRO)
 from . import bot_retry
 from .bot_notify import Notifier
 
@@ -939,6 +939,9 @@ class BotRuntime(BotCommunications):
             task["result"] = message
             task["outcome"] = parse_outcome(message)
             task["error"] = None
+            if (plan or {}).get("mode") == "fleet" and task.get("workerKind") != "fleet":
+                plan["verdict"] = parse_fleet_verdict(message)
+                task["coordinatorPlan"] = plan
         elif state in {"failed", "interrupted"}:
             task["error"] = message
         self._bot(task["botId"])["status"] = "idle"
@@ -1055,7 +1058,7 @@ class BotRuntime(BotCommunications):
             task["coordinatorPlan"] = plan
         task["childResults"] = child_results
         task["resumedAt"] = now()
-        merge_intro = "各家模型意见如下，请汇总结论和分歧，不要再分发。" if plan.get("mode") == "fleet" else "子任务均已回传，请检查成果并总结。"
+        merge_intro = FLEET_MERGE_INTRO if plan.get("mode") == "fleet" else "子任务均已回传，请检查成果并总结。"
         task.update(status="queued", waitReason=None, childrenChanged=False,
                     resumeText=merge_intro + "\n" + "\n".join(lines))
         self._message(task["id"], "system", "子任务已回传，自动唤醒发起 Bot。" if plan.get("mode") != "fleet" else "各家意见已回传，由当前 Bot 汇总。")

@@ -129,6 +129,14 @@ def test_fleet_review_stays_on_one_bot_and_fans_out_live_models(tmp_path):
         assert nested_cycle.value.code == "BOT_DISPATCH_CYCLE"
         assert rt._dispatch_blocked(children[0], children[1]) is False
         assert rt._dispatch_blocked(parent, children[0]) is True
+        for child in children:
+            rt._finish(child, "completed", "结论：可以\n不同意：无\n风险：贵")
+        live["childrenChanged"] = True
+        rt._resume_children(live)
+        rt._finish(live, "completed",
+                   "分歧：\n- A vs B：门槛\n风险：\n- 伪独立\n共识：\n- 一家一通道\n判断：\n站 B。")
+        assert live["coordinatorPlan"]["verdict"]["disagreements"][0].startswith("A vs B")
+        assert live["coordinatorPlan"]["verdict"]["judgment"].startswith("站 B")
         saved = rt.update_bot(owner["id"], {"fleetPolicy": {"enabled": False}})
         assert saved["fleetPolicy"]["enabled"] is False
         quiet = rt.create_task({"requestId": "fleet-off", "botId": owner["id"],

@@ -1,8 +1,8 @@
 from mms_web.bot_coordinator import (make_plan, parse_model_plan, build_planner_prompt, direct_plan,
                                      looks_multi_goal, looks_fleet_review, fleet_presets, fleet_plan,
-                                     is_split_plan, normalize_fleet_policy, set_plan_status, transition_plan,
-                                     transition_step, normalize_step_status, MAX_PLAN_HISTORY,
-                                     UNDERFILLED_REASON)
+                                     is_split_plan, normalize_fleet_policy, parse_fleet_verdict,
+                                     set_plan_status, transition_plan, transition_step,
+                                     normalize_step_status, MAX_PLAN_HISTORY, UNDERFILLED_REASON)
 from mms_web.bot_computer import EgoComputer
 
 
@@ -204,6 +204,25 @@ def test_fleet_plan_uses_owner_bot_not_new_colleagues():
     assert normalize_fleet_policy({"maxFamilies": 9})["maxFamilies"] == 9
     assert normalize_fleet_policy({})["maxFamilies"] == 2
     assert normalize_fleet_policy({})["hintShown"] is False
+
+
+def test_parse_fleet_verdict_keeps_disagreement_first():
+    verdict = parse_fleet_verdict(
+        "分歧：\n- DeepSeek 认为不足两家不能叫多方审；GLM 认为仍可标 self-check\n"
+        "风险：\n- 通道数被当成模型数\n"
+        "共识：\n- 每家一个通道\n"
+        "判断：\n取 GLM 做法，加上 DeepSeek 的约束。"
+    )
+    assert verdict["disagreements"][0].startswith("DeepSeek")
+    assert verdict["risks"] == ["通道数被当成模型数"]
+    assert verdict["consensus"] == ["每家一个通道"]
+    assert "GLM" in verdict["judgment"]
+    messy = parse_fleet_verdict("**分歧：** 无\n**判断：** 就这样。")
+    assert messy["disagreements"] == []
+    assert messy["judgment"] == "就这样。"
+    raw = parse_fleet_verdict("这是一段没有标题的长文。")
+    assert raw["judgment"].startswith("这是一段")
+    assert raw["disagreements"] == []
 
 
 def test_family_fallback_is_mms_core_not_a_second_table():

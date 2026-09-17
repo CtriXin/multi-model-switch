@@ -2294,12 +2294,13 @@ export function BotChat({
                   .reverse()
                   .find((t) => t.outcome?.summary?.trim() || (t.result && !isPeerExplanation(t.result)));
 
+          const fleetVerdict = conversationTask.coordinatorPlan?.mode === "fleet" && conversationTask.coordinatorPlan?.verdict;
           let resultText = "";
-          if (latestTaskWithResult) {
+          if (!fleetVerdict && latestTaskWithResult) {
             resultText =
               latestTaskWithResult.outcome?.summary?.trim() ||
               cleanTranscriptText(latestTaskWithResult.result || "");
-          } else if (conversationTask.result) {
+          } else if (!fleetVerdict && conversationTask.result) {
             resultText =
               conversationTask.outcome?.summary?.trim() ||
               cleanTranscriptText(conversationTask.result || "");

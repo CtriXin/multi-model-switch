@@ -29,6 +29,53 @@
   font-size: 0.8125rem;
   line-height: 1.45;
 }
+.bot-fleet-verdict {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 8px 0 4px;
+}
+.bot-fleet-verdict-block h3,
+.bot-fleet-verdict-consensus summary {
+  margin: 0 0 4px;
+  font-size: 0.75rem;
+  font-weight: 650;
+  color: var(--muted);
+}
+.bot-fleet-verdict-judgment {
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.5;
+}
+.bot-fleet-verdict-list {
+  margin: 0;
+  padding-left: 1.1em;
+}
+.bot-fleet-verdict-list li + li {
+  margin-top: 4px;
+}
+.bot-fleet-verdict-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+.bot-fleet-verdict-consensus {
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+.bot-fleet-verdict-consensus summary {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  list-style: none;
+}
+.bot-fleet-verdict-consensus summary::-webkit-details-marker {
+  display: none;
+}
+.bot-fleet-verdict-consensus[open] .bot-plan-chevron {
+  transform: rotate(90deg);
+}
 .bot-plan-tag {
   font-size: 0.6875rem;
   color: var(--muted);

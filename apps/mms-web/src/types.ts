@@ -369,11 +369,18 @@ export interface BotPlanHistoryEntry {
   to: string;
   by: string;
 }
+export interface BotFleetVerdict {
+  disagreements: string[];
+  risks: string[];
+  consensus: string[];
+  judgment: string;
+}
 export interface BotTaskPlan {
   version?: number;
   mode: "direct" | "delegate" | "fleet";
   reason?: string;
   notice?: string;
+  verdict?: BotFleetVerdict;
   steps?: BotPlanStep[];
   candidates?: Array<{ id: string; name: string; description?: string }>;
   merge?: string;

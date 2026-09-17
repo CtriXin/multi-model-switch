@@ -43,6 +43,23 @@ FLEET_DISABLED_REASON = "多方听意见已关闭，由当前 Bot 直接完成�
 FLEET_FIRST_HINT = (
     "这次会并行听 {n} 家。开着「多方听意见」时，发送都会这样扇出；关掉则只问当前 Bot。"
 )
+FLEET_WORKER_PROMPT = (
+    "只用下面三行，每行不超过 40 字，不要空行、不要 markdown、不要再分发：\n"
+    "结论：\n"
+    "不同意：\n"
+    "风险：\n\n"
+)
+FLEET_MERGE_INTRO = (
+    "各家意见如下。只按下面四段输出，不要作文、不要再分发。"
+    "没有分歧就写「分歧：无」。\n"
+    "分歧：\n- （谁 vs 谁：争什么）\n"
+    "风险：\n- \n"
+    "共识：\n- \n"
+    "判断：\n（你站哪边，一句话）\n"
+)
+_VERDICT_HEADING = re.compile(
+    r"^\*{0,2}(分歧|风险|共识|判断)\*{0,2}\s*[:：]?\s*(.*)$"
+)
 
 _CHEAP_MARKERS = ("flash", "turbo", "highspeed", "mini", "air", "lite", "haiku", "small", "fast")
 _INTENSE_MARKERS = ("opus", "sonnet", "thinking", "max", "pro", "heavy", "astra", "k3", "5.4", "5.6", "gpt-6")
@@ -267,10 +284,7 @@ def fleet_plan(owner: dict, presets: list[dict], prompt: str, policy=None) -> di
             "kind": "fleet",
             "botId": owner.get("id"),
             "goal": "",
-            "workerPrompt": (
-                "用你当前的模型独立看一遍下面的目标，只写结论、风险和你不同意的地方。"
-                "不要调用其他 Bot，不要再分发。\n\n" + goal
-            ),
+            "workerPrompt": FLEET_WORKER_PROMPT + goal,
             "dependsOn": [],
             "presetId": str(preset["id"])[:500],
             "label": label[:80],
@@ -295,6 +309,48 @@ def fleet_plan(owner: dict, presets: list[dict], prompt: str, policy=None) -> di
     if not policy.get("hintShown"):
         plan["notice"] = FLEET_FIRST_HINT.format(n=len(steps))
     return plan
+
+
+def _strip_verdict_bullet(text: str) -> str:
+    return re.sub(r"^[-*•、]+\s*", "", str(text or "").strip()).strip()
+
+
+def parse_fleet_verdict(text) -> dict:
+    """Split a merge reply into 分歧 / 风险 / 共识 / 判断. Fallback keeps raw judgment."""
+    raw = str(text or "").strip()
+    sections = {"分歧": [], "风险": [], "共识": [], "判断": ""}
+    current = None
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        match = _VERDICT_HEADING.match(stripped)
+        if match:
+            current = match.group(1)
+            rest = _strip_verdict_bullet(match.group(2))
+            if current == "判断":
+                if rest:
+                    sections["判断"] = rest
+            elif rest and rest not in {"无", "没有", "无。"}:
+                sections[current].append(rest[:200])
+            continue
+        if current == "判断":
+            extra = _strip_verdict_bullet(stripped)
+            if extra:
+                sections["判断"] = (sections["判断"] + " " + extra).strip()[:800]
+        elif current:
+            item = _strip_verdict_bullet(stripped)
+            if item and item not in {"无", "没有", "无。"}:
+                sections[current].append(item[:200])
+    judgment = sections["判断"].strip()
+    if not judgment and not any(sections[key] for key in ("分歧", "风险", "共识")):
+        judgment = raw[:400]
+    return {
+        "disagreements": sections["分歧"][:8],
+        "risks": sections["风险"][:8],
+        "consensus": sections["共识"][:8],
+        "judgment": judgment[:800],
+    }
 
 
 def normalize_step_status(status):
