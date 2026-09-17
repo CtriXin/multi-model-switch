@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "title": "回到 4.x 稳定线要用安装器",
+  "reason": "当前运行的是 5.x 预览线。Pilot 内的更新只会安装更高的版本，4.x 稳定版不会以「有更新」的形式出现；回到稳定线要用安装器重新安装。",
+  "command": "curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash",
+  "steps": [
+    "先备份 5.x 数据：~/.local/share/mms-web 里的 Bot 工作台、定时任务和记忆不会被 4.x 读取；降级前自己留一份。",
+    "先等执行中、待确认和排队的任务全部结束，再停止 Pilot 服务。关闭浏览器标签页不会停止服务。",
+    "可用 mms web stop 停止后台服务；很旧的前台版本请回到启动它的终端按 Ctrl+C。",
+    "执行下面的安装命令，完成后重新打开 Pilot。使用自定义会话目录时，继续指定原来的 --state-root。",
+    "如果以前只在旧终端配置过通道，请在 Pilot 设置中重新连接并确认模型可用。"
+  ]
+}

@@ -4,6 +4,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { isPreview, request } from "./api";
 import { copyText } from "./clipboard";
+import { UpgradeGuidanceNotice, UpdateStatusLine, type UpgradeGuidance } from "./update-channel";
 import "./updates.css";
 
 type UpdateStatus = {
@@ -12,7 +13,7 @@ type UpdateStatus = {
   latest: { tag?: string; notes?: string; url?: string; upgradeNotice?: string };
   updateAvailable: boolean; enabled: boolean; checking: boolean; checkedAt: number;
   error: string; canUpgrade: boolean; port?: number;
-  upgradeGuidance?: { required: boolean; title: string; reason: string; command: string; steps: string[] };
+  upgradeGuidance?: UpgradeGuidance;
   /** Whether this update also replaces the `mms` command line, and why not. */
   installation?: { updatesCli?: boolean; root?: string; reason?: string };
   operation: { phase: string; message?: string; target?: string; cancellable?: boolean };
@@ -87,21 +88,15 @@ export function UpdateCenter({ ready, open, setOpen, onStatus }: {
     {open && <dialog ref={dialog} className="update-center" aria-labelledby="update-title" onCancel={e => { e.preventDefault(); setOpen(false); }} onClick={e => { if (e.target === dialog.current) setOpen(false); }}>
       <header><div><h2 id="update-title">版本与更新</h2><p>当前版本 {data ? `v${data.currentVersion}` : "读取中…"}</p></div><button type="button" className="icon-button" aria-label="关闭更新" onClick={() => setOpen(false)}><X size={19} /></button></header>
       <div className="update-body">
-        <div className="update-check-row"><span>{data?.checking ? "正在检查…" : data?.updateAvailable ? `发现新版 ${data.latest.tag}` : data?.checkedAt && !data.error ? channel === "preview" ? "已是最新 5.x 预览版" : "已是最新 4.x 稳定版" : channel === "preview" ? "检查 5.x 预览版" : "检查 4.x 稳定版"}</span><button type="button" className="text-button" disabled={busy || isPreview || !data} onClick={() => void act("check")}><RefreshCw size={14} />检查更新</button></div>
+        <div className="update-check-row"><UpdateStatusLine state={data} /><button type="button" className="text-button" disabled={busy || isPreview || !data} onClick={() => void act("check")}><RefreshCw size={14} />检查更新</button></div>
         {data?.checkedAt ? <p className="update-muted">上次检查：{new Date(data.checkedAt * 1000).toLocaleString()}</p> : null}
         <label className="update-preference"><span>更新通道<small>{channel === "preview" ? "5.x 预览版：包含 Bot 工作台，可能还有变化。" : "4.x 稳定版：当前默认与推荐通道。"}</small></span><select aria-label="更新通道" value={channel} disabled={pending || isPreview || !data} onChange={e => { setConfirming(false); void act("preferences", { channel: e.target.value }); }}><option value="stable">4.x 稳定版</option><option value="preview">5.x 预览版</option></select></label>
-        {channel === "preview" && <p className="update-preview-note" role="status">已切换到 5.x 预览通道。检查并确认后才会升级；切回 4.x 稳定版即可继续留在稳定线。</p>}
+        {channel === "preview" && <p className="update-preview-note" role="status">已切换到 5.x 预览通道。检查并确认后才会升级；切回 4.x 稳定版只改回检查对象，已经在 5.x 的机器要用安装器才能回到稳定线。</p>}
         <label className="update-preference"><span>自动检查更新<small>每 6 小时检查一次；发现新版后由你决定是否更新。</small></span><input type="checkbox" role="switch" aria-label="自动检查更新" checked={data?.enabled ?? false} disabled={pending || isPreview || !data} onChange={e => void act("preferences", { enabled: e.target.checked })} /></label>
         {data?.latest.notes && <section className="update-notes" aria-label="更新内容"><h3>{data.latest.tag} 更新内容</h3>{/* Release notes are Markdown. Rendering them into a paragraph showed
             the asterisks, the list dashes and the code fence as literal text. */}
         <div className="update-notes-body"><Markdown remarkPlugins={[remarkGfm]} skipHtml>{data.latest.notes}</Markdown></div>{data.latest.url && <a href={data.latest.url} target="_blank" rel="noreferrer">查看完整发布说明</a>}</section>}
-        {data?.upgradeGuidance?.required && <section className="update-migration-warning" role="alert" aria-label="需要手动升级">
-          <h3>{data.upgradeGuidance.title}</h3>
-          <p>{data.upgradeGuidance.reason}</p>
-          <ol>{data.upgradeGuidance.steps.map(step => <li key={step}>{step}</li>)}</ol>
-          <div className="update-command"><pre><code>{data.upgradeGuidance.command}</code></pre><button type="button" className="text-button" onClick={() => { void copyText(data.upgradeGuidance!.command).then(done => { setCopiedCommand(done); if (done) setTimeout(() => setCopiedCommand(false), 1600); }); }}>{copiedCommand ? "已复制" : "复制命令"}</button></div>
-          <p className="update-muted">这次不会清空会话或运行记录；安装器会保留旧目录，确认无误后再手动备份或清理。</p>
-        </section>}
+        {data?.upgradeGuidance?.required && <UpgradeGuidanceNotice guidance={data.upgradeGuidance} copied={copiedCommand} onCopy={() => { void copyText(data.upgradeGuidance!.command).then(done => { setCopiedCommand(done); if (done) setTimeout(() => setCopiedCommand(false), 1600); }); }} />}
         {data?.operation.message && <p className="update-progress" role="status">{data.operation.message}</p>}
         {(error || data?.error) && <p className="update-error" role="alert">{error || data?.error}</p>}
         {isPreview && <p className="update-muted">预览模式不检查或安装更新。</p>}

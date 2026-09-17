@@ -2,6 +2,7 @@ import pytest
 """Offline checks: scheduling, failure isolation, concurrency and API security."""
 import json
 import threading
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -50,6 +51,36 @@ def test_status_exposes_manual_policy_and_disables_one_click_update(tmp_path):
         result = s.check()
     assert result['upgradeGuidance']['required'] is True
     assert result['canUpgrade'] is False
+
+
+def test_a_five_x_install_on_the_stable_channel_is_told_the_installer_is_the_way_back():
+    """The updater only installs higher versions, so 5.x cannot leave via the dropdown."""
+    guidance = upgrade_guidance('5.1.0', {}, channel='stable')
+    assert guidance['required'] is True
+    assert guidance['command'] == INSTALL_COMMAND
+    assert '4.x' in guidance['title']
+    assert any('mms-web' in step for step in guidance['steps'])
+    assert upgrade_guidance('4.23.0', {'tag': 'v4.24.0'}, channel='stable') is None
+    assert upgrade_guidance('5.1.0', {}, channel='preview') is None
+    # Callers that do not know the channel keep the old behaviour.
+    assert upgrade_guidance('5.1.0', {'tag': 'v4.23.0'}) is None
+
+
+def test_the_back_to_stable_notice_is_the_payload_the_ui_renders():
+    fixture = json.loads((Path(__file__).resolve().parents[1] / 'apps/mms-web/tests/fixtures'
+                          / 'cross-line-guidance.json').read_text(encoding='utf-8'))
+    assert upgrade_guidance('5.1.0', {}, channel='stable') == fixture
+
+
+def test_status_never_calls_a_five_x_install_current_on_the_stable_line(tmp_path):
+    s = service(tmp_path, Mock(return_value={'tag': 'v4.23.0', 'notes': 'stable'}))
+    s.preferences({'channel': 'stable'})
+    with patch('mms_web.updates.VERSION', '5.1.0'):
+        result = s.check(manual=True)
+    assert result['latest']['tag'] == 'v4.23.0'
+    assert result['updateAvailable'] is False
+    assert result['canUpgrade'] is False
+    assert result['upgradeGuidance']['required'] is True
 
 
 def test_due_manual_and_auto_checks_share_a_persistent_cache(tmp_path):
