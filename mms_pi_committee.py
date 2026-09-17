@@ -701,6 +701,9 @@ def _prepare_attempt(member: MemberSpec, candidate: ModelCandidate, binding: Rou
         "api_key": binding.api_key,
         "model": candidate.model,
         "provider_profile": binding.provider_profile,
+        # a672ed49 requires explicitly declared protocols; the binding already
+        # carries the planned protocol, so declare exactly that one.
+        "protocols": [binding.protocol],
         "_launch_prefetched_probe": {"models": [candidate.model]},
     }
     if binding.protocol == "anthropic_messages":
