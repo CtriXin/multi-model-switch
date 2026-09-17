@@ -1114,7 +1114,6 @@ export function App() {
   const feedback = useFeedback({
     ready: !loading && connected && !statusesStale,
     allowed: !busy && !error && !settingsOpen && !setupOpen && !guideOpen && !guideStep && !updateOpen && !updateStatus?.active && !navOpen && !data.sessions.some(session => sessionIsBusy(session)) && !(detail && sessionIsBusy(detail.session)),
-    surface: page === "bots" ? "bot" : "pilot",
   });
   const tourHasEffort = page === "session"
     ? Boolean(detail?.runtime && ((detail.runtime.supportedThinkingLevels && detail.runtime.supportedThinkingLevels.length > 0) || detail.runtime.thinkingLevel))
@@ -1795,7 +1794,6 @@ export function App() {
           </div>
         </header>
         {feedback.invitation}
-        {feedback.dialog}
         {!settingsOpen && tour}
         {isPreview && (
           <div className="preview-banner">

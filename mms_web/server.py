@@ -422,8 +422,6 @@ class WebApplication:
         return locate_folder(self.catalog, payload)
 
     def post(self, parts: list[str], payload: dict) -> dict:
-        if parts == ["feedback", "submit"]:
-            return self.feedback.submit(payload)
         if parts in self._UNLOCKED_POSTS:
             return self._post_readonly(parts, payload)
         with self.mutation_lock:

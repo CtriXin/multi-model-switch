@@ -1,10 +1,9 @@
 import json
 import tempfile
-import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 from mms_web.errors import WebError
 from mms_web.feedback import DAY, FeedbackService, request_surface
@@ -16,18 +15,13 @@ class FeedbackTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         self.now = 1800000000
-        self.sent = []
-        def sender(endpoint, payload):
-            self.sent.append(payload)
-            return {"received": True, "receiptId": payload["requestId"]}
-        self.sender = sender
         self.service = self.make_service()
 
     def tearDown(self):
         self.temp.cleanup()
 
-    def make_service(self, endpoint="https://feedback.example.test/submit", sender=None):
-        return FeedbackService(self.root, endpoint=endpoint, clock=lambda: self.now, sender=sender or self.sender)
+    def make_service(self, form_url="https://feedback.example.test/form"):
+        return FeedbackService(self.root, form_url=form_url, clock=lambda: self.now)
 
     def use(self, rid, *, bot=False):
         self.service.observe(["bots", "b1", "tasks"] if bot else ["sessions"],
@@ -42,13 +36,9 @@ class FeedbackTests(unittest.TestCase):
                     self.use(f"{day}-{visit}-{turn}", bot=bool(turn))
         self.now = start + 3 * DAY
 
-    def form(self):
-        return {"requestId": "feedback-request-123", "surface": "bot", "job": "整理工作", "outcome": "partial", "detail": "需要自己复核"}
-
-    def test_get_does_not_write_or_contact_network(self):
+    def test_status_does_not_write_usage(self):
         self.assertFalse(self.service.status()["eligible"])
         self.assertFalse(self.service.path.exists())
-        self.assertEqual(self.sent, [])
 
     def test_moderate_usage_all_conditions_and_no_historical_backfill(self):
         for i in range(12):
@@ -61,7 +51,6 @@ class FeedbackTests(unittest.TestCase):
         state = self.service.path.read_text()
         self.assertNotIn("private-user-text", state)
         self.assertNotIn("b1", json.dumps(json.loads(state).get("taskIds", [])))
-        self.assertEqual(self.sent, [])
 
     def test_each_medium_usage_threshold_is_required(self):
         self.medium_use()
@@ -119,14 +108,13 @@ class FeedbackTests(unittest.TestCase):
         self.medium_use()
         self.assertFalse(self.service.status()["eligible"])
 
-    def test_unconfigured_or_insecure_endpoint_never_invites_or_submits(self):
+    def test_unconfigured_or_insecure_form_never_invites_or_leaks_invalid_url(self):
         self.medium_use()
-        for endpoint in ["", "http://feedback.test", "https://user:secret@feedback.test", "https://feedback.test/#secret", "https://[invalid"]:
-            service = self.make_service(endpoint)
+        for form_url in ["", "http://feedback.test", "https://user:secret@feedback.test", "https://feedback.test/#secret", "https://[invalid"]:
+            service = self.make_service(form_url)
             self.assertFalse(service.status()["enabled"])
             self.assertFalse(service.status()["eligible"])
-            with self.assertRaises(WebError): service.submit(self.form())
-        self.assertEqual(self.sent, [])
+            self.assertEqual(service.status()["formUrl"], "")
 
     def test_corrupt_preferences_fail_quietly_without_reprompt(self):
         for text in ["not-json", "[]", '{"schema":1}', '{"schema":2}']:
@@ -135,28 +123,19 @@ class FeedbackTests(unittest.TestCase):
             self.use("new-request")
             self.assertFalse(self.service.status()["eligible"])
 
-    def test_submit_requires_receipt_and_retries_same_id_without_duplicates(self):
+    def test_form_open_does_not_claim_a_submission(self):
         self.medium_use()
-        form = self.form()
-        self.assertTrue(self.service.submit(form)["received"])
-        self.assertTrue(self.make_service().submit(form)["received"])
-        self.assertEqual(len(self.sent), 1)
-        self.assertEqual(set(self.sent[0]), {"requestId", "surface", "job", "outcome", "detail", "recurring", "contact", "campaign", "version", "system"})
-        self.assertFalse(self.make_service().status()["eligible"])
-        self.assertNotIn("整理工作", self.service.path.read_text())
-        with self.assertRaises(WebError): self.service.submit({**form, "detail": "changed"})
+        status = self.service.invitation({"action": "open"})
+        self.assertEqual(status["phase"], "opened")
+        self.assertNotIn("received", status)
+        self.assertFalse(status["eligible"])
+        self.assertEqual(status["formUrl"], "https://feedback.example.test/form")
 
-    def test_no_success_on_network_error_or_wrong_receipt(self):
-        self.medium_use()
-        for sender in [lambda *a: {}, lambda *a: {"received": True, "receiptId": "wrong"}, Mock(side_effect=TimeoutError())]:
-            service = self.make_service(sender=sender)
-            with self.assertRaises(WebError): service.submit(self.form())
-            self.assertNotEqual(service.status()["phase"], "submitted")
-
-    def test_unknown_fields_and_long_answers_never_leave_machine(self):
-        for extra in [{"transcript": "secret"}, {"endpoint": "https://evil.test"}, {"detail": "x" * 2001}, {"job": ""}, {"surface": "invalid"}]:
-            with self.assertRaises(WebError): self.service.submit({**self.form(), **extra})
-        self.assertEqual(self.sent, [])
+    def test_config_can_disable_form_without_resetting_preferences(self):
+        self.service.invitation({"action": "dismiss"})
+        with patch.dict("os.environ", {"MMS_FEEDBACK_FORM_URL": ""}):
+            self.assertFalse(FeedbackService(self.root).status()["enabled"])
+        self.assertEqual(self.make_service().status()["phase"], "dismissed")
 
     def test_http_dispatch_observes_accepted_requests_and_excludes_failures(self):
         with patch("mms_web.server._adapter", return_value=None):
@@ -172,7 +151,7 @@ class FeedbackTests(unittest.TestCase):
             self.assertTrue(app.post(["sessions"], {})["accepted"])
         app.close()
 
-    def test_work_and_pending_approvals_block_invites_and_submit_never_holds_app_lock(self):
+    def test_work_and_pending_approvals_block_invites(self):
         self.medium_use()
         with patch("mms_web.server._adapter", return_value=None):
             app = WebApplication(state_root=self.root / "app")
@@ -180,19 +159,6 @@ class FeedbackTests(unittest.TestCase):
         with patch.object(app.bots, "list_tasks", return_value=[{"status": "waiting"}]):
             self.assertFalse(app.get(["feedback"])["eligible"])
             self.assertFalse(app.post(["feedback", "invitation"], {"action": "claim"})["claimed"])
-        entered, release = threading.Event(), threading.Event()
-        def slow_sender(endpoint, payload):
-            entered.set(); release.wait(3)
-            return self.sender(endpoint, payload)
-        app.feedback.sender = slow_sender
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            submitted = pool.submit(app.post, ["feedback", "submit"], self.form())
-            self.assertTrue(entered.wait(1))
-            acquired = app.mutation_lock.acquire(blocking=False)
-            self.assertTrue(acquired)
-            if acquired: app.mutation_lock.release()
-            release.set()
-            self.assertTrue(submitted.result()["received"])
         app.close()
 
 
