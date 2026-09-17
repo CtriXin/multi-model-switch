@@ -396,3 +396,10 @@ export function createdScheduleNotice(
   const when = formatNext(next);
   return when ? `已设定，下次 ${when}` : "已设定定时。";
 }
+
+export function nextEvening(now: Date): { date: Date; label: string } {
+  const date = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 20, 0, 0, 0);
+  const tomorrow = date.getTime() <= now.getTime();
+  if (tomorrow) date.setDate(date.getDate() + 1);
+  return { date, label: `${tomorrow ? "明晚" : "今晚"} 20:00` };
+}

@@ -3,40 +3,30 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import esbuild from 'esbuild';
+import React from 'react';
 
-const source = fs.readFileSync(new URL('../src/Bot.tsx', import.meta.url), 'utf8');
-const marker = source.indexOf('className="bot-chat-model-line"');
-assert.ok(marker > 0, 'the model chip must remain in the actual Bot header');
-const start = source.lastIndexOf('<p', marker);
-const end = source.indexOf('</p>', marker) + 4;
-const code = esbuild.transformSync(`result = (${source.slice(start, end)});`, {loader:'tsx'}).code;
-
-for (const [event, key, editable, opens] of [
-  ['click', '', true, true], ['key', 'Enter', true, true], ['key', ' ', true, true],
-  ['key', 'Escape', true, false], ['click', '', false, false], ['key', 'Enter', false, false],
-]) {
-  test(`actual Bot model chip ${event}/${key || 'pointer'} editable=${editable}`, () => {
-    const calls = [];
-    const context = {React:{createElement:(_tag,props)=>props},result:null,
-      onUpdateBot:editable ? ()=>{} : undefined,
-      bot:{model:'current',pendingPresetId:'next'},presets:[{id:'next',name:'Next model'}],
-      setOnboardingEditing:value=>calls.push(['settings',value]),
-      setSchedulePanelOpen:value=>calls.push(['schedule',value]),
-      setTimeout:callback=>callback(),
-      document:{getElementById:id=>{
-        assert.equal(id,'bot-preset-model-section');
-        return {scrollIntoView:()=>calls.push(['scroll']),querySelector:selector=>{
-          assert.match(selector,/model-picker-trigger/);return {focus:()=>calls.push(['focus'])};
-        }};
-      }},
-    };
-    vm.runInNewContext(code,context);
-    assert.equal(context.result.role,editable ? 'button' : undefined);
-    assert.equal(context.result.tabIndex,editable ? 0 : -1);
-    let prevented = false;
-    if(event==='click')context.result.onClick();
-    else context.result.onKeyDown({key,preventDefault:()=>{prevented=true;}});
-    assert.deepEqual(calls,opens ? [['settings',true],['schedule',false],['scroll'],['focus']] : []);
-    assert.equal(prevented,event==='key' && opens);
-  });
-}
+const code=esbuild.transformSync(fs.readFileSync(new URL('../src/BotModelPicker.tsx',import.meta.url),'utf8'),{loader:'tsx',format:'cjs'}).code;
+const mod={exports:{}};
+vm.runInNewContext(code,{module:mod,exports:mod.exports,React,require:()=>({})});
+const {BotModelPicker}=mod.exports;
+for(const disabled of [false,true]) test(`Bot model chip forwards native pointer/keyboard disabled=${disabled}`,()=>{
+  const tree=BotModelPicker({bot:{model:'current',pendingPresetId:'next'},presets:[{id:'next',name:'Next model'}],models:[],disabled,change:async()=>{}});
+  assert.equal(tree.props.disabled,disabled);
+  assert.equal(tree.props.title,'切换 Bot 模型');
+  assert.equal(tree.props.label,'当前 current · 下一轮 Next model');
+  const menu=tree.props.children(()=>{},true);
+  assert.equal(menu.props.value,'next');
+  assert.equal(menu.props.disabled,disabled);
+});
+test('quick Bot model selection waits for the API and propagates rejection',async()=>{
+  let resolve,reject;
+  const calls=[];
+  const tree=BotModelPicker({bot:{presetId:'old'},presets:[],models:[],change:id=>{calls.push(id);return new Promise((a,b)=>{resolve=a;reject=b;});}});
+  const menu=tree.props.children(()=>{},true);
+  let settled=false;
+  const result=menu.props.change('new').then(()=>{settled=true;});
+  await Promise.resolve();assert.equal(settled,false);assert.deepEqual(calls,['new']);
+  resolve();await result;assert.equal(settled,true);
+  const failed=menu.props.change('bad');reject(new Error('fixture rejection'));
+  await assert.rejects(failed,/fixture rejection/);
+});

@@ -1,3 +1,7 @@
+import { useRef, useState } from "react";
+import { ChevronDown } from "lucide-react";
+import { Popover } from "./Popover";
+import { RadioMenu } from "./RadioMenu";
 import type { Preset } from "./types";
 import {
   compactModelLabel,
@@ -28,16 +32,22 @@ export function BotFleetBar({
   presets?: Preset[];
   disabled?: boolean;
   busy?: boolean;
-  onChange: (next: BotFleetPolicy) => void;
+  onChange: (next: BotFleetPolicy) => void | Promise<void>;
 }) {
-  const locked = Boolean(disabled || busy);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+  const inFlight = useRef(false);
+  const locked = Boolean(disabled || busy || pending);
   const allOn = families.length > 0 && policy.families.length === families.length
     && families.every((name) => policy.families.includes(name));
   const visibleFamilies = [...new Set([...families, ...policy.families])];
 
-  function patch(partial: Partial<BotFleetPolicy>) {
-    if (locked) return;
-    onChange(normalizeFleetPolicy({ ...policy, ...partial }));
+  async function patch(partial: Partial<BotFleetPolicy>) {
+    if (locked || inFlight.current) return false;
+    inFlight.current = true; setPending(true); setError("");
+    try { await onChange(normalizeFleetPolicy({ ...policy, ...partial })); return true; }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "场外帮助设置未保存，请重试。"); return false; }
+    finally { inFlight.current = false; setPending(false); }
   }
 
   function toggleFamily(name: string) {
@@ -52,11 +62,11 @@ export function BotFleetBar({
   }
 
   function pickModel(family: string, presetId: string) {
-    if (locked) return;
+    if (locked) return Promise.resolve(false);
     const selected = policy.families.includes(family)
       ? policy.families
       : [...policy.families, family].slice(0, 12);
-    patch({
+    return patch({
       families: selected,
       maxFamilies: Math.max(selected.length, policy.maxFamilies),
       models: { ...policy.models, [family]: presetId },
@@ -140,19 +150,19 @@ export function BotFleetBar({
                   type="button"
                   className={"bot-fleet-chip bot-fleet-family" + (on ? " is-on" : "")}
                   aria-pressed={on}
-                  aria-haspopup="menu"
-                  title={name === label ? `${name}，悬停选模型` : `${name} · ${label}`}
+                  title={`${on ? "取消" : "选择"} ${name}`}
                   disabled={locked}
                   onClick={() => toggleFamily(name)}
                 >
                   {label}
                 </button>
                 {options.length > 0 && (
-                  <div className="bot-fleet-model-menu" role="menu" aria-label={`${name} 可选模型`}>
-                    <div className="bot-fleet-model-panel">
+                  <Popover title={`选择 ${name} 的模型`} label={<ChevronDown size={14} />}
+                    className="bot-fleet-chip bot-fleet-model-trigger" panelWidth={260} disabled={locked}>
+                    {(close, open) => <RadioMenu active={open} className="bot-fleet-model-panel" label={`${name} 可选模型`}>
                     {remembered && <button type="button" role="menuitemradio" aria-checked={false}
                       className="bot-fleet-model-item" disabled={locked}
-                      onClick={() => patch({ models: { ...policy.models, [name]: "" } })}>
+                      onClick={async () => { if (await patch({ models: { ...policy.models, [name]: "" } })) close(); }}>
                       自动选择
                     </button>}
                     {options.map((preset) => {
@@ -165,10 +175,10 @@ export function BotFleetBar({
                           aria-checked={active}
                           className={"bot-fleet-model-item" + (active ? " is-on" : "")}
                           disabled={locked}
-                          onClick={(event) => {
+                          onClick={async (event) => {
                             event.preventDefault();
                             event.stopPropagation();
-                            pickModel(name, preset.id);
+                            if (await pickModel(name, preset.id)) close();
                           }}
                         >
                           {compactModelLabel(preset.name)}
@@ -177,14 +187,16 @@ export function BotFleetBar({
                         </button>
                       );
                     })}
-                    </div>
-                  </div>
+                    </RadioMenu>}
+                  </Popover>
                 )}
               </div>
             );
           })}
         </div>
       )}
+      {pending && <p role="status" className="bot-fleet-preview">正在保存选择…</p>}
+      {error && <p role="alert" className="bot-inline-error">{error}</p>}
       {policy.enabled && (
         <p className="bot-fleet-preview">{fleetPreviewLabel(policy, families, presets)}</p>
       )}

@@ -73,15 +73,12 @@ test("normalizeModelQuery strips separators and trailing particles", () => {
 const botSource = fs.readFileSync(path.resolve(__dirname, "../src/Bot.tsx"), "utf-8");
 
 test("bot chat header renders the current and next-round model line", () => {
-  const start = botSource.indexOf('className="bot-chat-model-line"');
-  assert.ok(start > 0, "bot-chat-model-line should exist in the chat header");
-  const end = botSource.indexOf("</p>", start);
-  assert.ok(end > start, "bot-chat-model-line should be closed");
-  const block = botSource.slice(start, end);
-  assert.match(block, /当前 /);
-  assert.match(block, /下一轮 /);
-  assert.ok(block.includes("bot.pendingPresetId"), "next-round model comes from pendingPresetId");
-  assert.ok(block.includes("bot.model"), "current model comes from bot.model");
+  assert.match(botSource, /<BotModelPicker bot=\{bot\}/);
+  const picker = fs.readFileSync(path.resolve(__dirname, "../src/BotModelPicker.tsx"), "utf-8");
+  assert.match(picker, /当前 /);
+  assert.match(picker, /下一轮 /);
+  assert.match(picker, /bot\.pendingPresetId/);
+  assert.match(picker, /bot\.model/);
 });
 
 

@@ -66,12 +66,14 @@ const quickModelMenuMock = {
 };
 
 const popoverExports = loadModule("../src/Popover.tsx");
+const radioMenuExports = loadModule("../src/RadioMenu.tsx");
 const taskSettingsExports = loadModule("../src/TaskSettings.tsx", {
   "lucide-react": lucideMock,
   "./ModelExplorer": modelExplorerMock,
   "./modelSelection": modelSelectionMock,
   "./QuickModelMenu": quickModelMenuMock,
   "./Popover": popoverExports,
+  "./RadioMenu": radioMenuExports,
 });
 
 const { sortLevels, EffortPicker, TaskSettings, SessionSettings } = taskSettingsExports;
@@ -371,8 +373,17 @@ test("live session effort menu sends only explicit runtime levels", async () => 
   });
   const picker = nodes(tree).find(node => node.type === EffortPicker);
   assert.ok(picker, "SessionSettings must mount the picker");
-  const popover = EffortPicker(picker.props);
-  const buttons = nodes(popover.props.children(() => {})).filter(node => node.type === "button");
+  let buttons = [];
+  const { EffortPicker: MountedPicker } = loadModule("../src/TaskSettings.tsx", {
+    "lucide-react": lucideMock, "./ModelExplorer": modelExplorerMock,
+    "./RadioMenu": radioMenuExports,
+    "./Popover": { Popover: ({children}) => {
+      const menu = children(() => {}, true);
+      buttons = nodes(menu).filter(node => node.type === "button");
+      return menu;
+    } },
+  });
+  renderToStaticMarkup(React.createElement(MountedPicker, picker.props));
   assert.equal(buttons.length, 2, "live runtime has no empty/default reset command");
   buttons[0].props.onClick();
   await Promise.resolve();

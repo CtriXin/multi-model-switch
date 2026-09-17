@@ -165,15 +165,15 @@ test("parsePreset and buildPreset support new footer order and maintain backward
 
 
 test("the preset editor lets the rename input keep Escape to itself", () => {
-  const source = readFileSync(new URL("../src/Bot.tsx", import.meta.url), "utf8");
-  const start = source.indexOf("if (!onboardingEditing) return;");
-  assert.ok(start > 0, "找不到预设编辑器的 Esc 监听");
-  const handler = source.slice(start, source.indexOf("window.removeEventListener", start));
-  assert.ok(handler.includes("bot-chat-title-input"), "编辑器的 Esc 监听必须认出改名输入框");
-  assert.ok(
-    handler.indexOf("bot-chat-title-input") < handler.indexOf("setOnboardingEditing(false)"),
-    "命中改名输入框时必须先返回，不再关闭预设编辑器",
-  );
+  const source = readFileSync(new URL("../src/BotPresetPanel.tsx", import.meta.url), "utf8");
+  const start = source.indexOf("const handleKeyDown");
+  assert.ok(start > 0);
+  const handler = source.slice(start, source.indexOf('document.addEventListener', start));
+  assert.ok(handler.includes("bot-chat-title-input"));
+  assert.ok(handler.indexOf("bot-chat-title-input") < handler.indexOf("handleClose()"));
+  assert.match(handler, /!hasTopLayer\(\)/, "nested native layers own their Escape");
+  const parent = readFileSync(new URL("../src/Bot.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(parent, /if \(!onboardingEditing\) return;/, "no second listener may bypass the guard");
 });
 
 test("runWizard covers branches for work, daily, research, and write", () => {

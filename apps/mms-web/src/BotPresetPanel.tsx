@@ -312,12 +312,13 @@ export function BotPresetPanel({
             <h3>默认模型</h3>
           </div>
           <ModelPicker
+            scope="bot"
             presets={presets.filter((item) => item.harness === "pi" && item.available)}
             models={models}
             workspaceId={bot.workspaceId || "default"}
-            value={bot.presetId || ""}
-            change={(presetId) => {
-              void onUpdateBot?.(bot.id, { presetId: presetId || null });
+            value={bot.pendingPresetId || bot.presetId || ""}
+            change={async (presetId) => {
+              await onUpdateBot?.(bot.id, { presetId: presetId || null });
             }}
             favorites={favorites}
             toggleFavorite={(id) =>

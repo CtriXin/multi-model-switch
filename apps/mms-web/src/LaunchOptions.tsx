@@ -27,17 +27,21 @@ export function ModelPicker({
   favorites,
   toggleFavorite,
   disabled = false,
+  scope = "web",
 }: {
   presets: Preset[];
   models: Model[];
   workspaceId: string;
   value: string;
-  change: (id: string) => void;
+  change: (id: string) => void | Promise<void | boolean>;
   favorites: string[];
   toggleFavorite: (id: string) => void;
   disabled?: boolean;
+  scope?: "web" | "bot";
 }) {
   const [open, setOpen] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
   const [candidate, setCandidate] = useState(value);
   const selected = presets.find((p) => p.id === value);
   const extraChannels = availableRoutesForModel(presets, selected).length > 1;
@@ -48,6 +52,7 @@ export function ModelPicker({
         className="model-picker-trigger"
         disabled={disabled}
         onClick={() => {
+          setError("");
           setCandidate(value);
           setOpen(true);
         }}
@@ -61,8 +66,12 @@ export function ModelPicker({
         <ChevronDown size={14} />
       </button>
       {open && (
-        <Dialog title="模型与通道" close={() => setOpen(false)}>
+        <Dialog title="模型与通道" close={() => setOpen(false)} dismissible={!pending}>
+          {error && <p role="alert" className="inline-alert">{error}</p>}
+          {pending && <p role="status">正在切换模型…</p>}
+          <fieldset disabled={pending} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
           <ModelExplorer
+            scope={scope}
             presets={presets}
             models={models}
             workspaceId={workspaceId}
@@ -70,11 +79,18 @@ export function ModelPicker({
             change={setCandidate}
             favorites={favorites}
             toggleFavorite={toggleFavorite}
-            choose={() => {
-              change(candidate);
-              setOpen(false);
+            choose={async () => {
+              if (pending) return;
+              setPending(true); setError("");
+              try {
+                if (await change(candidate) === false) setError("切换未完成，请重试。");
+                else setOpen(false);
+              } catch (cause) {
+                setError(cause instanceof Error ? cause.message : "切换未完成，请重试。");
+              } finally { setPending(false); }
             }}
           />
+          </fieldset>
         </Dialog>
       )}
     </>
