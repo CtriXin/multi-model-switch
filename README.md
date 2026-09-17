@@ -56,7 +56,7 @@ v4 各版累积下来的能力：
 
 | 线 | 分支 | 版本 | 安装命令 | 适合谁 | 里面有什么 |
 |---|---|---|---|---|---|
-| 稳定线 | `main` | 4.22.x | `--channel stable`（默认） | 所有把它当日常工具用的人 | 已经坐稳的功能。新版本只收修复和验证过的能力 |
+| 稳定线 | `main` | 4.23.x | `--channel stable`（默认） | 所有把它当日常工具用的人 | 已经坐稳的功能。新版本只收修复和验证过的能力 |
 | 预览线 | `dev` | 5.x | `--channel dev` | 愿意试新东西、能接受波动的人 | 稳定线的全部内容，外加还在打磨的 Bot 工作台 |
 | Canary | `canary` | 跟随 `canary` 分支 | `--channel canary` | 专门验证某个修复的人 | 小步高频，允许短期破 |
 
@@ -215,7 +215,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel canary
 
 # 固定到某个 release 或分支
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref v4.22.2
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref v4.23.0
 curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref main
 
 # 不打开 Web 端，也不改 shell 配置（CI、脚本）
