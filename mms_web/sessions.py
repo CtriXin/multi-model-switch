@@ -15,6 +15,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import logging
 import os
 import re
 import threading
@@ -350,7 +351,15 @@ class _LiveSession:
             "updatedAt": self.updated_at,
         }
         from .runtime import private_json
-        private_json(state_dir / f"{self.meta['id']}.json", payload)
+        target = state_dir / f"{self.meta['id']}.json"
+        try:
+            private_json(target, payload)
+        except OSError:
+            logging.getLogger("mms_web.sessions").exception(
+                "session persist failed for %s; this conversation may not have been saved",
+                self.meta.get("id"),
+            )
+            raise
 
 
 

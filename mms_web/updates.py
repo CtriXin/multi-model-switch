@@ -1,6 +1,7 @@
 """Bounded release checks. Only Web-owned state is written; no provider calls."""
 from __future__ import annotations
 import json
+import logging
 import os
 import re
 import threading
@@ -10,6 +11,9 @@ from pathlib import Path
 from mms_version import VERSION
 from .errors import WebError
 from .runtime import private_json
+
+_LOG = logging.getLogger("mms_web.updates")
+_CHECK_ERROR = "暂时无法检查更新，稍后可以重试。现有会话不受影响。"
 
 REPO = 'CtriXin/multi-model-switch'
 RELEASE_API = f'https://api.github.com/repos/{REPO}/releases/latest'
@@ -163,6 +167,7 @@ class UpdateService:
         self._check_lock = threading.Lock()
         self._stop = threading.Event()
         self._checking = False
+        self._check_error = ''
         self._scheduler = None
         self.coordinator = None
 
@@ -196,7 +201,7 @@ class UpdateService:
                 'whatsNew': self.whats_new(),
                 'enabled': self.enabled(), 'checking': self._checking,
                 'checkedAt': checked_at(cache), 'checkInterval': CHECK_INTERVAL,
-                'error': str(cache.get('error') or ''), 'operation': operation,
+                'error': str(cache.get('error') or self._check_error or ''), 'operation': operation,
                 'port': self.coordinator.port() if self.coordinator else 0,
                 'installation': installation,
                 'upgradeGuidance': guidance,
@@ -215,26 +220,39 @@ class UpdateService:
         if not self._check_lock.acquire(blocking=False):
             return self.status()
         try:
-            channel = self.channel()
-            cache_path = self._cache_path(channel)
-            cache = read_json(cache_path)
-            interval = 60 if manual else (1800 if cache.get('error') else CHECK_INTERVAL)
-            age = self.clock() - checked_at(cache)
-            if checked_at(cache) and 0 <= age < interval:
-                return self.status()
-            self._checking = True
             try:
-                latest = (self.preview_fetcher if channel == 'preview' else self.fetcher)()
-                private_json(cache_path, {'checkedAt': self.clock(), 'latest': latest, 'error': ''})
+                channel = self.channel()
+                cache_path = self._cache_path(channel)
+                cache = read_json(cache_path)
+                interval = 60 if manual else (1800 if cache.get('error') else CHECK_INTERVAL)
+                age = self.clock() - checked_at(cache)
+                if checked_at(cache) and 0 <= age < interval:
+                    return self.status()
+                self._checking = True
+                try:
+                    latest = (self.preview_fetcher if channel == 'preview' else self.fetcher)()
+                    private_json(cache_path, {'checkedAt': self.clock(), 'latest': latest, 'error': ''})
+                    self._check_error = ''
+                except Exception:
+                    self._check_error = _CHECK_ERROR
+                    private_json(cache_path, {**cache, 'checkedAt': self.clock(), 'error': _CHECK_ERROR})
             except Exception:
-                private_json(cache_path, {**cache, 'checkedAt': self.clock(), 'error': '暂时无法检查更新，稍后可以重试。现有会话不受影响。'})
+                self._check_error = _CHECK_ERROR
+                _LOG.exception("update check failed")
         finally:
             self._checking = False
             self._check_lock.release()
         return self.status()
 
+    def _run_check_safe(self, *, manual=False):
+        try:
+            return self.check(manual=manual)
+        except Exception:
+            _LOG.exception("background update check failed")
+            return None
+
     def request_check(self):
-        threading.Thread(target=self.check, kwargs={'manual': True}, name='pilot-update-check', daemon=True).start()
+        threading.Thread(target=self._run_check_safe, kwargs={'manual': True}, name='pilot-update-check', daemon=True).start()
         return self.status()
 
     def preferences(self, payload):
@@ -253,8 +271,9 @@ class UpdateService:
             while not self._stop.is_set():
                 try:
                     self.check()
-                except OSError:
-                    pass  # Unwritable update cache must not stop the Web service.
+                except Exception:
+                    # Unwritable update cache must not stop the Web service.
+                    _LOG.exception("scheduled update check failed")
                 self._stop.wait(60)
         self._scheduler = threading.Thread(target=loop, name='pilot-release-scheduler', daemon=True)
         self._scheduler.start()

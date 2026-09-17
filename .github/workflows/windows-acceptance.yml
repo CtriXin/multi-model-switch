@@ -34,6 +34,7 @@ on:
       - "tests/test_mms_web_windows_service.py"
       - "tests/test_mms_web_status.py"
       - "tests/test_mms_web_sessions_pi_driver.py"
+      - "tests/test_mms_web_atomic_write.py"
       - "tests/test_npx_installer_package.py"
 
 permissions:
@@ -172,6 +173,7 @@ jobs:
             tests/test_mms_web_windows_service.py `
             tests/test_mms_web_status.py `
             tests/test_mms_web_sessions_pi_driver.py `
+            tests/test_mms_web_atomic_write.py `
             tests/test_npx_installer_package.py `
             ${{ github.event.inputs.pytest_extra }}
 
