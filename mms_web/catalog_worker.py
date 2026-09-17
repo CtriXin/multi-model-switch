@@ -46,7 +46,7 @@ import os
 import tempfile
 import tomllib
 
-_PROVIDER_LAUNCHABLE_CLIS = ("claude", "codex", "opencode", "pi")
+from mms_web.harness import PROVIDER_LAUNCHABLE_HARNESSES as _PROVIDER_LAUNCHABLE_CLIS
 _PROTECTED_ROOT_NAMES = (".config/mms", ".config/mms-next")
 
 
@@ -192,13 +192,14 @@ def _cmd_resolve_launch(stream, payload):
         materialize_manual_runtime_bundle(config_root, runtime, model)
     options = {}
     pi_model = {}
-    if cli == "pi":
+    if cli in {"pi", "grok"}:
         from mms_web.launch_options import public_options
         options = public_options(runtime, model)
         runtime["reasoning_effort"] = options["defaultThinkingLevel"]
-        import mms_pi_support
-        _, provider_ref = mms_pi_support._pi_build_models_payload(runtime, mms_pi_support._pi_effective_selected_model(runtime, model))
-        pi_model = {"provider": provider_ref, "modelId": options["model"]["id"]}
+        if cli == "pi":
+            import mms_pi_support
+            _, provider_ref = mms_pi_support._pi_build_models_payload(runtime, mms_pi_support._pi_effective_selected_model(runtime, model))
+            pi_model = {"provider": provider_ref, "modelId": options["model"]["id"]}
     _emit(
         stream,
         {

@@ -258,6 +258,11 @@ def test_snapshot_same_model_name_two_providers(tmp_path):
     assert shared["providerName"] == "Gateway A"
     assert shared["available"] is True
     assert "claude" in shared["harnesses"]
+    assert "pi" in shared["harnesses"]
+    assert "grok" in shared["harnesses"]
+    grok_preset = next(p for p in snapshot["presets"] if p["id"] == "web:grok:gw-a:shared-model")
+    assert grok_preset["harness"] == "grok"
+    assert grok_preset["available"] is True
 
 
 def test_snapshot_hidden_and_favorite_policy(tmp_path):

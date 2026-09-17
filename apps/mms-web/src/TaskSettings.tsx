@@ -2,7 +2,8 @@ import { ChevronDown, ArrowUpRight } from "lucide-react";
 import type { Model, Preset, SessionDetail } from "./types";
 import type { LaunchFacts } from "./ModelExplorer";
 import { EffortSelect } from "./ModelExplorer";
-import { availableRoutesForModel, channelLabel } from "./modelSelection";
+import { harnessNames } from "./components";
+import { availableHarnesses, availableRoutesForModel, channelLabel, siblingHarnessPreset } from "./modelSelection";
 import { QuickModelMenu } from "./QuickModelMenu";
 import { Popover } from "./Popover";
 
@@ -37,6 +38,8 @@ export function TaskSettings({
 }) {
   const preset = presets.find((p) => p.id === value);
   const extraChannels = availableRoutesForModel(presets, preset).length > 1;
+  const harnesses = availableHarnesses(presets, preset);
+  const scoped = presets.filter((p) => p.harness === (preset?.harness || "pi"));
   return (
     <Popover
       title="本次任务设置"
@@ -53,8 +56,25 @@ export function TaskSettings({
       }
     >
       {(close, open) => open ? (
-        <QuickModelMenu presets={presets} models={models} value={value} favorites={favorites}
+        <QuickModelMenu presets={scoped} models={models} value={value} favorites={favorites}
           change={change} close={close} notice={planning ? "当前为只读规划模式。" : undefined}>
+          {harnesses.length > 1 && (
+            <label className="task-setting-row">
+              <span>执行工具</span>
+              <select
+                aria-label="执行工具"
+                value={preset?.harness || "pi"}
+                onChange={(e) => {
+                  const next = siblingHarnessPreset(presets, preset, e.target.value);
+                  if (next) change(next.id);
+                }}
+              >
+                {harnesses.map((item) => (
+                  <option key={item} value={item}>{harnessNames[item] || item}</option>
+                ))}
+              </select>
+            </label>
+          )}
           <div className="task-setting-row" data-guide="effort">
             <span>思考强度</span>
             {facts ? (
@@ -68,6 +88,7 @@ export function TaskSettings({
             <select
               aria-label="新任务工作模式"
               value={planning ? "plan" : "execute"}
+              disabled={preset?.harness === "grok"}
               onChange={(e) => setPlanning(e.target.value === "plan")}
             >
               <option value="execute">执行任务</option>
@@ -75,7 +96,9 @@ export function TaskSettings({
             </select>
           </label>
           <p className="popover-note">
-            {planning
+            {preset?.harness === "grok"
+              ? "Grok 首版按执行模式启动，Web 只读规划开关尚未接入。"
+              : planning
               ? "先分析与阅读资料，不修改工作文件。"
               : "可以读取、修改工作文件，并执行命令。"}
           </p>
@@ -134,7 +157,7 @@ export function SessionSettings({
       }
     >
       {(close, open) => open ? (
-        <QuickModelMenu presets={presets.filter(p => p.harness === "pi")} models={models}
+        <QuickModelMenu presets={presets.filter(p => p.harness === (detail.session.harness || "pi"))} models={models}
           value={detail.session.presetId || ""} favorites={favorites} close={close}
           change={presetId => action(`/sessions/${detail.session.id}/model`, {presetId})}
           disabled={busy || ["running", "waiting"].includes(detail.session.state) || !detail.session.capabilities.send}

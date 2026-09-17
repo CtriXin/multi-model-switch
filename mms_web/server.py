@@ -107,17 +107,20 @@ class WebApplication:
                              "reason": preset.get("reason") or blocker}
                             for preset in snapshot.get("presets", [])],
             }
+        allowed = [item for item in (capabilities.get("richHarnesses") or ["pi"]) if item]
+        if not allowed:
+            allowed = ["pi"]
         if capabilities["launch"]:
             snapshot["models"] = [
-                {**m, "harnesses": ["pi"] if "pi" in m.get("harnesses", []) else [],
-                 "available": bool(m.get("available") and "pi" in m.get("harnesses", [])),
+                {**m, "harnesses": [h for h in m.get("harnesses", []) if h in allowed],
+                 "available": bool(m.get("available") and any(h in allowed for h in m.get("harnesses", []))),
                  **({"reason": m.get("reason") or "这个模型尚未支持当前网页执行工具。"}
-                    if "pi" not in m.get("harnesses", []) else {})}
+                    if not any(h in allowed for h in m.get("harnesses", [])) else {})}
                 for m in snapshot.get("models", [])
             ]
         snapshot["presets"] = [
             {**p, "available": False, "reason": "该执行工具的网页交互正在接入，可先选择 Pi。"}
-            if p.get("harness") != "pi" else p for p in snapshot.get("presets", [])
+            if p.get("harness") not in allowed else p for p in snapshot.get("presets", [])
         ]
         return {
             **snapshot, "version": "1", "appVersion": VERSION, "mode": "live",

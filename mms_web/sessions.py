@@ -24,9 +24,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
-from .drivers import PiRpcDriver, PipedProcessLauncher, probe_mms_pi_seam
+from .drivers import GrokAcpDriver, PiRpcDriver, PipedProcessLauncher, probe_mms_pi_seam
 from .drivers.base import DriverClosedError, DriverWriteUnconfirmedError, LaunchSeamUnavailable, RpcTimeoutError
+from .drivers.launch_bridge import probe_mms_grok_seam
 from .errors import WebError
+from .harness import is_web_rich
 from .context_evidence import consume_prompt, observe_read, prompt_hash
 from .session_actions import SessionActions, backfill_history, redact
 from .side_questions import BTW_FINAL_STATES, SessionSideQuestions, public_side_question
@@ -397,7 +399,16 @@ class SessionService(SessionActions, SessionSideQuestions):
 
         self._launch_plan_builder = launch_plan_builder or mms_pi_launch_plan_builder(self._config_root)
         self._driver_factory = driver_factory
-        self._seam = probe_mms_pi_seam()
+        pi_seam = probe_mms_pi_seam()
+        grok_seam = probe_mms_grok_seam()
+        self._seam = {
+            "available": bool(pi_seam.get("available") or grok_seam.get("available")),
+            "reason": "" if (pi_seam.get("available") or grok_seam.get("available")) else str(pi_seam.get("reason") or grok_seam.get("reason") or ""),
+            "driver": "pi-rpc" if pi_seam.get("available") else "grok-acp",
+            "launcher": "mms_launchers.launch_cli",
+            "pi": pi_seam,
+            "grok": grok_seam,
+        }
         # Real launches stay disabled until the lead integrates the launcher
         # seam; tests enable it explicitly with a task-owned fixture child.
         self._real_launch = bool(real_launch)
@@ -429,6 +440,9 @@ class SessionService(SessionActions, SessionSideQuestions):
             and self._seam.get("available")
             and callable(getattr(self._catalog, "resolve_launch", None))
         )
+        pi_ok = bool((self._seam.get("pi") or self._seam).get("available")) if isinstance(self._seam.get("pi"), dict) else bool(self._seam.get("available"))
+        grok_ok = bool((self._seam.get("grok") or {}).get("available"))
+        rich = [name for name, ok in (("pi", pi_ok), ("grok", grok_ok)) if ok]
         return {
             "launch": launch,
             "launchReason": "" if launch else self._launch_blocker(),
@@ -438,6 +452,7 @@ class SessionService(SessionActions, SessionSideQuestions):
             # all. Whether one particular session can is a property of its
             # route, and shows up on that question's own row.
             "sidecarCompletion": callable(getattr(self, "_sidecar_runner", None)) or _route_completion_build(),
+            "richHarnesses": rich,
         }
 
     def _sidecar_runner_for(self, session):
@@ -913,7 +928,12 @@ class SessionService(SessionActions, SessionSideQuestions):
         if not root.is_relative_to((self._state_root / "runtimes").resolve()):
             raise WebError("INVALID_SESSION", "会话运行目录无效。", 409)
         saved = json.loads((root / "resume.json").read_text(encoding="utf-8"))
-        plan = self._launch_plan_builder("pi", saved["modelInfo"], saved["runtime"], saved["cwd"])
+        harness = str(session.meta.get("harness") or "pi")
+        plan = self._launch_plan_builder(harness, saved["modelInfo"], saved["runtime"], saved["cwd"])
+        if plan is None:
+            raise WebError("RESUME_FAILED", "无法为该执行工具构建恢复计划。", 502)
+        if harness == "grok":
+            plan.resume_session_id = str(saved.get("grokSessionId") or session.meta.get("grokSessionId") or "") or None
         session.finalized = False
         session.stop_requested = False
         driver = self._spawn_driver(plan, _DriverSink(self, session))
@@ -1129,10 +1149,10 @@ class SessionService(SessionActions, SessionSideQuestions):
         if not isinstance(resolved, dict):
             raise WebError("LAUNCH_RESOLVE_FAILED", "无法解析所选启动组合", status=400)
         harness = str(resolved.get("harness") or "").strip()
-        if harness != "pi":
+        if not is_web_rich(harness):
             raise WebError(
                 "CAPABILITY_UNAVAILABLE",
-                f"harness {harness or '?'} 暂不支持 Web rich 会话，当前仅支持 pi",
+                f"harness {harness or '?'} 暂不支持 Web rich 会话，当前支持 pi 与 grok",
                 status=409,
             )
         model_info = resolved.get("modelInfo") or resolved.get("model_info")
@@ -1149,7 +1169,7 @@ class SessionService(SessionActions, SessionSideQuestions):
         try:
             plan = self._launch_plan_builder(harness, model_info, runtime, cwd)
         except (LaunchSeamUnavailable, DriverClosedError) as exc:
-            raise WebError("CAPABILITY_UNAVAILABLE", f"Pi 启动接缝不可用: {exc}", status=409)
+            raise WebError("CAPABILITY_UNAVAILABLE", f"{'Grok' if harness == 'grok' else 'Pi'} 启动接缝不可用: {exc}", status=409)
         if plan is None:
             raise WebError("CAPABILITY_UNAVAILABLE", "无法为该组合构建启动计划", status=409)
 
@@ -1165,7 +1185,7 @@ class SessionService(SessionActions, SessionSideQuestions):
         context = usage_record(cwd, selected_skills, attachments, payload.get("references", []), [], materials, payload.get("skillInvocation"))
         context["promptSha256"] = prompt_hash(prompt + suffix)
         if not title:
-            title = _clip(str(prompt or "").strip() or "Pi 会话", 60)
+            title = _clip(str(prompt or "").strip() or ("Grok 会话" if harness == "grok" else "Pi 会话"), 60)
 
         session_id = f"s-{uuid.uuid4().hex[:12]}"
         meta = self._build_meta(session_id, harness, workspace_id, title, model_info, runtime,
@@ -1187,26 +1207,35 @@ class SessionService(SessionActions, SessionSideQuestions):
         except (OSError, DriverClosedError) as exc:
             raise WebError("LAUNCH_FAILED", "Pi 子进程无法启动", status=502) from exc
         live.driver = driver
+        grok_sid = str(getattr(driver, "native_session_id", "") or "")
+        if grok_sid:
+            live.meta["grokSessionId"] = grok_sid
         if runtime.get("_webConfigRoot"):
+            if grok_sid:
+                private_json(Path(runtime["_webConfigRoot"]) / "resume.json",
+                             {"modelInfo": model_info, "runtime": runtime, "cwd": cwd, "grokSessionId": grok_sid})
             try:
                 state = driver.get_state()
                 if not state.get("model"):
-                    raise DriverClosedError("Pi 没有加载所选模型")
+                    raise DriverClosedError("没有加载所选模型")
             except (DriverClosedError, RpcTimeoutError):
                 driver.close(graceful_timeout=0.5)
                 diagnostic = str(getattr(driver, "_stderr_tail", ""))
                 for secret in live.secrets:
                     diagnostic = diagnostic.replace(secret, "[已隐藏密钥]")
                 private_json(Path(runtime["_webConfigRoot"]) / "launch-stderr.json", {"stderr": diagnostic})
-                raise WebError("LAUNCH_FAILED", "MMS 未能启动所选模型，请检查本机 Pi 和模型服务。", 502)
+                raise WebError("LAUNCH_FAILED", "MMS 未能启动所选模型，请检查本机执行工具和模型服务。", 502)
         try:
             if effort:
                 from .launch_options import set_thinking
                 set_thinking(self, live, effort)
             self._check_images(live, images)
             if payload.get("planMode") is True:
-                self._require_plan_control(live)
-                self._rpc(live, {"type": "prompt", "message": "/mms-web-plan on"})
+                if harness == "grok":
+                    live.append_event({"kind": "notice", "title": "规划", "text": "Grok 首版未接入 Web 只读规划开关，已按执行模式启动。"}, self._now)
+                else:
+                    self._require_plan_control(live)
+                    self._rpc(live, {"type": "prompt", "message": "/mms-web-plan on"})
         except WebError:
             driver.close(graceful_timeout=0.5)
             raise
@@ -1268,6 +1297,14 @@ class SessionService(SessionActions, SessionSideQuestions):
         if self._driver_factory is not None:
             return self._driver_factory(plan, sink)
         process = self._process_launcher.popen(plan.cmd, env=plan.env, cwd=plan.cwd)
+        if str(plan.harness) == "grok":
+            return GrokAcpDriver(
+                process,
+                sink,
+                name="grok",
+                cwd=plan.cwd,
+                resume_session_id=getattr(plan, "resume_session_id", None),
+            )
         return PiRpcDriver(process, sink, name=str(plan.harness))
 
     def _check_images(self, session, images):

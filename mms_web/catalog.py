@@ -38,13 +38,14 @@ import tomllib
 from pathlib import Path
 
 from .errors import WebError
+from .harness import KNOWN_HARNESSES, PROVIDER_LAUNCHABLE_HARNESSES, WEB_RICH_HARNESSES
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _WORKER_PATH = Path(__file__).resolve().parent / "catalog_worker.py"
 
 PREVIEW_TTL_SECONDS = 30 * 60
-_PROVIDER_LAUNCHABLE_HARNESSES = ("claude", "codex", "opencode", "pi")
-_KNOWN_HARNESSES = ("pi", "codex", "claude", "opencode", "gemini", "agy")
+_PROVIDER_LAUNCHABLE_HARNESSES = PROVIDER_LAUNCHABLE_HARNESSES
+_KNOWN_HARNESSES = KNOWN_HARNESSES
 # Project identity for model-policy project overlays (docs/MODEL_CONFIG_CONTRACT.md).
 PROJECT_ID = "mms-web"
 _PROTECTED_ROOT_NAMES = (".config/mms", ".config/mms-next")
@@ -533,10 +534,10 @@ class CatalogService:
                 if cli in supported:
                     harnesses.append(cli)
                     continue
-                # Mirror MMS protocol-compat relaxation for pi/opencode only.
-                if cli == "pi" and "openai_chat_completions" in protocols and supported & {"codex", "opencode", "claude"}:
+                # Mirror MMS protocol-compat relaxation for pi/grok/opencode.
+                if cli in {"pi", "grok"} and "openai_chat_completions" in protocols and supported & {"codex", "opencode", "claude", "pi", "grok"}:
                     harnesses.append(cli)
-                elif cli == "pi" and "anthropic_messages" in protocols and "claude" in supported:
+                elif cli in {"pi", "grok"} and "anthropic_messages" in protocols and supported & {"claude", "pi", "grok"}:
                     harnesses.append(cli)
                 elif cli == "opencode" and "openai_chat_completions" in protocols and supported & {"codex", "claude"}:
                     harnesses.append(cli)
@@ -808,16 +809,18 @@ class CatalogService:
                 preset_payload["reason"] = reason
             presets.append(preset_payload)
 
+        labels = {"pi": "Pi", "grok": "Grok"}
         for model in models:
-            if "pi" not in model.get("harnesses", []):
-                continue
-            presets.append({
-                "id": "web:pi:" + model["id"], "name": model["name"],
-                "description": model["providerName"] + " · Pi",
-                "harness": "pi", "modelId": model["id"],
-                "providerId": model["providerId"], "channel": model["providerId"],
-                "available": model["available"], "reason": model.get("reason", ""),
-            })
+            for harness in WEB_RICH_HARNESSES:
+                if harness not in model.get("harnesses", []):
+                    continue
+                presets.append({
+                    "id": f"web:{harness}:" + model["id"], "name": model["name"],
+                    "description": model["providerName"] + " · " + labels.get(harness, harness),
+                    "harness": harness, "modelId": model["id"],
+                    "providerId": model["providerId"], "channel": model["providerId"],
+                    "available": model["available"], "reason": model.get("reason", ""),
+                })
         return {
             "models": models,
             "services": services,
@@ -1191,13 +1194,17 @@ class CatalogService:
         cfg = self._raw_config()
         presets = cfg.get("presets") if isinstance(cfg.get("presets"), dict) else {}
         preset = presets.get(str(preset_id)) if isinstance(presets, dict) else None
-        if str(preset_id).startswith("web:pi:"):
-            model_id = str(preset_id).removeprefix("web:pi:")
+        for harness in WEB_RICH_HARNESSES:
+            prefix = f"web:{harness}:"
+            if not str(preset_id).startswith(prefix):
+                continue
+            model_id = str(preset_id).removeprefix(prefix)
             item = next((m for m in self.snapshot()["models"] if m["id"] == model_id), None)
-            if not item or not item["available"] or "pi" not in item["harnesses"]:
+            if not item or not item["available"] or harness not in item["harnesses"]:
                 raise WebError("MODEL_UNAVAILABLE", "所选模型当前不可用。", 409)
-            preset = {"cli": "pi", "provider": item["providerId"],
+            preset = {"cli": harness, "provider": item["providerId"],
                       "model": model_id.removeprefix(item["providerId"] + ":")}
+            break
         if not isinstance(preset, dict):
             raise WebError("PRESET_NOT_FOUND", f"预设不存在：{preset_id}", status=404)
         cli = str(preset.get("cli") or "claude").strip()

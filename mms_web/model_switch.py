@@ -57,7 +57,9 @@ def route_identity(runtime):
 def verify(driver, target, effort):
     state = rpc(driver, {"type": "get_state"})
     model = state.get("model") or {}
-    if model.get("id") != target["modelId"] or model.get("provider") != target["provider"]:
+    if model.get("id") != target["modelId"]:
+        raise WebError("MODEL_NOT_APPLIED", "执行进程未采用所选模型，切换没有完成。", 409)
+    if target.get("provider") and model.get("provider") not in {None, "", target["provider"]}:
         raise WebError("MODEL_NOT_APPLIED", "执行进程未采用所选模型，切换没有完成。", 409)
     if effort and state.get("thinkingLevel") != effort:
         raise WebError("EFFORT_NOT_APPLIED", "执行进程未采用新模型的 effort，切换没有完成。", 409)
@@ -97,21 +99,29 @@ def switch_model(service, session_id, payload):
             return service.get_session(session_id)
         if session.state in {"running", "waiting"}:
             raise WebError("SESSION_BUSY", "请等待本轮完成，或先停止本轮，再切换模型。", 409)
-        if session.meta.get("harness") != "pi" or not session.meta.get("runtimeRoot"):
+        harness = str(session.meta.get("harness") or "")
+        if harness not in {"pi", "grok"} or not session.meta.get("runtimeRoot"):
             raise WebError("MODEL_SWITCH_UNAVAILABLE", "该会话不支持切换模型。", 409)
         root = require_private_root(Path(session.meta["runtimeRoot"]))
         if not root.is_relative_to((service._state_root / "runtimes").resolve()):
             raise WebError("INVALID_SESSION", "会话运行目录无效。", 409)
         saved = json.loads((root / "resume.json").read_text())
         resolved = service._catalog.resolve_launch(preset, session.meta["workspaceId"])
-        if resolved.get("harness") != "pi" or not resolved.get("piModel"):
+        if resolved.get("harness") != harness:
+            raise WebError("MODEL_SWITCH_UNAVAILABLE", "换执行工具请开新会话。", 409)
+        model_name = str((resolved.get("modelInfo") or {}).get("model") or "")
+        target = resolved.get("piModel") or {"modelId": model_name, "provider": ""}
+        if harness == "pi" and not resolved.get("piModel"):
             raise WebError("MODEL_SWITCH_UNAVAILABLE", "请选择支持 Pi 的模型通道。", 409)
-        target = resolved["piModel"]
         effort = resolved.get("launchOptions", {}).get("defaultThinkingLevel")
         driver = session.driver
         available = rpc(driver, {"type": "get_available_models"}).get("models", []) if session.alive() else []
-        native = session.alive() and route_identity(saved["runtime"]) == route_identity(resolved["runtime"]) and any(
-            m.get("id") == target["modelId"] and m.get("provider") == target["provider"] for m in available)
+        same_route = route_identity(saved["runtime"]) == route_identity(resolved["runtime"])
+        if harness == "grok":
+            native = session.alive() and same_route
+        else:
+            native = session.alive() and same_route and any(
+                m.get("id") == target["modelId"] and m.get("provider") == target["provider"] for m in available)
         old_driver = session.driver
         previous = rpc(old_driver, {"type": "get_state"}) if native else None
         runtime = copy.deepcopy(resolved["runtime"])
@@ -146,7 +156,7 @@ def switch_model(service, session_id, payload):
                 for event in session.events:
                     if event.get("kind") == "assistant":
                         event.setdefault("modelName", session.meta.get("modelName", ""))
-                meta = service._build_meta(session_id, "pi", session.meta["workspaceId"], session.meta["title"], resolved["modelInfo"], runtime)
+                meta = service._build_meta(session_id, harness, session.meta["workspaceId"], session.meta["title"], resolved["modelInfo"], runtime)
                 session.meta.update({key: meta[key] for key in ("modelName", "providerName", "channel")})
                 session.meta.update(presetId=preset, runtimeRoot=str(next_root))
                 session.secrets.extend(str(v) for k, v in runtime.items() if "key" in k.lower() and isinstance(v, str) and v)
@@ -195,7 +205,7 @@ def prepare_runtime(service, session, resolved, old_root, target, effort):
     if history.is_file():
         shutil.copyfile(history, next_root / "conversation.jsonl")
         (next_root / "conversation.jsonl").chmod(0o600)
-    plan = service._launch_plan_builder("pi", resolved["modelInfo"], resolved["runtime"], session.meta["cwd"])
+    plan = service._launch_plan_builder(session.meta.get("harness") or "pi", resolved["modelInfo"], resolved["runtime"], session.meta["cwd"])
     sink = DeferredSink()
     driver = service._spawn_driver(plan, sink)
     try:

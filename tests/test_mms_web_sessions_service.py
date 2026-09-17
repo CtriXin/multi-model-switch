@@ -209,10 +209,12 @@ def test_launch_disabled_without_real_launch(tmp_path, seeded_seam):
     # has to be able to say what is missing.
     # sidecarCompletion is a build capability, not a launch one: an existing
     # session can still be asked a question after new launches are blocked.
-    assert service.capabilities() == {"launch": False,
-                                      "launchReason": "没有选定 MMS 配置根，无法启动会话。",
-                                      "sideQuestions": True,
-                                      "sidecarCompletion": True}
+    caps = service.capabilities()
+    assert caps["launch"] is False
+    assert caps["launchReason"] == "没有选定 MMS 配置根，无法启动会话。"
+    assert caps["sideQuestions"] is True
+    assert caps["sidecarCompletion"] is True
+    assert "richHarnesses" in caps
     with pytest.raises(WebError) as err:
         launch_ok(service)
     assert err.value.status == 409

@@ -1007,7 +1007,15 @@ export function App() {
   function presetForModel(modelName: string) {
     const wanted = modelName.trim().toLowerCase();
     if (!wanted) return presetId;
+    const currentHarness = data.presets.find((p) => p.id === presetId)?.harness || "pi";
     const match = data.presets.find(
+      (p) =>
+        p.available &&
+        p.harness === currentHarness &&
+        (p.name.toLowerCase() === wanted ||
+          p.modelId.toLowerCase().endsWith(":" + wanted) ||
+          p.modelId.toLowerCase() === wanted),
+    ) || data.presets.find(
       (p) =>
         p.available &&
         p.harness === "pi" &&

@@ -20,6 +20,7 @@ class LaunchPlan:
     cwd: str
     harness: str
     session_home: str | None = None
+    resume_session_id: str | None = None
     notes: list[str] = field(default_factory=list)
 
 
@@ -144,6 +145,46 @@ def _windows_shell_tool_args() -> list[str]:
     return ["--tools", ",".join(tools)]
 
 
+def grok_runtime() -> str:
+    return shutil.which("grok") or ""
+
+
+def probe_mms_grok_seam() -> dict:
+    executable = grok_runtime()
+    if not executable:
+        reason = "找不到 Grok Build：PATH 上没有 grok。安装 Grok CLI 后重启 Pilot。"
+    elif not _WORKER.is_file():
+        reason = "这份安装缺少会话执行组件，请重新运行安装脚本。"
+    else:
+        reason = ""
+    return {
+        "available": not reason,
+        "driver": "grok-acp",
+        "launcher": "mms_launchers.launch_cli",
+        "reason": reason,
+    }
+
+
+def probe_mms_web_seam() -> dict:
+    pi = probe_mms_pi_seam()
+    grok = probe_mms_grok_seam()
+    available = bool(pi.get("available") or grok.get("available"))
+    if pi.get("available"):
+        reason = ""
+    elif grok.get("available"):
+        reason = ""
+    else:
+        reason = "；".join(item["reason"] for item in (pi, grok) if item.get("reason"))
+    return {
+        "available": available,
+        "driver": "pi-rpc" if pi.get("available") else "grok-acp",
+        "launcher": "mms_launchers.launch_cli",
+        "reason": reason,
+        "pi": pi,
+        "grok": grok,
+    }
+
+
 def probe_mms_pi_seam() -> dict:
     """Whether this machine can run a Pi session, and what is missing if not.
 
@@ -191,6 +232,7 @@ def build_pi_launch_plan(model_info, runtime, cwd, *, config_root=None, extra_ar
     payload = root / ("launch-" + uuid.uuid4().hex + ".json")
     tool_args = _windows_shell_tool_args()
     private_json(payload, {
+        "cli": "pi",
         "modelInfo": model_info,
         "runtime": {k: v for k, v in runtime.items() if not k.startswith("_web")},
         "extraArgs": ["--mode", "rpc", "--session", str(root / "conversation.jsonl"), *tool_args, *(extra_args or [])],
@@ -199,9 +241,45 @@ def build_pi_launch_plan(model_info, runtime, cwd, *, config_root=None, extra_ar
                      notes=["original MMS launcher in a dedicated worker process"])
 
 
+def build_grok_launch_plan(model_info, runtime, cwd, *, resume_session_id=None, extra_args=None):
+    if not isinstance(runtime, dict) or runtime.get("auth_mode", "api_key") != "api_key":
+        raise LaunchSeamUnavailable("仅支持所选模型服务的 API Key 通道")
+    root = runtime.get("_webConfigRoot")
+    if not root:
+        raise LaunchSeamUnavailable("缺少独立 MMS 运行目录")
+    root = require_private_root(Path(root))
+    has_registry = (root / "generated" / "model-registry.latest-approved.json").is_file()
+    if not has_registry and not (root / "config.toml").is_file():
+        raise LaunchSeamUnavailable("独立 MMS 运行配置或已批准模型目录不存在")
+    if not grok_runtime():
+        raise LaunchSeamUnavailable("需要安装 Grok Build（grok）")
+    env = os.environ.copy()
+    env.update(MMS_CONFIG_ROOT=str(root), MMS_REAL_HOME=str(real_home()), MMS_WEB_WORKER="1")
+    env["PYTHONUNBUFFERED"] = "1"
+    payload = root / ("launch-" + uuid.uuid4().hex + ".json")
+    private_json(payload, {
+        "cli": "grok",
+        "modelInfo": model_info,
+        "runtime": {k: v for k, v in runtime.items() if not k.startswith("_web")},
+        "extraArgs": ["agent", "--no-leader", "stdio", *(extra_args or [])],
+    })
+    return LaunchPlan(
+        [sys.executable, str(_WORKER), str(payload)],
+        env,
+        str(cwd),
+        "grok",
+        resume_session_id=str(resume_session_id or "") or None,
+        notes=["original MMS grok launcher in a dedicated worker process"],
+    )
+
+
 def mms_pi_launch_plan_builder(config_root=None):
     def build(harness, model_info, runtime, cwd):
-        return build_pi_launch_plan(model_info, runtime, cwd) if harness == "pi" else None
+        if harness == "pi":
+            return build_pi_launch_plan(model_info, runtime, cwd)
+        if harness == "grok":
+            return build_grok_launch_plan(model_info, runtime, cwd)
+        return None
     return build
 
 

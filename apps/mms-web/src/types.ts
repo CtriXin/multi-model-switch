@@ -1,6 +1,6 @@
 import type { SideQuestion } from "./side-questions";
 
-export type Harness = "pi" | "codex" | "claude" | "opencode" | "gemini" | "agy";
+export type Harness = "pi" | "codex" | "claude" | "opencode" | "gemini" | "agy" | "grok";
 /** How a message reaches the session. `direct` starts a turn, `followUp` waits
  *  for the current one to settle, `steer` lands in it. See message-control.ts
  *  for the service contract behind these. */

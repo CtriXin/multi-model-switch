@@ -26,7 +26,19 @@ export function channelLabel(
 export function availableRoutesForModel(presets: Preset[], preset: Preset | undefined) {
   if (!preset) return [];
   const key = modelKey(preset);
-  return presets.filter((item) => modelKey(item) === key && item.available);
+  return presets.filter((item) => modelKey(item) === key && item.available && item.harness === preset.harness);
+}
+
+export function availableHarnesses(presets: Preset[], preset: Preset | undefined) {
+  if (!preset) return [];
+  const key = modelKey(preset);
+  return [...new Set(presets.filter((item) => modelKey(item) === key && item.available).map((item) => item.harness))];
+}
+
+export function siblingHarnessPreset(presets: Preset[], preset: Preset | undefined, harness: string) {
+  if (!preset) return undefined;
+  return presets.find((item) => item.available && item.harness === harness && item.modelId === preset.modelId && item.providerId === preset.providerId)
+    || presets.find((item) => item.available && item.harness === harness && modelKey(item) === modelKey(preset));
 }
 
 /** Keep the explorer's existing preference order; reselecting a model keeps its current route. */

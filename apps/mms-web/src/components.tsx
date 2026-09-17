@@ -29,6 +29,7 @@ import type {
 
 export const harnessNames: Record<string, string> = {
   pi: "Pi",
+  grok: "Grok",
   codex: "Codex",
   claude: "Claude Code",
   opencode: "OpenCode",
