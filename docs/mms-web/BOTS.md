@@ -287,7 +287,7 @@ schedule: {
 
 ### 模型来源优先级（高 → 低）
 
-1. `task["presetIdOverride"]` —— 计划为这一步明确指定的模型，最高。
+1. `task["presetIdOverride"]` —— 计划为这一步明确指定的模型，最高（跑在它自己的一次性会话里，见 v2.8）。
 2. `bot["pendingPresetId"]` —— 对话里刚换的，下一轮生效。
 3. `bot["presetId"]` —— Bot 的默认模型。
 
@@ -303,4 +303,14 @@ schedule: {
 ### 前端
 
 - 对话输入框的既有捷径（`parseBotSettingCommand` 拦住“把模型改成 X”）改写为同样的语义：写 `pendingPresetId`、复用 `bot-model-switch.ts` 的同一套匹配，匹配不到时列出可用模型而不是只说“说得更具体一点”；命中当前模型时不发 patch。两条入口同一语义，不留并行路径。
+
+## v2.8 计划步骤指定的模型真的生效（2026-09-17，T5d）
+
+计划里的一个 step 可以带 `presetId`，落成子任务的 `presetIdOverride`。这个覆盖此前对任何跑过一次任务的 Bot 都静默失效：`_launch` 只换 `bot["presetId"]`、不重置 `sessionId`，而 `PiBotExecutor.start()` 只在新建会话时才用算好的 preset —— 于是那一步用 Bot 的旧模型跑完，`task.model` 显示的还是旧模型名，界面上没有任何线索。修法分两层：
+
+- **运行时决定归属（`bots.py` 的 `_launch`）。** 带 `presetIdOverride` 的任务用**它自己的一次性会话**：传给 executor 的 bot 副本 `sessionId` 强制为 None，launch 成功后只把结果写进 `task["sessionId"]`（`task["ephemeralSession"] = True`），**不回写 `bot["sessionId"]`**。理由：会话历史是在某个模型上长出来的，不同模型本就不该共享会话（与 `update_bot` 换 preset 时清 `sessionId`、T5c 消费 `pendingPresetId` 时重置会话同一语义）；Bot 的主对话是用户和它的连续主线，不该被计划的子步骤切碎、占用或换掉。代价是这一步拿不到主会话的历史，但它本来就有自己的 `prompt` / `memoryContext` / `mailboxContext` / `resumeText`，而且被指定了另一个模型，说明计划作者就是把它当成一件独立的活。override 值与 Bot 当前 preset 不同时，任务里会多一条 system 消息“本轮由计划指定使用模型 X。”。
+- **执行器不许静默丢 preset（`bot_executor.py` 的 `start()`）。** 复用会话前，先读该会话自己的 `presetId`（`sessions.get_session(id)["session"]["presetId"]`，会话 meta 在 launch 时写入，`model_switch` 切会话模型时同步更新）并与 `selected["presetId"]` 比对：不一致（或会话没记录 preset）就**不用这个会话，按选中 preset 新起一个**，并在返回值里带 `reusedSession: false`。真值来源选会话而不是“在 Bot 上再记一个当前会话的 preset”，是因为会话才是实际跑模型的那个东西，Bot 侧再记一份就是第二个真相源（这个 bug 本身就是两份记录对不上产生的）。这条是兜底：将来任何“临时换模型跑一个任务”的路径即使忘了自己解析会话，也不会再静默跑错模型。
+- **一次性会话跑完就收。** `tick()` 开头把已终态、带 `ephemeralSession` 的任务收集起来，在锁外调 `executor.release_session()`（沿用 planner 一次性会话同一套 stop + archive，见 `plan()`），所以它不会在 Pilot 的会话列表里变成孤儿；顺带能清掉“服务重启时被打断”的那条残留。Bot 主会话不受影响。
+- `_maybe_compact` 不变：它只在复用持久会话的分支里调，一次性会话没有历史可压。
+
 - `BotDefinition.modelName`（从未有值的声明）对齐为后端的 `model`，派发表单的 Bot 选项现在能显示当前模型。用户实际可见的“当前 X · 下一轮 Y”在 **Bot 对话页头部**（`Bot.tsx` 的 `bot-chat-model-line`）。BotStudio 的 `BotEditor` 里同样接了一行，但该编辑器目前在 UI 上没有打开入口（`setEditor` 全文件只有 `onClose` 一处调用），那几行是预留接线；`BotStudio.tsx` 里 `onUpdateBot` 白名单上的 `pendingPresetId` 是活的且必需——对话捷径的 patch 靠它才不被丢掉。
