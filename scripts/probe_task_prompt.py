@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Send the tunnel task to real models and report what each one's first turn did.
 
-The task in the remote-access settings row tells the agent to ask two
+The task in the remote-access settings panel tells the agent to ask two
 questions and stop. Whether a model actually does that is not something a
 string assertion can answer, so this asks them. It launches one session per
 model through a running Pilot, reads the first assistant turn, and reports
@@ -45,7 +45,12 @@ UPSTREAM = re.compile(r"^\s*(4\d\d|5\d\d)[\s:]")
 def rendered_task(port: int) -> str:
     """The exact text the button sends, read from the module the app uses."""
     body = TASK_MODULE.read_text(encoding="utf-8").replace("export function", "function")
-    body = body.replace("(port: number)", "(port)")
+    body = re.sub(
+        r"\(port: number, facts\?: \{[^}]*\}\)",
+        "(port, facts)",
+        body,
+        count=1,
+    )
     with tempfile.NamedTemporaryFile("w", suffix=".mjs", delete=False,
                                      encoding="utf-8") as handle:
         handle.write(body + f"\nprocess.stdout.write(tunnelTask({port}));\n")
