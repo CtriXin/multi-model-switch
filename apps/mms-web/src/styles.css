@@ -233,9 +233,16 @@ h3 {
   font-size: max(11px, 1.0714rem);
   font-weight: 600;
 }
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+}
 .app-shell {
   display: flex;
   height: 100dvh;
+  height: var(--vv-height, 100dvh);
   overflow: hidden;
 }
 .sidebar {
@@ -2676,6 +2683,20 @@ dialog:has(.dialog-body.sheet) .dialog-body.sheet > header {
   box-shadow: 0 5px 24px #0002;
   border-radius: 8px;
   width: 176px;
+}
+@media (max-width: 640px) {
+  .session-menu > div,
+  .rename-form {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    top: auto;
+    bottom: calc(12px + var(--keyboard-inset, 0px));
+    width: auto;
+    max-height: min(70dvh, var(--vv-height, 70dvh));
+    overflow: auto;
+    z-index: 30;
+  }
 }
 .session-menu > div > button {
   width: 100%;
