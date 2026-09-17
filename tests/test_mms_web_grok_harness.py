@@ -87,7 +87,7 @@ def test_grok_launch_send_stop(service):
     assert view["state"] in {"idle", "stopped"}
 
 
-def test_grok_plan_mode_does_not_call_pi_extension(service):
+def test_grok_plan_mode_starts_plan_agent(service):
     detail = service.launch(
         {
             "requestId": "grok-plan",
@@ -97,8 +97,33 @@ def test_grok_plan_mode_does_not_call_pi_extension(service):
             "planMode": True,
         }
     )
+    session_id = detail["session"]["id"]
+    assert service._sessions[session_id].meta.get("planning") is True
     notices = [e["text"] for e in detail["events"] if e["kind"] == "notice"]
-    assert any("只读规划" in text for text in notices)
+    assert any("规划模式" in text for text in notices)
+
+
+def test_grok_follow_up_queue_delivers_after_turn(service):
+    detail = service.launch(
+        {
+            "requestId": "grok-q1",
+            "workspaceId": "ws",
+            "presetId": "web:grok:prov:dummy",
+            "prompt": "slow first",
+        }
+    )
+    session_id = detail["session"]["id"]
+    service.send(session_id, {"requestId": "grok-q2", "text": "queued second"})
+    wait_for(
+        lambda: (
+            any("echo: slow first" in (e.get("text") or "") for e in service.get_session(session_id)["events"] if e["kind"] == "assistant")
+            and any("echo: queued second" in (e.get("text") or "") for e in service.get_session(session_id)["events"] if e["kind"] == "assistant")
+        ),
+        timeout=8.0,
+        message="queued follow-up",
+    )
+    queued = [e for e in service.get_session(session_id)["events"] if e["kind"] == "user" and e.get("status") == "queued"]
+    assert queued == []
 
 
 def test_grok_approval_confirm(service):

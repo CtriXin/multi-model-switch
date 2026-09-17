@@ -73,7 +73,6 @@ export function TaskSettings({
             <select
               aria-label="新任务工作模式"
               value={planning ? "plan" : "execute"}
-              disabled={preset?.harness === "grok"}
               onChange={(e) => setPlanning(e.target.value === "plan")}
             >
               <option value="execute">执行任务</option>
@@ -81,11 +80,10 @@ export function TaskSettings({
             </select>
           </label>
           <p className="popover-note">
-            {preset?.harness === "grok"
-              ? "当前 Pilot 默认用 Grok 开新会话，可在设置 → 使用里更换。Grok 首版没有 Web 只读规划开关。"
-              : planning
+            {planning
               ? "先分析与阅读资料，不修改工作文件。"
               : "可以读取、修改工作文件，并执行命令。"}
+            {preset?.harness === "grok" ? " 当前 Pilot 默认用 Grok 开新会话，可在设置 → 使用里更换。" : ""}
           </p>
           <button
             type="button"

@@ -116,6 +116,8 @@ class ChildRuntime:
         if method in {"session/new", "session/load", "session/resume"}:
             sid = SESSION_ID if method == "session/new" else str(params.get("sessionId") or SESSION_ID)
             self.loaded = method
+            meta = params.get("_meta") if isinstance(params.get("_meta"), dict) else {}
+            self.agent_profile = meta.get("agentProfile")
             if method in {"session/load", "session/resume"}:
                 _update("agent_message_chunk", content={"type": "text", "text": "REPLAY should not appear"})
             _result(req_id, {
@@ -169,6 +171,12 @@ class ChildRuntime:
             str(block.get("text") or "") for block in prompt
             if isinstance(block, dict) and block.get("type") == "text"
         )
+        if "slow" in text:
+            _update("agent_message_chunk", content={"type": "text", "text": "hold "})
+            time.sleep(0.55)
+            _text_turn("echo: " + text)
+            _result(req_id, {"stopReason": "end_turn"})
+            return None
         if "crash" in text:
             sys.exit(3)
         if "malformed" in text:

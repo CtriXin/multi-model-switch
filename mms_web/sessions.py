@@ -1179,6 +1179,8 @@ class SessionService(SessionActions, SessionSideQuestions):
             raise WebError("CAPABILITY_UNAVAILABLE", f"{'Grok' if harness == 'grok' else 'Pi'} 启动接缝不可用: {exc}", status=409)
         if plan is None:
             raise WebError("CAPABILITY_UNAVAILABLE", "无法为该组合构建启动计划", status=409)
+        if harness == "grok" and payload.get("planMode") is True:
+            plan.plan_mode = True
 
         title = str(payload.get("title") or "").strip()
         prompt = payload.get("prompt") or ("请查看附件。" if payload.get("attachments") else "")
@@ -1239,7 +1241,8 @@ class SessionService(SessionActions, SessionSideQuestions):
             self._check_images(live, images)
             if payload.get("planMode") is True:
                 if harness == "grok":
-                    live.append_event({"kind": "notice", "title": "规划", "text": "Grok 首版未接入 Web 只读规划开关，已按执行模式启动。"}, self._now)
+                    live.meta["planning"] = True
+                    live.append_event({"kind": "notice", "title": "规划", "text": "已按 Grok 规划模式启动：先出方案，不改工作文件。"}, self._now)
                 else:
                     self._require_plan_control(live)
                     self._rpc(live, {"type": "prompt", "message": "/mms-web-plan on"})
@@ -1311,6 +1314,7 @@ class SessionService(SessionActions, SessionSideQuestions):
                 name="grok",
                 cwd=plan.cwd,
                 resume_session_id=getattr(plan, "resume_session_id", None),
+                plan_mode=bool(getattr(plan, "plan_mode", False)),
             )
         return PiRpcDriver(process, sink, name=str(plan.harness))
 

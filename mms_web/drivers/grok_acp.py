@@ -49,6 +49,7 @@ class GrokAcpDriver:
         *,
         cwd: str = "",
         resume_session_id: str | None = None,
+        plan_mode: bool = False,
         response_timeout: float = 30.0,
         abort_timeout: float = 15.0,
         handshake_timeout: float = 20.0,
@@ -58,6 +59,7 @@ class GrokAcpDriver:
         self._sink = sink
         self._cwd = str(cwd or os.getcwd())
         self._resume_session_id = str(resume_session_id or "").strip() or None
+        self._plan_mode = bool(plan_mode)
         self._response_timeout = response_timeout
         self._abort_timeout = abort_timeout
         self._name = name
@@ -243,6 +245,7 @@ class GrokAcpDriver:
             "isCompacting": False,
             "pendingMessageCount": pending,
             "supportedThinkingLevels": [k for k in ("low", "medium", "high", "xhigh") if k in (model.get("thinkingLevelMap") or {})],
+            "planning": self._plan_mode,
         }
 
     def get_commands(self, *, timeout: float | None = None) -> list:
@@ -314,16 +317,17 @@ class GrokAcpDriver:
                     break
             self._replay = False
         if not isinstance(session, dict) or not session.get("sessionId"):
-            session = self._rpc(
-                "session/new",
-                {"cwd": self._cwd, "mcpServers": []},
-                timeout=timeout,
-            )
+            new_params: dict = {"cwd": self._cwd, "mcpServers": []}
+            if self._plan_mode:
+                new_params["_meta"] = {"agentProfile": "plan"}
+            session = self._rpc("session/new", new_params, timeout=timeout)
         if not isinstance(session, dict) or not session.get("sessionId"):
             raise DriverClosedError("grok ACP session/new failed")
         self._session_id = str(session["sessionId"])
         self._native_session_id = self._session_id
         self._apply_session_result(session)
+        if self._plan_mode:
+            self._upsert({"planning": True})
         self._sink.set_proto_state("idle")
 
     def _dispatch(self, ctype: str, command: dict, *, timeout: float | None) -> dict:
@@ -345,6 +349,13 @@ class GrokAcpDriver:
             return self.get_state()
         if ctype == "set_session_name":
             return {}
+        if ctype == "set_plan_mode":
+            enabled = bool(command.get("enabled"))
+            self._plan_mode = enabled
+            if enabled:
+                self._prompt("/plan", wait=False)
+            self._upsert({"planning": enabled})
+            return self.get_state()
         if ctype in {"set_auto_compaction", "set_auto_retry"}:
             return self.get_state()
         if ctype == "compact":
@@ -757,6 +768,7 @@ class GrokAcpDriver:
             next_text = self._steering.pop(0) if self._steering else (self._follow_up.pop(0) if self._follow_up else "")
         self._emit_queue()
         if next_text:
+            self._upsert({"consumedPrompt": next_text})
             threading.Thread(target=self._prompt, args=(next_text,), daemon=True, name="grok-queue-flush").start()
 
     def _handle_native_queue(self, params: dict) -> None:

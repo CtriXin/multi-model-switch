@@ -131,7 +131,10 @@ def switch_model(service, session_id, payload):
             # Persist before changing the live process. A disk failure must
             # leave the currently selected model untouched.
             try:
-                private_json(root / "resume.json", {"modelInfo": resolved["modelInfo"], "runtime": runtime, "cwd": saved["cwd"]})
+                resume_payload = {"modelInfo": resolved["modelInfo"], "runtime": runtime, "cwd": saved["cwd"]}
+                if saved.get("grokSessionId"):
+                    resume_payload["grokSessionId"] = saved["grokSessionId"]
+                private_json(root / "resume.json", resume_payload)
                 state = apply_native(driver, target, effort)
             except Exception as exc:
                 private_json(root / "resume.json", saved)

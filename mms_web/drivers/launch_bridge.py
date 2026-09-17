@@ -21,6 +21,7 @@ class LaunchPlan:
     harness: str
     session_home: str | None = None
     resume_session_id: str | None = None
+    plan_mode: bool = False
     notes: list[str] = field(default_factory=list)
 
 

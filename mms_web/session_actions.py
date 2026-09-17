@@ -122,7 +122,8 @@ class SessionActions:
         session = self._get(session_id)
         driver = session.driver
         capabilities = capability_snapshot()
-        return redact({"state": session.state, "alive": session.alive(), "pid": getattr(getattr(driver, "_proc", None), "pid", None), "exitCode": getattr(driver, "exit_code", None), "mode": "Pi RPC (--mode rpc)", "cwd": session.meta.get("cwd"), "stderr": str(getattr(driver, "_stderr_tail", ""))[-8000:], "notices": [e["text"] for e in session.events if e["kind"] == "notice"][-12:], "platform": capabilities.get("platform"), "browser": capabilities.get("browser", [])}, session.secrets)
+        mode = "Grok ACP (stdio)" if session.meta.get("harness") == "grok" else "Pi RPC (--mode rpc)"
+        return redact({"state": session.state, "alive": session.alive(), "pid": getattr(getattr(driver, "_proc", None), "pid", None), "exitCode": getattr(driver, "exit_code", None), "mode": mode, "cwd": session.meta.get("cwd"), "stderr": str(getattr(driver, "_stderr_tail", ""))[-8000:], "notices": [e["text"] for e in session.events if e["kind"] == "notice"][-12:], "platform": capabilities.get("platform"), "browser": capabilities.get("browser", [])}, session.secrets)
 
     def command_catalog(self, session_id):
         session = self._get(session_id)
@@ -133,6 +134,8 @@ class SessionActions:
                              for c in data.get("commands", []) if isinstance(c, dict) and not c.get("name", "").startswith("mms-web-")]}
 
     def _require_plan_control(self, session):
+        if session.meta.get("harness") == "grok":
+            return
         available = self._rpc(session, {"type": "get_commands"})
         if not any(c.get("name") == "mms-web-plan" for c in available.get("commands", [])):
             raise WebError("CAPABILITY_UNAVAILABLE", "当前进程未加载 Web 模式控制，重新启动会话后可用。", 409)
@@ -145,7 +148,10 @@ class SessionActions:
         if action == "plan":
             if not isinstance(value, bool):
                 raise WebError("INVALID_PARAMETER", "请选择规划或执行模式。", 400)
-            command = {"type": "prompt", "message": "/mms-web-plan " + ("on" if value else "off")}
+            if session.meta.get("harness") == "grok":
+                command = {"type": "set_plan_mode", "enabled": value}
+            else:
+                command = {"type": "prompt", "message": "/mms-web-plan " + ("on" if value else "off")}
         elif action == "thinking":
             if value not in {"off", "minimal", "low", "medium", "high", "xhigh", "max"}:
                 raise WebError("INVALID_PARAMETER", "请选择有效的 Thinking 等级。", 400)
@@ -174,6 +180,8 @@ class SessionActions:
                 if action == "clearQueue":
                     session.cancel_pending()
                 session.meta.setdefault("controlSettings", {})[action] = value
+                if action == "plan":
+                    session.meta["planning"] = bool(value)
                 session.runtime_checked = 0
                 session.append_event({"kind": "notice", "title": "设置", "text": {"plan": "工作模式已切换", "thinking": f"Thinking 已设置为 {value}", "autoCompaction": "自动压缩设置已更新", "autoRetry": "自动重试设置已更新", "compact": "上下文压缩完成", "clearQueue": "待发送队列已清空"}[action]}, self._now)
                 session.persist(self._state_dir)
