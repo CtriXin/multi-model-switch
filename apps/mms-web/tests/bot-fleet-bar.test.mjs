@@ -6,6 +6,7 @@ import {
   familyChipLabel,
   fleetPreviewLabel,
   normalizeFleetPolicy,
+  modelsForFamily,
 } from "../src/bot-fleet.ts";
 
 test("normalizeFleetPolicy defaults to two cheap families and keeps pinned families", () => {
@@ -25,6 +26,20 @@ test("normalizeFleetPolicy defaults to two cheap families and keeps pinned famil
     "Qwen",
     "Grok",
   ]);
+});
+
+test("unavailable remembered IDs stay visibly invalid instead of matching another model name", () => {
+  const presets = [{ id: "replacement", name: "old-id", harness: "pi", available: true, family: "Kimi" }];
+  const policy = normalizeFleetPolicy({ families: ["Kimi", "GPT"], models: { Kimi: "old-id" } });
+  assert.equal(familyChipLabel("Kimi", policy, presets), "Kimi（已失效）");
+  assert.equal(familyChipLabel("GPT", policy, presets), "GPT（已失效）");
+});
+
+test("same-name presets keep their distinct selectable IDs", () => {
+  const presets = ["provider-a", "provider-b"].map((id) => ({ id, name: "k3", harness: "pi", available: true, family: "Kimi" }));
+  assert.equal(modelsForFamily(presets, "Kimi").length, 2);
+  const policy = normalizeFleetPolicy({ models: { Kimi: "provider-b" } });
+  assert.equal(familyChipLabel("Kimi", policy, presets), "k3");
 });
 
 test("availableFleetFamilies skips unavailable and Other", () => {

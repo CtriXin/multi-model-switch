@@ -31,7 +31,9 @@ export function BotFleetBar({
   onChange: (next: BotFleetPolicy) => void;
 }) {
   const locked = Boolean(disabled || busy);
-  const allOn = families.length > 0 && policy.families.length === families.length;
+  const allOn = families.length > 0 && policy.families.length === families.length
+    && families.every((name) => policy.families.includes(name));
+  const visibleFamilies = [...new Set([...families, ...policy.families])];
 
   function patch(partial: Partial<BotFleetPolicy>) {
     if (locked) return;
@@ -125,9 +127,9 @@ export function BotFleetBar({
           </>
         )}
       </div>
-      {policy.enabled && families.length > 0 && (
+      {policy.enabled && visibleFamilies.length > 0 && (
         <div className="bot-fleet-row bot-fleet-families" role="group" aria-label="指定家族">
-          {families.map((name) => {
+          {visibleFamilies.map((name) => {
             const on = policy.families.includes(name);
             const options = modelsForFamily(presets, name);
             const label = familyChipLabel(name, policy, presets);

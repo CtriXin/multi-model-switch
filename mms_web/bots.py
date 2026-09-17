@@ -1835,6 +1835,7 @@ class BotRuntime(BotCommunications):
             # scheduler lock) and is bounded by the planner timeout; a
             # planning failure must never block the task itself.
             if not task.get("planResolved"):
+                fleet_review = False
                 try:
                     # Keep direct-first lightweight: a normal request should
                     # use the Bot's persistent session immediately. The
@@ -1861,7 +1862,9 @@ class BotRuntime(BotCommunications):
                                 self._persist()
                     else:
                         self.plan_task(task, bot)
-                except Exception:
+                except Exception as exc:
+                    if fleet_review:
+                        raise
                     with self._lock:
                         live = self._task(task["id"])
                         if not live.get("planResolved"):

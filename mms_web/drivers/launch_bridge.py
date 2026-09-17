@@ -21,6 +21,7 @@ class LaunchPlan:
     harness: str
     session_home: str | None = None
     notes: list[str] = field(default_factory=list)
+    read_only: bool = False
 
 
 def cached_pi() -> str:
@@ -189,14 +190,16 @@ def build_pi_launch_plan(model_info, runtime, cwd, *, config_root=None, extra_ar
     env.update(MMS_CONFIG_ROOT=str(root), MMS_REAL_HOME=str(real_home()), MMS_WEB_WORKER="1")
     env["PYTHONUNBUFFERED"] = "1"
     payload = root / ("launch-" + uuid.uuid4().hex + ".json")
-    tool_args = _windows_shell_tool_args()
+    tool_args = [] if runtime.get("_webReadOnly") is True else _windows_shell_tool_args()
     private_json(payload, {
         "modelInfo": model_info,
+        "readOnly": runtime.get("_webReadOnly") is True,
         "runtime": {k: v for k, v in runtime.items() if not k.startswith("_web")},
         "extraArgs": ["--mode", "rpc", "--session", str(root / "conversation.jsonl"), *tool_args, *(extra_args or [])],
     })
     return LaunchPlan([sys.executable, str(_WORKER), str(payload)], env, str(cwd), "pi",
-                     notes=["original MMS launcher in a dedicated worker process"])
+                     notes=["original MMS launcher in a dedicated worker process"],
+                     read_only=runtime.get("_webReadOnly") is True)
 
 
 def mms_pi_launch_plan_builder(config_root=None):

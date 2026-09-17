@@ -21,6 +21,12 @@ def main():
         import mms_launchers
         import mms_pi_support
         extra_args = list(payload["extraArgs"])
+        if payload.get("readOnly") is True:
+            # The launcher enforces the native read-only tool list and disables
+            # all extensions; do not inject /btw or interactive Web controls.
+            runtime = {**payload["runtime"], "_webReadOnly": True}
+            mms_launchers.launch_cli("pi", payload["modelInfo"], runtime, extra_args=extra_args)
+            return
         btw_extension = mms_pi_support.pi_btw_extension_path(
             None, payload["runtime"], os.getcwd(), log=mms_launchers.console.print
         )

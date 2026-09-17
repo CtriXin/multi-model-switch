@@ -1,3 +1,5 @@
+import pytest
+from mms_web.errors import WebError
 from mms_web.bot_coordinator import (make_plan, parse_model_plan, build_planner_prompt, direct_plan,
                                      looks_multi_goal, looks_fleet_review, fleet_presets, fleet_plan,
                                      is_split_plan, normalize_fleet_policy, parse_fleet_verdict,
@@ -163,8 +165,9 @@ def test_fleet_presets_defaults_to_two_cheap_families():
     intense = fleet_presets(presets, policy={"intensity": "intense", "maxFamilies": 2})
     intense_ids = {item["id"] for item in intense}
     assert "web:pi:kimi-k3" in intense_ids or "web:pi:opus" in intense_ids
-    pinned = fleet_presets(presets, policy={"families": ["DeepSeek", "Grok"], "maxFamilies": 2})
-    assert [item["family"] for item in pinned] == ["Grok"]
+    # A disappeared pinned family is not permission to silently narrow the panel.
+    with pytest.raises(WebError, match="DeepSeek"):
+        fleet_presets(presets, policy={"families": ["DeepSeek", "Grok"], "maxFamilies": 2})
     three = fleet_presets(presets, policy={"families": ["Kimi", "GLM", "Grok"], "maxFamilies": 3})
     assert [item["family"] for item in three] == ["Kimi", "GLM", "Grok"]
     remembered = fleet_presets(presets, policy={

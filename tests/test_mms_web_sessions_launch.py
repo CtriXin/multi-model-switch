@@ -123,6 +123,45 @@ def test_bot_owned_launch_is_kept_out_of_pilot_session_list(service):
     assert any(row["id"] == session_id for row in service.list_sessions())
 
 
+def test_read_only_bot_launch_requires_enforced_plan(service):
+    with pytest.raises(WebError, match="只读工具限制"):
+        service.launch_bot({"requestId": "unsafe-adapter", "workspaceId": "ws",
+                            "presetId": "preset", "prompt": "review"}, "owner", read_only=True)
+    assert service.list_sessions() == []
+
+
+def test_read_only_bot_flag_reaches_plan_and_cannot_replay_as_executor(service):
+    original = service._launch_plan_builder
+    received = []
+
+    def build(harness, model, runtime, cwd):
+        received.append(dict(runtime))
+        plan = original(harness, model, runtime, cwd)
+        # This controlled test child only echoes and never runs a model/tool.
+        plan.read_only = runtime.get("_webReadOnly") is True
+        return plan
+
+    service._launch_plan_builder = build
+    payload = {"requestId": "readonly-bot", "workspaceId": "ws", "presetId": "preset", "prompt": "review"}
+    detail = service.launch_bot(payload, "owner", read_only=True)
+    session_id = detail["session"]["id"]
+    assert detail["session"]["readOnly"] is True
+    assert received[-1]["_webReadOnly"] is True
+    with pytest.raises(WebError) as error:
+        service.launch_bot(payload, "owner")
+    assert error.value.code == "REQUEST_ID_CONFLICT"
+    wait_for(lambda: service.get_session(session_id)["session"]["state"] == "idle")
+    service.retire_bot_session(session_id)
+    assert service._sessions[session_id].driver._proc.poll() is not None
+    assert service.get_session(session_id)["session"]["archived"] is True
+
+
+def test_public_launch_cannot_claim_read_only_mode(service):
+    detail = service.launch({"requestId": "public-readonly", "workspaceId": "ws",
+                             "presetId": "preset", "prompt": "normal", "readOnly": True})
+    assert not detail["session"].get("readOnly")
+
+
 def test_full_chain_approval_confirm_flow(service):
     detail = service.launch(
         {

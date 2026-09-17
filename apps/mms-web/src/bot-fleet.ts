@@ -66,17 +66,13 @@ export function availableFleetFamilies(presets: Preset[]): string[] {
 }
 
 export function modelsForFamily(presets: Preset[], family: string): Preset[] {
-  const byName = new Map<string, Preset>();
+  const byId = new Map<string, Preset>();
   for (const preset of presets) {
     if (preset.harness !== "pi" || !preset.available) continue;
     if (familyFromPreset(preset) !== family) continue;
-    const key = String(preset.name || preset.modelName || preset.id);
-    const current = byName.get(key);
-    if (!current) {
-      byName.set(key, preset);
-    }
+    byId.set(preset.id, preset);
   }
-  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+  return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export function compactModelLabel(name: string): string {
@@ -93,12 +89,10 @@ export function familyChipLabel(
   presets: Preset[],
 ): string {
   const remembered = policy.models[family];
-  if (!remembered) return family;
+  if (!remembered) return availableFleetFamilies(presets).includes(family) ? family : `${family}（已失效）`;
   const options = modelsForFamily(presets, family);
-  const match =
-    options.find((item) => item.id === remembered) ||
-    options.find((item) => item.name === remembered);
-  return match ? compactModelLabel(match.name) : family;
+  const match = options.find((item) => item.id === remembered);
+  return match ? compactModelLabel(match.name) : `${family}（已失效）`;
 }
 
 export function fleetPreviewLabel(policy: BotFleetPolicy, families: string[], presets: Preset[] = []): string {

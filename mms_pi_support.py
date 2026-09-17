@@ -1979,17 +1979,18 @@ def launch_pi(model_info, runtime, once=False, extra_args=None):
     cmd = ["pi", "--provider", provider_ref]
     if model:
         cmd += ["--model", model]
-    glint_bridge = _glint_pi_bridge_path(env)
+    read_only = runtime.get("_webReadOnly") is True
+    glint_bridge = "" if read_only else _glint_pi_bridge_path(env)
     if glint_bridge:
         # MMS isolates PI_CODING_AGENT_DIR, so load the global Glint bridge explicitly.
         cmd += ["--extension", glint_bridge]
-    btw_extension = pi_btw_extension_path(env, runtime, os.getcwd(),
-                                          log=launchers.console.print)
+    btw_extension = "" if read_only else pi_btw_extension_path(env, runtime, os.getcwd(),
+                                                               log=launchers.console.print)
     if btw_extension:
         # MMS' own /btw: a side question that never touches the main task.
         cmd += ["--extension", btw_extension]
     skill_overlay = str(env.get("MMS_PI_SKILLS_OVERLAY") or "").strip()
-    if skill_overlay:
+    if skill_overlay and not read_only:
         cmd += ["--no-skills", "--skill", skill_overlay]
 
     thinking_mode = str(runtime.get("thinking_mode") or "").strip().lower()
@@ -2000,5 +2001,10 @@ def launch_pi(model_info, runtime, once=False, extra_args=None):
         cmd += ["--thinking", reasoning_effort]
 
     if extra_args:
+        if read_only and any(str(arg).split("=", 1)[0] in {"--extension", "-e", "--skill", "--tools", "--prompt-template", "--theme"} for arg in extra_args):
+            raise ValueError("只读听意见不允许额外工具或扩展")
         cmd += list(extra_args)
+    if read_only:
+        cmd += ["--no-context-files", "--no-extensions", "--no-skills",
+                "--no-prompt-templates", "--no-themes", "--tools", "read,grep,find,ls"]
     _exec_or_run(cmd, env, once)

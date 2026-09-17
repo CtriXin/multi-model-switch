@@ -16,6 +16,8 @@ import re
 from copy import deepcopy
 from datetime import datetime, timezone
 
+from .errors import WebError
+
 
 _COLLABORATION_HINTS = (
     "找", "派给", "分派", "协作", "并行", "让.*bot", "让.*同事", "请.*检查",
@@ -44,6 +46,7 @@ FLEET_FIRST_HINT = (
     "这次会再问 {n} 家。想只问我，把上面关掉就行。"
 )
 FLEET_WORKER_PROMPT = (
+    "你只负责阅读材料并提供意见，不执行用户任务，不改文件、不运行命令、不派发。\n"
     "只用下面三行，每行不超过 40 字，不要空行、不要 markdown、不要再分发：\n"
     "结论：\n"
     "不同意：\n"
@@ -240,7 +243,11 @@ def fleet_presets(presets: list[dict], owner_preset_id=None, policy=None) -> lis
         row = dict(preset)
         row["family"] = family
         grouped.setdefault(family, []).append(row)
-    pinned = [name for name in policy["families"] if name in grouped]
+    missing = [name for name in policy["families"] if name not in grouped]
+    if missing:
+        raise WebError("BOT_FLEET_SELECTION_UNAVAILABLE",
+                       "所选模型家族当前不可用：" + "、".join(missing) + "。请重新选择；本次没有换用其他模型。", 409)
+    pinned = list(policy["families"])
     if pinned:
         wanted = pinned[: policy["maxFamilies"]]
     else:
@@ -261,7 +268,8 @@ def fleet_presets(presets: list[dict], owner_preset_id=None, policy=None) -> lis
         chosen_id = str(remembered.get(family) or "")
         pick = next((item for item in candidates if item.get("id") == chosen_id), None)
         if pick is None and chosen_id:
-            pick = next((item for item in candidates if item.get("name") == chosen_id), None)
+            raise WebError("BOT_FLEET_SELECTION_UNAVAILABLE",
+                           f"{family} 中指定的型号当前不可用。请重新选择；本次没有换用其他型号。", 409)
         if pick is None:
             pick = _pick_in_family(candidates, policy["intensity"])
         rows.append(pick)
@@ -275,6 +283,9 @@ def fleet_plan(owner: dict, presets: list[dict], prompt: str, policy=None) -> di
         return direct_plan(owner, FLEET_DISABLED_REASON, "fleet-disabled")
     rows = fleet_presets(presets, owner.get("presetId"), policy)
     if len(rows) < 2:
+        if policy["families"] or policy["models"]:
+            raise WebError("BOT_FLEET_SELECTION_UNAVAILABLE",
+                           "多方听意见需要至少两家可用模型。请补选一家，或关闭开关只问当前 Bot。", 409)
         return direct_plan(owner, UNDERFILLED_REASON, "fleet-underfilled")
     goal = str(prompt or "").strip()[:8000]
     steps = []

@@ -25,7 +25,7 @@ function parsePackedTake(text: string): { conclusion: string; dissent: string; r
 }
 
 function takeFromStep(step: BotPlanStep): { conclusion: string; dissent: string; risk: string; summary: string } {
-  const raw = step.result || {};
+  const raw: NonNullable<BotPlanStep["result"]> = step.result || { summary: "" };
   const blob = String(raw.conclusion || raw.summary || "");
   const packed = /不同意\s*[:：]|风险\s*[:：]/.test(blob);
   if (packed && !raw.dissent) {

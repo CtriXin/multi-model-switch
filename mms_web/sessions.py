@@ -263,6 +263,8 @@ class _LiveSession:
             view["piSessionId"] = self.meta["piSessionId"]
         if self.meta.get("botId"):
             view["botId"] = self.meta["botId"]
+        if self.meta.get("readOnly") is True:
+            view["readOnly"] = True
         return view
 
     def detail_view(self) -> dict:
@@ -542,7 +544,7 @@ class SessionService(SessionActions, SessionSideQuestions):
                     entry["sessionId"] = live.meta["id"]
         return detail
 
-    def launch_bot(self, payload: dict, bot_id: str) -> dict:
+    def launch_bot(self, payload: dict, bot_id: str, *, read_only: bool = False) -> dict:
         """Launch a Bot-owned Pi session without exposing it as a Pilot chat.
 
         Bot transcripts still use the same Pi/session machinery so the Bot can
@@ -551,9 +553,9 @@ class SessionService(SessionActions, SessionSideQuestions):
         """
         if not isinstance(bot_id, str) or not bot_id.strip():
             raise WebError("INVALID_REQUEST", "bot_id 必须是非空文本。", status=400)
-        return self._launch_owned(payload, owner="bot", bot_id=bot_id.strip())
+        return self._launch_owned(payload, owner="bot", bot_id=bot_id.strip(), read_only=read_only)
 
-    def _launch_owned(self, payload: dict, *, owner: str, bot_id: str | None = None) -> dict:
+    def _launch_owned(self, payload: dict, *, owner: str, bot_id: str | None = None, read_only: bool = False) -> dict:
         """Internal launch path used by non-Pilot owners."""
         self._require_open()
         payload = self._object_payload(payload)
@@ -567,11 +569,13 @@ class SessionService(SessionActions, SessionSideQuestions):
             "owner": owner,
             "botId": bot_id,
         }
+        if read_only:
+            op_payload["readOnly"] = True
         with self._request_scope(request_id, op_payload) as replay:
             if replay is not None:
                 with replay.lock:
                     return replay.detail_view()
-            detail, live = self._do_launch(payload, request_id, op_payload, owner=owner, bot_id=bot_id)
+            detail, live = self._do_launch(payload, request_id, op_payload, owner=owner, bot_id=bot_id, read_only=read_only)
             with self._lock:
                 entry = self._requests.get(request_id)
                 if entry is not None:
@@ -1155,7 +1159,7 @@ class SessionService(SessionActions, SessionSideQuestions):
     # -- internals: launch ----------------------------------------------
 
     def _do_launch(self, payload: dict, request_id: str, op_payload: dict, *,
-                   owner: str = "web", bot_id: str | None = None) -> tuple[dict, _LiveSession]:
+                   owner: str = "web", bot_id: str | None = None, read_only: bool = False) -> tuple[dict, _LiveSession]:
         if not self.capabilities()["launch"]:
             raise WebError("CAPABILITY_UNAVAILABLE", "当前环境未启用真实 Pi 会话启动", status=409)
         if payload.get("thinkingLevel") is not None and payload["thinkingLevel"] not in ("off", "minimal", "low", "medium", "high", "xhigh", "max"):
@@ -1193,12 +1197,21 @@ class SessionService(SessionActions, SessionSideQuestions):
         if effort and options and effort not in options.get("supportedThinkingLevels", []):
             raise WebError("EFFORT_UNSUPPORTED", "这条通道不支持所选 effort，请重新选择。", 409)
 
+        # Only the internal Bot seam can request this; HTTP payloads cannot.
+        runtime = {**runtime}
+        runtime.pop("_webReadOnly", None)
+        if read_only:
+            if owner != "bot":
+                raise WebError("INVALID_REQUEST", "只读审阅仅用于 Bot 内部任务。", 400)
+            runtime["_webReadOnly"] = True
         try:
             plan = self._launch_plan_builder(harness, model_info, runtime, cwd)
         except (LaunchSeamUnavailable, DriverClosedError) as exc:
             raise WebError("CAPABILITY_UNAVAILABLE", f"Pi 启动接缝不可用: {exc}", status=409)
         if plan is None:
             raise WebError("CAPABILITY_UNAVAILABLE", "无法为该组合构建启动计划", status=409)
+        if read_only and not getattr(plan, "read_only", False):
+            raise WebError("BOT_REVIEW_UNAVAILABLE", "启动器未确认只读工具限制，已停止本次听意见。", 409)
 
         title = str(payload.get("title") or "").strip()
         prompt = payload.get("prompt") or ("请查看附件。" if payload.get("attachments") else "")
@@ -1218,6 +1231,8 @@ class SessionService(SessionActions, SessionSideQuestions):
         meta = self._build_meta(session_id, harness, workspace_id, title, model_info, runtime,
                                 owner=owner, bot_id=bot_id)
         meta.update(cwd=cwd, presetId=preset_id)
+        if read_only:
+            meta["readOnly"] = True
         if runtime.get("_webConfigRoot"):
             meta["runtimeRoot"] = runtime["_webConfigRoot"]
             from .runtime import private_json
