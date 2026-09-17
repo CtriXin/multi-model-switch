@@ -1,3 +1,4 @@
+import pytest
 """Offline checks: scheduling, failure isolation, concurrency and API security."""
 import json
 import threading
@@ -253,3 +254,31 @@ def test_update_channel_rejects_non_string_and_recovers_corrupt_settings(tmp_pat
         private_json(s.root / "settings.json", {"channel": value})
         assert s.channel() == "stable"
         assert s.status()["channel"] == "stable"
+
+
+def test_release_payload_retains_the_real_prerelease_flag():
+    from mms_web.updates import _release_payload
+    assert _release_payload({'tag_name': 'v5.1.0', 'prerelease': True})['prerelease'] is True
+    assert _release_payload({'tag_name': 'v4.23.0', 'prerelease': False})['prerelease'] is False
+
+
+@pytest.mark.parametrize('payload,accepted', [
+    ({'tag_name': 'v5.1.0', 'draft': False, 'prerelease': True}, True),
+    ({'tag_name': 'v5.1.0', 'draft': False, 'prerelease': False}, True),
+    ({'tag_name': 'v5.1.1', 'draft': False, 'prerelease': True}, False),
+    ({'tag_name': 'v5.1.0', 'draft': True, 'prerelease': True}, False),
+    ({'tag_name': 'v5.1.0', 'draft': False}, False),
+])
+def test_exact_installed_release_lookup_is_bounded_and_validated(monkeypatch, payload, accepted):
+    import io, json
+    from mms_web import updates
+    class Opener:
+        def open(self, request, timeout):
+            assert request.full_url.endswith('/releases/tags/v5.1.0') and timeout == 5
+            return io.BytesIO(json.dumps(payload).encode())
+    monkeypatch.setattr(updates.urllib.request, 'build_opener', lambda *args: Opener())
+    if accepted:
+        assert updates.fetch_tag_release('v5.1.0')['prerelease'] is payload['prerelease']
+    else:
+        with pytest.raises(ValueError):
+            updates.fetch_tag_release('v5.1.0')

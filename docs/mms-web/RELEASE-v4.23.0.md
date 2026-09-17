@@ -5,8 +5,11 @@
 - 工作目录在 Pilot 内逐层浏览和选择，支持键盘展开、收起，重复按右方向键保持展开；窄屏可用。
 - OpenRouter 目录差异检查使用所有已知模型的最新参考值，空的新快照不再让旧参考失效，保留变更来源。
 - committee 传递已选模型的明确 protocol，保持 Anthropic Messages / OpenAI Responses 路由边界。
+- 应用内更新成功后写回安装版本和真实发布通道，保留语言偏好；写入失败显示警告。文件替换失败时恢复旧文件。
 - 更新通道收到错误 JSON 类型时返回可处理的请求错误。
 - 首次 OpenCode bootstrap、批准 bundle 校验和 config export 增加隔离回归；缺失或损坏的 bundle 继续 fail closed。
+
+## 升级须知
 
 升级保持原有 config root、账号和历史记录。仍是 4.x stable 线；5.x Bot 工作台通过 Preview 通道获取。
 

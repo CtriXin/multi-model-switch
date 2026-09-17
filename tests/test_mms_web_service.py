@@ -191,3 +191,22 @@ def test_doctor_checks_bootstrap_sessions_and_detail_without_network(home, monke
     assert service.doctor(state_root=home / "state", port_base=9876, limit=1) == 0
     assert calls == ["/api/v1/bootstrap", "/api/v1/sessions", "/api/v1/sessions/session%2F1"]
     assert "MMS doctor：PASS" in capsys.readouterr().out
+
+
+def test_fingerprint_discovery_never_reads_a_different_default_roots_token(monkeypatch, tmp_path):
+    from mms_web import service
+    state, default = tmp_path / "selected", tmp_path / "default"
+    default.mkdir()
+    (default / "remote-access.json").write_text('{"mode":"lan"}')
+    (default / "remote-access-token").write_text('foreign-fixture-token')
+    monkeypatch.setattr(service, 'default_state_root', lambda: default)
+    monkeypatch.setattr(service, '_probe', lambda port: {
+        'identity': 'fixture', 'version': '9.9.9', 'stateIdentity': service.state_identity(state)})
+    monkeypatch.setattr(service, '_listening_pids', lambda port: [])
+    found = service.discover(8765, 1, state)[0]
+    assert found['mine'] is True and found['stateRoot'] == str(state.resolve())
+    assert found['url'] == 'http://127.0.0.1:8765'
+    state.mkdir()
+    (state / "remote-access.json").write_text('{"mode":"lan"}')
+    (state / "remote-access-token").write_text('selected-fixture-token')
+    assert service.discover(8765, 1, state)[0]['url'] == 'http://127.0.0.1:8765/?k=selected-fixture-token'

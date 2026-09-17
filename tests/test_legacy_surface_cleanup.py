@@ -1021,6 +1021,7 @@ def test_mms_help_keeps_review_launch_outside_legacy_bucket(monkeypatch, capsys)
 
 
 def test_mms_chat_discuss_direct_commands_are_disabled_by_default(monkeypatch, capsys) -> None:
+    monkeypatch.delenv("MMS_COMMAND_NAME", raising=False)
     import mms_core
 
     monkeypatch.delenv("MMS_ENABLE_LEGACY_CHAT_DISCUSS", raising=False)

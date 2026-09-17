@@ -855,6 +855,12 @@ def _release_track_for_channel(version_meta, git_branch=""):
             "release_track_version": "4.0.0-dev",
             "release_track_label": "4.0 Dev Preview",
         }
+    published_preview = re.fullmatch(r"v?(\d+\.\d+\.\d+)", installed_ref)
+    if install_channel == "preview" and published_preview:
+        version = published_preview.group(1)
+        series = version.split(".", 1)[0] + ".x"
+        return {"release_track": "dev", "release_track_series": series,
+                "release_track_version": version, "release_track_label": series + " Preview"}
     published_v4 = re.fullmatch(r"v?(4\.\d+\.\d+)", installed_ref)
     if published_v4:
         return {

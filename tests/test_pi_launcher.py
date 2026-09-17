@@ -1557,6 +1557,7 @@ def test_pi_rejects_selected_image_generation_only_model(monkeypatch):
 
 
 def test_pi_reopens_deprecated_antigravity_gemini_alias_when_replacement_available(monkeypatch, tmp_path):
+    monkeypatch.delenv("MMS_PI_SKILLS_OVERLAY", raising=False)
     import mms_launchers
 
     real_home = tmp_path / "real-home"
