@@ -3775,6 +3775,7 @@ dialog:has(> .dialog-body .model-explorer) > .dialog-body > header {
   background: var(--danger-bg);
 }
 .current-activity.idle,
+.current-activity.pending,
 .current-activity.stopped,
 .current-activity.completed {
   background: transparent;

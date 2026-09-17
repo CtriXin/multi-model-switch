@@ -37,6 +37,29 @@ export function resultToken(detail: SessionDetail): string {
   return `${output.nativeTimestamp || output.id}:${hash >>> 0}`;
 }
 
+const BOTTOM_SLACK = 100;
+
+export function conversationAtBottom(
+  el: { scrollHeight: number; scrollTop: number; clientHeight: number },
+  slack = BOTTOM_SLACK,
+): boolean {
+  return el.scrollHeight - el.scrollTop - el.clientHeight < slack;
+}
+
+export function shouldMarkResultRead(input: {
+  hasOutputToken: boolean;
+  viewingBottom: boolean;
+  visible: boolean;
+  connected: boolean;
+}): boolean {
+  return Boolean(
+    input.hasOutputToken &&
+      input.viewingBottom &&
+      input.visible &&
+      input.connected,
+  );
+}
+
 export function useSessionAttention(
   sessions: Session[],
   detail: SessionDetail | null,
@@ -158,9 +181,19 @@ export function useSessionAttention(
   }, [signature, connected, retry]);
   const token = detail ? resultToken(detail) : "";
   useEffect(() => {
-    if (!detail || !token || !viewingBottom || !visible || !connected) return;
+    if (
+      !detail ||
+      !shouldMarkResultRead({
+        hasOutputToken: Boolean(token),
+        viewingBottom,
+        visible,
+        connected,
+      })
+    )
+      return;
     const id = detail.session.id;
-    // A selected row is not a read receipt. Wait until its actual output is rendered.
+    // Opening the session is not a read receipt. The latest output must be
+    // on screen — scroll at the bottom — before the row goes quiet.
     const frame = requestAnimationFrame(() => {
       receipts.current[id] = token;
       save();

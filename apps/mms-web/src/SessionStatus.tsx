@@ -1,6 +1,7 @@
 import type { Session, SessionEvent } from "./types";
 import {
   Check,
+  Circle,
   CircleAlert,
   Pause,
   CircleHelp,
@@ -9,7 +10,11 @@ import {
   Wrench,
 } from "lucide-react";
 
-export function sessionStatus(session: Session, disconnected = false) {
+export function sessionStatus(
+  session: Session,
+  disconnected = false,
+  unread = false,
+) {
   const terminal = ["completed", "stopped", "error"].includes(session.state);
   const phase = disconnected
     ? "disconnected"
@@ -20,9 +25,14 @@ export function sessionStatus(session: Session, disconnected = false) {
       : session.state === "waiting"
         ? "waiting"
         : session.activity?.phase ||
-          (session.state === "idle" ? "completed" : session.state);
+          (session.state === "idle"
+            ? unread
+              ? "completed"
+              : "pending"
+            : session.state);
   const labels: Record<string, string> = {
     idle: "准备就绪",
+    pending: "待命",
     running: "执行中",
     thinking: "思考中",
     responding: "正在输出",
@@ -30,7 +40,7 @@ export function sessionStatus(session: Session, disconnected = false) {
     waiting: session.activity?.method === "confirm" ? "等待确认" : "等待你回答",
     compacting: "压缩上下文",
     retrying: "正在重试",
-    completed: "本轮已完成",
+    completed: "已完成",
     closed: "进程已结束",
     stopped: "已停止",
     error: "执行出错",
@@ -105,16 +115,19 @@ export function Status({
   session,
   compact = false,
   disconnected = false,
+  unread = false,
 }: {
   session: Session;
   compact?: boolean;
   disconnected?: boolean;
+  unread?: boolean;
 }) {
-  const { phase, detail } = sessionStatus(session, disconnected);
+  const { phase, detail } = sessionStatus(session, disconnected, unread);
   const Icon =
     (
       {
         completed: Check,
+        pending: Circle,
         closed: Pause,
         stopped: Pause,
         error: CircleAlert,
@@ -148,6 +161,7 @@ export function Status({
 
 export const activityHints: Record<string, string> = {
   idle: "就绪 · 随时发送消息",
+  pending: "就绪 · 随时发送消息",
   running: "正在规划与执行…",
   thinking: "正在思考…",
   responding: "正在输出回复…",
@@ -162,9 +176,13 @@ export const activityHints: Record<string, string> = {
   disconnected: "连接恢复后更新；保留最近内容",
 };
 
-export function turnWorkingHint(session: Session, disconnected = false): string {
+export function turnWorkingHint(
+  session: Session,
+  disconnected = false,
+  unread = false,
+): string {
   if (disconnected) return "状态未同步，等待重新连接…";
-  const { phase } = sessionStatus(session, disconnected);
+  const { phase } = sessionStatus(session, disconnected, unread);
   if (phase === "tool" && session.activity?.toolName) {
     return `正在执行工具 · ${session.activity.toolName}`;
   }
@@ -177,11 +195,13 @@ export function turnWorkingHint(session: Session, disconnected = false): string 
 export function CurrentActivity({
   session,
   disconnected,
+  unread = false,
 }: {
   session: Session;
   disconnected: boolean;
+  unread?: boolean;
 }) {
-  const { phase } = sessionStatus(session, disconnected);
+  const { phase } = sessionStatus(session, disconnected, unread);
   const closedHint = session.capabilities.send
     ? "发送消息可继续本次对话"
     : "仍可查看历史记录";
@@ -197,11 +217,10 @@ export function CurrentActivity({
       aria-live="polite"
       aria-atomic="true"
     >
-      <Status session={session} disconnected={disconnected} />
+      <Status session={session} disconnected={disconnected} unread={unread} />
       {route && <span className="activity-route">{route}</span>}
-      {!["completed", "stopped", "waiting"].includes(phase) && hintText && (
-        <span className="activity-hint">{hintText}</span>
-      )}
+      {!["completed", "pending", "stopped", "waiting"].includes(phase) &&
+        hintText && <span className="activity-hint">{hintText}</span>}
     </div>
   );
 }
