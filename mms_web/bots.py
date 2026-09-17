@@ -1622,13 +1622,22 @@ class BotRuntime(BotCommunications):
                     fired, reason = None, "创建任务失败"
                 if fired:
                     self._tasks[fired["id"]]["scheduleId"] = updated["id"]
-                    if schedule["rule"]["kind"] == "once" and (schedule.get("lastSkip") or {}).get("reason") in {"paused", "busy"}:
-                        self._message(fired["id"], "system", f"这条定时原定 {format_local(due_at, updated['timezone'])} 触发，因暂停或上一轮未结束而延后，现在补触发。")
+                    skip_reason = (schedule.get("lastSkip") or {}).get("reason")
+                    if schedule["rule"]["kind"] == "once" and skip_reason in {"paused", "busy", "error"}:
+                        when = format_local(due_at, updated["timezone"])
+                        if skip_reason == "error":
+                            note = f"这条定时原定 {when} 触发，当时没能建出任务，现在补触发。"
+                        else:
+                            note = f"这条定时原定 {when} 触发，因暂停或上一轮未结束而延后，现在补触发。"
+                        self._message(fired["id"], "system", note)
                     updated.update(lastRunAt=now(), lastTaskId=fired["id"], lastSkip=None,
                                    recentTaskIds=(updated.get("recentTaskIds") or [])[-(RECENT_TASK_LIMIT - 1):] + [fired["id"]])
                 elif reason and schedule["rule"]["kind"] == "once" and updated.get("nextRunAt") is None:
                     # create_task failed before anything ran: give the one-shot
                     # its only chance back instead of consuming it.
+                    # reason="error" is only valid here because advance() never
+                    # skips a once (skipped is always 0 for kind once). If that
+                    # changes, this label would lie.
                     updated["nextRunAt"] = due_at
                     parked = defer_once(updated, stamp=now(), reason="error")
                     if parked is None:

@@ -44,7 +44,7 @@ interface BotSchedulePanelProps {
   wakeControl?: ReactNode;
 }
 
-function scheduleEnablePath(botId: string, scheduleId: string, enabled: boolean): string {
+export function scheduleEnablePath(botId: string, scheduleId: string, enabled: boolean): string {
   const action = enabled ? "enable" : "disable";
   return `/bots/${encodeURIComponent(botId)}/schedules/${encodeURIComponent(scheduleId)}/${action}`;
 }
@@ -291,7 +291,7 @@ export function BotSchedulePanel({
         ) : (
           <ul className="bot-schedule-list">
             {schedules.map((schedule) => {
-              const state = scheduleRunState(schedule);
+              const state = scheduleRunState(schedule, new Date(), { wakeEnabled: bot.wakeEnabled });
               const missed = skipNote(schedule);
               const lastTask = tasks.find((item) => item.id === schedule.lastTaskId);
               const editing = editingId === schedule.id;
@@ -309,11 +309,7 @@ export function BotSchedulePanel({
                   <p className="bot-schedule-prompt" title={schedule.prompt}>
                     {schedule.prompt}
                   </p>
-                  {gated ? (
-                    <p className="bot-schedule-meta">被自动唤醒总闸拦住</p>
-                  ) : (
-                    <p className="bot-schedule-meta">{state.detail}</p>
-                  )}
+                  {state.detail && <p className="bot-schedule-meta">{state.detail}</p>}
                   {schedule.nextRunAt && state.kind !== "completed" && state.kind !== "invalid" && (
                     <p className="bot-schedule-meta">
                       下次 {formatScheduledTaskTime(schedule.nextRunAt)}

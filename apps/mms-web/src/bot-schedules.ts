@@ -56,6 +56,7 @@ export type ScheduleRunKind =
   | "invalid"
   | "error"
   | "disabled"
+  | "gated"
   | "unknown";
 
 export interface ScheduleRunState {
@@ -227,9 +228,16 @@ export function describeComposerChip(form: ComposerScheduleForm): string {
   }
 }
 
+function holdDetail(reason: string | undefined): string {
+  return reason === "busy"
+    ? "到点时上一轮还在跑，恢复后会补跑。"
+    : "到点时被暂停或总闸拦住，恢复后会补跑。";
+}
+
 export function scheduleRunState(
   schedule: BotSchedule,
   now: Date = new Date(),
+  options: { wakeEnabled?: boolean } = {},
 ): ScheduleRunState {
   const skip = schedule.lastSkip;
   const next = schedule.nextRunAt;
@@ -237,6 +245,7 @@ export function scheduleRunState(
   const hasNext = Number.isFinite(nextMs);
   const past = hasNext && nextMs <= now.getTime();
   const future = hasNext && nextMs > now.getTime();
+  const holdSkip = skip?.reason === "paused" || skip?.reason === "busy";
 
   if (next == null && schedule.enabled === false && skip?.reason === "invalid") {
     return {
@@ -252,20 +261,28 @@ export function scheduleRunState(
       detail: "这一次已经跑过，不会再触发。",
     };
   }
-  if (
-    past &&
-    (skip?.reason === "paused" || skip?.reason === "busy") &&
-    schedule.lastRunAt == null
-  ) {
-    const holdReason = skip.reason as "paused" | "busy";
+  // Repeating rules keep a future nextRunAt while paused. That must not read as 待触发.
+  if (!schedule.enabled) {
+    if (holdSkip && schedule.lastRunAt == null) {
+      return {
+        kind: "disabled",
+        holdReason: skip?.reason as "paused" | "busy",
+        label: "已暂停",
+        detail: holdDetail(skip?.reason),
+      };
+    }
+    return {
+      kind: "disabled",
+      label: "已暂停",
+      detail: "这条定时不会触发；恢复后按下次时间跑。",
+    };
+  }
+  if (past && holdSkip && schedule.lastRunAt == null) {
     return {
       kind: "held",
-      holdReason,
+      holdReason: skip?.reason as "paused" | "busy",
       label: "已到点但被挂起",
-      detail:
-        holdReason === "paused"
-          ? "到点时被暂停或总闸拦住，恢复后会补跑。"
-          : "到点时上一轮还在跑，恢复后会补跑。",
+      detail: holdDetail(skip?.reason),
     };
   }
   if (skip?.reason === "error") {
@@ -275,15 +292,15 @@ export function scheduleRunState(
       detail: "到点会再试，不是已经执行完。",
     };
   }
+  if (options.wakeEnabled === false) {
+    return {
+      kind: "gated",
+      label: "被总闸拦住",
+      detail: "被自动唤醒总闸拦住",
+    };
+  }
   if (future) {
     return { kind: "upcoming", label: "待触发", detail: "" };
-  }
-  if (!schedule.enabled) {
-    return {
-      kind: "disabled",
-      label: "已暂停",
-      detail: "这条定时不会触发；恢复后按下次时间跑。",
-    };
   }
   if (past) {
     return {

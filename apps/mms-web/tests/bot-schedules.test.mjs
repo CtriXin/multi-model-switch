@@ -140,6 +140,92 @@ test("scheduleRunState keeps the four states distinct and never calls a past nex
   );
   assert.equal(pastWithoutSkip.kind, "upcoming");
   assert.doesNotMatch(pastWithoutSkip.label, /逾期/);
+
+  const disabledFuture = scheduleRunState(
+    {
+      ...base,
+      rule: { kind: "daily", atLocalTime: "09:00" },
+      enabled: false,
+      nextRunAt: "2026-09-17T01:00:00.000Z",
+      lastRunAt: null,
+      lastSkip: null,
+    },
+    now,
+  );
+  assert.equal(disabledFuture.kind, "disabled");
+  assert.equal(disabledFuture.label, "已暂停");
+  assert.doesNotMatch(disabledFuture.label, /待触发/);
+
+  const disabledHold = scheduleRunState(
+    {
+      ...base,
+      enabled: false,
+      nextRunAt: "2026-09-16T01:00:00.000Z",
+      lastRunAt: null,
+      lastSkip: { reason: "paused", at: "2026-09-16T01:00:00.000Z", skipped: 0 },
+    },
+    now,
+  );
+  assert.equal(disabledHold.kind, "disabled");
+  assert.equal(disabledHold.label, "已暂停");
+  assert.match(disabledHold.detail, /恢复后会补跑/);
+
+  const disabledInvalid = scheduleRunState(
+    {
+      ...base,
+      enabled: false,
+      nextRunAt: null,
+      lastRunAt: null,
+      lastSkip: { reason: "invalid", at: "2026-09-16T00:00:00.000Z", skipped: 0 },
+    },
+    now,
+  );
+  assert.equal(disabledInvalid.kind, "invalid");
+  assert.equal(disabledInvalid.label, "记录损坏");
+  assert.equal(disabledInvalid.detail, "这条定时读不出来，改规则或时区后再启用。");
+
+  const heldBusy = scheduleRunState(
+    {
+      ...base,
+      enabled: true,
+      nextRunAt: "2026-09-16T01:00:00.000Z",
+      lastRunAt: null,
+      lastSkip: { reason: "busy", at: "2026-09-16T01:00:00.000Z", skipped: 0 },
+    },
+    now,
+  );
+  assert.equal(heldBusy.kind, "held");
+  assert.equal(heldBusy.holdReason, "busy");
+  assert.match(heldBusy.detail, /恢复后会补跑/);
+
+  const errorState = scheduleRunState(
+    {
+      ...base,
+      enabled: true,
+      nextRunAt: "2026-09-16T01:00:00.000Z",
+      lastRunAt: null,
+      lastSkip: { reason: "error", at: "2026-09-16T01:00:00.000Z", skipped: 0 },
+    },
+    now,
+  );
+  assert.equal(errorState.kind, "error");
+  assert.equal(errorState.label, "上次没能建出任务");
+
+  const gatedUpcoming = scheduleRunState(
+    {
+      ...base,
+      rule: { kind: "daily", atLocalTime: "09:00" },
+      enabled: true,
+      nextRunAt: "2026-09-17T01:00:00.000Z",
+      lastRunAt: null,
+      lastSkip: null,
+    },
+    now,
+    { wakeEnabled: false },
+  );
+  assert.equal(gatedUpcoming.kind, "gated");
+  assert.equal(gatedUpcoming.label, "被总闸拦住");
+  assert.doesNotMatch(gatedUpcoming.label, /待触发/);
 });
 
 test("skipNote explains missed counts without inventing a backlog for repeating rules", () => {

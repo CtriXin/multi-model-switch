@@ -3409,6 +3409,11 @@
   color: var(--bot-amber);
 }
 
+.bot-schedule-state.is-disabled,
+.bot-schedule-state.is-gated {
+  color: var(--muted);
+}
+
 .bot-schedule-state.is-completed {
   color: var(--muted);
 }

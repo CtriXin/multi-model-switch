@@ -34,6 +34,7 @@ test("pause and resume go through /enable and /disable, never an edit POST with 
     /\$\{action\}/,
   );
   assert.match(source, /enabled \? "enable" : "disable"/);
+  assert.match(source, /scheduleEnablePath\(bot\.id, schedule\.id, !schedule\.enabled\)/);
   assert.match(source, /mutate\(scheduleEnablePath\(/);
   assert.match(source, /mutate\(scheduleEditPath\(/);
   assert.match(source, /prompt:\s*trimmed/);
@@ -56,12 +57,14 @@ test("management list keeps the four run states and does not collapse them into 
   const logic = read("../src/bot-schedules.ts");
   assert.match(panel, /scheduleRunState\(/);
   assert.match(panel, /\{state\.label\}/);
-  assert.match(panel, /被自动唤醒总闸拦住/);
+  assert.match(panel, /wakeEnabled: bot\.wakeEnabled/);
   assert.match(panel, /这不是单条「已暂停」/);
+  assert.match(logic, /被自动唤醒总闸拦住/);
   assert.match(panel, /skipNote\(/);
   assert.doesNotMatch(panel, /逾期/);
   assert.match(logic, /kind: "upcoming"/);
   assert.match(logic, /kind: "held"/);
+  assert.match(logic, /kind: "gated"/);
   assert.match(logic, /label: "已到点但被挂起"/);
   assert.match(logic, /label: "已执行完"/);
   assert.match(logic, /label: "记录损坏"/);
@@ -69,6 +72,9 @@ test("management list keeps the four run states and does not collapse them into 
   assert.match(logic, /skip\?\.reason === "busy"/);
   assert.match(logic, /skip\?\.reason === "invalid"/);
   assert.doesNotMatch(logic, /逾期/);
+  const disabledAt = logic.indexOf("if (!schedule.enabled)");
+  const futureAt = logic.indexOf("if (future)");
+  assert.ok(disabledAt >= 0 && futureAt > disabledAt, "!enabled must win over a future nextRunAt");
 });
 
 test("BotStudio wakeEnabled default aligns with backend true via nullish coalescing", () => {
