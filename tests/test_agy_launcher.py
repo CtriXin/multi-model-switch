@@ -50,6 +50,8 @@ def test_legacy_gemini_account_is_preserved_but_not_visible():
 
 def test_agy_visible_when_binary_exists_or_account_exists(monkeypatch):
     import mms_core
+    # This tests availability, independent of any previously saved preferences.
+    monkeypatch.setattr(mms_core, "load_user_preferences", lambda: {})
 
     provider = {
         "id": "default",
