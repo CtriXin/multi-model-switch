@@ -3,19 +3,14 @@
  *  never wins. After showModal, put the caret where typing should start. */
 
 export function scheduleDialogAutofocus(root: ParentNode | null): () => void {
-  const run = () => {
-    const node = pickAutofocus(root);
-    if (!node) return;
+  const node = pickAutofocus(root);
+  if (node) {
     node.focus();
     if (isSelectableField(node) && node.value) node.select();
-  };
-  run();
-  const raf = typeof requestAnimationFrame === "function" ? requestAnimationFrame(run) : 0;
-  const timer = setTimeout(run, 50);
-  return () => {
-    if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(raf);
-    clearTimeout(timer);
-  };
+  }
+  // showModal has already run. A later re-selection can overwrite the first
+  // characters typed by the user or steal focus from another control.
+  return () => {};
 }
 
 export function pickAutofocus(root: ParentNode | null): HTMLElement | null {

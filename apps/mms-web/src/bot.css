@@ -2816,18 +2816,26 @@
 
 @media (max-width: 640px) {
   .bot-workspace {
-    display: block;
+    flex-direction: column;
+    height: 100dvh;
+    min-height: 0;
+  }
+  .app-shell[data-page="bots"] > .main-area {
+    height: 100dvh;
+  }
+  .bot-main {
     height: auto;
-    min-height: 100vh;
+    min-height: 0;
   }
   .bot-sidebar {
     width: 100%;
+    flex: 0 0 auto;
     height: auto;
-    max-height: none;
+    max-height: 30dvh;
     padding: 14px 14px 16px;
     border-right: 0;
     border-bottom: 1px solid var(--line);
-    overflow: visible;
+    overflow-y: auto;
   }
   .bot-list {
     flex: none;

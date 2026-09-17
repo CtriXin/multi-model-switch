@@ -94,3 +94,22 @@ test("rename and search fields mark where typing should start", () => {
   assert.match(app, /data-autofocus=""\s*\n\s*aria-label="会话名称"/);
   assert.match(app, /data-autofocus=""\s*\n\s*aria-label="搜索全部会话"/);
 });
+
+test("autofocus never selects again after the user starts typing", () => {
+  const callbacks = [], selected = [];
+  const node = { tagName: "INPUT", type: "text", value: "old", focus() {}, select() { selected.push(this.value); } };
+  const raf = globalThis.requestAnimationFrame, timeout = globalThis.setTimeout;
+  globalThis.requestAnimationFrame = (fn) => { callbacks.push(fn); return 1; };
+  globalThis.setTimeout = (fn) => { callbacks.push(fn); return 1; };
+  try {
+    const stop = scheduleDialogAutofocus({querySelector: () => node});
+    node.value = "新";
+    callbacks.forEach(fn => fn());
+    assert.deepEqual(selected, ["old"], "late select would make the next character replace 新");
+    stop();
+  } finally {
+    globalThis.setTimeout = timeout;
+    if (raf) globalThis.requestAnimationFrame = raf;
+    else delete globalThis.requestAnimationFrame;
+  }
+});
