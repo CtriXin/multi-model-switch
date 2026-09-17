@@ -221,12 +221,13 @@ class _LiveSession:
 
     def session_caps(self) -> dict:
         alive = self.alive() and not self.finalized
+        interactive = self.meta.get("readOnly") is not True
         return {
-            "send": bool(alive or self.can_resume()),
+            "send": bool(interactive and (alive or self.can_resume())),
             "stop": bool(alive),
             "approve": bool(alive and self.approvals),
-            "steer": bool(alive),
-            "queueControl": bool(alive),
+            "steer": bool(alive and interactive),
+            "queueControl": bool(alive and interactive),
         }
 
     def session_view(self) -> dict:
@@ -742,6 +743,7 @@ class SessionService(SessionActions, SessionSideQuestions):
     def send(self, session_id: str, payload: dict) -> dict:
         self._require_open()
         session = self._get(session_id)
+        self._require_interactive_session(session)
         payload = self._object_payload(payload)
         request_id = self._validate_request_id(payload.get("requestId"))
         text = payload.get("text") or ("请查看附件。" if payload.get("attachments") else "")

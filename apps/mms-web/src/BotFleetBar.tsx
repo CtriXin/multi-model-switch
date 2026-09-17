@@ -150,6 +150,11 @@ export function BotFleetBar({
                 {options.length > 0 && (
                   <div className="bot-fleet-model-menu" role="menu" aria-label={`${name} 可选模型`}>
                     <div className="bot-fleet-model-panel">
+                    {remembered && <button type="button" role="menuitemradio" aria-checked={false}
+                      className="bot-fleet-model-item" disabled={locked}
+                      onClick={() => patch({ models: { ...policy.models, [name]: "" } })}>
+                      自动选择
+                    </button>}
                     {options.map((preset) => {
                       const active = remembered === preset.id;
                       return (
@@ -167,6 +172,8 @@ export function BotFleetBar({
                           }}
                         >
                           {compactModelLabel(preset.name)}
+                          {options.some((other) => other.id !== preset.id && other.name === preset.name)
+                            && ` · ${preset.channel || preset.providerId || preset.id}`}
                         </button>
                       );
                     })}

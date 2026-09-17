@@ -2146,6 +2146,7 @@ export function BotChat({
             prompt: content,
             wake: true,
             runAt: onceLocalToIso(scheduleForm.onceDate, scheduleForm.onceTime),
+            fleetDispatch: Boolean(extra?.fleetDispatch || normalizeFleetPolicy(bot.fleetPolicy).enabled),
           });
           const created = result?.schedule;
           if (created) {
@@ -2163,6 +2164,7 @@ export function BotChat({
               rule,
               timezone: localTimezone(),
               overlapPolicy: "skip",
+              fleetDispatch: Boolean(extra?.fleetDispatch || normalizeFleetPolicy(bot.fleetPolicy).enabled),
             },
           );
           setSettingNotice(createdScheduleNotice(created, formatScheduledTaskTime));
@@ -3404,4 +3406,3 @@ export function BotPeerThread({
     </details>
   );
 }
-

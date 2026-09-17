@@ -103,5 +103,9 @@ export function fleetPreviewLabel(policy: BotFleetPolicy, families: string[], pr
   }
   const auto = families.slice(0, policy.maxFamilies);
   if (auto.length < 2) return "凑不齐两家，我自己看，不当成多方";
-  return `发出去会再问 ${policy.maxFamilies} 家${policy.intensity === "intense" ? "，问仔细" : ""}`;
+  if (families.some((family) => policy.models[family]
+    && familyChipLabel(family, policy, presets).endsWith("（已失效）"))) {
+    return "有固定模型已失效，请重新选择，或在模型菜单改为自动选择。";
+  }
+  return `发出去会再问 ${auto.length} 家${policy.intensity === "intense" ? "，问仔细" : ""}`;
 }

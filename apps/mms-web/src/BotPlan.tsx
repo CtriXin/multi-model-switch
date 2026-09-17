@@ -253,18 +253,18 @@ export function BotPlan({ task, bots }: { task: BotTask; bots: BotDefinition[] }
           </div>
         </details>
       )}
-      {!fleet && (status === "proposed" || undoable || status === "running") && (
+      {(status === "proposed" || undoable || status === "running") && (
         <div className="bot-plan-actions">
           {status === "proposed" && (
             <button type="button" className="bot-plan-approve" onClick={() => void act("approve")} disabled={busy}>
               {busy ? <LoaderCircle className="bot-spin" size={13} /> : <Check size={13} />}
-              确认分工
+              {fleet ? "确认，问问他们" : "确认分工"}
             </button>
           )}
           {(status === "proposed" || undoable) && (
             <button type="button" className="bot-plan-reject" onClick={() => void act("reject")} disabled={busy}>
               <X size={13} />
-              {status === "proposed" ? "拒绝，自己做" : "撤回分工"}
+              {status === "proposed" ? "拒绝，自己做" : fleet ? "撤回场外帮助" : "撤回分工"}
             </button>
           )}
           {status === "running" && (
@@ -291,4 +291,3 @@ export function BotPlan({ task, bots }: { task: BotTask; bots: BotDefinition[] }
     </div>
   );
 }
-

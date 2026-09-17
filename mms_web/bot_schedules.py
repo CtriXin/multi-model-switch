@@ -380,6 +380,7 @@ def build_schedule(bot_id: str, payload: dict, *, existing_count: int, now: date
         "id": schedule_id or ("sch_" + uuid4().hex[:16]),
         "botId": bot_id,
         "prompt": str(payload["prompt"]).strip(),
+        "fleetDispatch": payload.get("fleetDispatch") is True,
         "rule": rule,
         "timezone": zone,
         "enabled": True,
@@ -405,6 +406,10 @@ def apply_update(schedule: dict, payload: dict, *, now: datetime) -> dict:
         # ignored entry point would drift apart from them.
         raise WebError("INVALID_REQUEST", "启停定时请用 /enable 或 /disable，不要放在编辑里。", 400)
     updated = deepcopy(schedule)
+    if "fleetDispatch" in payload:
+        if not isinstance(payload["fleetDispatch"], bool):
+            raise WebError("INVALID_REQUEST", "fleetDispatch 必须是 true 或 false。", 400)
+        updated["fleetDispatch"] = payload["fleetDispatch"]
     if "prompt" in payload:
         prompt = payload.get("prompt")
         if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > MAX_PROMPT_CHARS:

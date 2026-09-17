@@ -129,7 +129,7 @@ def test_fleet_review_stays_on_one_bot_and_fans_out_live_models(tmp_path):
         with pytest.raises(WebError) as nested_cycle:
             rt.create_task({"requestId": "nested-fleet", "botId": owner["id"], "prompt": "再分一层",
                             "parentTaskId": nested["id"], "workerKind": "fleet", "presetId": "web:pi:glm"})
-        assert nested_cycle.value.code == "BOT_DISPATCH_CYCLE"
+        assert nested_cycle.value.code == "BOT_FLEET_INTERNAL_ONLY"
         assert rt._dispatch_blocked(children[0], children[1]) is False
         assert rt._dispatch_blocked(parent, children[0]) is True
         for child in children:

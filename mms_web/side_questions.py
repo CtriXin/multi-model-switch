@@ -219,6 +219,7 @@ class SessionSideQuestions:
     def ask_side_question(self, session_id: str, payload: dict) -> dict:
         self._require_open()
         session = self._get(session_id)
+        self._require_interactive_session(session)
         payload = self._object_payload(payload)
         question = payload.get("question")
         if not isinstance(question, str) or not question.strip():

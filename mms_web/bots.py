@@ -520,7 +520,7 @@ class BotRuntime(BotCommunications):
             del rows[:-MAX_MESSAGES]
         return message
 
-    def create_task(self, payload, *, persist=True):
+    def create_task(self, payload, *, persist=True, _fleet_step=False):
         with self._lock:
             key, value = self._replay("task", payload)
             if key in self._requests:
@@ -533,6 +533,10 @@ class BotRuntime(BotCommunications):
                 raise WebError("TASK_LIMIT", "本地已保存 2,000 个任务，请归档后继续。", 409)
             parent_id = payload.get("parentTaskId")
             fleet_leaf = bool(parent_id) and payload.get("workerKind") == "fleet"
+            if payload.get("workerKind") == "fleet" and not _fleet_step:
+                raise WebError("BOT_FLEET_INTERNAL_ONLY", "场外帮助子任务只能由已确认的计划创建。", 400)
+            if _fleet_step and (not fleet_leaf or not str(payload.get("presetId") or "").strip()):
+                raise WebError("BOT_FLEET_SELECTION_UNAVAILABLE", "场外帮助缺少指定模型，请重新选择。", 409)
             if parent_id and payload.get("runAt"):
                 raise WebError("INVALID_REQUEST", "子任务不能定时执行。", 400)
             if parent_id:
@@ -553,7 +557,8 @@ class BotRuntime(BotCommunications):
                 # A one-off time is no longer a task state; it is its own
                 # schedule entity, so the timer survives restarts and can be
                 # listed, paused or deleted.
-                schedule = self.create_schedule(bot["id"], {"prompt": prompt, "rule": {"kind": "once", "at": run_at}})
+                schedule = self.create_schedule(bot["id"], {"prompt": prompt, "rule": {"kind": "once", "at": run_at},
+                                                          "fleetDispatch": payload.get("fleetDispatch") is True})
                 self._remember(key, value, schedule["id"])
                 return {**schedule, "kind": "schedule"}
             if fleet_leaf:
@@ -1056,7 +1061,8 @@ class BotRuntime(BotCommunications):
         if state == "completed":
             try:
                 bot = self._bot(task["botId"])
-                if bot.get("memoryEnabled", True) and self._should_remember_task(task, message):
+                if (task.get("workerKind") != "fleet" and bot.get("memoryEnabled", True)
+                        and self._should_remember_task(task, message)):
                     digest = f"任务 {task['id']}：{task.get('prompt','')[:600]}\n结果：{message[:1200]}"
                     self.memory.remember(task["botId"], digest, kind="task", source="task", task_id=task["id"])
             except Exception:
@@ -1367,7 +1373,7 @@ class BotRuntime(BotCommunications):
                                "requestId": f"plan:{task['id']}:{step['id']}:{attempt}"}
                     if plan.get("mode") == "fleet":
                         payload.update(workerKind="fleet", presetId=step.get("presetId"), label=step.get("label"))
-                    child = self.create_task(payload)
+                    child = self.create_task(payload, _fleet_step=plan.get("mode") == "fleet")
                 except WebError as exc:
                     step["status"] = "failed"
                     step["error"] = exc.message
@@ -1735,6 +1741,7 @@ class BotRuntime(BotCommunications):
                     # Publish the task, schedule linkage and advanced due time
                     # together in tick's final atomic store write, before launch.
                     fired = self.create_task({"botId": bot["id"], "prompt": updated["prompt"],
+                                              "fleetDispatch": updated.get("fleetDispatch") is True,
                                               "requestId": f"schedule:{schedule['id']}:{due_at}"},
                                              persist=False) if armed and not holding and not skipped else None
                 except Exception:
@@ -1904,6 +1911,8 @@ class BotRuntime(BotCommunications):
                 # 一步明确指定）> bot 的 pendingPresetId（对话里刚换，本轮起生
                 # 效并消费）> bot 的 presetId（默认）。带 override 的任务不消费
                 # pending，否则用户的切换会被一个无关的计划子任务吃掉。
+                if task.get("workerKind") == "fleet" and not task.get("presetIdOverride"):
+                    raise WebError("BOT_FLEET_SELECTION_UNAVAILABLE", "场外帮助缺少指定模型，请重新选择。", 409)
                 one_off = bool(task.get("presetIdOverride"))
                 own_preset = str(bot.get("presetId") or "")
                 if one_off:
@@ -1987,7 +1996,7 @@ class BotRuntime(BotCommunications):
                 # This is the only replayable seam; `_finish` retries a
                 # transient reason and otherwise keeps the prompt unmodified
                 # for an explicit human resume.
-                self._finish(live, "interrupted", message, error_code=getattr(exc, "code", ""),
+                self._finish(live, "failed" if live.get("workerKind") == "fleet" else "interrupted", message, error_code=getattr(exc, "code", ""),
                              error_detail=str(exc), error_status=getattr(exc, "status", None))
                 self._persist()
         finally:

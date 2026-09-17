@@ -147,6 +147,14 @@ def test_read_only_bot_flag_reaches_plan_and_cannot_replay_as_executor(service):
     session_id = detail["session"]["id"]
     assert detail["session"]["readOnly"] is True
     assert received[-1]["_webReadOnly"] is True
+    assert detail["session"]["capabilities"]["send"] is False
+    for action, body in [(service.switch_model, {"presetId": "another"}),
+                         (service.fork, {}), (service.send, {"text": "continue"}),
+                         (service.control, {"action": "plan", "value": False}),
+                         (service.ask_side_question, {"question": "extra"})]:
+        with pytest.raises(WebError) as blocked:
+            action(session_id, {"requestId": "blocked", **body})
+        assert blocked.value.code == "BOT_REVIEW_IMMUTABLE"
     with pytest.raises(WebError) as error:
         service.launch_bot(payload, "owner")
     assert error.value.code == "REQUEST_ID_CONFLICT"
@@ -160,6 +168,79 @@ def test_public_launch_cannot_claim_read_only_mode(service):
     detail = service.launch({"requestId": "public-readonly", "workspaceId": "ws",
                              "presetId": "preset", "prompt": "normal", "readOnly": True})
     assert not detail["session"].get("readOnly")
+
+
+@pytest.mark.parametrize("failed_reader", [False, True])
+def test_fleet_full_chain_preserves_main_and_reaps_both_readers(service, tmp_path, failed_reader):
+    from mms_web.bot_executor import PiBotExecutor
+    from mms_web.bots import BotRuntime
+
+    class FleetCatalog(FakeCatalog):
+        def snapshot(self):
+            return {"presets": [
+                {"id": name, "name": name, "family": family, "harness": "pi", "available": True}
+                for name, family in [("owner-model", "GPT"), ("review-a", "Kimi"), ("review-b", "GLM")]
+            ], "workspaces": [{"id": "ws"}]}
+
+        def resolve_launch(self, preset_id, workspace_id):
+            resolved = super().resolve_launch(preset_id, workspace_id)
+            resolved["model_info"] = {"model": preset_id}
+            resolved["cwd"] = str(tmp_path)
+            return resolved
+
+    original = service._launch_plan_builder
+
+    def build(harness, model, runtime, cwd):
+        if failed_reader and model["model"] == "review-a":
+            raise WebError("BOT_REVIEW_UNAVAILABLE", "fixture readonly launch refused", 409)
+        plan = original(harness, model, runtime, cwd)
+        # Controlled echo subprocess: no model or filesystem tools execute.
+        plan.read_only = runtime.get("_webReadOnly") is True
+        return plan
+
+    service._launch_plan_builder = build
+    service._catalog = FleetCatalog()
+    rt = BotRuntime(state_root=tmp_path / "bots", executor=PiBotExecutor(service, service._catalog))
+    rt.configure_endpoint("http://127.0.0.1:8765/api/v1/bot-worker")
+
+    def complete(task):
+        def tick_done():
+            rt.tick()
+            for worker in list(rt._workers):
+                worker.join(timeout=0.05)
+            return rt.get_task(task["id"])["status"] == "completed"
+        wait_for(tick_done, message="Fleet lifecycle completion")
+        rt.tick()
+
+    try:
+        owner = rt.create_bot({"name": "Owner", "workspaceId": "ws", "presetId": "owner-model",
+                               "wakeEnabled": True})
+        ordinary = rt.create_task({"botId": owner["id"], "prompt": "摘要", "fleetDispatch": False})
+        complete(ordinary)
+        main = rt.get_bot(owner["id"])["sessionId"]
+        rt.update_bot(owner["id"], {"fleetPolicy": {"families": ["Kimi", "GLM"],
+                         "models": {"Kimi": "review-a", "GLM": "review-b"}}})
+        fleet = rt.create_task({"botId": owner["id"], "prompt": "请评价方案", "fleetDispatch": True})
+        complete(fleet)
+        children = [rt.get_task(cid) for cid in rt.get_task(fleet["id"])["children"]]
+        assert len(children) == 2
+        readers = [child for child in children if child["sessionId"]]
+        if failed_reader:
+            assert {child["status"] for child in children} == {"completed", "failed"}
+        else:
+            assert {child["model"] for child in readers} == {"review-a", "review-b"}
+        assert len({child["sessionId"] for child in readers} | {main}) == len(readers) + 1
+        for child in readers:
+            live = service._sessions[child["sessionId"]]
+            assert live.session_view()["readOnly"] is True
+            assert live.meta["archived"] is True
+            assert live.driver._proc.poll() is not None
+        assert rt.get_bot(owner["id"])["sessionId"] == main
+        assert service._sessions[main].alive()
+        assert not service._sessions[main].meta.get("archived")
+        assert rt.get_task(fleet["id"])["sessionId"] == main
+    finally:
+        rt.close()
 
 
 def test_full_chain_approval_confirm_flow(service):

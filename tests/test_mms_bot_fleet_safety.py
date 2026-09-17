@@ -140,3 +140,73 @@ def test_ordinary_native_launch_keeps_extensions_and_default_tools(monkeypatch):
 def test_read_only_cannot_load_extra_tools_or_extensions(monkeypatch, args):
     with pytest.raises(ValueError, match="只读"):
         capture_native_launch(monkeypatch, True, args)
+
+
+def test_public_payload_cannot_create_a_fleet_leaf_or_replace_main(tmp_path):
+    from test_mms_web_bots import bot, runtime
+    rt = runtime(tmp_path)
+    try:
+        owner = bot(rt)
+        rt._bots[owner['id']]['sessionId'] = 'persistent-main'
+        parent = rt.create_task({'botId': owner['id'], 'prompt': 'parent'})
+        with pytest.raises(WebError) as error:
+            rt.create_task({'botId': owner['id'], 'prompt': 'spoof',
+                            'parentTaskId': parent['id'], 'workerKind': 'fleet'})
+        assert error.value.code == 'BOT_FLEET_INTERNAL_ONLY'
+        assert rt.get_task(parent['id'])['children'] == []
+        assert rt.get_bot(owner['id'])['sessionId'] == 'persistent-main'
+    finally:
+        rt.close()
+
+
+@pytest.mark.parametrize('kind', ['once', 'interval'])
+def test_scheduled_fleet_intent_survives_restart_and_reaches_plan(tmp_path, kind):
+    from datetime import datetime, timedelta, timezone
+    from test_mms_web_bots import FakeCatalog, FakeExecutor, bot, runtime, drain_launch
+    executor = FakeExecutor(FakeCatalog())
+    rt = runtime(tmp_path, executor)
+    owner = bot(rt)
+    due = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+    if kind == 'once':
+        schedule = rt.create_task({'botId': owner['id'], 'prompt': '评价方案',
+                                   'runAt': due, 'fleetDispatch': True})
+    else:
+        schedule = rt.create_schedule(owner['id'], {'prompt': '评价方案', 'fleetDispatch': True,
+                                      'rule': {'kind': 'interval', 'everySeconds': 300}})
+        rt._schedules[schedule['id']]['nextRunAt'] = due
+    rt._persist()
+    rt.close()
+    rt = runtime(tmp_path, executor)
+    try:
+        assert rt.list_schedules(owner['id'])[0]['fleetDispatch'] is True
+        rt.tick(); drain_launch(rt)
+        parent = next(t for t in rt.list_tasks(bot_id=owner['id']) if t.get('scheduleId'))
+        assert parent['coordinatorPlan']['mode'] == 'fleet'
+        assert len(parent['children']) == 2
+    finally:
+        rt.close()
+
+
+def test_sequential_fleet_readers_do_not_leak_opinions_into_owner_memory(tmp_path):
+    from test_mms_web_bots import FakeCatalog, FakeExecutor, bot, runtime, complete_one
+    contexts = []
+    sentinel = 'INDEPENDENT_OPINION_295 ' * 8
+    class Readers(FakeExecutor):
+        def start(self, task, bot, context_path):
+            if task.get('workerKind') == 'fleet':
+                contexts.append(task.get('memoryContext', ''))
+            return super().start(task, bot, context_path)
+        def snapshot(self, task):
+            result = super().snapshot(task)
+            result['events'][0]['text'] = sentinel if task.get('workerKind') == 'fleet' else '最终综合'
+            return result
+    rt = runtime(tmp_path, Readers(FakeCatalog()), max_concurrent=1)
+    try:
+        owner = bot(rt)
+        task = rt.create_task({'botId': owner['id'], 'prompt': '评价方案', 'fleetDispatch': True})
+        assert complete_one(rt, task['id'])['status'] == 'completed'
+        assert len(contexts) == 2
+        assert all('INDEPENDENT_OPINION_295' not in text for text in contexts)
+        assert 'INDEPENDENT_OPINION_295' not in str(rt.memory.get(owner['id']))
+    finally:
+        rt.close()

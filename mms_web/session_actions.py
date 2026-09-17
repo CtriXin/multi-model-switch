@@ -66,6 +66,10 @@ def backfill_history(session):
 
 
 class SessionActions:
+    def _require_interactive_session(self, session):
+        if session.meta.get("readOnly") is True:
+            raise WebError("BOT_REVIEW_IMMUTABLE", "场外帮助是一次性只读会话，请回到主 Bot 发起新的请求。", 409)
+
     def _rpc(self, session, command, timeout=8):
         if not session.alive():
             self._resume(session)
@@ -139,6 +143,7 @@ class SessionActions:
 
     def control(self, session_id, payload):
         session = self._get(session_id)
+        self._require_interactive_session(session)
         action = payload.get("action")
         value = payload.get("value")
         command = None
@@ -180,6 +185,7 @@ class SessionActions:
         return self.get_session(session_id)
 
     def switch_model(self, session_id, payload):
+        self._require_interactive_session(self._get(session_id))
         from .model_switch import switch_model
         return switch_model(self, session_id, payload)
 
@@ -204,6 +210,7 @@ class SessionActions:
 
     def fork(self, session_id, payload):
         session = self._get(session_id)
+        self._require_interactive_session(session)
         with session.mutation_lock, self._request_scope(self._validate_request_id(payload.get("requestId")), {"op": "fork", "sessionId": session_id, "eventId": payload.get("eventId")}) as replay:
             if replay is not None:
                 return replay.detail_view()
