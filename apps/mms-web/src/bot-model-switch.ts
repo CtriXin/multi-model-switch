@@ -61,3 +61,8 @@ export function resolveModelSwitch(query: string, presets: Preset[], currentPres
     message: `好，已记下：下一轮起使用 ${preset.name} · ${preset.channel}，本轮仍是当前模型。`,
   };
 }
+
+/** Pickers use the same next-round boundary as conversational model changes. */
+export function botModelSelectionPatch(presetId: string, currentPresetId?: string | null) {
+  return { pendingPresetId: presetId === currentPresetId ? "" : presetId };
+}

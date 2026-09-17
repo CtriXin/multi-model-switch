@@ -133,13 +133,16 @@ export function Dialog({
   size?: "default" | "wide" | "sheet";
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const returnFocus = useRef(typeof document === "undefined" ? null : document.activeElement as HTMLElement);
   useEffect(() => {
     const dialog = ref.current;
     dialog?.showModal();
     const stop = scheduleDialogAutofocus(dialog);
     return () => {
       stop();
+      const shouldRestore = document.activeElement === document.body || dialog?.contains(document.activeElement);
       dialog?.close();
+      if (shouldRestore && returnFocus.current?.isConnected) returnFocus.current.focus();
     };
   }, []);
   return (

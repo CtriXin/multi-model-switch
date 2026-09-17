@@ -41,6 +41,10 @@ import {
 import { previewType } from "./bot-artifact-preview";
 import type { BotChildResult, BotPendingQuestion, BotTaskPlan, Model, Preset } from "./types";
 import { isPreview, mutate, request } from "./api";
+import { botModelSelectionPatch } from "./bot-model-switch";
+import { fleetSelectionError } from "./bot-fleet";
+import { nextEvening } from "./bot-schedules";
+import { BotModelPicker } from "./BotModelPicker";
 import { BotPresetPanel } from "./BotPresetPanel";
 import { BotSchedulePanel } from "./BotSchedulePanel";
 import {
@@ -1718,6 +1722,7 @@ export function BotChat({
   const popoverRef = useRef<HTMLDivElement>(null);
   const scheduleTriggerRef = useRef<HTMLButtonElement>(null);
   const [schedulePopoverOpen, setSchedulePopoverOpen] = useState(false);
+  const [scheduleNow, setScheduleNow] = useState(() => new Date());
   const [schedulePanelOpen, setSchedulePanelOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -1899,6 +1904,7 @@ export function BotChat({
   function armOnce(date: string, time: string) {
     setScheduleForm((current) => ({ ...current, kind: "once", onceDate: date, onceTime: time }));
     setScheduleArmed(true);
+    textareaRef.current?.focus();
     try {
       popoverRef.current?.hidePopover();
     } catch {
@@ -1919,8 +1925,7 @@ export function BotChat({
       return;
     }
     if (preset === "tonight") {
-      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 20, 0, 0, 0);
-      if (d.getTime() <= now.getTime()) d.setDate(d.getDate() + 1);
+      const d = nextEvening(now).date;
       armOnce(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`, "20:00");
       return;
     }
@@ -1929,6 +1934,7 @@ export function BotChat({
   }
 
   function placeSchedulePopover() {
+    setScheduleNow(new Date());
     const popover = popoverRef.current;
     const trigger = scheduleTriggerRef.current;
     if (!popover || !trigger) return;
@@ -1986,7 +1992,14 @@ export function BotChat({
   })();
   useEffect(() => {
     if (schedulePopoverOpen) placeSchedulePopover();
-  }, [scheduleForm.kind, schedulePopoverOpen]);
+  }, [scheduleForm.kind, schedulePopoverOpen, schedulePanelOpen]);
+  useEffect(() => {
+    if (!schedulePopoverOpen) return;
+    const midnight = new Date(scheduleNow.getFullYear(), scheduleNow.getMonth(), scheduleNow.getDate() + 1);
+    const boundary = Math.min(midnight.getTime(), nextEvening(scheduleNow).date.getTime());
+    const timer = window.setTimeout(() => setScheduleNow(new Date()), Math.max(0, boundary - Date.now()) + 50);
+    return () => window.clearTimeout(timer);
+  }, [schedulePopoverOpen, scheduleNow]);
   const composerScheduleInvalid = validateComposerForm(scheduleForm);
   const composerIntervalSeconds = intervalSecondsFromHours(scheduleForm.intervalHours);
   const scheduleQuotaText = remainingScheduleQuota(schedules.length);
@@ -2005,6 +2018,7 @@ export function BotChat({
   const [onboardingBusy, setOnboardingBusy] = useState(false);
   const [onboardingDone, setOnboardingDone] = useState(false);
   const [onboardingEditing, setOnboardingEditing] = useState(false);
+  const closePresetRef = useRef<(() => boolean) | null>(null);
   const [onboardingError, setOnboardingError] = useState("");
   const [settingNotice, setSettingNotice] = useState("");
   const streamRef = useRef<HTMLDivElement>(null);
@@ -2040,19 +2054,6 @@ export function BotChat({
     setSchedulePanelOpen(false);
     setError("");
   }, [bot?.id]);
-  useEffect(() => {
-    if (!onboardingEditing) return;
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key !== "Escape") return;
-      // Renaming owns Escape while its input has focus, so one press only
-      // cancels the rename instead of also closing the preset editor.
-      const active = document.activeElement;
-      if (active instanceof HTMLElement && active.classList.contains("bot-chat-title-input")) return;
-      setOnboardingEditing(false);
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onboardingEditing]);
   useEffect(() => {
     const stream = streamRef.current;
     if (stream && followLatest.current) stream.scrollTop = stream.scrollHeight;
@@ -2128,6 +2129,8 @@ export function BotChat({
         setValue("");
         return;
       }
+      const fleetError = fleetSelectionError(bot.fleetPolicy, extra?.fleetDispatch);
+      if (fleetError) { setError(fleetError); return; }
       // 每条新消息默认开启独立任务，让互不相关的目标可以并发推进。
       // 针对已有任务的补充仍通过任务详情中的跟进入口完成。
       if (scheduleArmed) {
@@ -2332,43 +2335,10 @@ export function BotChat({
                   label={getBotHeaderStatusText(bot, tasks)}
                 />
               )}
-              {bot && (bot.model || bot.pendingPresetId) && (
-                <p
-                  className="bot-chat-model-line"
-                  role={onUpdateBot ? "button" : undefined}
-                  tabIndex={onUpdateBot ? 0 : -1}
-                  onClick={() => {
-                    if (!onUpdateBot) return;
-                    setOnboardingEditing(true);
-                    setSchedulePanelOpen(false);
-                    setTimeout(() => {
-                      const section = document.getElementById("bot-preset-model-section");
-                      section?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-                      const trigger = section?.querySelector<HTMLElement>(".model-picker-trigger, button");
-                      trigger?.focus();
-                    }, 80);
-                  }}
-                  onKeyDown={(e) => {
-                    if (onUpdateBot && (e.key === "Enter" || e.key === " ")) {
-                      e.preventDefault();
-                      setOnboardingEditing(true);
-                      setSchedulePanelOpen(false);
-                      setTimeout(() => {
-                        const section = document.getElementById("bot-preset-model-section");
-                        section?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-                        const trigger = section?.querySelector<HTMLElement>(".model-picker-trigger, button");
-                        trigger?.focus();
-                      }, 80);
-                    }
-                  }}
-                  title={onUpdateBot ? "点击在设定中切换模型" : "当前模型与下一轮待生效模型"}
-                >
-                  {bot.model ? `当前 ${bot.model}` : ""}
-                  {bot.pendingPresetId
-                    ? `${bot.model ? " · " : ""}下一轮 ${presets.find((item) => item.id === bot.pendingPresetId)?.name || bot.pendingPresetId}`
-                    : ""}
-                </p>
-              )}
+              {bot && <BotModelPicker bot={bot} presets={presets} models={models}
+                disabled={disabled || isPreview || !onUpdateBot}
+                change={async presetId => { await onUpdateBot?.(bot.id, botModelSelectionPatch(presetId, bot.presetId)); }} />}
+
             </div>
             {editingDesc && bot ? (
               <div className="bot-chat-desc-edit-wrap">
@@ -2431,7 +2401,8 @@ export function BotChat({
               className={"bot-quiet-button" + (onboardingEditing ? " is-active" : "")}
               type="button"
               onClick={() => {
-                setOnboardingEditing((prev) => !prev);
+                if (onboardingEditing) closePresetRef.current?.();
+                else setOnboardingEditing(true);
                 setSchedulePanelOpen(false);
               }}
               aria-label="打开设定"
@@ -2447,8 +2418,8 @@ export function BotChat({
               className={"bot-quiet-button" + (schedulePanelOpen ? " is-active" : "")}
               type="button"
               onClick={() => {
+                // The preset panel capture handler already guards this outside click.
                 setSchedulePanelOpen((prev) => !prev);
-                setOnboardingEditing(false);
               }}
               aria-label="打开定时面板"
               aria-pressed={schedulePanelOpen}
@@ -2929,8 +2900,9 @@ export function BotChat({
             disabled={disabled}
             busy={busy}
             onChange={(next) => {
-              void onUpdateBot(bot.id, { fleetPolicy: next }).catch((cause) => {
+              return onUpdateBot(bot.id, { fleetPolicy: next }).catch((cause) => {
                 setError(cause instanceof Error ? cause.message : "没存上，再点一次。");
+                throw cause;
               });
             }}
           />
@@ -3118,7 +3090,7 @@ export function BotChat({
                     </button>
                     <button type="button" className="bot-schedule-option" onClick={() => selectSchedulePreset("tonight")}>
                       <Clock3 size={14} />
-                      <span>今晚 20:00</span>
+                      <span>{nextEvening(scheduleNow).label}</span>
                     </button>
                     <button type="button" className="bot-schedule-option" onClick={() => selectSchedulePreset("tomorrow")}>
                       <Calendar size={14} />
@@ -3265,6 +3237,7 @@ export function BotChat({
       <BotPresetPanel
         bot={bot}
         onClose={() => setOnboardingEditing(false)}
+        requestCloseRef={closePresetRef}
         onUpdateBot={onUpdateBot}
         preview={isPreview}
         presets={presets}
@@ -3278,6 +3251,12 @@ export function BotChat({
         tasks={tasks}
         preview={isPreview}
         onClose={() => setSchedulePanelOpen(false)}
+        onCreate={() => {
+          setSchedulePanelOpen(false);
+          placeSchedulePopover();
+          popoverRef.current?.showPopover();
+          popoverRef.current?.querySelector<HTMLButtonElement>(".bot-schedule-option")?.focus();
+        }}
         onChange={onSchedulesChange}
         onSelectTask={onSelectTask}
         wakeControl={

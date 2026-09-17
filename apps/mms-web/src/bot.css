@@ -1683,39 +1683,9 @@
   color: var(--muted);
 }
 
-.bot-fleet-family-wrap {
-  position: relative;
-}
-
-.bot-fleet-model-menu {
-  display: none;
-  position: absolute;
-  left: 0;
-  bottom: 100%;
-  z-index: 40;
-  padding: 0 0 10px;
-  background: transparent;
-  border: 0;
-}
-
-.bot-fleet-family-wrap:hover .bot-fleet-model-menu,
-.bot-fleet-family-wrap:focus-within .bot-fleet-model-menu {
-  display: block;
-}
-
-.bot-fleet-model-panel {
-  min-width: 148px;
-  max-height: 220px;
-  overflow: auto;
-  padding: 4px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface);
-  box-shadow: 0 8px 20px color-mix(in srgb, var(--ink) 12%, transparent);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
+.bot-fleet-family-wrap { display: inline-flex; gap: 3px; align-items: center; }
+.bot-fleet-model-trigger { min-width: 28px; justify-content: center; }
+.bot-fleet-model-panel { display: flex; flex-direction: column; gap: 2px; }
 
 .bot-fleet-model-item {
   appearance: none;
@@ -3678,4 +3648,14 @@
 .bot-dispatch-schedule legend small {
   color: var(--muted);
   font-weight: 400;
+}
+
+/* Touch actions retain the compact desktop layout while providing distinct targets. */
+@media (max-width: 640px), (pointer: coarse) {
+  .bot-chat-title-row .bot-chat-model-line,
+  .bot-chat-header-actions .bot-quiet-button,
+  .bot-fleet-chip, .bot-fleet-model-item, .bot-schedule-option { min-height: 44px; }
+  .bot-fleet-model-trigger { min-width: 44px; }
+  .bot-chat-send, .bot-chat-schedule-trigger { min-width: 44px; width: 44px; height: 44px; }
+  .bot-chat-send-group { gap: 8px; }
 }

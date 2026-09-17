@@ -109,3 +109,11 @@ export function fleetPreviewLabel(policy: BotFleetPolicy, families: string[], pr
   }
   return `发出去会再问 ${auto.length} 家${policy.intensity === "intense" ? "，问仔细" : ""}`;
 }
+
+/** Reject known-invalid explicit selection before dispatch, keeping the draft.
+ * Automatic selection retains the backend's availability/fallback decision. */
+export function fleetSelectionError(raw?: Partial<BotFleetPolicy> | null, requested = false): string {
+  const policy = normalizeFleetPolicy(raw);
+  if (!(policy.enabled || requested) || policy.families.length !== 1) return "";
+  return "场外帮助至少需要 2 家。请再选一家，或点「2 家」自动选择；也可以关闭场外帮助后发送。";
+}

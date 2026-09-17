@@ -1,3 +1,5 @@
+import { useRef, useState } from "react";
+import { RadioMenu } from "./RadioMenu";
 import { ChevronDown, ArrowUpRight, Brain, Check } from "lucide-react";
 import type { Model, Preset, SessionDetail } from "./types";
 import type { LaunchFacts } from "./ModelExplorer";
@@ -38,6 +40,20 @@ export function EffortPicker({
   title?: string;
   dataGuide?: string;
 }) {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+  const inFlight = useRef(false);
+  async function choose(level: string, close: () => void) {
+    if (disabled || inFlight.current) return;
+    if (level === value) { close(); return; }
+    inFlight.current = true; setPending(true); setError("");
+    try {
+      if (await change(level) === false) setError("思考强度未更新，请重试。");
+      else close();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "思考强度未更新，请重试。");
+    } finally { inFlight.current = false; setPending(false); }
+  }
   const isCustom = Boolean(value && value !== "");
   const isUnsupported = Boolean(isCustom && !levels.includes(value));
   const isDefaultActive = !isCustom || !value;
@@ -65,14 +81,14 @@ export function EffortPicker({
           <>
             <Brain size={13} className="task-effort-icon" />
             <span className="task-effort-prefix">思考 · </span>
-            <span className="task-effort">{currentLabel}</span>
+            <span className="task-effort">{pending ? "更新中…" : currentLabel}</span>
             <ChevronDown size={13} />
           </>
         )
       }
     >
-      {(close) => (
-        <div className="effort-menu" role="menu" aria-label="选择思考强度">
+      {(close, open) => (
+        <RadioMenu active={open} className="effort-menu" label="选择思考强度">
           <div className="effort-menu-header">
             <span>{title}</span>
             <small>推理与分析深度</small>
@@ -95,12 +111,12 @@ export function EffortPicker({
             )}
             {allowDefault && <button
               type="button"
+              disabled={pending || disabled}
               role="menuitemradio"
               aria-checked={isDefaultActive}
               className={`effort-menu-item ${isDefaultActive ? "active" : ""}`}
               onClick={() => {
-                void change("");
-                close();
+                void choose("", close);
               }}
             >
               <div className="effort-menu-item-info">
@@ -118,12 +134,12 @@ export function EffortPicker({
                 <button
                   key={level}
                   type="button"
+                  disabled={pending || disabled}
                   role="menuitemradio"
                   aria-checked={isSelected}
                   className={`effort-menu-item ${isSelected ? "active" : ""}`}
                   onClick={() => {
-                    void change(level);
-                    close();
+                    void choose(level, close);
                   }}
                 >
                   <div className="effort-menu-item-info">
@@ -140,7 +156,9 @@ export function EffortPicker({
               );
             })}
           </div>
-        </div>
+          {pending && <p className="popover-note" role="status">正在更新思考强度…</p>}
+          {error && <p className="inline-alert" role="alert">{error}</p>}
+        </RadioMenu>
       )}
     </Popover>
   );

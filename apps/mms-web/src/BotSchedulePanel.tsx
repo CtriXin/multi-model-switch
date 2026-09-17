@@ -38,6 +38,7 @@ interface BotSchedulePanelProps {
   tasks?: BotTask[];
   preview?: boolean;
   onClose: () => void;
+  onCreate?: () => void;
   onChange?: () => void;
   onSelectTask?: (task: BotTask) => void;
   wakeControl?: ReactNode;
@@ -62,6 +63,7 @@ export function BotSchedulePanel({
   tasks = [],
   preview = false,
   onClose,
+  onCreate,
   onChange,
   onSelectTask,
   wakeControl,
@@ -285,7 +287,8 @@ export function BotSchedulePanel({
         {!schedules.length ? (
           <div className="bot-schedule-empty">
             <p>这个 Bot 现在没有定时安排。</p>
-            <p>在聊天框右边的定时按钮里选周期，或者直接跟它说「每天早上九点…」。</p>
+            <p>选择时间后，在聊天框输入要做的事并发送。</p>
+            {onCreate && <button type="button" className="bot-chat-secondary" disabled={preview} onClick={onCreate}><Timer size={15} />添加定时</button>}
             <p className="bot-schedule-empty-bound">Pilot 关着的时候定时不会触发，这是本机应用的边界。</p>
           </div>
         ) : (

@@ -13,8 +13,8 @@ test("BotPresetPanel supports click-outside and escape key with dirty guard", ()
   // Panel ref binding
   assert.match(source, /ref=\{panelRef\}/, "panelRef must be attached to the aside element");
 
-  // Click-outside listener on pointerdown
-  assert.match(source, /document\.addEventListener\("pointerdown", handlePointerDown\)/);
+  // Capture clicks so cancelling a dirty close also cancels the outside action
+  assert.match(source, /document\.addEventListener\("click", handleOutsideClick, true\)/);
   assert.match(source, /panel\.contains\(target\)/);
 
   // Trigger button exclusion so clicking the trigger button does not cause double toggling

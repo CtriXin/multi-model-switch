@@ -158,6 +158,7 @@ export function ModelExplorer({
   toggleFavorite,
   choose,
   effortChanged,
+  scope = "web",
 }: {
   presets: Preset[];
   models: Model[];
@@ -167,6 +168,7 @@ export function ModelExplorer({
   favorites: string[];
   toggleFavorite: (id: string) => void;
   choose?: () => void;
+  scope?: "web" | "bot";
   effortChanged?: (id: string) => void;
 }) {
   const [query, setQuery] = useState("");
@@ -208,6 +210,7 @@ export function ModelExplorer({
         <label className="picker-search">
           <Search size={17} />
           <input
+            data-autofocus=""
             autoFocus
             aria-label="搜索模型或通道"
             placeholder="搜索模型、公司或通道…"
@@ -437,7 +440,7 @@ export function ModelExplorer({
                     />
                     设为这个模型的默认通道
                   </label>
-                  {facts && (
+                  {facts && scope === "web" && (
                     <label>
                       Web 默认 effort
                       <select
@@ -461,6 +464,7 @@ export function ModelExplorer({
                   </small>
                 </details>
               </div>
+              {scope === "bot" && <p className="section-note">Bot 的思考强度跟随 MMS 默认；浏览器的 Web 默认 effort 不影响 Bot。切换模型时，运行中的任务仍使用原模型，下一轮生效。</p>}
               {choose && (
                 <button
                   type="button"
