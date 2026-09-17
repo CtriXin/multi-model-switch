@@ -10,86 +10,7 @@ from mms_capability_resolver import CapabilityBundleError
 from mms_capability_resolver import resolve_model_capabilities
 
 
-def _write_bundle(
-    config_dir: Path,
-    *,
-    profile_payload: dict | None = None,
-    capabilities_payload: dict | None = None,
-) -> Path:
-    generated = config_dir / "generated"
-    router = generated / "model-routes.json"
-    lineup = generated / "model-routes.lineup.json"
-    profile = generated / "provider-profiles.generated.json"
-    policy = generated / "model-policy.effective.json"
-    capabilities = generated / "model-capabilities.approved.json"
-
-    mms_registry.write_json_atomic(router, {"version": 1, "routes": {}})
-    mms_registry.write_json_atomic(lineup, {"version": 1, "routes": {}})
-    mms_registry.write_json_atomic(
-        profile,
-        profile_payload
-        or {
-            "schema_version": 1,
-            "profiles": {},
-        },
-    )
-    mms_registry.write_json_atomic(policy, {"version": 1, "models": {}})
-    mms_registry.write_json_atomic(
-        capabilities,
-        capabilities_payload
-        or {
-            "schema": "mms.model_capabilities.approved.v1",
-            "models": [],
-        },
-    )
-    files = {
-        "router": {
-            "path": router,
-            "canonical_path": "generated/model-routes.json",
-            "legacy_alias_path": "model-routes.json",
-            "sensitivity": "secret",
-            "legacy_alias_compat": True,
-        },
-        "lineup": {
-            "path": lineup,
-            "canonical_path": "generated/model-routes.lineup.json",
-            "legacy_alias_path": "model-routes.lineup.json",
-            "sensitivity": "non-secret",
-            "legacy_alias_compat": True,
-        },
-        "profile": {
-            "path": profile,
-            "canonical_path": "generated/provider-profiles.generated.json",
-            "sensitivity": "non-secret",
-            "legacy_alias_compat": False,
-        },
-        "policy": {
-            "path": policy,
-            "canonical_path": "generated/model-policy.effective.json",
-            "legacy_alias_path": "model-policy.json",
-            "sensitivity": "non-secret",
-            "legacy_alias_compat": True,
-        },
-        "capabilities": {
-            "path": capabilities,
-            "canonical_path": "generated/model-capabilities.approved.json",
-            "sensitivity": "non-secret",
-            "legacy_alias_compat": False,
-        },
-    }
-
-    manifest_path = generated / "model-registry.latest-approved.json"
-    mms_registry.export_latest_approved_bundle_manifest(
-        manifest_path,
-        bundle_revision="bundle_test_001",
-        capability_revision="cap_test_001",
-        route_revision="route_test_001",
-        policy_revision="policy_test_001",
-        profile_revision="profile_test_001",
-        generated_at="2026-05-22T00:00:00.000Z",
-        files=files,
-    )
-    return manifest_path
+from approved_bundle import write_bundle as _write_bundle
 
 
 def test_provider_profiles_use_verified_latest_approved_before_legacy(monkeypatch, tmp_path: Path) -> None:
@@ -138,8 +59,8 @@ def test_provider_profiles_use_verified_latest_approved_before_legacy(monkeypatc
     )
 
 
-def test_provider_profiles_use_legacy_only_when_latest_manifest_missing(monkeypatch, tmp_path: Path) -> None:
-    config_root = tmp_path / "xdg" / "mms"
+def test_provider_profiles_refuse_unapproved_overlay_when_manifest_missing(monkeypatch, tmp_path: Path) -> None:
+    config_root = tmp_path / "xdg" / "mms-next"
     config_root.mkdir(parents=True)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(config_root.parent))
     monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
@@ -163,13 +84,13 @@ def test_provider_profiles_use_legacy_only_when_latest_manifest_missing(monkeypa
             "legacy-model",
             provider_id="legacy-provider",
         )
-        == 111_000
+        is None
     )
 
 
 def test_provider_profile_cache_is_scoped_by_config_root(monkeypatch, tmp_path: Path) -> None:
-    root_a = tmp_path / "root-a" / "mms"
-    root_b = tmp_path / "root-b" / "mms"
+    root_a = tmp_path / "root-a" / "mms-next"
+    root_b = tmp_path / "root-b" / "mms-next"
     root_a.mkdir(parents=True)
     root_b.mkdir(parents=True)
     mms_registry.write_json_atomic(
@@ -196,6 +117,9 @@ def test_provider_profile_cache_is_scoped_by_config_root(monkeypatch, tmp_path: 
             },
         },
     )
+
+    for root in (root_a, root_b):
+        _write_bundle(root, profile_payload=json.loads((root / "provider-profiles.json").read_text()))
 
     import mms_provider_profiles
 
@@ -238,6 +162,8 @@ def test_capability_resolver_uses_verified_latest_approved_by_default(monkeypatc
 
     generated_caps = tmp_path / "generated" / "model-capabilities.approved.json"
     generated_caps.write_text(json.dumps({"models": []}), encoding="utf-8")
+    from mms_capability_resolver import clear_capability_resolver_caches
+    clear_capability_resolver_caches()
 
     with pytest.raises(CapabilityBundleError, match="latest-approved capabilities unavailable"):
         resolve_model_capabilities("approved-model")

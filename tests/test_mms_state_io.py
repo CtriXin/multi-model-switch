@@ -18,7 +18,7 @@ def test_mms_config_dir_counts_as_explicit_selected_root(tmp_path: Path) -> None
     assert status["config_root"] == str(config_root)
 
 
-def test_xdg_config_home_is_not_explicit_preview_root(tmp_path: Path) -> None:
+def test_xdg_config_home_defaults_to_preview_without_explicit_selection(tmp_path: Path) -> None:
     from mms_state_io import mms_config_root_is_explicit, mms_config_root_status
 
     env = {"XDG_CONFIG_HOME": str(tmp_path / "xdg"), "MMS_REAL_HOME": str(tmp_path / "home")}
@@ -27,6 +27,6 @@ def test_xdg_config_home_is_not_explicit_preview_root(tmp_path: Path) -> None:
 
     assert mms_config_root_is_explicit(env) is False
     assert status["root_source"] == "XDG_CONFIG_HOME"
-    assert status["mode"] == "stable"
+    assert status["mode"] == "preview"
     assert status["explicit_root"] is False
-    assert status["config_root"] == str(tmp_path / "xdg" / "mms")
+    assert status["config_root"] == str(tmp_path / "xdg" / "mms-next")

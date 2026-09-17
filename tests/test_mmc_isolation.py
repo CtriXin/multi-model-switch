@@ -141,13 +141,13 @@ def test_build_session_settings_only_uses_repo_allowlisted_hooks(monkeypatch, tm
         for hook in group["hooks"]
     ]
 
-    assert set(hooks.keys()) == {"PreToolUse", "PostCompact"}
+    assert set(hooks.keys()) == {"PreToolUse"}
     assert any(group["matcher"] == "Bash" for group in hooks["PreToolUse"])
-    assert any(group["matcher"] == "Read" for group in hooks["PreToolUse"])
-    assert hooks["PostCompact"][0]["matcher"] == ""
+    assert all(group["matcher"] != "Read" for group in hooks["PreToolUse"])
+    assert "PostCompact" not in hooks
     assert any("rtk-rewrite.sh" in command for command in commands)
-    assert any("READ_ONCE_DIFF=1" in command and "read-once-hook.sh" in command for command in commands)
-    assert any("read-once-compact.sh" in command for command in commands)
+    assert all("read-once-hook.sh" not in command for command in commands)
+    assert all("read-once-compact.sh" not in command for command in commands)
     assert all("agentim" not in command for command in commands)
     assert all("hive-compact-hook.sh" not in command for command in commands)
     assert all("claude-map-auto-index.sh" not in command for command in commands)

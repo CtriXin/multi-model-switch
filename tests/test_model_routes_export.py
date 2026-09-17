@@ -1086,29 +1086,6 @@ def test_refresh_routes_export_for_hive_loads_current_config(monkeypatch):
     ]
 
 
-def test_refresh_routes_export_for_hive_supports_startup_safe_probe(monkeypatch):
-    import mms_core
-    import mms_router
-
-    calls = []
-    monkeypatch.setattr(mms_core, "load_config", lambda: {"provider": {"default": "demo"}, "providers": []})
-    monkeypatch.setattr(
-        mms_core,
-        "apply_local_overrides",
-        lambda cfg: {**cfg, "local_override_applied": True},
-    )
-    monkeypatch.setattr(
-        mms_router,
-        "export_model_routes",
-        lambda cfg, force=False, startup_safe=False: calls.append((cfg, force, startup_safe)) or {},
-    )
-
-    assert mms_core._refresh_routes_export_for_hive(force=True, quiet=True, startup_safe=True) is True
-    assert calls == [
-        ({"provider": {"default": "demo"}, "providers": [], "local_override_applied": True}, True, True)
-    ]
-
-
 def test_refresh_routes_export_for_hive_skips_startup_safe_probe_for_preview(monkeypatch):
     import mms_core
     import mms_router

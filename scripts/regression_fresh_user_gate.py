@@ -100,6 +100,7 @@ _PYTEST_TARGETS = [
     "tests/test_hook_retirement.py",
     "tests/test_owned_superset_hook.py",
     "tests/test_pi_launcher.py",
+    "tests/test_opencode_first_run.py",
     "tests/test_mms_installer_runtime.py",
     "tests/test_command_smoke.py",
 ]
@@ -212,6 +213,7 @@ def _base_env() -> dict[str, str]:
     env = os.environ.copy()
     for key in _SCRUB_ENV_KEYS:
         env.pop(key, None)
+    env["MMS_TEST_ALLOW_REAL_CONFIG"] = "0"
     env["PYTHONPATH"] = str(ROOT_DIR)
     return env
 

@@ -681,6 +681,7 @@ def test_config_web_bundle_runtime_ignores_remote_probe_cache(monkeypatch):
     assert rows[0]["source"] == "approved"
 
 
+@pytest.mark.usefixtures("approved_preview_bundle")
 def test_config_web_model_capability_defaults_are_profile_backed_not_hardcoded():
     cfg = {
         "providers": [
@@ -4525,6 +4526,7 @@ def test_config_web_model_smoke_shows_openrouter_claude_403_error(monkeypatch):
     assert "sk-or-v1-secretvalue123456" not in encoded
 
 
+@pytest.mark.usefixtures("approved_preview_bundle")
 def test_config_web_provider_model_fetch_returns_policy_capabilities(monkeypatch, tmp_path):
     (tmp_path / "model-policy.json").write_text(
         json.dumps(

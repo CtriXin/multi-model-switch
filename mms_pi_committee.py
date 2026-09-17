@@ -700,6 +700,7 @@ def _prepare_attempt(member: MemberSpec, candidate: ModelCandidate, binding: Rou
         "name": binding.provider_id,
         "api_key": binding.api_key,
         "model": candidate.model,
+        "protocols": [binding.protocol],
         "provider_profile": binding.provider_profile,
         "_launch_prefetched_probe": {"models": [candidate.model]},
     }

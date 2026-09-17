@@ -54,9 +54,14 @@ def _clean_env() -> dict[str, str]:
         "MMS_SESSION_HOME",
         "MMS_PI_EXECUTABLE",
         "XDG_CONFIG_HOME",
+        "MMS_COMMAND_NAME",
+        "MMS_PI_SKILLS_OVERLAY",
+        "LANG",
+        "LC_ALL",
     ):
         env.pop(key, None)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["MMS_TEST_ALLOW_REAL_CONFIG"] = "0"
     return env
 
 

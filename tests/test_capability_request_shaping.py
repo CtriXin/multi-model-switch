@@ -13,7 +13,7 @@ def _profiles(monkeypatch, tmp_path):
 
 
 def test_profile_budget_patch_maps_reasoning_effort(monkeypatch, tmp_path):
-    config_root = tmp_path / "mms"
+    config_root = tmp_path / "mms-next"
     config_root.mkdir()
     (config_root / "provider-profiles.json").write_text(
         json.dumps(
@@ -40,6 +40,8 @@ def test_profile_budget_patch_maps_reasoning_effort(monkeypatch, tmp_path):
         ),
         encoding="utf-8",
     )
+    from approved_bundle import write_bundle
+    write_bundle(config_root, profile_payload=json.loads((config_root / "provider-profiles.json").read_text()))
     profiles = _profiles(monkeypatch, tmp_path)
     payload = {"model": "gemini-3-flash-preview", "messages": []}
 

@@ -157,7 +157,7 @@ class UpdateService:
 
     def channel(self):
         value = read_json(self.root / 'settings.json').get('channel', 'stable')
-        return value if value in {'stable', 'preview'} else 'stable'
+        return value if isinstance(value, str) and value in {'stable', 'preview'} else 'stable'
 
     def _cache_path(self, channel=None):
         return self.root / ('check-preview.json' if (channel or self.channel()) == 'preview' else 'check.json')
@@ -225,7 +225,7 @@ class UpdateService:
         current = read_json(self.root / 'settings.json')
         enabled = payload.get('enabled', current.get('enabled', True))
         channel = payload.get('channel', current.get('channel', 'stable'))
-        if not isinstance(enabled, bool) or channel not in {'stable', 'preview'}:
+        if not isinstance(enabled, bool) or not isinstance(channel, str) or channel not in {'stable', 'preview'}:
             raise WebError('INVALID_REQUEST', '更新检查设置无效。', 400)
         private_json(self.root / 'settings.json', {'enabled': enabled, 'channel': channel})
         return self.status()

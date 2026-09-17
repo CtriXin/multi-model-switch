@@ -240,3 +240,16 @@ def test_preview_fetch_refuses_a_list_with_no_published_prerelease():
         except ValueError:
             return
         raise AssertionError('a stable-only list must not yield a preview release')
+
+
+def test_update_channel_rejects_non_string_and_recovers_corrupt_settings(tmp_path):
+    import pytest
+    from mms_web.errors import WebError
+    s = service(tmp_path)
+    for value in ([], {}, 7, None):
+        with pytest.raises(WebError) as caught:
+            s.preferences({"channel": value})
+        assert caught.value.status == 400
+        private_json(s.root / "settings.json", {"channel": value})
+        assert s.channel() == "stable"
+        assert s.status()["channel"] == "stable"
