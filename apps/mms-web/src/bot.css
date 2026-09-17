@@ -578,6 +578,20 @@
   max-width: 240px;
   min-width: 0;
   flex-shrink: 1;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+  user-select: none;
+}
+
+.bot-chat-title-row .bot-chat-model-line:hover {
+  background: color-mix(in srgb, var(--accent) 10%, var(--soft));
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
+  color: var(--ink);
+}
+
+.bot-chat-title-row .bot-chat-model-line:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .bot-chat-title-group p {

@@ -2322,7 +2322,36 @@ export function BotChat({
                 />
               )}
               {bot && (bot.model || bot.pendingPresetId) && (
-                <p className="bot-chat-model-line" title="当前模型与下一轮待生效模型">
+                <p
+                  className="bot-chat-model-line"
+                  role={onUpdateBot ? "button" : undefined}
+                  tabIndex={onUpdateBot ? 0 : -1}
+                  onClick={() => {
+                    if (!onUpdateBot) return;
+                    setOnboardingEditing(true);
+                    setSchedulePanelOpen(false);
+                    setTimeout(() => {
+                      const section = document.getElementById("bot-preset-model-section");
+                      section?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+                      const trigger = section?.querySelector<HTMLElement>(".model-picker-trigger, button");
+                      trigger?.focus();
+                    }, 80);
+                  }}
+                  onKeyDown={(e) => {
+                    if (onUpdateBot && (e.key === "Enter" || e.key === " ")) {
+                      e.preventDefault();
+                      setOnboardingEditing(true);
+                      setSchedulePanelOpen(false);
+                      setTimeout(() => {
+                        const section = document.getElementById("bot-preset-model-section");
+                        section?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+                        const trigger = section?.querySelector<HTMLElement>(".model-picker-trigger, button");
+                        trigger?.focus();
+                      }, 80);
+                    }
+                  }}
+                  title={onUpdateBot ? "点击在设定中切换模型" : "当前模型与下一轮待生效模型"}
+                >
                   {bot.model ? `当前 ${bot.model}` : ""}
                   {bot.pendingPresetId
                     ? `${bot.model ? " · " : ""}下一轮 ${presets.find((item) => item.id === bot.pendingPresetId)?.name || bot.pendingPresetId}`

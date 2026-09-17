@@ -293,7 +293,7 @@ export function BotPresetPanel({
           </p>
         )}
 
-        <section className="bot-memory-section">
+        <section className="bot-memory-section" id="bot-preset-model-section">
           <div className="bot-memory-section-heading">
             <h3>默认模型</h3>
           </div>
