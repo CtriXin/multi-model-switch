@@ -229,12 +229,14 @@ class _LiveSession:
 
     def session_caps(self) -> dict:
         alive = self.alive() and not self.finalized
+        grok = str(self.meta.get("harness") or "") == "grok"
         return {
             "send": bool(alive or self.can_resume()),
             "stop": bool(alive),
             "approve": bool(alive and self.approvals),
-            "steer": bool(alive),
+            "steer": bool(alive) and not grok,
             "queueControl": bool(alive),
+            "sideQuestions": not grok,
         }
 
     def session_view(self) -> dict:
@@ -753,6 +755,8 @@ class SessionService(SessionActions, SessionSideQuestions):
         mode = str(payload.get("mode") or "followUp")
         if mode not in {"followUp", "steer"}:
             raise WebError("INVALID_PARAMETER", "mode 必须是 followUp 或 steer。", 400)
+        if mode == "steer" and session.meta.get("harness") == "grok":
+            raise WebError("CAPABILITY_UNAVAILABLE", "Grok 会话不支持立即引导。运行中的消息会排队，当前轮结束后发送。", 409)
         op_payload = {"op": "send", "sessionId": session.meta["id"], "text": text, "mode": mode, "skills": payload.get("skills", []), "attachments": payload.get("attachments", []), "references": payload.get("references", []), "fileSelections": payload.get("fileSelections", [])}
         with session.mutation_lock, self._request_scope(request_id, op_payload, session) as replay:
             if replay is not None:
@@ -830,6 +834,8 @@ class SessionService(SessionActions, SessionSideQuestions):
         event_id = str(payload.get("id") or "")
         if action not in {"remove", "steer", "move"}:
             raise WebError("UNKNOWN_COMMAND", "队列只支持删除、改为引导或调整顺序。", 400)
+        if action == "steer" and session.meta.get("harness") == "grok":
+            raise WebError("CAPABILITY_UNAVAILABLE", "Grok 会话不支持立即引导。", 409)
         request_id = self._validate_request_id(payload.get("requestId"))
         op_payload = {"op": "queue", "sessionId": session.meta["id"], "action": action,
                       "id": event_id, "toIndex": payload.get("toIndex")}

@@ -87,6 +87,27 @@ def test_grok_launch_send_stop(service):
     assert view["state"] in {"idle", "stopped"}
 
 
+def test_grok_hides_steer_and_btw(service):
+    detail = service.launch(
+        {
+            "requestId": "grok-hide",
+            "workspaceId": "ws",
+            "presetId": "web:grok:prov:dummy",
+            "prompt": "hello grok",
+        }
+    )
+    session_id = detail["session"]["id"]
+    caps = detail["session"]["capabilities"]
+    assert caps["steer"] is False
+    assert caps["sideQuestions"] is False
+    with pytest.raises(WebError) as err:
+        service.send(session_id, {"requestId": "grok-steer", "text": "redirect", "mode": "steer"})
+    assert err.value.status == 409
+    with pytest.raises(WebError) as btw:
+        service.ask_side_question(session_id, {"question": "现在到哪一步了？"})
+    assert btw.value.status == 409
+
+
 def test_grok_plan_mode_starts_plan_agent(service):
     detail = service.launch(
         {

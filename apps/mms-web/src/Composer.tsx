@@ -410,7 +410,7 @@ export function Composer({
     if (!collapsed) fitToContent();
   }, [collapsed]);
   const items = [
-    ...commands.filter((c) => sessionId || ["help", "files"].includes(c.name)),
+    ...commands.filter((c) => (sessionId || ["help", "files"].includes(c.name)) && (c.name !== "btw" || !!sideQuestion)),
     ...nativeCommands.filter(
       (c) =>
         !commands.some((b) => b.name === c.name) &&
@@ -621,6 +621,7 @@ export function Composer({
           setFiles(true);
           ok = true;
         } else if (match[1] === "btw") {
+          if (!sideQuestion) throw new Error("当前执行工具不支持旁问。");
           const intent = readBtwCommand(match[2] || "");
           if (intent.kind === "compose") {
             enterSideQuestion();

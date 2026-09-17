@@ -94,6 +94,8 @@ export interface Session {
     /** The service accepts `mode: "steer"` on a message. Absent means every
      *  message queues as a follow-up, so the page offers no steer. */
     steer?: boolean;
+    /** `/btw` is available on this session. Absent or false hides the command. */
+    sideQuestions?: boolean;
     /** The service serves `/sessions/{id}/queue`, so single queued messages can
      *  be removed or reordered. Absent leaves only clearing the whole queue. */
     queueControl?: boolean;

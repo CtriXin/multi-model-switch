@@ -219,6 +219,8 @@ class SessionSideQuestions:
     def ask_side_question(self, session_id: str, payload: dict) -> dict:
         self._require_open()
         session = self._get(session_id)
+        if session.meta.get("harness") == "grok":
+            raise WebError("CAPABILITY_UNAVAILABLE", "Grok 会话不支持 /btw 旁问。", 409)
         payload = self._object_payload(payload)
         question = payload.get("question")
         if not isinstance(question, str) or not question.strip():

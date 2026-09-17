@@ -183,16 +183,7 @@ class GrokAcpDriver:
         return self._prompt(text, images=images, timeout=timeout)
 
     def steer(self, text: str, *, images=None, timeout: float | None = None) -> dict:
-        # Grok ACP has no Pi-style steer. Queue until idle rather than interrupt.
-        if images:
-            raise WebError("IMAGE_UNSUPPORTED", "Grok 排队补充暂不支持图片，请等本轮结束后发送。", 409)
-        with self._state_lock:
-            self._steering.append(str(text))
-        if not self._steer_notice_sent:
-            self._steer_notice_sent = True
-            self._notice("Grok 没有立即引导，这条消息会在当前轮结束后发送。", title="排队")
-        self._emit_queue()
-        return {"type": "response", "success": True, "data": {}}
+        raise WebError("CAPABILITY_UNAVAILABLE", "Grok 会话不支持立即引导。", 409)
 
     def follow_up(self, text: str, *, images=None, timeout: float | None = None) -> dict:
         if images:

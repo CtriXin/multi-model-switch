@@ -2241,11 +2241,14 @@ export function App() {
                             { action: "move", id, toIndex },
                           )
                         }
-                        steer={(id) =>
-                          void runAction(
-                            `/sessions/${encodeURIComponent(detail.session.id)}/queue`,
-                            { action: "steer", id },
-                          )
+                        steer={
+                          detail.session.capabilities.steer
+                            ? (id) =>
+                                void runAction(
+                                  `/sessions/${encodeURIComponent(detail.session.id)}/queue`,
+                                  { action: "steer", id },
+                                )
+                            : undefined
                         }
                         clear={() =>
                           void runAction(
@@ -2264,13 +2267,17 @@ export function App() {
                     sessionId={detail.session.id}
                     sessionAlive={!!detail.runtime?.alive}
                     scroll={scroll}
-                    sideQuestion={{
-                      ask: sideQuestions.ask,
-                      limitation:
-                        data.capabilities.sidecarCompletion === false
-                          ? "这个版本不能发起需要模型判断的旁问。进度、耗时、最近工具、审批和队列这类状态问题仍然可以回答。"
-                          : undefined,
-                    }}
+                    sideQuestion={
+                      detail.session.capabilities.sideQuestions === false
+                        ? undefined
+                        : {
+                            ask: sideQuestions.ask,
+                            limitation:
+                              data.capabilities.sidecarCompletion === false
+                                ? "这个版本不能发起需要模型判断的旁问。进度、耗时、最近工具、审批和队列这类状态问题仍然可以回答。"
+                                : undefined,
+                          }
+                    }
                     onCommand={async (command, args) => {
                       if (command === "export") {
                         exportConversation(detail);
