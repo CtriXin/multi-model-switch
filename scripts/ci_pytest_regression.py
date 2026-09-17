@@ -79,6 +79,7 @@ def run_suite(checkout: Path, target: str, report: Path, *, only: list[str] | No
     ]
     cmd.extend(only or [target])
     proc = subprocess.run(cmd, cwd=str(checkout), text=True, capture_output=True, env=_clean_env())
+    report.with_suffix(".log").write_text(proc.stdout + proc.stderr, encoding="utf-8")
     if not report.exists():
         # pytest died before writing a report: a collection error, a missing
         # dependency. That is a hard failure, not a comparison input.
@@ -161,13 +162,15 @@ def main() -> int:
     )
     parser.add_argument("--head", default="", help="Commit to test. Defaults to the working tree.")
     parser.add_argument("--target", default=DEFAULT_TARGET, help="Test path to run. Defaults to tests/.")
+    parser.add_argument("--report-dir", default="", help="Keep JUnit XML and captured output here for audit.")
     args = parser.parse_args()
 
     if not args.base.strip():
         print("No base commit given; nothing to compare against.", file=sys.stderr)
         return 2
 
-    workdir = Path(tempfile.mkdtemp(prefix="mms-pytest-gate-"))
+    workdir = Path(args.report_dir).resolve() if args.report_dir else Path(tempfile.mkdtemp(prefix="mms-pytest-gate-"))
+    workdir.mkdir(parents=True, exist_ok=True)
     created: list[Path] = []
     try:
         head_checkout = REPO_ROOT
@@ -243,7 +246,8 @@ def main() -> int:
         for checkout in created:
             _run(["git", "worktree", "remove", "--force", str(checkout)], cwd=REPO_ROOT)
         shutil.rmtree(REPO_ROOT / GATE_DIR_NAME, ignore_errors=True)
-        shutil.rmtree(workdir, ignore_errors=True)
+        if not args.report_dir:
+            shutil.rmtree(workdir, ignore_errors=True)
 
 
 if __name__ == "__main__":
