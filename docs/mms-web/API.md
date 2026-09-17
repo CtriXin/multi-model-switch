@@ -92,7 +92,7 @@ launch `{requestId,workspaceId,presetId,title,prompt}`；send `{requestId,text}`
 ## 已集成扩展
 
 - WebApplication 未提供 config_root 时，使用 state_root/config 完成新用户设置。CatalogService 自身的 config_root=None 仍表示禁用目录，不偷偷发现 HOME。
-- POST /workspaces 接收 {path}，返回 Workspace。POST /workspaces/browse 列出一层目录供弹窗内的文件夹树使用：只返回目录，不返回文件、大小或内容；隐藏目录、依赖目录和 symlink 不列出，每层最多 400 项。path 为空时返回「这台电脑」（家目录、已有工作文件夹、Windows 盘符或 POSIX /Volumes 挂载）。起点包括用户显式给出的绝对路径（POSIX 上含 `/`）；hidden / EXCLUDED / symlink 仍然过滤。盘符层只在 Windows 上执行。只由用户点击触发，不持 mutation lock。不再打开系统文件夹对话框。
+- POST /workspaces 接收 {path}，返回 Workspace。POST /workspaces/browse 列出一层目录供弹窗内的文件夹树使用：只返回目录，不返回文件、大小或内容；隐藏目录、依赖目录和 symlink 不列出，每层最多 400 项。path 为空时返回「这台电脑」（家目录、已有工作文件夹、Windows 盘符或 POSIX /Volumes 挂载）。起点包括用户显式给出的绝对路径（POSIX 上含 `/`）；hidden / EXCLUDED / symlink 仍然过滤。盘符层只在 Windows 上执行。只由用户点击触发，不持 mutation lock。不再打开系统文件夹对话框。显式绝对路径**没有 home 收束**，这是有意的：能力边界是 Pilot 的 token，不是这个接口——token 持有者本来就能在任意工作目录启动 CLI 并读写文件，列目录严格弱于此。代码里不要再加一个看起来在做包含检查、实际永远通过的判断（`browse_workspaces` 曾经有过一个，已删除）。
 - POST /workspaces/locate 接收 {name, children}，返回 {matches, sure}。用于浏览器只给出目录名的拖放：按已知工作目录、zoxide、系统索引和有界扫描查找同名目录，用 children 交集排序。sure 为 true 表示可直接引用，false 时由用户在“引用文件夹”中选择。只读取目录名，扫描有深度、数量和时间上限。
 - 自动模型组合 id 为 web:pi:<providerId>:<modelId>，由当前可用目录派生，不写回 MMS presets。
 - Event 增加 arguments、method、options、placeholder、prefill、answer。method 为 confirm/select/input/editor；select 回答必须是服务端收到的原始选项。任何问题都不自动代答。

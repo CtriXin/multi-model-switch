@@ -17,6 +17,7 @@ import threading
 import traceback
 import webbrowser
 from datetime import datetime, timezone
+import socketserver
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
@@ -565,13 +566,31 @@ class _SetupWebHandler(BaseHTTPRequestHandler):
             self._send(*_json_response({"ok": False, "error": str(exc), "trace": traceback.format_exc(limit=5)}, status=500))
 
 
+class SetupHTTPServer(ThreadingHTTPServer):
+    def server_bind(self):
+        # The stock server_bind resolves socket.getfqdn(host), which blocks for
+        # 30 seconds on a network whose router does not answer PTR queries --
+        # measured on a real LAN address. server_name is only read by the
+        # stdlib's CGI plumbing, which this server never runs, so keep the
+        # literal host and do no DNS here. mms_web/server.py PilotHTTPServer is
+        # the same override for the Pilot listeners; change the two together.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
+
+
+def create_setup_server(app: ConfigWebApp, *, host: str, port: int) -> SetupHTTPServer:
+    """Bind the setup WebUI. Split out of serve_config_web so a test can assert
+    which server class actually binds; serve_config_web itself blocks forever."""
+    handler = type("MMSSetupWebHandler", (_SetupWebHandler,), {"app": app})
+    return SetupHTTPServer((host, int(port)), handler)
+
+
 def serve_config_web(app_or_snapshot: ConfigWebApp | dict[str, Any], *, host: str, port: int, open_browser: bool = True) -> str:
     if isinstance(app_or_snapshot, ConfigWebApp):
         app = app_or_snapshot
     else:
         app = ConfigWebApp({}, command_name="mms")
-    handler = type("MMSSetupWebHandler", (_SetupWebHandler,), {"app": app})
-    server = ThreadingHTTPServer((host, int(port)), handler)
+    server = create_setup_server(app, host=host, port=port)
     actual_host, actual_port = server.server_address[:2]
     url = f"http://{actual_host}:{actual_port}/"
     thread = threading.Thread(target=server.serve_forever, daemon=True, name="mms-setup-web")
