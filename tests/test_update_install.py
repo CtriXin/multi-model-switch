@@ -162,13 +162,120 @@ def test_the_upgrade_notice_is_the_release_section_and_nothing_else():
     assert upgrade_notice(None) == ""
 
 
-def _spec(tmp_path, *, old_source: Path, staged: Path) -> dict:
+def _spec(tmp_path, *, old_source: Path, staged: Path, target: str = "v2.0.0",
+          prerelease: bool = False, config: Path | None = None) -> dict:
     state = tmp_path / "state"
     (state / "updates").mkdir(parents=True, exist_ok=True)
     operation_root = state / "updates" / "operations" / "op-1"
     operation_root.mkdir(parents=True)
-    return {"state": str(state), "source": str(staged), "oldSource": str(old_source),
-            "target": "v2.0.0", "armed": str(operation_root / "armed")}
+    spec = {"state": str(state), "source": str(staged), "oldSource": str(old_source),
+            "target": target, "prerelease": prerelease, "armed": str(operation_root / "armed")}
+    if config is not None:
+        spec["config"] = str(config)
+    return spec
+
+
+def _version_meta(config: Path, **fields) -> None:
+    """version.json as install.sh leaves it, overlaid with the given fields."""
+    meta = {"installed_ref": "v4.18.0", "installed_version": "v4.18.0",
+            "install_channel": "stable", "release_track": "stable",
+            "release_track_version": "4.18.0", "release_track_label": "4.x Stable",
+            "preferred_language": "zh", "installed_at": "2026-01-01T00:00:00Z",
+            "source": "install.sh"}
+    meta.update(fields)
+    config.mkdir(parents=True, exist_ok=True)
+    (config / "version.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def test_an_update_records_what_it_installed_in_version_json(tmp_path):
+    """install.sh owned version.json alone; an in-app update must keep it true."""
+    from mms_web.update_handoff import install_alongside
+
+    installed = _release(tmp_path / "installed", version="1.0.0")
+    staged = _release(tmp_path / "staged", version="4.22.4")
+    config = tmp_path / "config"
+    _version_meta(config, preferred_language="en")
+    spec = _spec(tmp_path, old_source=installed, staged=staged, target="v4.22.4", config=config)
+
+    assert install_alongside(spec) is True
+    meta = json.loads((config / "version.json").read_text(encoding="utf-8"))
+    assert meta["installed_ref"] == "v4.22.4"
+    assert meta["installed_version"] == "v4.22.4"
+    assert meta["install_channel"] == "stable"
+    assert meta["release_track"] == "stable"
+    assert meta["release_track_version"] == "4.22.4"
+    assert meta["release_track_label"] == "4.x Stable"
+    assert meta["source"] == "pilot-update"
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", meta["installed_at"])
+    report = json.loads((Path(spec["armed"]).parent / "installation.json").read_text())
+    assert report["installed"] is True and report["versionRecord"]["recorded"] is True
+
+
+def test_a_preview_update_records_the_preview_line(tmp_path):
+    """The channel comes from the tag's prerelease flag, not the setting.
+
+    A user who switched to preview and updated is legitimately installed on
+    the preview line; the record saying "stable" is the lie T8d caught live.
+    """
+    from mms_web.update_handoff import install_alongside
+
+    installed = _release(tmp_path / "installed", version="4.22.4")
+    staged = _release(tmp_path / "staged", version="5.0.6")
+    config = tmp_path / "config"
+    _version_meta(config, installed_version="v4.22.4", release_track_version="4.22.4")
+    spec = _spec(tmp_path, old_source=installed, staged=staged, target="v5.0.6",
+                 prerelease=True, config=config)
+
+    assert install_alongside(spec) is True
+    meta = json.loads((config / "version.json").read_text(encoding="utf-8"))
+    assert meta["installed_version"] == "v5.0.6"
+    assert meta["install_channel"] == "preview"
+    assert meta["release_track"] == "preview"
+    assert meta["release_track_version"] == "5.0.6"
+    assert meta["release_track_label"] == "5.x Preview"
+
+
+def test_user_preferences_in_version_json_survive_the_update(tmp_path):
+    """The file mixes install metadata with user preferences; merge, not replace."""
+    from mms_web.update_handoff import install_alongside
+
+    installed = _release(tmp_path / "installed", version="1.0.0")
+    staged = _release(tmp_path / "staged", version="4.22.4")
+    config = tmp_path / "config"
+    _version_meta(config, preferred_language="en", preferred_theme="dark", custom_marker=True)
+    spec = _spec(tmp_path, old_source=installed, staged=staged, target="v4.22.4", config=config)
+
+    assert install_alongside(spec) is True
+    meta = json.loads((config / "version.json").read_text(encoding="utf-8"))
+    assert meta["preferred_language"] == "en"
+    assert meta["preferred_theme"] == "dark"
+    assert meta["custom_marker"] is True
+    assert meta["installed_ref"] == "v4.22.4"
+
+
+def test_a_failed_version_record_does_not_fail_the_update(tmp_path, monkeypatch, capsys):
+    """The files are already replaced; a record must never cost the update."""
+    from mms_web.update_handoff import install_alongside
+
+    installed = _release(tmp_path / "installed", version="1.0.0")
+    staged = _release(tmp_path / "staged", version="4.22.4")
+    config = tmp_path / "config"
+    _version_meta(config)
+    spec = _spec(tmp_path, old_source=installed, staged=staged, target="v4.22.4", config=config)
+
+    def refuse(*args, **kwargs):
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr("mms_web.update_install.record_installed_version", refuse)
+
+    assert install_alongside(spec) is True
+    assert 'VERSION = "4.22.4"' in (installed / "mms_version.py").read_text()
+    report = json.loads((Path(spec["armed"]).parent / "installation.json").read_text())
+    assert report["installed"] is True
+    assert report["versionRecord"]["recorded"] is False
+    assert "read-only file system" in report["versionRecord"]["error"]
+    # The failure is said out loud, not swallowed.
+    assert "version.json not recorded" in capsys.readouterr().err
 
 
 def test_a_verified_update_replaces_the_installation_and_drops_the_pointer(tmp_path):

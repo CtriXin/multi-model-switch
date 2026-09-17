@@ -86,6 +86,29 @@ def ready(spec, process, source, *, probation):
     return None
 
 
+def _record_installed_version(spec):
+    """Update ``version.json`` after the copy; never fail the update for it.
+
+    The files are already replaced at this point, so an unrecorded version
+    costs far less than a failed update. The failure is reported instead of
+    swallowed: in installation.json for whoever reads the machine later, and
+    on stderr, which the coordinator captures in guardian.log.
+    """
+    from .update_install import record_installed_version
+
+    target = str(spec.get('target') or '').strip()
+    config = str(spec.get('config') or '').strip()
+    if not target or not config:
+        return {'versionRecord': {'recorded': False, 'error': '没有记录目标版本或配置根，安装记录未写入。'}}
+    try:
+        record_installed_version(Path(config) / 'version.json', target,
+                                 prerelease=spec.get('prerelease') is True)
+    except Exception as exc:
+        print(f'version.json not recorded after update to {target}: {exc}', file=sys.stderr)
+        return {'versionRecord': {'recorded': False, 'error': f'{type(exc).__name__}: {str(exc)[:200]}'}}
+    return {'versionRecord': {'recorded': True}}
+
+
 def install_alongside(spec):
     """Copy the verified release over the installation the old server ran from.
 
@@ -109,7 +132,8 @@ def install_alongside(spec):
                       'backup': str(operation_root/'installation-backup')})
         return False
     private_json(operation_root/'installation.json',
-                 {'installed': True, 'root': str(source), 'version': spec['target'], 'paths': names})
+                 {'installed': True, 'root': str(source), 'version': spec['target'], 'paths': names,
+                  **_record_installed_version(spec)})
     return True
 
 

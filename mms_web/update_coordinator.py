@@ -58,8 +58,13 @@ class UpdateCoordinator:
                 )
             if not self.available() or not latest['updateAvailable'] or target != latest['latest'].get('tag'):
                 raise WebError('UPDATE_UNAVAILABLE', '请先检查更新，并选择可用的稳定版本。', 409)
+            # The line the target tag itself is on, not the channel setting:
+            # a payload cached before this field existed only ever came from
+            # the preview fetcher on the preview channel.
+            release = latest['latest'] if isinstance(latest['latest'], dict) else {}
+            prerelease = release.get('prerelease', latest.get('channel') == 'preview') is True
             self._cancel.clear()
-            self._operation = {'id':uuid.uuid4().hex, 'target':target,
+            self._operation = {'id':uuid.uuid4().hex, 'target':target, 'prerelease':prerelease,
                                'allowIdleRestart':payload.get('allowIdleRestart') is True}
             self._status('preparing', '正在下载并检查新版，当前对话可以继续。', cancellable=True)
             self._thread = threading.Thread(target=self._run, args=(target,), name='pilot-safe-update', daemon=True)
@@ -121,6 +126,7 @@ class UpdateCoordinator:
         backup_state(self.app.state_root, backup)
         spec = {'id':self._operation['id'], 'target':target, 'source':str(candidate),
                 'oldSource':str(self.source), 'oldVersion':VERSION, 'python':sys.executable,
+                'prerelease':self._operation.get('prerelease') is True,
                 'state':str(self.app.state_root), 'config':str(self.app.config_root.resolve()),
                 'cwd':os.getcwd(), 'port':self.server.server_address[1],
                 'sessions':session_inventory(self.app.sessions), 'token':secrets.token_urlsafe(32),

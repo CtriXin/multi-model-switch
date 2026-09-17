@@ -21,6 +21,32 @@ def setup(tmp_path, stager):
     return app,c
 
 
+def test_the_target_tag_s_own_line_reaches_the_operation_record(tmp_path):
+    """version.json must record the tag's prerelease line, not the channel setting.
+
+    A payload cached before the prerelease field existed only ever came from
+    the preview fetcher on the preview channel, so the channel is the fallback.
+    """
+    app,c=setup(tmp_path,Mock(return_value=tmp_path/'candidate'))
+    seen={}
+    def capture(candidate,target):
+        seen['prerelease']=c._operation.get('prerelease')
+    with patch.object(app.updates,'status',return_value={
+        'updateAvailable':True,'channel':'stable','latest':{'tag':'v5.0.6','prerelease':True},
+    }), patch('mms_web.update_coordinator.session_safety',return_value={'blockers':[],'live':0}), \
+         patch.object(c,'_cutover',side_effect=capture):
+        c.start({'target':'v5.0.6'});c._thread.join(2)
+    assert seen['prerelease'] is True
+
+    with patch.object(app.updates,'status',return_value={
+        'updateAvailable':True,'channel':'preview','latest':{'tag':'v5.0.7'},
+    }), patch('mms_web.update_coordinator.session_safety',return_value={'blockers':[],'live':0}), \
+         patch.object(c,'_cutover',side_effect=capture):
+        c.start({'target':'v5.0.7'});c._thread.join(2)
+    # Old cache shape: no prerelease field, so the channel decides.
+    assert seen['prerelease'] is True
+
+
 def test_unavailable_or_unchecked_target_is_rejected(tmp_path):
     app,c=setup(tmp_path,Mock())
     with pytest.raises(Exception):c.start({'target':'v98.0.0'})

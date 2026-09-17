@@ -379,7 +379,13 @@ class WebApplication:
                 operation_path = self.state_root / "updates/operation.json"
                 from .updates import read_json
                 operation = read_json(operation_path)
-                private_json(operation_path, {**operation, "phase": "complete", "message": f"已更新到 v{VERSION}，会话历史已保留。", "cancellable": False})
+                message = f"已更新到 v{VERSION}，会话历史已保留。"
+                operation_id = str(operation.get("id") or "")
+                if operation_id:
+                    installation = read_json(self.state_root / "updates" / "operations" / operation_id / "installation.json")
+                    if (installation.get("versionRecord") or {}).get("recorded") is False:
+                        message += " 但安装记录（version.json）未写入，重跑一次安装器即可修复。"
+                private_json(operation_path, {**operation, "phase": "complete", "message": message, "cancellable": False})
                 self.probation_token = ""
                 self.maintenance = False
                 return {"ok": True}

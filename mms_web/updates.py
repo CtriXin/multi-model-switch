@@ -93,8 +93,12 @@ def _release_payload(value):
         raise ValueError('invalid release tag')
     body = str(value.get('body') or '')
     from .update_guidance import release_policy
+    # The prerelease flag is the tag's own line, as the release API states it:
+    # it is what an installed version.json must record, unlike the channel
+    # setting, which only says which line to check.
     return {'tag': tag, 'notes': body[:16000], 'upgradeNotice': upgrade_notice(body),
             'upgradePolicy': release_policy(body),
+            'prerelease': bool(value.get('prerelease')),
             'publishedAt': str(value.get('published_at') or '')[:80],
             'url': f'https://github.com/{REPO}/releases/tag/{tag}'}
 

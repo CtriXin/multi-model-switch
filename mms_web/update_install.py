@@ -13,8 +13,12 @@ source is a git worktree, and replacing its files would destroy work.
 """
 from __future__ import annotations
 
+import json
+import os
+import re
 import shutil
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Mirrors the copy list in install.sh. tests/test_update_install.py fails when
@@ -114,6 +118,62 @@ def _replace(saved: Path, target: Path) -> None:
             target.unlink()
     if saved.exists() or saved.is_symlink():
         saved.rename(target)
+
+
+def _release_track(tag: str, prerelease: bool) -> dict:
+    """The display track install.sh derives from the tag, plus the preview line.
+
+    install.sh only knows canary/dev/stable; an in-app update can also land a
+    preview release, which gets its own track instead of falling into the
+    pre-4.x bucket a v5.x tag would otherwise land in.
+    """
+    published = re.fullmatch(r'v(\d+)\.(\d+)\.(\d+)', str(tag))
+    if prerelease:
+        version = published.group(0)[1:] if published else 'preview'
+        label = f'{published.group(1)}.x Preview' if published else 'Preview'
+        return {'release_track': 'preview', 'release_track_version': version,
+                'release_track_label': label}
+    if published and int(published.group(1)) >= 4:
+        return {'release_track': 'stable', 'release_track_version': published.group(0)[1:],
+                'release_track_label': f'{published.group(1)}.x Stable'}
+    return {'release_track': 'stable', 'release_track_version': '3.x-stable',
+            'release_track_label': '3.x Stable'}
+
+
+def record_installed_version(meta_path: Path, tag: str, *, prerelease: bool) -> None:
+    """Merge what an in-app update installed into ``version.json``.
+
+    install.sh owns the file's shape; this writes the same install-metadata
+    keys. The file also carries user preferences (``preferred_language``), so
+    existing keys are merged in place and anything unrecognized is preserved —
+    never rewritten wholesale. ``install_channel`` reflects the tag's own
+    prerelease flag, not the channel setting, which only says what to check.
+    """
+    try:
+        value = json.loads(Path(meta_path).read_text(encoding='utf-8'))
+        payload = dict(value) if isinstance(value, dict) else {}
+    except (OSError, ValueError):
+        payload = {}
+    published = re.fullmatch(r'v\d+\.\d+\.\d+', str(tag))
+    payload.update({
+        'installed_ref': str(tag),
+        'installed_version': str(tag) if published else '',
+        'install_channel': 'preview' if prerelease else 'stable',
+        **_release_track(str(tag), prerelease),
+        'installed_at': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+        'source': 'pilot-update',
+    })
+    path = Path(meta_path)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd, temporary = tempfile.mkstemp(dir=path.parent, prefix='.version-', suffix='.json')
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+            json.dump(payload, stream, ensure_ascii=False, indent=2)
+            stream.write('\n')
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 def install(candidate: Path, source: Path, backup: Path) -> list[str]:

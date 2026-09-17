@@ -213,6 +213,20 @@ def _release_list(*entries):
     return patch('urllib.request.build_opener', return_value=opener)
 
 
+def test_release_payload_carries_the_tags_own_prerelease_flag():
+    """version.json's install_channel must come from the tag, not the setting.
+
+    The flag is the release API's own statement of which line a tag is on, so
+    a cached payload stays truthful even after the channel setting moves.
+    """
+    from mms_web.updates import _release_payload
+
+    stable = _release_payload({'tag_name': 'v4.22.4', 'prerelease': False, 'body': ''})
+    preview = _release_payload({'tag_name': 'v5.0.6', 'prerelease': True, 'body': ''})
+    assert stable['prerelease'] is False
+    assert preview['prerelease'] is True
+
+
 def test_preview_fetch_only_ever_returns_a_published_prerelease():
     """The stable line must never be offered as a preview update.
 
