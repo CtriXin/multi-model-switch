@@ -549,6 +549,13 @@ kbd {
   align-items: center;
   margin-left: auto;
 }
+.topbar-actions .status.compact {
+  align-self: center;
+  margin: 0;
+  width: 30px;
+  height: 30px;
+  justify-content: center;
+}
 .icon-button {
   border: 0;
   background: transparent;
@@ -3696,9 +3703,8 @@ dialog:has(> .dialog-body .model-explorer) > .dialog-body > header {
   flex: 0 0 7px;
   position: relative;
 }
-.status.compact {
+.session-link .status.compact {
   align-self: flex-start;
-  margin: 6px 2px 0 0;
   overflow: visible;
 }
 .status.idle .status-dot,
