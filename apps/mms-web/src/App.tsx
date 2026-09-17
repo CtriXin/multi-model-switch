@@ -2530,6 +2530,7 @@ export function App() {
               会话名称
               <input
                 autoFocus
+                data-autofocus=""
                 aria-label="会话名称"
                 value={renameSession.title}
                 maxLength={100}
@@ -2568,6 +2569,7 @@ export function App() {
               工作区名称
               <input
                 autoFocus
+                data-autofocus=""
                 aria-label="工作区名称"
                 value={renameWorkspace.name}
                 maxLength={120}
@@ -2705,6 +2707,7 @@ export function App() {
             <Search size={19} />
             <input
               autoFocus
+              data-autofocus=""
               aria-label="搜索全部会话"
               placeholder="输入任务、模型或工具名称…"
               value={query}

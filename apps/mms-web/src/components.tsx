@@ -18,6 +18,7 @@ import { ToolEvent } from "./ToolEvent";
 import { messageAnchor } from "./ConversationOutline";
 import { MessageActions } from "./SessionTools";
 import { ReplyReader } from "./ReplyReader";
+import { scheduleDialogAutofocus } from "./dialog-focus";
 import { AttachmentView } from "./MessageMedia";
 import { ContextUsage } from "./ContextUsage";
 import { formatEventTime, formatEventTimeTitle, turnDuration } from "./time";
@@ -133,8 +134,13 @@ export function Dialog({
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
-    ref.current?.showModal();
-    return () => ref.current?.close();
+    const dialog = ref.current;
+    dialog?.showModal();
+    const stop = scheduleDialogAutofocus(dialog);
+    return () => {
+      stop();
+      dialog?.close();
+    };
   }, []);
   return (
     <dialog
