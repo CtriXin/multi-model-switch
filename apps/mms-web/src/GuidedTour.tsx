@@ -10,7 +10,7 @@ const content: Record<TourStep, StepContent> = {
   connection: { target: ['[data-guide="connect"]'], title: "先让助手连接一个模型", body: "模型是负责回答你的 AI。点击亮起的「连接服务」，按提示填入服务商给你的 API 地址和 API Key，再选择模型并保存。", tip: "API Key 是服务商给你的连接密钥。没有这些信息时，可以先熟悉页面，之后再配置。" },
   workspace: { target: ['[data-guide="workspace"]', '.home-intro select'], title: "这次在哪个文件夹里工作？", body: "点这里输入项目名，就能查找最近用过的文件夹；也可以浏览电脑上的其他目录。你让 AI 读文件、写文章或改代码时，它会从这个位置开始。", tip: "已为你选好工作文件夹，普通聊天可以直接继续。换项目时再选择其他目录；已有会话保留原路径。" },
   model: { target: ['.studio-popover:popover-open .quick-model-list', '.task-settings-trigger'], title: "只显示模型，需要时再展开", body: "输入框底部默认只显示当前模型。点模型名称后搜索并选择即可快速切换；Pilot 会沿用已设置的默认通道。同一模型有多条连接时会出现通道名；需要指定通道时，再展开「高级选项」。", tip: "新会话和当前会话共用这个入口。当前会话切换会保留上下文，不会自动发送消息；执行或待确认时会先提示你等本轮结束或停止。" },
-  effort: { target: ['.studio-popover:popover-open [data-guide="effort"]', '.task-settings-trigger'], title: "effort：让它想得更深，还是更快？", body: "展开「高级选项」，这里的「思考强度」就是 effort。简单问答可以选较低档，复杂分析再提高；第一次保留默认值即可。", tip: "只显示当前模型支持的档位。高档通常更慢、用量更多，不保证回答一定更好。切换模型后会回到新模型的默认 effort；已有会话的调整只影响后续工作。" },
+  effort: { target: ['[data-guide="effort"]', '.task-effort-trigger', '.studio-popover:popover-open [data-guide="effort"]', '.task-settings-trigger'], title: "effort：让它想得更深，还是更快？", body: "模型右侧的「思考强度」就是 effort。简单问答可以选较低档，复杂分析再提高；第一次保留默认值即可。", tip: "只显示当前模型支持的档位。高档通常更慢、用量更多，不保证回答一定更好。切换模型后会回到新模型的默认 effort；已有会话的调整只影响后续工作。" },
   compose: { target: ['textarea[aria-label="任务内容"]'], title: "像和人说话一样，写下你的想法", body: "不用学特殊命令。说清楚「我想做什么、现在有什么、希望得到什么」就行。也可以先填入下面的简单示例，看看 AI 怎样回应。", tip: "示例会追加到已有草稿后面。你可以修改，填入不会自动发送。" },
   send: { target: ['button[aria-label="发送任务"]'], title: "准备好了？点这个箭头发送", body: "确认文件夹和模型后，点击亮起的发送箭头。AI 会开始回复；你可以继续补充要求，不必一次就问得完美。", tip: "发送可能产生所选服务的用量。灰色箭头表示还没准备好，查看输入框下方的原因。" },
   reply: { target: ['.conversation-turn:last-child', '.current-activity', 'textarea[aria-label="任务内容"]'], title: "回复会出现在这里", body: "等待 AI 回答后，可以继续问「说得简单一点」「给个例子」，或补充你的要求。结果不符合预期也没关系，接着沟通就好。", tip: "你已经认识基本操作。附件、Skills 和成果等功能，可以需要时再学。" },
@@ -34,33 +34,39 @@ function visibleTarget(selectors: string[]) {
 }
 
 /** A non-modal top-layer coachmark. It never intercepts clicks on the real controls. */
-export function GuidedTour({ step, move, close, help, example, modelReady, configure, hasSession }: {
+export function GuidedTour({ step, move, close, help, example, modelReady, configure, hasSession, hasEffort = true }: {
   step: TourStep; move: (step: TourStep) => void; close: () => void; help: () => void;
   example: (text: string) => void; modelReady: boolean; configure: boolean; hasSession: boolean;
+  hasEffort?: boolean;
 }) {
   const layer = useRef<HTMLDivElement>(null);
   const card = useRef<HTMLElement>(null);
   const [layout, setLayout] = useState<Layout>({ box: null, left: 12, top: 80, side: "none", arrow: 24, paused: false });
-  const steps = modelReady ? tourSteps.filter(s => s !== "connection") : [...tourSteps];
+  const steps = tourSteps
+    .filter((s) => (modelReady ? s !== "connection" : true))
+    .filter((s) => (!hasEffort ? s !== "effort" : true));
   const index = steps.indexOf(step);
   const firstCount = steps.indexOf("reply") + 1;
   const item = content[step];
   const more = index >= firstCount;
+
+  useEffect(() => {
+    if (!hasEffort && step === "effort") {
+      const idx = steps.indexOf("model");
+      move(steps[idx >= 0 ? idx + 1 : 0] || "compose");
+    }
+  }, [hasEffort, step, steps, move]);
+
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>;
     let previous = "";
     let scrolled: HTMLElement | null = null;
     let focusCard = true;
     let lastMenu: Element | null = null;
-    if (step === "effort" && !document.querySelector('.studio-popover:popover-open [data-guide="effort"]')) document.querySelector<HTMLButtonElement>('.task-settings-trigger')?.click();
     const update = () => {
       // Real dialogs (connection, file picker, model choice) own focus while open.
       const paused = !!document.querySelector('dialog[open]:not([data-guide-dialog="settings"])');
       const menu = document.querySelector('.studio-popover:popover-open');
-      if (step === "effort") {
-        const advanced = menu?.querySelector<HTMLDetailsElement>('[data-guide="model-advanced"]');
-        if (advanced && !advanced.open) advanced.open = true;
-      }
       if (paused) layer.current?.hidePopover();
       else if (layer.current) {
         if (menu !== lastMenu && layer.current.matches(':popover-open')) layer.current.hidePopover();
