@@ -66,7 +66,7 @@ def _clean_env() -> dict[str, str]:
 
 
 def run_suite(checkout: Path, target: str, report: Path, *, only: list[str] | None = None):
-    """Run pytest; return ``(failing node ids, tests collected)``."""
+    """Run pytest; return ``(failing node ids, tests collected, node ids present)``."""
     cmd = [
         sys.executable,
         "-m",
@@ -114,13 +114,33 @@ def _node_id(case, checkout: Path) -> str:
 def parse_report(report: Path, checkout: Path):
     root = ET.parse(report).getroot()
     failures: set[str] = set()
+    present: set[str] = set()
     collected = 0
     for case in root.iter("testcase"):
         collected += 1
+        node = _node_id(case, checkout)
+        # Which tests ran at all, so a base failure that simply stopped existing
+        # can be told apart from one that was actually made to pass.
+        present.add(node)
         if case.find("failure") is None and case.find("error") is None:
             continue
-        failures.add(_node_id(case, checkout))
-    return failures, collected
+        failures.add(node)
+    return failures, collected, present
+
+
+def classify_repairs(base_failures: set[str], head_failures: set[str], head_present: set[str]):
+    """Split base failures that are no longer failing into repaired vs gone.
+
+    A red test that was deleted stops appearing in ``head_failures`` exactly
+    like one that was made to pass, so counting ``base - head`` as "repaired"
+    lets a deletion read as a repair. It happened: four of one PR's sixty-two
+    "repairs" were tests that no longer existed, and one of those was a real
+    behaviour that then had no coverage at all.
+    """
+    cleared = base_failures - head_failures
+    fixed = sorted(item for item in cleared if item in head_present)
+    gone = sorted(item for item in cleared if item not in head_present)
+    return fixed, gone
 
 
 def base_worktree(base_ref: str) -> Path:
@@ -171,11 +191,11 @@ def main() -> int:
         print(f"== base {args.base} ==", flush=True)
         base_checkout = base_worktree(args.base)
         created.append(base_checkout)
-        base_failures, base_collected = run_suite(base_checkout, args.target, workdir / "base.xml")
+        base_failures, base_collected, _base_present = run_suite(base_checkout, args.target, workdir / "base.xml")
         print(f"base: {len(base_failures)} failing of {base_collected}", flush=True)
 
         print(f"== head {args.head or 'working tree'} ==", flush=True)
-        head_failures, head_collected = run_suite(head_checkout, args.target, workdir / "head.xml")
+        head_failures, head_collected, head_present = run_suite(head_checkout, args.target, workdir / "head.xml")
         print(f"head: {len(head_failures)} failing of {head_collected}", flush=True)
 
         candidates = sorted(head_failures - base_failures)
@@ -184,7 +204,7 @@ def main() -> int:
             for attempt in range(FLAKE_RERUNS):
                 if not candidates:
                     break
-                still, rerun_collected = run_suite(
+                still, rerun_collected, _rerun_present = run_suite(
                     head_checkout,
                     args.target,
                     workdir / f"rerun{attempt}.xml",
@@ -201,11 +221,24 @@ def main() -> int:
                     break
                 candidates = [item for item in candidates if item in still]
 
-        fixed = sorted(base_failures - head_failures)
+        fixed, gone = classify_repairs(base_failures, head_failures, head_present)
         if fixed:
             print(f"\nRepaired by this PR ({len(fixed)}):")
             for item in fixed:
                 print(f"  + {item}")
+
+        if gone:
+            print(f"\nRed at the base and NO LONGER PRESENT here ({len(gone)}):")
+            for item in gone:
+                print(f"  ~ {item}")
+            print(
+                "\nThese were not repaired; they stopped existing. A rename or a removed "
+                "feature is fine -- say which in the PR. Deleting a red test to clear the "
+                "gate is not, and leaves the behaviour uncovered."
+            )
+            if os.environ.get("GITHUB_ACTIONS") == "true":
+                names = ", ".join(gone[:10]) + (" ..." if len(gone) > 10 else "")
+                print(f"::warning title=Red tests disappeared rather than passing::{len(gone)}: {names}")
 
         if candidates:
             print(f"\nBroken by this PR ({len(candidates)}):")
