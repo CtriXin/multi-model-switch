@@ -1590,9 +1590,15 @@ button.app-version.has-update::after { content: ""; display: inline-block; width
 .workspace-matches button > span { display: grid; gap: 4px; flex: 1; min-width: 0; }
 .workspace-matches strong { font-weight: 600; }
 .workspace-matches small { color: var(--muted); font-size: max(11px, .8571rem); overflow-wrap: anywhere; }
-.workspace-folder-tree { width: 100%; }
-.workspace-folder-row { width: 100%; }
-.workspace-matches .workspace-folder-row > span { flex: 0 0 auto; }
+.workspace-folder-tree { width: 100%; min-width: 0; overflow-x: hidden; }
+.workspace-folder-row { width: 100%; min-width: 0; }
+.workspace-matches .workspace-folder-row > .workspace-folder-chevron {
+  flex: 0 0 auto;
+  min-width: 44px;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+}
 .workspace-folder-chevron {
   display: inline-flex;
   color: var(--muted);
