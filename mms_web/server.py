@@ -337,17 +337,41 @@ class WebApplication:
         raise WebError("NOT_FOUND", "找不到这个接口。", 404)
 
     # POSTs that change nothing and can take seconds: listing a directory for
-    # the in-app folder picker, and two filesystem sweeps. Holding the mutation
-    # lock through those would stop every other POST — sending a message,
-    # stopping a session, confirming an update — for as long as they run. They
-    # only read state that is written by atomic replace, so a concurrent write
-    # is seen whole or not at all.
-    _UNLOCKED_POSTS = (["workspaces", "browse"], ["workspaces", "search"], ["workspaces", "locate"])
+    # the in-app folder picker, two filesystem sweeps, an httpx probe of the
+    # URL the user just typed (15s timeout), and the read-only model-settings
+    # worker probes (90s timeout). Holding the mutation lock through those
+    # would stop every other POST — sending a message, stopping a session,
+    # confirming an update — for as long as they run. The workspace routes
+    # only read state written by atomic replace, so a concurrent write is seen
+    # whole or not at all. The model-settings probes run on a throwaway
+    # snapshot_config, never write (worker is called without write=True), and
+    # their concurrency safety comes from ModelSettings.lock plus the
+    # fingerprint() double-check that raises CONFIG_STALE — not from the
+    # global lock.
+    #
+    # This is an exact-match allowlist on purpose: model-settings/preview and
+    # model-settings/apply DO write config and must keep holding
+    # mutation_lock. Never widen these entries to prefix matching.
+    _UNLOCKED_POSTS = (
+        ["workspaces", "browse"], ["workspaces", "search"], ["workspaces", "locate"],
+        ["configuration", "discover"],
+        ["model-settings", "discover"], ["model-settings", "check"], ["model-settings", "refresh"],
+    )
 
     def _post_readonly(self, parts: list[str], payload: dict) -> dict:
         if parts == ["workspaces", "browse"]:
             from .workspace_browse import browse_workspaces
             return browse_workspaces(self.catalog, payload)
+        if parts == ["configuration", "discover"]:
+            # Probes the user-supplied URL once and returns the result; nothing
+            # is written, so a slow or dead host must not freeze other POSTs.
+            self._catalog()
+            from .connections import discover_models
+            return discover_models(payload)
+        if len(parts) == 2 and parts[0] == "model-settings" and parts[1] in {"discover", "check", "refresh"}:
+            # Read-only worker runs on a snapshot; preview/apply stay in the
+            # locked dispatch in _post() because they write config.
+            return getattr(self._model_settings(), parts[1])(payload)
         if not self.catalog:
             raise WebError("CAPABILITY_UNAVAILABLE", "本地服务尚未连接。", 409)
         if parts == ["workspaces", "search"]:
