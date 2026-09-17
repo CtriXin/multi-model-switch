@@ -1153,3 +1153,13 @@ Mutation（都实际跑过，还原后 302 全绿）：
 3. `reusedSession` 是新加的 task 字段（给证据与测试用）；若不想暴露到接口，需要在 `_view` 里过滤。
 
 耗时：约 1 小时 40 分（含真机两轮、门禁等待与 mutation）· 归因：[AGENT]/[TOOL]
+
+## 20:23 +08 · GPT-6 · b7e8c8e283844b7d
+现象: 独立 worktree 不包含 ignored impeccable skill，context.mjs MODULE_NOT_FOUND。
+处置: 从已安装原 skill 绝对路径读取，在当前应用目录运行 context。
+耗时: 未单独计时 · 归因:[TOOL]
+
+## 20:29 +08 · GPT-6 · b7e8c8e283844b7d
+现象: root npm ci 缺少 lockfile，实际 lock 在 apps/mms-web。
+处置: 在 Web 子项目使用 --workspaces=false 安装已锁定依赖，无新增依赖。
+耗时: 未单独计时 · 归因:[AGENT]

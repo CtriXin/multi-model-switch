@@ -1,0 +1,22 @@
+.feedback-invitation { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 20px; padding: 10px 20px; border-bottom: 1px solid var(--line); background: var(--soft); color: var(--ink); font-size: 13px; flex-shrink: 0; }
+.feedback-invitation > div { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.feedback-invitation button { min-height: 36px; }
+.feedback-form { display: flex; flex-direction: column; gap: 16px; }
+.feedback-form label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: var(--ink); }
+.feedback-form label > span, .feedback-intro, .feedback-disclosure, .feedback-contact p, .feedback-success small { color: var(--muted); font-size: 13px; line-height: 1.6; }
+.feedback-form input:not([type=radio]), .feedback-form textarea, .feedback-form select { width: 100%; min-width: 0; padding: 9px 10px; font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
+.feedback-form textarea { resize: vertical; }
+.feedback-form input::placeholder, .feedback-form textarea::placeholder { color: var(--muted); }
+.feedback-form fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.feedback-form legend { margin-bottom: 6px; font-size: 14px; }
+.feedback-outcomes { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.feedback-outcomes label { flex-direction: row; align-items: center; min-height: 36px; cursor: pointer; }
+.feedback-outcomes input { accent-color: var(--accent); }
+.feedback-contact summary { color: var(--muted); font-size: 13px; cursor: pointer; min-height: 36px; align-content: center; }
+.feedback-contact label { margin-top: 8px; }
+.feedback-form footer { display: flex; justify-content: flex-end; gap: 10px; }
+.feedback-form p { margin: 0; }
+.feedback-error { color: var(--danger); }
+.feedback-success { display: flex; flex-direction: column; gap: 12px; line-height: 1.6; }
+.feedback-success .button { align-self: flex-end; }
+@media (max-width: 600px) { .feedback-invitation { padding: 10px 12px; } .feedback-invitation > div { width: 100%; justify-content: space-between; gap: 4px; } }

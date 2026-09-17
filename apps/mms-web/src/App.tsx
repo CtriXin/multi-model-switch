@@ -60,6 +60,8 @@ import { UpdateCenter } from "./UpdateCenter";
 import { ConnectionDialog } from "./ConnectionDialog";
 import { GuidedTour } from "./GuidedTour";
 import { WhatsNew } from "./WhatsNew";
+import { useFeedback } from "./Feedback";
+import { sessionIsBusy } from "./SessionStatus";
 import type { TourStep } from "./GuidedTour";
 import type { GuideAction } from "./guide-content";
 import { ArtifactView } from "./ArtifactView";
@@ -1109,6 +1111,11 @@ export function App() {
     page === "session" && atBottom && !sessionError,
     connected && !statusesStale,
   );
+  const feedback = useFeedback({
+    ready: !loading && connected && !statusesStale,
+    allowed: !busy && !error && !settingsOpen && !setupOpen && !guideOpen && !guideStep && !updateOpen && !updateStatus?.active && !navOpen && !data.sessions.some(session => sessionIsBusy(session)) && !(detail && sessionIsBusy(detail.session)),
+    surface: page === "bots" ? "bot" : "pilot",
+  });
   const tourHasEffort = page === "session"
     ? Boolean(detail?.runtime && ((detail.runtime.supportedThinkingLevels && detail.runtime.supportedThinkingLevels.length > 0) || detail.runtime.thinkingLevel))
     : Boolean(launchFacts.facts && launchFacts.facts.supportedThinkingLevels && launchFacts.facts.supportedThinkingLevels.length > 0);
@@ -1764,6 +1771,7 @@ export function App() {
             </strong>
           </div>
           <div className="topbar-actions">
+            {feedback.trigger}
             <UpdateCenter ready={!loading && connected} open={updateOpen} setOpen={setUpdateOpen} onStatus={setUpdateStatus} />
             <HelpGuide ready={isGuideReady({ loading, connected, modelReady, setupOpen, settingsOpen, page })} modelReady={modelReady} open={guideOpen} setOpen={(open) => { if (open) setGuideStep(null); setGuideOpen(open); }} hasSession={page === "session" && !!detail} navigate={guideNavigate} startTour={startIntroduction} startConnection={data.capabilities.configure ? () => requestNavigation(() => { setGuideOpen(false); setGuideStep(null); setSettingsOpen(false); setSetupOpen(true); }) : undefined} />
             {detail && (
@@ -1786,6 +1794,8 @@ export function App() {
             )}
           </div>
         </header>
+        {feedback.invitation}
+        {feedback.dialog}
         {!settingsOpen && tour}
         {isPreview && (
           <div className="preview-banner">
