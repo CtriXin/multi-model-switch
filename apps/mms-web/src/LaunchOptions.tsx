@@ -1,9 +1,21 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, FolderOpen, Search, ArrowUpRight } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import type { Model, Preset, Workspace } from "./types";
 import { Dialog } from "./components";
 import { ModelExplorer } from "./ModelExplorer";
 import { mutate, request } from "./api";
+import {
+  applyTreeKey,
+  busyNotice,
+  dismissWorkspaceDialog,
+  parentRowIndex,
+  scheduleWorkspaceSearchFocus,
+  toggleExpanded,
+  visibleRows,
+  WorkspaceDialogBody,
+  type BrowseResponse,
+  type FolderEntry,
+} from "./folder-tree";
 
 export function ModelPicker({
   presets,
@@ -77,24 +89,37 @@ export function WorkspaceDialog({ close, added, reference, initialQuery = "", su
   const [results, setResults] = useState<Workspace[]>([]);
   const [choice, setChoice] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<"" | "select" | "browse">("");
   const [error, setError] = useState("");
+  const [browsing, setBrowsing] = useState(false);
+  const [treeRoots, setTreeRoots] = useState<FolderEntry[]>([]);
+  const [treeChildren, setTreeChildren] = useState<Record<string, FolderEntry[]>>({});
+  const [expanded, setExpanded] = useState<string[]>([]);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [truncatedAt, setTruncatedAt] = useState<Record<string, boolean>>({});
   const inputRef = useRef<HTMLInputElement>(null);
+  const actionRef = useRef<AbortController | null>(null);
+  const rows = visibleRows(treeRoots, expanded, treeChildren);
+  const abortAction = () => { actionRef.current?.abort(); };
+  const startAction = () => {
+    abortAction();
+    const controller = new AbortController();
+    actionRef.current = controller;
+    return controller;
+  };
 
   useEffect(() => {
-    const focus = () => inputRef.current?.focus();
-    focus();
-    const raf = requestAnimationFrame(focus);
-    const timer = setTimeout(focus, 50);
-    return () => {
-      cancelAnimationFrame(raf);
-      clearTimeout(timer);
-    };
-  }, []);
+    if (busy) return;
+    return scheduleWorkspaceSearchFocus(inputRef.current);
+  }, [browsing, busy]);
   useEffect(() => {
-    document.getElementById(`workspace-match-${choice}`)?.scrollIntoView({block: "nearest"});
-  }, [choice]);
+    const target = browsing
+      ? `workspace-folder-${activeIndex}`
+      : `workspace-match-${choice}`;
+    document.getElementById(target)?.scrollIntoView({block: "nearest"});
+  }, [choice, activeIndex, browsing]);
   useEffect(() => {
+    if (browsing) return;
     const controller = new AbortController();
     setLoading(true);
     const timer = setTimeout(() => {
@@ -104,70 +129,130 @@ export function WorkspaceDialog({ close, added, reference, initialQuery = "", su
         .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     }, 120);
     return () => { clearTimeout(timer); controller.abort(); };
-  }, [query]);
+  }, [query, browsing]);
   // Located folders lead while the query is untouched; typing takes over.
   const shown = (query === initialQuery ? [...suggestions, ...results] : results)
     .filter((item, index, all) => all.findIndex(other => other.path === item.path) === index);
   async function select(workspace: Workspace) {
     if (busy) return;
-    setBusy(true); setError("");
+    const controller = startAction();
+    setBusy("select"); setError("");
     try {
       if (reference) await reference(workspace.path);
-      else added?.(workspace.id ? workspace : await mutate<Workspace>("/workspaces", {path: workspace.path}));
-      close();
-    } catch (e) { setError((e as Error).message); }
-    finally { setBusy(false); }
+      else added?.(workspace.id ? workspace : await mutate<Workspace>("/workspaces", {path: workspace.path}, controller.signal));
+      if (!controller.signal.aborted) close();
+    } catch (e) {
+      if (controller.signal.aborted) return;
+      setError((e as Error).message);
+    } finally {
+      if (!controller.signal.aborted) setBusy("");
+    }
   }
-  async function choose() {
+  async function loadListing(path: string, controller: AbortController): Promise<BrowseResponse> {
+    return request<BrowseResponse>("/workspaces/browse", {path}, controller.signal);
+  }
+  async function openBrowser() {
     if (busy) return;
-    setBusy(true); setError("");
+    const controller = startAction();
+    setBusy("browse"); setError("");
     try {
-      const result = await Promise.race([
-        mutate<{path: string}>("/workspaces/choose", {}),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("文件夹选择器没有打开。请直接输入完整的 Windows 路径，例如 C:\\Users\\Admin\\Downloads。")), 15000)),
-      ]);
-      if (result.path) {
-        if (reference) await reference(result.path);
-        else added?.(await mutate<Workspace>("/workspaces", {path: result.path}));
-        close();
-      }
-    } catch (e) { setError((e as Error).message); }
-    finally { setBusy(false); }
+      const data = await loadListing("", controller);
+      if (controller.signal.aborted) return;
+      setTreeRoots(data.entries);
+      setTreeChildren({});
+      setExpanded([]);
+      setActiveIndex(0);
+      setTruncatedAt({ "": data.truncated });
+      setBrowsing(true);
+    } catch (e) {
+      if (controller.signal.aborted) return;
+      setError((e as Error).message);
+    } finally {
+      if (!controller.signal.aborted) setBusy("");
+    }
   }
+  async function toggle(path: string) {
+    if (expanded.includes(path)) {
+      setExpanded(toggleExpanded(expanded, path));
+      return;
+    }
+    const controller = startAction();
+    setBusy("browse"); setError("");
+    try {
+      let kids = treeChildren[path];
+      if (!kids) {
+        const data = await loadListing(path, controller);
+        if (controller.signal.aborted) return;
+        kids = data.entries;
+        setTreeChildren((current) => ({ ...current, [path]: kids }));
+        setTruncatedAt((current) => ({ ...current, [path]: data.truncated }));
+      }
+      if (controller.signal.aborted) return;
+      setExpanded((current) => toggleExpanded(current, path));
+    } catch (e) {
+      if (controller.signal.aborted) return;
+      setError((e as Error).message);
+    } finally {
+      if (!controller.signal.aborted) setBusy("");
+    }
+  }
+  function onTreeKey(event: { key: string; preventDefault: () => void }): boolean {
+    const result = applyTreeKey(event.key, activeIndex, rows.length);
+    if (result === null) return false;
+    event.preventDefault();
+    if (typeof result === "number") setActiveIndex(result);
+    else if (result === "expand" && rows[activeIndex]) {
+      if (event.key === "Enter" || !rows[activeIndex].expanded) void toggle(rows[activeIndex].path);
+    }
+    else if (result === "collapse" && rows[activeIndex]) {
+      if (rows[activeIndex].expanded) setExpanded(toggleExpanded(expanded, rows[activeIndex].path));
+      else setActiveIndex(parentRowIndex(rows, activeIndex));
+    }
+    return true;
+  }
+  const status = busy
+    ? busyNotice(busy)
+    : browsing
+      ? "从这台电脑逐层打开"
+      : loading && !shown.length ? "正在查找…" : query ? `找到 ${shown.length} 个文件夹` : "最近和常用的文件夹";
+  const activeFolder = rows[activeIndex];
+  const truncated = Object.values(truncatedAt).some(Boolean);
   return (
-    <Dialog title={reference ? "引用文件夹" : "找到你的项目"} close={() => { if (!busy) close(); }}>
+    <Dialog title={reference ? "引用文件夹" : "找到你的项目"} close={() => dismissWorkspaceDialog(close, abortAction)}>
       <p className="dialog-intro">{reference
         ? `已识别文件夹${initialQuery ? `「${initialQuery}」` : ""}。选择对应的本地目录，把路径插入正文；不会复制内容或切换工作目录。`
         : "输入项目名，就能找到常用的工作文件夹。选好后会记住，下次可以直接开始。"}</p>
-      <form className="workspace-form" onSubmit={e => { e.preventDefault(); if (shown[choice]) void select(shown[choice]); }}>
-        <label className="workspace-search-input">
-          <Search size={18} />
-          <input ref={inputRef} autoFocus value={query} onChange={e => { setQuery(e.target.value); setResults([]); setChoice(0); }}
-            placeholder="输入项目名，如 runtimia 或 multi" autoComplete="off" aria-label="搜索项目文件夹"
-            role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls="workspace-matches"
-            aria-activedescendant={shown[choice] ? `workspace-match-${choice}` : undefined}
-            onKeyDown={e => {
-              if (e.key === "Enter" && !e.nativeEvent.isComposing) {
-                e.preventDefault();
-                if (shown[choice]) void select(shown[choice]);
-              }
-              if ((e.key === "ArrowDown" || e.key === "ArrowUp") && shown.length) {
-                e.preventDefault(); setChoice(old => (old + (e.key === "ArrowDown" ? 1 : -1) + shown.length) % shown.length);
-              }
-            }} />
-        </label>
-        <p className="muted" role="status">{loading && !shown.length ? "正在查找…" : query ? `找到 ${shown.length} 个文件夹` : "最近和常用的文件夹"}</p>
-        <div id="workspace-matches" className="workspace-matches" role="listbox" aria-label="匹配的项目">
-          {shown.map((item, index) => <button type="button" id={`workspace-match-${index}`} key={item.path}
-            role="option" aria-selected={choice === index} disabled={busy}
-            onMouseEnter={() => setChoice(index)} onClick={() => void select(item)}>
-            <FolderOpen size={18} /><span><strong>{item.name}</strong><small>{item.path}</small></span><ArrowUpRight size={15} />
-          </button>)}
-          {!loading && !shown.length && <p className="muted">还没找到，可以换个关键词、粘贴完整路径，或浏览文件夹。</p>}
-        </div>
-        {error && <p role="alert" className="inline-alert">{error}</p>}
-        <button type="button" className="text-button" disabled={busy} onClick={() => void choose()}><FolderOpen size={16} />浏览其他文件夹…</button>
-      </form>
+      <WorkspaceDialogBody
+        query={query}
+        onQueryChange={(value) => { setQuery(value); setResults([]); setChoice(0); setBrowsing(false); }}
+        onQueryKeyDown={(e) => {
+          if (browsing && onTreeKey(e)) return;
+          if (e.key === "Enter" && !e.nativeEvent?.isComposing) {
+            e.preventDefault();
+            if (shown[choice]) void select(shown[choice]);
+          }
+          if ((e.key === "ArrowDown" || e.key === "ArrowUp") && shown.length) {
+            e.preventDefault(); setChoice(old => (old + (e.key === "ArrowDown" ? 1 : -1) + shown.length) % shown.length);
+          }
+        }}
+        inputRef={inputRef}
+        browsing={browsing}
+        busy={busy}
+        status={status}
+        error={error}
+        shown={shown}
+        choice={choice}
+        onHighlightShown={setChoice}
+        onSelectShown={(item) => void select({ id: item.id || "", name: item.name, path: item.path })}
+        rows={rows}
+        activeIndex={activeIndex}
+        truncated={truncated}
+        onHighlightRow={setActiveIndex}
+        onToggleRow={(path) => void toggle(path)}
+        onTreeKeyDown={(e) => { onTreeKey(e); }}
+        onUseFolder={() => activeFolder && void select({ id: "", name: activeFolder.name, path: activeFolder.path })}
+        onOpenBrowser={() => void openBrowser()}
+      />
     </Dialog>
   );
 }

@@ -1590,4 +1590,30 @@ button.app-version.has-update::after { content: ""; display: inline-block; width
 .workspace-matches button > span { display: grid; gap: 4px; flex: 1; min-width: 0; }
 .workspace-matches strong { font-weight: 600; }
 .workspace-matches small { color: var(--muted); font-size: max(11px, .8571rem); overflow-wrap: anywhere; }
+.workspace-folder-tree { width: 100%; min-width: 0; overflow-x: hidden; }
+.workspace-folder-row { width: 100%; min-width: 0; }
+.workspace-matches .workspace-folder-row > .workspace-folder-chevron {
+  flex: 0 0 auto;
+  min-width: 44px;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+}
+.workspace-folder-chevron {
+  display: inline-flex;
+  color: var(--muted);
+}
+.workspace-folder-label {
+  display: grid;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+.workspace-busy { margin: 0; color: var(--muted); }
+@media (prefers-reduced-motion: reduce) {
+  .workspace-folder-chevron { transition: none; }
+}
+@media (max-width: 390px) {
+  .workspace-matches { max-height: min(48dvh, 280px); }
+}
 .preference-row > div { min-width: 0; }
