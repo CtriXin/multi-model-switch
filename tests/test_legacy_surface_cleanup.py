@@ -1043,7 +1043,7 @@ def test_mms_default_path_still_uses_tui_launcher_handler(monkeypatch) -> None:
     cfg = {"user": {}, "recommend": {}}
     provider = {"id": "default-provider"}
     monkeypatch.setattr(sys, "argv", ["mms"])
-    monkeypatch.setattr(mms_core, "load_config", lambda: cfg)
+    monkeypatch.setattr(mms_core, "_load_config_or_preview_bundle", lambda **_: cfg)
     monkeypatch.setattr(mms_core, "_ensure_startup_snapshot_guard", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(mms_core, "apply_local_overrides", lambda value: value)
     monkeypatch.setattr(mms_core, "_refresh_routes_export_for_hive", lambda *_args, **_kwargs: None)

@@ -207,6 +207,7 @@ def _read_opencode_session_db(path: Path) -> dict[str, dict]:
         conn.close()
 
 
+@pytest.mark.usefixtures("approved_preview_bundle")
 def test_opencode_config_uses_openai_compatible_provider():
     import mms_launchers
 
@@ -252,6 +253,7 @@ def test_opencode_config_uses_openai_compatible_provider():
         assert reasoner["limit"]["output"] == expected_output_limit
 
 
+@pytest.mark.usefixtures("approved_preview_bundle")
 def test_opencode_config_keeps_local_rtk_plugin_out_of_json(monkeypatch):
     import mms_launchers
 
@@ -267,6 +269,7 @@ def test_opencode_config_keeps_local_rtk_plugin_out_of_json(monkeypatch):
     assert "plugin" not in payload
 
 
+@pytest.mark.usefixtures("approved_preview_bundle")
 def test_opencode_config_can_disable_lite_agents_for_raw_profile():
     import mms_launchers
 
@@ -281,6 +284,7 @@ def test_opencode_config_can_disable_lite_agents_for_raw_profile():
     assert "default_agent" not in payload
 
 
+@pytest.mark.usefixtures("approved_preview_bundle")
 def test_opencode_config_can_disable_default_bypass():
     import mms_launchers
 
@@ -295,6 +299,7 @@ def test_opencode_config_can_disable_default_bypass():
     assert payload["agent"]["mobius-fixer"]["permission"]["edit"] == "ask"
 
 
+@pytest.mark.usefixtures("approved_preview_bundle")
 def test_opencode_model_limit_includes_required_output_value():
     import mms_launchers
 
@@ -308,6 +313,7 @@ def test_opencode_model_limit_includes_required_output_value():
     assert config["limit"]["output"] == 16384
 
 
+@pytest.mark.usefixtures("approved_preview_bundle")
 def test_opencode_model_config_maps_profile_thinking_and_effort(monkeypatch):
     import mms_provider_profiles
     import mms_launchers
@@ -408,6 +414,7 @@ def test_opencode_kimi_k3_uses_profile_effort_not_stale_generic_thinking(monkeyp
     assert "thinking" not in json.dumps(model_config)
 
 
+@pytest.mark.usefixtures("approved_preview_bundle")
 def test_opencode_stepfun_openai_effort_does_not_emit_output_config():
     import mms_launchers
 
@@ -435,6 +442,7 @@ def test_opencode_stepfun_openai_effort_does_not_emit_output_config():
         assert "output_config" not in options
 
 
+@pytest.mark.usefixtures("approved_preview_bundle")
 def test_opencode_model_config_does_not_turn_non_request_effort_into_variant(monkeypatch):
     import mms_provider_profiles
     import mms_launchers
@@ -481,6 +489,7 @@ def test_opencode_model_config_does_not_turn_non_request_effort_into_variant(mon
     assert "variants" not in model_config
 
 
+@pytest.mark.usefixtures("approved_preview_bundle")
 def test_opencode_agent_variant_is_data_driven(monkeypatch):
     import mms_opencode_config
     import mms_provider_profiles
@@ -552,6 +561,7 @@ def test_opencode_agent_variant_is_data_driven(monkeypatch):
     assert "variant" not in updated["env-agent"]
 
 
+@pytest.mark.usefixtures("approved_preview_bundle")
 def test_opencode_committee_gemini_policy_disables_builtin_search_tools(monkeypatch):
     import mms_launchers
     import mms_provider_profiles
@@ -648,6 +658,7 @@ def test_opencode_committee_gemini_policy_disables_builtin_search_tools(monkeypa
     assert "built-in grep/glob/list" not in kimi_agent["prompt"]
 
 
+@pytest.mark.usefixtures("approved_preview_bundle")
 def test_opencode_committee_route_policy_ignores_runtime_provider_profile(monkeypatch):
     import mms_launchers
     import mms_provider_profiles
@@ -776,6 +787,7 @@ def test_opencode_model_limit_uses_shared_model_policy(monkeypatch):
     assert config["limit"] == {"context": 512_000, "output": 65_536}
 
 
+@pytest.mark.usefixtures("approved_preview_bundle")
 def test_opencode_model_config_uses_runtime_model_capabilities_for_limits_and_vision():
     import mms_launchers
 
@@ -894,6 +906,7 @@ def test_opencode_provider_base_url_preserves_existing_v1_and_explicit_override(
     )
 
 
+@pytest.mark.usefixtures("approved_preview_bundle")
 def test_opencode_config_and_exports_use_normalized_gateway_openai_url(monkeypatch, tmp_path):
     import mms_launchers
 
@@ -914,6 +927,7 @@ def test_opencode_config_and_exports_use_normalized_gateway_openai_url(monkeypat
     assert json.loads(Path(exports["OPENCODE_CONFIG"]).read_text(encoding="utf-8"))["provider"]["mms"]["options"]["baseURL"] == "http://129.146.32.12:3000/openai/v1"
 
 
+@pytest.mark.usefixtures("approved_preview_bundle")
 def test_opencode_gateway_env_writes_session_local_config(monkeypatch, tmp_path):
     import mms_launchers
 
@@ -987,6 +1001,7 @@ def test_opencode_gateway_env_writes_session_local_config(monkeypatch, tmp_path)
     assert "OPENCODE_CONFIG_CONTENT" not in env
 
 
+@pytest.mark.usefixtures("approved_preview_bundle")
 def test_opencode_gateway_env_can_disable_shared_cache(monkeypatch, tmp_path):
     import mms_launchers
 
@@ -1021,6 +1036,7 @@ def test_opencode_gateway_env_can_disable_shared_cache(monkeypatch, tmp_path):
     assert not (session_home / "Library" / "Caches").exists()
 
 
+@pytest.mark.usefixtures("approved_preview_bundle")
 def test_opencode_gateway_env_can_opt_into_external_skills(monkeypatch, tmp_path):
     import mms_launchers
 
@@ -1057,6 +1073,7 @@ def test_opencode_gateway_env_can_opt_into_external_skills(monkeypatch, tmp_path
     assert "BUN_INSTALL_CACHE_DIR" not in env
 
 
+@pytest.mark.usefixtures("approved_preview_bundle")
 def test_opencode_gateway_env_can_opt_into_real_home_without_external_skills(monkeypatch, tmp_path):
     import mms_launchers
 
@@ -1107,6 +1124,7 @@ def test_opencode_gateway_env_requires_explicit_profile(monkeypatch, tmp_path):
         )
 
 
+@pytest.mark.usefixtures("approved_preview_bundle")
 def test_opencode_gateway_env_profiles_get_isolated_shared_state(monkeypatch, tmp_path):
     import mms_launchers
 
@@ -1137,6 +1155,7 @@ def test_opencode_gateway_env_profiles_get_isolated_shared_state(monkeypatch, tm
     assert review_env["XDG_STATE_HOME"] == review_env["XDG_DATA_HOME"]
 
 
+@pytest.mark.usefixtures("approved_preview_bundle")
 def test_opencode_gateway_env_isolate_data_kill_switch_restores_session_local_state(monkeypatch, tmp_path):
     import mms_launchers
 
@@ -1164,11 +1183,12 @@ def test_opencode_gateway_env_isolate_data_kill_switch_restores_session_local_st
     assert env["MMS_OPENCODE_PROFILE"] == "lite_pro_orchestrated"
 
 
-def test_opencode_gateway_env_migrates_existing_session_local_opencode_data(monkeypatch, tmp_path):
+@pytest.mark.usefixtures("approved_preview_bundle")
+def test_opencode_gateway_env_migrates_existing_session_local_opencode_data(monkeypatch, tmp_path, approved_preview_bundle):
     import mms_launchers
 
     real_home = tmp_path / "real-home"
-    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_session = approved_preview_bundle / "opencode-gateway" / "s" / "123"
     old_config_dir = old_session / ".config" / "opencode"
     old_config_dir.mkdir(parents=True)
     (old_config_dir / "opencode.json").write_text(
@@ -1204,11 +1224,12 @@ def test_opencode_gateway_env_migrates_existing_session_local_opencode_data(monk
     assert (shared_state / ".mms-shared-state-migration-v1").read_text(encoding="utf-8") == "migrated=1\n"
 
 
-def test_opencode_gateway_env_migrates_all_legacy_profile_data_before_cleanup(monkeypatch, tmp_path):
+@pytest.mark.usefixtures("approved_preview_bundle")
+def test_opencode_gateway_env_migrates_all_legacy_profile_data_before_cleanup(monkeypatch, tmp_path, approved_preview_bundle):
     import mms_launchers
 
     real_home = tmp_path / "real-home"
-    sessions_dir = real_home / ".config" / "mms" / "opencode-gateway" / "s"
+    sessions_dir = approved_preview_bundle / "opencode-gateway" / "s"
     agent_session = sessions_dir / "123"
     review_session = sessions_dir / "456"
     for session, default_agent, db_text in (
@@ -2142,12 +2163,13 @@ def test_opencode_set_soft_home_commits_schema_backfill_when_source_tables_are_e
     assert session_row == ("legacy-migrated-project", "session-1", "1")
 
 
-def test_opencode_gateway_env_skips_cleanup_when_migration_fails(monkeypatch, tmp_path):
+@pytest.mark.usefixtures("approved_preview_bundle")
+def test_opencode_gateway_env_skips_cleanup_when_migration_fails(monkeypatch, tmp_path, approved_preview_bundle):
     import mms_launchers
     import mms_opencode_env
 
     real_home = tmp_path / "real-home"
-    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_session = approved_preview_bundle / "opencode-gateway" / "s" / "123"
     old_config_dir = old_session / ".config" / "opencode"
     old_config_dir.mkdir(parents=True)
     (old_config_dir / "opencode.json").write_text(
@@ -2185,11 +2207,12 @@ def test_opencode_gateway_env_skips_cleanup_when_migration_fails(monkeypatch, tm
     assert env["MMS_OPENCODE_MIGRATION_FAILED"] == "1"
 
 
-def test_opencode_gateway_env_skips_cleanup_when_shared_target_is_non_sqlite(monkeypatch, tmp_path):
+@pytest.mark.usefixtures("approved_preview_bundle")
+def test_opencode_gateway_env_skips_cleanup_when_shared_target_is_non_sqlite(monkeypatch, tmp_path, approved_preview_bundle):
     import mms_launchers
 
     real_home = tmp_path / "real-home"
-    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_session = approved_preview_bundle / "opencode-gateway" / "s" / "123"
     old_config_dir = old_session / ".config" / "opencode"
     old_config_dir.mkdir(parents=True)
     (old_config_dir / "opencode.json").write_text(
@@ -2236,11 +2259,12 @@ def test_opencode_gateway_env_skips_cleanup_when_shared_target_is_non_sqlite(mon
     assert env["MMS_OPENCODE_MIGRATION_FAILED"] == "1"
 
 
-def test_opencode_gateway_env_skips_cleanup_when_legacy_source_is_non_sqlite_and_shared_target_is_valid(monkeypatch, tmp_path):
+@pytest.mark.usefixtures("approved_preview_bundle")
+def test_opencode_gateway_env_skips_cleanup_when_legacy_source_is_non_sqlite_and_shared_target_is_valid(monkeypatch, tmp_path, approved_preview_bundle):
     import mms_launchers
 
     real_home = tmp_path / "real-home"
-    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_session = approved_preview_bundle / "opencode-gateway" / "s" / "123"
     old_config_dir = old_session / ".config" / "opencode"
     old_config_dir.mkdir(parents=True)
     (old_config_dir / "opencode.json").write_text(
@@ -2370,6 +2394,7 @@ def test_opencode_set_soft_home_skips_intentionally_isolated_session_data(tmp_pa
     assert not shared_db.exists()
 
 
+@pytest.mark.usefixtures("approved_preview_bundle")
 def test_opencode_gateway_env_materializes_session_assets(monkeypatch, tmp_path):
     import mms_launchers
 
@@ -2411,22 +2436,23 @@ def test_opencode_gateway_env_materializes_session_assets(monkeypatch, tmp_path)
     assert "plugin" not in payload
     assert (config_dir / "plugins" / "mms-rtk.ts").is_symlink()
     assert (config_dir / "plugins" / "mms-rtk.ts").resolve() == rtk_plugin
-    for name in ("caveman", "weber", "codegraph", "toon"):
+    for name in ("weber", "codegraph", "toon"):
         assert (config_dir / "skills" / name).is_symlink()
         assert (config_dir / "skills" / name / "SKILL.md").exists()
     # web-access lives inside Weber and token-saver is retired: neither is a separate session skill.
-    for name in ("web-access", "token-saver"):
+    for name in ("web-access", "token-saver", "caveman"):
         assert not (config_dir / "skills" / name).exists()
         assert not (config_dir / "skills" / name).is_symlink()
     packet = json.loads(Path(env["MMS_SESSION_PACKET_JSON"]).read_text(encoding="utf-8"))
     features = {row["name"]: row["status"] for row in packet["features"]}
-    assert features["caveman"] == "enabled"
+    assert features["caveman"] == "disabled"
     assert features["opencode_rtk"] == "enabled"
     # The web-access backend still resolves (inside Weber), so the capability stays reported.
     assert features["web_access"] == "enabled"
     assert features["codegraph"] == "enabled"
 
 
+@pytest.mark.usefixtures("approved_preview_bundle")
 def test_opencode_gateway_env_can_disable_bypass(monkeypatch, tmp_path):
     import mms_launchers
 
@@ -2634,6 +2660,7 @@ def test_opencode_run_preflight_uses_bypass_flag(monkeypatch):
     assert mms_launchers.OPENCODE_BYPASS_FLAG not in captured["cmds"][1]
 
 
+@pytest.mark.usefixtures("approved_preview_bundle")
 def test_get_export_env_exposes_opencode_file_config(monkeypatch, tmp_path):
     import mms_launchers
 
@@ -2848,6 +2875,7 @@ def test_core_opencode_heavy_profile_uses_global_runtime_without_model_provider(
     assert runtime["opencode_use_global_config"] is True
 
 
+@pytest.mark.usefixtures("approved_preview_bundle")
 def test_core_opencode_lite_pro_builds_multi_model_roster(monkeypatch):
     import mms_core
     import mms_launchers
@@ -3235,6 +3263,7 @@ def test_gateway_ping_nan_timeout_falls_back_to_default(monkeypatch):
     assert captured["timeout"] == 8
 
 
+@pytest.mark.usefixtures("approved_preview_bundle")
 def test_core_opencode_lite_pro_orchestrated_delegates_to_executor_chain(monkeypatch):
     import mms_core
     import mms_launchers
@@ -3320,6 +3349,7 @@ def test_core_opencode_lite_pro_orchestrated_delegates_to_executor_chain(monkeyp
     assert vision_qwen_route["protocol"] == "anthropic_messages"
 
 
+@pytest.mark.usefixtures("approved_preview_bundle")
 def test_core_opencode_review_profile_builds_review_hub_roster(monkeypatch):
     import mms_core
     import mms_launchers
@@ -3679,6 +3709,7 @@ def test_core_preview_runtime_merges_local_committee_preferences(monkeypatch):
     assert "mobius-builder" not in merged["opencode"]["agent_roster"]
 
 
+@pytest.mark.usefixtures("approved_preview_bundle")
 def test_core_opencode_committee_profile_builds_general_committee_roster(monkeypatch):
     import mms_core
     import mms_launchers
@@ -4316,6 +4347,7 @@ def test_debate_contract_declares_assigned_role_and_stance_authenticity():
     assert "stance_authenticity" in rubric.split("## Step 3")[0]
 
 
+@pytest.mark.usefixtures("approved_preview_bundle")
 def test_core_opencode_debate_profile_builds_structured_debate_roster(monkeypatch):
     import mms_core
     import mms_launchers
@@ -4479,6 +4511,7 @@ def test_core_opencode_debate_profile_builds_structured_debate_roster(monkeypatc
     assert mimo_route["provider_id"] == "mimo-direct-anthropic"
 
 
+@pytest.mark.usefixtures("approved_preview_bundle")
 def test_core_opencode_review_host_models_are_configurable(monkeypatch):
     import mms_core
     import mms_launchers
@@ -4595,6 +4628,7 @@ def test_core_preview_bundle_restores_opencode_review_host(monkeypatch):
     assert cfg["opencode"]["review"]["models"] == ["kimi-k2.7-code"]
 
 
+@pytest.mark.usefixtures("approved_preview_bundle")
 def test_core_opencode_lite_pro_uses_agent_model_overrides(monkeypatch):
     import mms_core
     import mms_launchers
@@ -4642,6 +4676,7 @@ def test_core_opencode_lite_pro_uses_agent_model_overrides(monkeypatch):
     assert payload["agent"]["mobius-explore-glm"]["model"].endswith("/kimi-for-coding")
 
 
+@pytest.mark.usefixtures("approved_preview_bundle")
 def test_core_opencode_lite_pro_uses_agent_roster_custom_and_disabled(monkeypatch):
     import mms_core
     import mms_launchers
@@ -4703,6 +4738,7 @@ def test_core_opencode_lite_pro_uses_agent_roster_custom_and_disabled(monkeypatc
     assert "mobius-vision-mimo" not in payload["agent"]["mobius-builder-pro"]["permission"]["task"]
 
 
+@pytest.mark.usefixtures("approved_preview_bundle")
 def test_core_opencode_lite_pro_keeps_required_builder_when_roster_disables_it(monkeypatch):
     import mms_core
     import mms_launchers
@@ -4786,6 +4822,7 @@ def test_core_opencode_profile_menu_backend_and_acp_apply_entrypoints(monkeypatc
     assert acp_runtime["opencode_entrypoint"] == "acp"
 
 
+@pytest.mark.usefixtures("approved_preview_bundle")
 def test_core_opencode_lite_pro_falls_back_to_gpt_when_non_gpt_anthropic_unavailable(monkeypatch):
     import mms_core
     import mms_launchers

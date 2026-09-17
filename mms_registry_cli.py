@@ -3761,6 +3761,31 @@ def _calibration_openrouter_refs(payload: dict[str, Any]) -> list[dict[str, Any]
     return refs
 
 
+def _calibration_openrouter_baseline(db):
+    """Keep each model's latest reference set and its actual source snapshot."""
+    rows = db.execute(
+        "SELECT snapshot_id, payload_json FROM source_snapshot WHERE source_kind = ? ORDER BY snapshot_id ASC",
+        (mms_registry.CALIBRATION_SOURCE_KIND,),
+    ).fetchall()
+    if not rows:
+        raise mms_registry.RegistryValidationError("missing calibration source snapshot")
+    by_model = {}
+    snapshot_ids = []
+    for row in rows:
+        snapshot_id = int(row["snapshot_id"])
+        snapshot_ids.append(snapshot_id)
+        payload = json.loads(str(row["payload_json"] or "{}"))
+        if not isinstance(payload, dict):
+            raise mms_registry.RegistryValidationError("calibration source snapshot payload must be object")
+        current = {}
+        for ref in _calibration_openrouter_refs(payload):
+            key = ref["model_key"] or ref["provider_model_id"]
+            current.setdefault(key, []).append((snapshot_id, ref))
+        # A snapshot without references cannot erase earlier evidence.
+        by_model.update(current)
+    return snapshot_ids, [item for refs in by_model.values() for item in refs]
+
+
 def _candidate_value(item: dict[str, Any], field_key: str) -> Any:
     if field_key == "context_length":
         return item.get("context_length")
@@ -3793,16 +3818,18 @@ def diff_openrouter_catalog(
     db = mms_registry.open_registry(db_path)
     try:
         openrouter_snapshot, openrouter_payload = _latest_source_payload(db, mms_registry.OPENROUTER_MODELS_SOURCE_KIND)
-        baseline_snapshot, baseline_payload = _latest_source_payload(db, mms_registry.CALIBRATION_SOURCE_KIND)
+        baseline_ids, sourced_refs = _calibration_openrouter_baseline(db)
         catalog = _openrouter_items(openrouter_payload)
-        refs = _calibration_openrouter_refs(baseline_payload)
+        refs = [ref for _, ref in sourced_refs]
+        changes_by_baseline = {snapshot_id: [] for snapshot_id in baseline_ids}
         changes: list[dict[str, Any]] = []
         missing = 0
-        for ref in refs:
+        for baseline_id, ref in sourced_refs:
+            baseline_changes = changes_by_baseline[baseline_id]
             item = catalog.get(ref["provider_model_id"])
             if item is None:
                 missing += 1
-                changes.append(
+                baseline_changes.append(
                     {
                         "change_kind": "provider_catalog_missing",
                         "model_key": ref["model_key"],
@@ -3819,7 +3846,7 @@ def diff_openrouter_catalog(
                 new_value = _candidate_value(item, field_key)
                 if _canonical_equal(old_value, new_value):
                     continue
-                changes.append(
+                baseline_changes.append(
                     {
                         "change_kind": "provider_catalog_changed",
                         "model_key": ref["model_key"],
@@ -3830,23 +3857,26 @@ def diff_openrouter_catalog(
                         "metadata": {"source": "openrouter"},
                     }
                 )
+        changes = [change for group in changes_by_baseline.values() for change in group]
         referenced_ids = {ref["provider_model_id"] for ref in refs}
         untracked_count = len(set(catalog) - referenced_ids)
-        record = {"recorded_count": 0}
+        stored_count = 0
         if store:
-            record = mms_registry.record_candidate_changes(
-                db,
-                changes,
-                source_snapshot_id=int(openrouter_snapshot["snapshot_id"]),
-                baseline_snapshot_id=int(baseline_snapshot["snapshot_id"]),
-            )
-        stored_count = int(record.get("recorded_count", 0) or 0)
+            # Empty groups also retire candidates from a replaced baseline.
+            # Parse/compare every source before beginning these writes.
+            for baseline_id, group in changes_by_baseline.items():
+                record = mms_registry.record_candidate_changes(
+                    db, group, source_snapshot_id=int(openrouter_snapshot["snapshot_id"]),
+                    baseline_snapshot_id=baseline_id,
+                )
+                stored_count += int(record.get("recorded_count", 0) or 0)
     finally:
         db.close()
     return {
         "db_path": str(Path(db_path) if db_path else mms_registry.default_registry_db_path()),
         "source_snapshot_id": int(openrouter_snapshot["snapshot_id"]),
-        "baseline_snapshot_id": int(baseline_snapshot["snapshot_id"]),
+        "baseline_snapshot_id": max((sid for sid, _ in sourced_refs), default=baseline_ids[-1]),
+        "baseline_snapshot_ids": sorted({sid for sid, _ in sourced_refs}),
         "matched_reference_count": len(refs),
         "missing_reference_count": missing,
         "untracked_catalog_count": untracked_count,

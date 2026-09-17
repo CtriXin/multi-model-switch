@@ -456,11 +456,10 @@ def test_mimo_1m_gateway_env_keeps_selector_in_status_and_claude_shell_slots(mon
     )
     monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *args, **kwargs: None)
     monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
-    monkeypatch.setattr(
-        mms_launchers,
-        "_claude_route_status_paths",
-        lambda: [str(tmp_path / "route-status.json")],
-    )
+    def route_status_paths(*, gateway_home):
+        assert gateway_home == str(session_home)
+        return [str(tmp_path / "route-status.json")]
+    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", route_status_paths)
     monkeypatch.setattr(mms_launchers, "list_indexed_sessions", lambda _cli="claude": [])
 
     env = mms_launchers._claude_gateway_env(
@@ -519,11 +518,10 @@ def test_mimo_base_gateway_env_keeps_status_and_claude_shell_slots(monkeypatch, 
     )
     monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *args, **kwargs: None)
     monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
-    monkeypatch.setattr(
-        mms_launchers,
-        "_claude_route_status_paths",
-        lambda: [str(tmp_path / "route-status.json")],
-    )
+    def route_status_paths(*, gateway_home):
+        assert gateway_home == str(session_home)
+        return [str(tmp_path / "route-status.json")]
+    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", route_status_paths)
     monkeypatch.setattr(mms_launchers, "list_indexed_sessions", lambda _cli="claude": [])
 
     env = mms_launchers._claude_gateway_env(

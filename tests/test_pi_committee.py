@@ -992,3 +992,23 @@ def test_cli_dry_run_is_json_only_and_does_not_launch_pi(tmp_path: Path) -> None
     payload = json.loads(completed.stdout)
     assert payload["status"] == "dry_run"
     assert [item["member_id"] for item in payload["plan"]["members"]] == ["member-01", "member-02"]
+
+
+@pytest.mark.parametrize(("model", "api", "path"), [
+    ("claude-sonnet-test", "anthropic-messages", "/v1/messages"),
+    ("k3", "anthropic-messages", "/v1/messages"),
+    ("gpt-5.5", "openai-responses", "/v1/responses"),
+])
+def test_attempt_preserves_selected_protocol_and_rejects_invalid_binding(tmp_path, model, api, path):
+    root = _write_bundle(tmp_path / "config")
+    _, members, _ = mms_pi_committee.plan_committee(config_root=root, task="Inspect", count=1, explicit_models=[model])
+    member = members[0]
+    binding = member.candidate.route_chain[0]
+    with mms_pi_committee._scoped_mms_config_root(root):
+        attempt = mms_pi_committee._prepare_attempt(member, member.candidate, binding)
+        provider = attempt.models_payload["providers"][attempt.provider_ref]
+        assert provider["api"] == api
+        assert binding.request_path == path
+        assert provider["apiKey"].startswith("$MMS_PI_COMMITTEE_KEY_")
+        with pytest.raises(mms_pi_committee.CommitteeError, match="declared protocol"):
+            mms_pi_committee._prepare_attempt(member, member.candidate, replace(binding, protocol="invalid_protocol"))

@@ -377,40 +377,18 @@ class WebApplication:
             return self._sessions().get_session(parts[1])
         raise WebError("NOT_FOUND", "找不到这个接口。", 404)
 
-    # POSTs that change nothing and can take seconds: a native folder dialog the
-    # user may leave open, and two filesystem sweeps. Holding the mutation lock
-    # through those would stop every other POST — sending a message, stopping a
-    # session, confirming an update — for as long as they run. They only read
-    # state that is written by atomic replace, so a concurrent write is seen
-    # whole or not at all.
-    _UNLOCKED_POSTS = (["workspaces", "choose"], ["workspaces", "search"], ["workspaces", "locate"])
+    # POSTs that change nothing and can take seconds: listing a directory for
+    # the in-app folder picker, and two filesystem sweeps. Holding the mutation
+    # lock through those would stop every other POST — sending a message,
+    # stopping a session, confirming an update — for as long as they run. They
+    # only read state that is written by atomic replace, so a concurrent write
+    # is seen whole or not at all.
+    _UNLOCKED_POSTS = (["workspaces", "browse"], ["workspaces", "search"], ["workspaces", "locate"])
 
     def _post_readonly(self, parts: list[str], payload: dict) -> dict:
-        if parts == ["workspaces", "choose"]:
-            import subprocess
-            import sys
-            if sys.platform == "darwin":
-                command = ["osascript", "-e", 'POSIX path of (choose folder with prompt "选择 MMS 的工作文件夹")']
-            elif sys.platform == "win32":
-                # PowerShell is present on supported Windows installs. Keep
-                # the dialog in the interactive desktop and emit one UTF-8
-                # path so Chinese folder names survive the pipe.
-                script = (
-                    "Add-Type -AssemblyName System.Windows.Forms; "
-                    "$d=New-Object System.Windows.Forms.FolderBrowserDialog; "
-                    "$d.Description='选择 MMS 的工作文件夹'; "
-                    "if($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK){ "
-                    "[Console]::OutputEncoding=[Text.Encoding]::UTF8; "
-                    "[Console]::Write($d.SelectedPath) }"
-                )
-                command = ["powershell.exe", "-NoProfile", "-STA", "-WindowStyle", "Normal", "-ExecutionPolicy", "Bypass", "-Command", script]
-            else:
-                raise WebError("FOLDER_PICKER_UNAVAILABLE", "请直接填写电脑上的文件夹路径。", 409)
-            try:
-                result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", timeout=120)
-            except (OSError, subprocess.TimeoutExpired, UnicodeError) as exc:
-                raise WebError("FOLDER_PICKER_UNAVAILABLE", "无法打开文件夹选择器，请直接填写完整路径。", 409) from exc
-            return {"path": result.stdout.strip() if result.returncode == 0 else ""}
+        if parts == ["workspaces", "browse"]:
+            from .workspace_browse import browse_workspaces
+            return browse_workspaces(self.catalog, payload)
         if not self.catalog:
             raise WebError("CAPABILITY_UNAVAILABLE", "本地服务尚未连接。", 409)
         if parts == ["workspaces", "search"]:

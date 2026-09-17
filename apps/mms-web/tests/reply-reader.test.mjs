@@ -299,3 +299,23 @@ test("actual reader mount, keydown and cancel handlers fulfill copy/close action
   let prevented=false;tree.props.onCancel({preventDefault(){prevented=true;}});
   assert.equal(prevented,true);assert.equal(closed,2);
 });
+
+test("actual EventView read action opens the reply and close returns to the message", () => {
+  let reading=false;
+  const Actions=()=>null, Reader=()=>null;
+  const {EventView}=load("../src/components.tsx",{
+    react:{...React,useState:()=>[reading,value=>{reading=value;}]},
+    "lucide-react":new Proxy({}, {get:()=>()=>null}),
+    "./SessionTools":{MessageActions:Actions},"./ReplyReader":{ReplyReader:Reader},
+    "./ConversationOutline":{messageAnchor:id=>`m-${id}`},
+    "./time":{turnDuration:()=>"",formatEventTime:()=>"",formatEventTimeTitle:()=>""},
+  });
+  const props={event:{id:"reply",kind:"assistant",text:"my reply",createdAt:"2026-09-17"},
+    detail:{session:{id:"s",state:"idle",harness:"pi",modelName:"test",capabilities:{send:true}}},busy:false,approve(){},action(){}};
+  const nodes=(node,type)=>!node||typeof node!=="object"?[]:[...(node.type===type?[node]:[]),...React.Children.toArray(node.props?.children).flatMap(child=>nodes(child,type))];
+  let tree=EventView(props);assert.equal(nodes(tree,Reader).length,0);
+  const actions=nodes(tree,Actions);assert.equal(actions.length,1);assert.equal(typeof actions[0].props.onRead,"function");
+  actions[0].props.onRead();tree=EventView(props);let reader=nodes(tree,Reader);assert.equal(reader.length,1);assert.equal(reader[0].props.text,"my reply");
+  reader[0].props.onClose();assert.equal(nodes(EventView(props),Reader).length,0);
+  const user=EventView({...props,event:{...props.event,kind:"user"}});assert.equal(nodes(user,Actions)[0].props.onRead,undefined);
+});

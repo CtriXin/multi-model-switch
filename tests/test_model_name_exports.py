@@ -1,3 +1,5 @@
+
+import pytest
 import sys
 from pathlib import Path
 
@@ -30,6 +32,7 @@ def _patch_real_home(monkeypatch, mms_launchers, real_home: Path):
     )
 
 
+@pytest.mark.usefixtures("approved_preview_bundle")
 def test_get_export_env_includes_mms_model_name_for_standard_runners(monkeypatch, tmp_path):
     import mms_launchers
 
