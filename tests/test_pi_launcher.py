@@ -486,6 +486,9 @@ def test_launch_pi_writes_openai_models_config_and_uses_wrapper(monkeypatch, tmp
 def test_launch_pi_rewrites_deprecated_antigravity_gemini_alias_to_live_replacement(monkeypatch, tmp_path):
     import mms_launchers
 
+    # A launcher-injected skills overlay would leak extra argv entries.
+    monkeypatch.delenv("MMS_PI_SKILLS_OVERLAY", raising=False)
+
     captured = {}
     real_home = tmp_path / "real-home"
     real_home.mkdir()

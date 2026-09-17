@@ -13,32 +13,34 @@ def _profiles(monkeypatch, tmp_path):
 
 
 def test_profile_budget_patch_maps_reasoning_effort(monkeypatch, tmp_path):
-    config_root = tmp_path / "mms"
-    config_root.mkdir()
-    (config_root / "provider-profiles.json").write_text(
-        json.dumps(
-            {
-                "profiles": {
-                    "gemini-test": {
-                        "thinking": {"supported": True, "default_enabled": True},
-                        "body_patches": {
-                            "anthropic_messages": {
-                                "thinking_on": {"thinking.type": "enabled"},
-                                "thinking_off": {"thinking.type": "disabled"},
-                            }
-                        },
-                        "budget": {
-                            "anthropic_messages": {
-                                "path": "thinkingConfig.thinkingBudget",
-                                "default": 8192,
-                                "map": {"medium": 4096, "high": 8192, "xhigh": 16384},
-                            }
-                        },
-                    }
-                }
-            }
-        ),
-        encoding="utf-8",
+    # Preview roots read provider profiles only from the verified
+    # latest-approved bundle; loose provider-profiles.json files are ignored.
+    config_root = tmp_path / "mms-next"
+    from _bundle_helpers import write_minimal_latest_approved_bundle
+
+    write_minimal_latest_approved_bundle(
+        config_root,
+        profile_payload={
+            "schema_version": 1,
+            "profiles": {
+                "gemini-test": {
+                    "thinking": {"supported": True, "default_enabled": True},
+                    "body_patches": {
+                        "anthropic_messages": {
+                            "thinking_on": {"thinking.type": "enabled"},
+                            "thinking_off": {"thinking.type": "disabled"},
+                        }
+                    },
+                    "budget": {
+                        "anthropic_messages": {
+                            "path": "thinkingConfig.thinkingBudget",
+                            "default": 8192,
+                            "map": {"medium": 4096, "high": 8192, "xhigh": 16384},
+                        }
+                    },
+                },
+            },
+        },
     )
     profiles = _profiles(monkeypatch, tmp_path)
     payload = {"model": "gemini-3-flash-preview", "messages": []}

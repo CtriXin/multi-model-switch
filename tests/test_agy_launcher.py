@@ -381,7 +381,8 @@ def test_agy_session_assets_overlay_common_skills_mcp_and_hooks(monkeypatch, tmp
     plugin_dir = account_home / ".gemini" / "antigravity-cli" / "plugins" / "mms-session"
     assert (plugin_dir / "plugin.json").is_file()
     assert os.path.islink(plugin_dir / "skills")
-    assert (plugin_dir / "skills" / "web-access" / "SKILL.md").read_text(encoding="utf-8") == "# skill\n"
+    # web-access is a Weber backend, not a user-facing session skill (9ab22bec).
+    assert not (plugin_dir / "skills" / "web-access").exists()
     assert (plugin_dir / "skills" / "toon" / "SKILL.md").read_text(encoding="utf-8") == "# skill\n"
     assert json.loads((plugin_dir / "mcp_config.json").read_text(encoding="utf-8"))["mcpServers"]["pilot"]["command"] == "python3"
     hooks_path = plugin_dir / "hooks" / "hooks.json"

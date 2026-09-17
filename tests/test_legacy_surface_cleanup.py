@@ -1024,6 +1024,9 @@ def test_mms_chat_discuss_direct_commands_are_disabled_by_default(monkeypatch, c
     import mms_core
 
     monkeypatch.delenv("MMS_ENABLE_LEGACY_CHAT_DISCUSS", raising=False)
+    # current_command() prefers MMS_COMMAND_NAME over argv; do not let a
+    # launcher-injected name leak into the asserted output.
+    monkeypatch.delenv("MMS_COMMAND_NAME", raising=False)
     monkeypatch.setattr(sys, "argv", ["mms", "chat"])
     monkeypatch.setattr(mms_core, "load_config", lambda: {"user": {}, "recommend": {}})
     monkeypatch.setattr(mms_core, "_ensure_startup_snapshot_guard", lambda *_args, **_kwargs: pytest.fail("snapshot should not run"))
@@ -1043,7 +1046,8 @@ def test_mms_default_path_still_uses_tui_launcher_handler(monkeypatch) -> None:
     cfg = {"user": {}, "recommend": {}}
     provider = {"id": "default-provider"}
     monkeypatch.setattr(sys, "argv", ["mms"])
-    monkeypatch.setattr(mms_core, "load_config", lambda: cfg)
+    # main() bootstraps from the verified preview bundle, not load_config.
+    monkeypatch.setattr(mms_core, "_load_config_or_preview_bundle", lambda: cfg)
     monkeypatch.setattr(mms_core, "_ensure_startup_snapshot_guard", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(mms_core, "apply_local_overrides", lambda value: value)
     monkeypatch.setattr(mms_core, "_refresh_routes_export_for_hive", lambda *_args, **_kwargs: None)

@@ -459,7 +459,7 @@ def test_mimo_1m_gateway_env_keeps_selector_in_status_and_claude_shell_slots(mon
     monkeypatch.setattr(
         mms_launchers,
         "_claude_route_status_paths",
-        lambda: [str(tmp_path / "route-status.json")],
+        lambda *args, **kwargs: [str(tmp_path / "route-status.json")],
     )
     monkeypatch.setattr(mms_launchers, "list_indexed_sessions", lambda _cli="claude": [])
 
@@ -522,7 +522,7 @@ def test_mimo_base_gateway_env_keeps_status_and_claude_shell_slots(monkeypatch, 
     monkeypatch.setattr(
         mms_launchers,
         "_claude_route_status_paths",
-        lambda: [str(tmp_path / "route-status.json")],
+        lambda *args, **kwargs: [str(tmp_path / "route-status.json")],
     )
     monkeypatch.setattr(mms_launchers, "list_indexed_sessions", lambda _cli="claude": [])
 

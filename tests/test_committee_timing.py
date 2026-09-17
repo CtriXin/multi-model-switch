@@ -284,6 +284,9 @@ def test_timing_log_path_respects_explicit_config_dir(tmp_path, monkeypatch):
 def test_timing_log_path_defaults_to_mms_next_under_real_home(tmp_path, monkeypatch):
     # No explicit config dir, no preview marker -> default mms root is stable,
     # but issue #64 wants the timing data in the preview (mms-next) lane.
+    # conftest pins a process-wide XDG_CONFIG_HOME; case-3 resolution only
+    # happens when XDG is absent, so drop it here.
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
     monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
     monkeypatch.delenv("MMS_PREVIEW_MODE", raising=False)

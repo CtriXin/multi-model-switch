@@ -138,8 +138,13 @@ def test_provider_profiles_use_verified_latest_approved_before_legacy(monkeypatc
     )
 
 
-def test_provider_profiles_use_legacy_only_when_latest_manifest_missing(monkeypatch, tmp_path: Path) -> None:
-    config_root = tmp_path / "xdg" / "mms"
+def test_provider_profiles_ignore_loose_files_without_verified_bundle(monkeypatch, tmp_path: Path) -> None:
+    """Preview roots (the only mode) trust profiles from the verified bundle only.
+
+    A loose provider-profiles.json in the config root must not leak into
+    resolution while no verified latest-approved manifest exists.
+    """
+    config_root = tmp_path / "xdg" / "mms-next"
     config_root.mkdir(parents=True)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(config_root.parent))
     monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
@@ -163,39 +168,30 @@ def test_provider_profiles_use_legacy_only_when_latest_manifest_missing(monkeypa
             "legacy-model",
             provider_id="legacy-provider",
         )
-        == 111_000
+        is None
     )
 
 
 def test_provider_profile_cache_is_scoped_by_config_root(monkeypatch, tmp_path: Path) -> None:
-    root_a = tmp_path / "root-a" / "mms"
-    root_b = tmp_path / "root-b" / "mms"
-    root_a.mkdir(parents=True)
-    root_b.mkdir(parents=True)
-    mms_registry.write_json_atomic(
-        root_a / "provider-profiles.json",
-        {
-            "schema_version": 1,
-            "profiles": {
-                "root-a-profile": {
-                    "match": {"provider_id_contains": ["cache-provider"]},
-                    "context_windows": {"cache-model": 111_000},
-                }
+    root_a = tmp_path / "root-a" / "mms-next"
+    root_b = tmp_path / "root-b" / "mms-next"
+    for root, profile_name, window in (
+        (root_a, "root-a-profile", 111_000),
+        (root_b, "root-b-profile", 222_000),
+    ):
+        # Preview roots read profiles from the verified bundle, not loose files.
+        _write_bundle(
+            root,
+            profile_payload={
+                "schema_version": 1,
+                "profiles": {
+                    profile_name: {
+                        "match": {"provider_id_contains": ["cache-provider"]},
+                        "context_windows": {"cache-model": window},
+                    }
+                },
             },
-        },
-    )
-    mms_registry.write_json_atomic(
-        root_b / "provider-profiles.json",
-        {
-            "schema_version": 1,
-            "profiles": {
-                "root-b-profile": {
-                    "match": {"provider_id_contains": ["cache-provider"]},
-                    "context_windows": {"cache-model": 222_000},
-                }
-            },
-        },
-    )
+        )
 
     import mms_provider_profiles
 
@@ -238,6 +234,12 @@ def test_capability_resolver_uses_verified_latest_approved_by_default(monkeypatc
 
     generated_caps = tmp_path / "generated" / "model-capabilities.approved.json"
     generated_caps.write_text(json.dumps({"models": []}), encoding="utf-8")
+
+    # The resolver caches verified facts keyed on the manifest signature; a test
+    # that corrupts a payload in place must drop the cache to force re-verify.
+    from mms_capability_resolver import clear_capability_resolver_caches
+
+    clear_capability_resolver_caches()
 
     with pytest.raises(CapabilityBundleError, match="latest-approved capabilities unavailable"):
         resolve_model_capabilities("approved-model")

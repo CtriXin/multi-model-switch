@@ -27,6 +27,7 @@ def test_xdg_config_home_is_not_explicit_preview_root(tmp_path: Path) -> None:
 
     assert mms_config_root_is_explicit(env) is False
     assert status["root_source"] == "XDG_CONFIG_HOME"
-    assert status["mode"] == "stable"
+    # Single config root: every root is the mms-next preview root.
+    assert status["mode"] == "preview"
     assert status["explicit_root"] is False
-    assert status["config_root"] == str(tmp_path / "xdg" / "mms")
+    assert status["config_root"] == str(tmp_path / "xdg" / "mms-next")

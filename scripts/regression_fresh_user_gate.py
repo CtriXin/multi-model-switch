@@ -197,6 +197,11 @@ _SCENARIO_MATRIX = [
         "coverage": "hook trust does not reprompt and bounded resume/history is preserved safely",
     },
     {
+        "id": "fresh-root-launch-never-reaches-capability-fail-closed",
+        "state": "empty HOME, fresh ~/.config/mms-next, no published bundle",
+        "coverage": "a bare launch stops at the v2 guidance instead of reaching the opencode capability fail-closed path, so a fresh install without a bundle cannot crash the launcher with CapabilityBundleError",
+    },
+    {
         "id": "channel-switch-round-trip",
         "state": "one shared state root: the newer line writes a bot, a schedule, bot memory, bot-owned sessions and its update/ui caches; the 4.x line then boots on it; the newer line reads it back",
         "coverage": "downgrade boots clean (bootstrap 200, no 5xx, no traceback), every bots/ file is untouched byte-for-byte and by mtime, sessions whose owner this line does not know stay out of the list and refuse detail by id while plain web sessions are unaffected, and the upgrade back still finds bot, schedule and memory at schema 2 with no load error; recorded known costs: whatsNewSeenVersion keeps the newer line's version so this line's release notes stay hidden, and the cached update tag still points at the newer line so the update status offers it again",
@@ -315,6 +320,36 @@ def _smoke_shared_config_root_default() -> None:
         roots = json.loads(completed.stdout)
         if roots.get("fresh") != str(shared_root):
             raise SystemExit(f"pilot fresh root mismatch: {roots.get('fresh')} != {shared_root}")
+
+
+def _smoke_fresh_root_launch_stops_at_guidance() -> None:
+    """A bundle-less fresh root must exit with guidance, not a crash.
+
+    T8c phase-2 ruling 2: the opencode capability resolver fails closed when
+    the latest-approved bundle is missing. This scenario proves the real launch
+    path never reaches that state — runtime config only exists once a bundle
+    is published, so a bare launch on a fresh root stops at the v2 guidance.
+    """
+    with tempfile.TemporaryDirectory(prefix="mms-fresh-launch-") as tmp:
+        home = Path(tmp).resolve() / "home"
+        home.mkdir()
+        completed = subprocess.run(
+            [sys.executable, str(ROOT_DIR / "mms")],
+            cwd=ROOT_DIR,
+            env=_env_for_home(home),
+            stdin=subprocess.DEVNULL,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        output = completed.stdout + completed.stderr
+        print(output, end="")
+        if completed.returncode != 2:
+            raise SystemExit(f"fresh launch exit code mismatch: {completed.returncode} != 2")
+        if "Preview root uses v2 DB truth" not in output:
+            raise SystemExit("fresh launch did not print the v2 guidance")
+        if "CapabilityBundleError" in output or "Traceback" in output:
+            raise SystemExit("fresh launch crashed instead of stopping at the guidance")
 
 
 def _safe_symlink(target: Path | str, link: Path) -> None:
@@ -881,6 +916,7 @@ def main() -> int:
     _run("py_compile", [sys.executable, "-m", "py_compile", *_PY_COMPILE_TARGETS])
     _smoke_fresh_mmf_config_root()
     _smoke_shared_config_root_default()
+    _smoke_fresh_root_launch_stops_at_guidance()
     _smoke_legacy_install_state_matrix()
     _smoke_repeatable_install_dry_run()
     _smoke_pi_btw_bundled_extension()

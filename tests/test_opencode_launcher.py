@@ -10,6 +10,27 @@ from pathlib import Path
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _isolated_config_root_with_bundle(monkeypatch, tmp_path):
+    """Per-test config root carrying a minimal verified bundle (T8c R1).
+
+    Preview roots fail closed without a latest-approved bundle, and since
+    33fd11fc the opencode gateway sessions dir lives under the *config root*
+    (not the real home), so a shared session-scoped sandbox would leak files
+    between tests via the fixed per-PID session dir. Give every test its own
+    root: isolation plus the bundle the built-in-profile fallback path needs.
+    """
+    from _bundle_helpers import write_minimal_latest_approved_bundle
+    from mms_capability_resolver import clear_capability_resolver_caches
+
+    root = tmp_path / "config-root"
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(root))
+    write_minimal_latest_approved_bundle(root)
+    clear_capability_resolver_caches()
+    yield
+    clear_capability_resolver_caches()
+
+
 def _runtime(**overrides):
     runtime = {
         "id": "deepseek",
@@ -1168,7 +1189,7 @@ def test_opencode_gateway_env_migrates_existing_session_local_opencode_data(monk
     import mms_launchers
 
     real_home = tmp_path / "real-home"
-    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_session = tmp_path / "config-root" / "opencode-gateway" / "s" / "123"
     old_config_dir = old_session / ".config" / "opencode"
     old_config_dir.mkdir(parents=True)
     (old_config_dir / "opencode.json").write_text(
@@ -1208,7 +1229,7 @@ def test_opencode_gateway_env_migrates_all_legacy_profile_data_before_cleanup(mo
     import mms_launchers
 
     real_home = tmp_path / "real-home"
-    sessions_dir = real_home / ".config" / "mms" / "opencode-gateway" / "s"
+    sessions_dir = tmp_path / "config-root" / "opencode-gateway" / "s"
     agent_session = sessions_dir / "123"
     review_session = sessions_dir / "456"
     for session, default_agent, db_text in (
@@ -1258,7 +1279,7 @@ def test_opencode_set_soft_home_replaces_read_only_shared_pack_file(tmp_path):
     import mms_opencode_env
 
     real_home = tmp_path / "real-home"
-    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_session = tmp_path / "config-root" / "opencode-gateway" / "s" / "123"
     old_config_dir = old_session / ".config" / "opencode"
     old_config_dir.mkdir(parents=True)
     (old_config_dir / "opencode.json").write_text(
@@ -1292,7 +1313,7 @@ def test_opencode_set_soft_home_replaces_read_only_shared_pack_file(tmp_path):
     env = {}
     mms_opencode_env.opencode_set_soft_home(
         env,
-        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        str(tmp_path / "config-root" / "opencode-gateway" / "s" / "200"),
         real_user_path=_real_user_path,
         set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
         profile_id="lite_pro_orchestrated",
@@ -1307,7 +1328,7 @@ def test_opencode_set_soft_home_marks_generic_file_copy_failure_without_crashing
     import mms_opencode_env
 
     real_home = tmp_path / "real-home"
-    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_session = tmp_path / "config-root" / "opencode-gateway" / "s" / "123"
     old_config_dir = old_session / ".config" / "opencode"
     old_config_dir.mkdir(parents=True)
     (old_config_dir / "opencode.json").write_text(
@@ -1329,7 +1350,7 @@ def test_opencode_set_soft_home_marks_generic_file_copy_failure_without_crashing
     env = {}
     mms_opencode_env.opencode_set_soft_home(
         env,
-        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        str(tmp_path / "config-root" / "opencode-gateway" / "s" / "200"),
         real_user_path=_real_user_path,
         set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
         profile_id="lite_pro_orchestrated",
@@ -1342,7 +1363,7 @@ def test_opencode_set_soft_home_skips_unchanged_legacy_tree_after_marker(monkeyp
     import mms_opencode_env
 
     real_home = tmp_path / "real-home"
-    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_session = tmp_path / "config-root" / "opencode-gateway" / "s" / "123"
     old_config_dir = old_session / ".config" / "opencode"
     old_config_dir.mkdir(parents=True)
     (old_config_dir / "opencode.json").write_text(
@@ -1359,7 +1380,7 @@ def test_opencode_set_soft_home_skips_unchanged_legacy_tree_after_marker(monkeyp
     env = {}
     mms_opencode_env.opencode_set_soft_home(
         env,
-        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        str(tmp_path / "config-root" / "opencode-gateway" / "s" / "200"),
         real_user_path=_real_user_path,
         set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
         profile_id="lite_pro_orchestrated",
@@ -1376,7 +1397,7 @@ def test_opencode_set_soft_home_skips_unchanged_legacy_tree_after_marker(monkeyp
     env2 = {}
     mms_opencode_env.opencode_set_soft_home(
         env2,
-        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "201"),
+        str(tmp_path / "config-root" / "opencode-gateway" / "s" / "201"),
         real_user_path=_real_user_path,
         set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
         profile_id="lite_pro_orchestrated",
@@ -1390,7 +1411,7 @@ def test_opencode_set_soft_home_replays_db_after_marker_without_full_tree_scan(m
     import mms_opencode_env
 
     real_home = tmp_path / "real-home"
-    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_session = tmp_path / "config-root" / "opencode-gateway" / "s" / "123"
     old_config_dir = old_session / ".config" / "opencode"
     old_config_dir.mkdir(parents=True)
     (old_config_dir / "opencode.json").write_text(
@@ -1418,7 +1439,7 @@ def test_opencode_set_soft_home_replays_db_after_marker_without_full_tree_scan(m
     env = {}
     mms_opencode_env.opencode_set_soft_home(
         env,
-        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        str(tmp_path / "config-root" / "opencode-gateway" / "s" / "200"),
         real_user_path=_real_user_path,
         set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
         profile_id="lite_pro_orchestrated",
@@ -1450,7 +1471,7 @@ def test_opencode_set_soft_home_replays_db_after_marker_without_full_tree_scan(m
     env2 = {}
     mms_opencode_env.opencode_set_soft_home(
         env2,
-        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "201"),
+        str(tmp_path / "config-root" / "opencode-gateway" / "s" / "201"),
         real_user_path=_real_user_path,
         set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
         profile_id="lite_pro_orchestrated",
@@ -1465,7 +1486,7 @@ def test_opencode_set_soft_home_replays_nested_state_after_marker_without_full_t
     import mms_opencode_env
 
     real_home = tmp_path / "real-home"
-    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_session = tmp_path / "config-root" / "opencode-gateway" / "s" / "123"
     old_config_dir = old_session / ".config" / "opencode"
     old_config_dir.mkdir(parents=True)
     (old_config_dir / "opencode.json").write_text(
@@ -1482,7 +1503,7 @@ def test_opencode_set_soft_home_replays_nested_state_after_marker_without_full_t
     env = {}
     mms_opencode_env.opencode_set_soft_home(
         env,
-        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        str(tmp_path / "config-root" / "opencode-gateway" / "s" / "200"),
         real_user_path=_real_user_path,
         set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
         profile_id="lite_pro_orchestrated",
@@ -1503,7 +1524,7 @@ def test_opencode_set_soft_home_replays_nested_state_after_marker_without_full_t
     env2 = {}
     mms_opencode_env.opencode_set_soft_home(
         env2,
-        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "201"),
+        str(tmp_path / "config-root" / "opencode-gateway" / "s" / "201"),
         real_user_path=_real_user_path,
         set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
         profile_id="lite_pro_orchestrated",
@@ -1517,7 +1538,7 @@ def test_opencode_set_soft_home_replays_write_after_incremental_scan_before_mark
     import mms_opencode_env
 
     real_home = tmp_path / "real-home"
-    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_session = tmp_path / "config-root" / "opencode-gateway" / "s" / "123"
     old_config_dir = old_session / ".config" / "opencode"
     old_config_dir.mkdir(parents=True)
     (old_config_dir / "opencode.json").write_text(
@@ -1538,7 +1559,7 @@ def test_opencode_set_soft_home_replays_write_after_incremental_scan_before_mark
     env = {}
     mms_opencode_env.opencode_set_soft_home(
         env,
-        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        str(tmp_path / "config-root" / "opencode-gateway" / "s" / "200"),
         real_user_path=_real_user_path,
         set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
         profile_id="lite_pro_orchestrated",
@@ -1562,7 +1583,7 @@ def test_opencode_set_soft_home_replays_write_after_incremental_scan_before_mark
     env2 = {}
     mms_opencode_env.opencode_set_soft_home(
         env2,
-        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "201"),
+        str(tmp_path / "config-root" / "opencode-gateway" / "s" / "201"),
         real_user_path=_real_user_path,
         set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
         profile_id="lite_pro_orchestrated",
@@ -1576,7 +1597,7 @@ def test_opencode_set_soft_home_replays_write_after_incremental_scan_before_mark
     env3 = {}
     mms_opencode_env.opencode_set_soft_home(
         env3,
-        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "202"),
+        str(tmp_path / "config-root" / "opencode-gateway" / "s" / "202"),
         real_user_path=_real_user_path,
         set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
         profile_id="lite_pro_orchestrated",
@@ -1590,7 +1611,7 @@ def test_opencode_set_soft_home_replays_skipped_candidate_write_during_other_can
     import mms_opencode_env
 
     real_home = tmp_path / "real-home"
-    sessions_dir = real_home / ".config" / "mms" / "opencode-gateway" / "s"
+    sessions_dir = tmp_path / "config-root" / "opencode-gateway" / "s"
     session_a = sessions_dir / "123"
     session_b = sessions_dir / "124"
 
@@ -1683,7 +1704,7 @@ def test_opencode_set_soft_home_ignores_log_churn_after_marker(monkeypatch, tmp_
     import mms_opencode_env
 
     real_home = tmp_path / "real-home"
-    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_session = tmp_path / "config-root" / "opencode-gateway" / "s" / "123"
     old_config_dir = old_session / ".config" / "opencode"
     old_config_dir.mkdir(parents=True)
     (old_config_dir / "opencode.json").write_text(
@@ -1700,7 +1721,7 @@ def test_opencode_set_soft_home_ignores_log_churn_after_marker(monkeypatch, tmp_
     env = {}
     mms_opencode_env.opencode_set_soft_home(
         env,
-        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        str(tmp_path / "config-root" / "opencode-gateway" / "s" / "200"),
         real_user_path=_real_user_path,
         set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
         profile_id="lite_pro_orchestrated",
@@ -1721,7 +1742,7 @@ def test_opencode_set_soft_home_ignores_log_churn_after_marker(monkeypatch, tmp_
     env2 = {}
     mms_opencode_env.opencode_set_soft_home(
         env2,
-        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "201"),
+        str(tmp_path / "config-root" / "opencode-gateway" / "s" / "201"),
         real_user_path=_real_user_path,
         set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
         profile_id="lite_pro_orchestrated",
@@ -1735,7 +1756,7 @@ def test_opencode_set_soft_home_replays_active_legacy_session_tail_writes(tmp_pa
     import mms_opencode_env
 
     real_home = tmp_path / "real-home"
-    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_session = tmp_path / "config-root" / "opencode-gateway" / "s" / "123"
     old_config_dir = old_session / ".config" / "opencode"
     old_config_dir.mkdir(parents=True)
     (old_config_dir / "opencode.json").write_text(
@@ -1783,7 +1804,7 @@ def test_opencode_set_soft_home_replays_active_legacy_session_tail_writes(tmp_pa
     env = {}
     mms_opencode_env.opencode_set_soft_home(
         env,
-        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        str(tmp_path / "config-root" / "opencode-gateway" / "s" / "200"),
         real_user_path=_real_user_path,
         set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
         profile_id="lite_pro_orchestrated",
@@ -1856,7 +1877,7 @@ def test_opencode_set_soft_home_replays_active_legacy_session_tail_writes(tmp_pa
     env2 = {}
     mms_opencode_env.opencode_set_soft_home(
         env2,
-        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "201"),
+        str(tmp_path / "config-root" / "opencode-gateway" / "s" / "201"),
         real_user_path=_real_user_path,
         set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
         profile_id="lite_pro_orchestrated",
@@ -1878,7 +1899,7 @@ def test_opencode_set_soft_home_does_not_overwrite_newer_shared_state_when_legac
     import mms_opencode_env
 
     real_home = tmp_path / "real-home"
-    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_session = tmp_path / "config-root" / "opencode-gateway" / "s" / "123"
     old_config_dir = old_session / ".config" / "opencode"
     old_config_dir.mkdir(parents=True)
     (old_config_dir / "opencode.json").write_text(
@@ -1906,7 +1927,7 @@ def test_opencode_set_soft_home_does_not_overwrite_newer_shared_state_when_legac
     env = {}
     mms_opencode_env.opencode_set_soft_home(
         env,
-        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        str(tmp_path / "config-root" / "opencode-gateway" / "s" / "200"),
         real_user_path=_real_user_path,
         set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
         profile_id="lite_pro_orchestrated",
@@ -1947,7 +1968,7 @@ def test_opencode_set_soft_home_does_not_overwrite_newer_shared_state_when_legac
     env2 = {}
     mms_opencode_env.opencode_set_soft_home(
         env2,
-        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "201"),
+        str(tmp_path / "config-root" / "opencode-gateway" / "s" / "201"),
         real_user_path=_real_user_path,
         set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
         profile_id="lite_pro_orchestrated",
@@ -1964,7 +1985,7 @@ def test_opencode_set_soft_home_upgrades_existing_narrow_shared_schema(tmp_path)
     import mms_opencode_env
 
     real_home = tmp_path / "real-home"
-    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_session = tmp_path / "config-root" / "opencode-gateway" / "s" / "123"
     old_config_dir = old_session / ".config" / "opencode"
     old_config_dir.mkdir(parents=True)
     (old_config_dir / "opencode.json").write_text(
@@ -2015,7 +2036,7 @@ def test_opencode_set_soft_home_upgrades_existing_narrow_shared_schema(tmp_path)
     env = {}
     mms_opencode_env.opencode_set_soft_home(
         env,
-        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        str(tmp_path / "config-root" / "opencode-gateway" / "s" / "200"),
         real_user_path=_real_user_path,
         set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
         profile_id="lite_pro_orchestrated",
@@ -2042,7 +2063,7 @@ def test_opencode_set_soft_home_handles_narrow_source_project_schema(tmp_path):
     import mms_opencode_env
 
     real_home = tmp_path / "real-home"
-    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_session = tmp_path / "config-root" / "opencode-gateway" / "s" / "123"
     old_config_dir = old_session / ".config" / "opencode"
     old_config_dir.mkdir(parents=True)
     (old_config_dir / "opencode.json").write_text(
@@ -2080,7 +2101,7 @@ def test_opencode_set_soft_home_handles_narrow_source_project_schema(tmp_path):
     env = {}
     mms_opencode_env.opencode_set_soft_home(
         env,
-        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        str(tmp_path / "config-root" / "opencode-gateway" / "s" / "200"),
         real_user_path=_real_user_path,
         set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
         profile_id="lite_pro_orchestrated",
@@ -2096,7 +2117,7 @@ def test_opencode_set_soft_home_commits_schema_backfill_when_source_tables_are_e
     import mms_opencode_env
 
     real_home = tmp_path / "real-home"
-    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_session = tmp_path / "config-root" / "opencode-gateway" / "s" / "123"
     old_config_dir = old_session / ".config" / "opencode"
     old_config_dir.mkdir(parents=True)
     (old_config_dir / "opencode.json").write_text(
@@ -2123,7 +2144,7 @@ def test_opencode_set_soft_home_commits_schema_backfill_when_source_tables_are_e
     env = {}
     mms_opencode_env.opencode_set_soft_home(
         env,
-        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        str(tmp_path / "config-root" / "opencode-gateway" / "s" / "200"),
         real_user_path=_real_user_path,
         set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
         profile_id="lite_pro_orchestrated",
@@ -2147,7 +2168,7 @@ def test_opencode_gateway_env_skips_cleanup_when_migration_fails(monkeypatch, tm
     import mms_opencode_env
 
     real_home = tmp_path / "real-home"
-    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_session = tmp_path / "config-root" / "opencode-gateway" / "s" / "123"
     old_config_dir = old_session / ".config" / "opencode"
     old_config_dir.mkdir(parents=True)
     (old_config_dir / "opencode.json").write_text(
@@ -2189,7 +2210,7 @@ def test_opencode_gateway_env_skips_cleanup_when_shared_target_is_non_sqlite(mon
     import mms_launchers
 
     real_home = tmp_path / "real-home"
-    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_session = tmp_path / "config-root" / "opencode-gateway" / "s" / "123"
     old_config_dir = old_session / ".config" / "opencode"
     old_config_dir.mkdir(parents=True)
     (old_config_dir / "opencode.json").write_text(
@@ -2240,7 +2261,7 @@ def test_opencode_gateway_env_skips_cleanup_when_legacy_source_is_non_sqlite_and
     import mms_launchers
 
     real_home = tmp_path / "real-home"
-    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_session = tmp_path / "config-root" / "opencode-gateway" / "s" / "123"
     old_config_dir = old_session / ".config" / "opencode"
     old_config_dir.mkdir(parents=True)
     (old_config_dir / "opencode.json").write_text(
@@ -2296,7 +2317,7 @@ def test_opencode_set_soft_home_initial_sqlite_backup_reads_wal_state(tmp_path):
     import mms_opencode_env
 
     real_home = tmp_path / "real-home"
-    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_session = tmp_path / "config-root" / "opencode-gateway" / "s" / "123"
     old_config_dir = old_session / ".config" / "opencode"
     old_config_dir.mkdir(parents=True)
     (old_config_dir / "opencode.json").write_text(
@@ -2322,7 +2343,7 @@ def test_opencode_set_soft_home_initial_sqlite_backup_reads_wal_state(tmp_path):
         env = {}
         mms_opencode_env.opencode_set_soft_home(
             env,
-            str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+            str(tmp_path / "config-root" / "opencode-gateway" / "s" / "200"),
             real_user_path=_real_user_path,
             set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
             profile_id="lite_pro_orchestrated",
@@ -2345,7 +2366,7 @@ def test_opencode_set_soft_home_skips_intentionally_isolated_session_data(tmp_pa
         return str(real_home.joinpath(*parts))
 
     isolated_env = {"MMS_OPENCODE_ISOLATE_DATA": "1"}
-    isolated_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    isolated_session = tmp_path / "config-root" / "opencode-gateway" / "s" / "123"
     mms_opencode_env.opencode_set_soft_home(
         isolated_env,
         str(isolated_session),
@@ -2360,7 +2381,7 @@ def test_opencode_set_soft_home_skips_intentionally_isolated_session_data(tmp_pa
     shared_env = {}
     mms_opencode_env.opencode_set_soft_home(
         shared_env,
-        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        str(tmp_path / "config-root" / "opencode-gateway" / "s" / "200"),
         real_user_path=_real_user_path,
         set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
         profile_id="lite_pro_orchestrated",
@@ -2411,16 +2432,17 @@ def test_opencode_gateway_env_materializes_session_assets(monkeypatch, tmp_path)
     assert "plugin" not in payload
     assert (config_dir / "plugins" / "mms-rtk.ts").is_symlink()
     assert (config_dir / "plugins" / "mms-rtk.ts").resolve() == rtk_plugin
-    for name in ("caveman", "weber", "codegraph", "toon"):
+    for name in ("weber", "codegraph", "toon"):
         assert (config_dir / "skills" / name).is_symlink()
         assert (config_dir / "skills" / name / "SKILL.md").exists()
-    # web-access lives inside Weber and token-saver is retired: neither is a separate session skill.
-    for name in ("web-access", "token-saver"):
+    # caveman is retired globally, web-access lives inside Weber, token-saver is
+    # retired: none of them is a separate session skill.
+    for name in ("caveman", "web-access", "token-saver"):
         assert not (config_dir / "skills" / name).exists()
         assert not (config_dir / "skills" / name).is_symlink()
     packet = json.loads(Path(env["MMS_SESSION_PACKET_JSON"]).read_text(encoding="utf-8"))
     features = {row["name"]: row["status"] for row in packet["features"]}
-    assert features["caveman"] == "enabled"
+    assert features["caveman"] == "disabled"
     assert features["opencode_rtk"] == "enabled"
     # The web-access backend still resolves (inside Weber), so the capability stays reported.
     assert features["web_access"] == "enabled"
@@ -2673,7 +2695,7 @@ def test_get_export_env_for_heavy_omo_does_not_write_session_config(monkeypatch,
         "MMS_OPENCODE_BYPASS": "1",
         "MMS_OPENCODE_PROFILE": "heavy_omo",
     }
-    assert not (real_home / ".config" / "mms" / "opencode-gateway").exists()
+    assert not (tmp_path / "config-root" / "opencode-gateway").exists()
 
 
 def test_get_export_env_for_heavy_omo_does_not_require_provider_credentials():

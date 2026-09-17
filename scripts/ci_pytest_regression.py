@@ -54,6 +54,13 @@ def _clean_env() -> dict[str, str]:
         "MMS_SESSION_HOME",
         "MMS_PI_EXECUTABLE",
         "XDG_CONFIG_HOME",
+        # Launcher-injected identity/skill state leaks into assertions about
+        # argv and printed command names (T8c R9).
+        "MMS_COMMAND_NAME",
+        "MMS_PI_SKILLS_OVERLAY",
+        # Locale decides the UI language of main()-driving tests (T8c R10).
+        "LANG",
+        "LC_ALL",
     ):
         env.pop(key, None)
     env["PYTHONDONTWRITEBYTECODE"] = "1"

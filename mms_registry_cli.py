@@ -3783,6 +3783,38 @@ def _canonical_equal(left: Any, right: Any) -> bool:
     )
 
 
+def _calibration_openrouter_refs_union(db) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Union of OpenRouter refs across all calibration snapshots.
+
+    Drift detection must compare the catalog against everything we have ever
+    calibrated, not against whichever snapshot happens to be newest — snapshots
+    after 2026-05-21 carry no OpenRouter refs at all, so a latest-only baseline
+    silently turned the diff into a no-op. When several snapshots reference the
+    same model, the newest snapshot's values win.
+    """
+    rows = db.execute(
+        """
+        SELECT snapshot_id, source_kind, source_path, captured_at, content_hash, model_count, payload_json
+        FROM source_snapshot
+        WHERE source_kind = ?
+        ORDER BY snapshot_id ASC
+        """,
+        (mms_registry.CALIBRATION_SOURCE_KIND,),
+    ).fetchall()
+    if not rows:
+        raise mms_registry.RegistryValidationError(f"missing source snapshot: {mms_registry.CALIBRATION_SOURCE_KIND}")
+    refs_by_model: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        payload = json.loads(str(row["payload_json"] or "{}"))
+        if not isinstance(payload, dict):
+            raise mms_registry.RegistryValidationError(
+                f"source snapshot payload must be object: {mms_registry.CALIBRATION_SOURCE_KIND}"
+            )
+        for ref in _calibration_openrouter_refs(payload):
+            refs_by_model[ref["model_key"]] = ref
+    return dict(rows[-1]), list(refs_by_model.values())
+
+
 def diff_openrouter_catalog(
     *,
     db_path: str | Path | None = None,
@@ -3793,9 +3825,8 @@ def diff_openrouter_catalog(
     db = mms_registry.open_registry(db_path)
     try:
         openrouter_snapshot, openrouter_payload = _latest_source_payload(db, mms_registry.OPENROUTER_MODELS_SOURCE_KIND)
-        baseline_snapshot, baseline_payload = _latest_source_payload(db, mms_registry.CALIBRATION_SOURCE_KIND)
+        baseline_snapshot, refs = _calibration_openrouter_refs_union(db)
         catalog = _openrouter_items(openrouter_payload)
-        refs = _calibration_openrouter_refs(baseline_payload)
         changes: list[dict[str, Any]] = []
         missing = 0
         for ref in refs:

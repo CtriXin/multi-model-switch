@@ -681,7 +681,16 @@ def test_config_web_bundle_runtime_ignores_remote_probe_cache(monkeypatch):
     assert rows[0]["source"] == "approved"
 
 
-def test_config_web_model_capability_defaults_are_profile_backed_not_hardcoded():
+def test_config_web_model_capability_defaults_are_profile_backed_not_hardcoded(monkeypatch, tmp_path):
+    # Preview roots fail closed without a verified bundle; with one in place,
+    # capabilities fall back to the built-in provider profiles (T8c R1).
+    from _bundle_helpers import write_minimal_latest_approved_bundle
+    from mms_capability_resolver import clear_capability_resolver_caches
+
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(tmp_path / "config-root"))
+    write_minimal_latest_approved_bundle(tmp_path / "config-root")
+    clear_capability_resolver_caches()
+
     cfg = {
         "providers": [
             {
@@ -4526,6 +4535,14 @@ def test_config_web_model_smoke_shows_openrouter_claude_403_error(monkeypatch):
 
 
 def test_config_web_provider_model_fetch_returns_policy_capabilities(monkeypatch, tmp_path):
+    # Preview roots fail closed without a verified bundle (T8c R1).
+    from _bundle_helpers import write_minimal_latest_approved_bundle
+    from mms_capability_resolver import clear_capability_resolver_caches
+
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(tmp_path / "config-root"))
+    write_minimal_latest_approved_bundle(tmp_path / "config-root")
+    clear_capability_resolver_caches()
+
     (tmp_path / "model-policy.json").write_text(
         json.dumps(
             {

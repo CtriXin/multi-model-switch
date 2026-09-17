@@ -18,14 +18,17 @@ REFERENCE_JSON = ROOT / "docs/reference/model-capability-calibration/2026-05-21-
 def test_refresh_sources_imports_reference_snapshot_to_db(tmp_path: Path) -> None:
     db_path = tmp_path / "model-registry.sqlite"
 
-    summary = mms_registry_cli.refresh_source_snapshots(db_path=db_path, paths=[REFERENCE_JSON])
+    # registry_status() reports freshness across every default reference
+    # snapshot, so a full default refresh is what makes the view clean.
+    default_paths = mms_registry_cli._reference_snapshot_paths(None)
+    summary = mms_registry_cli.refresh_source_snapshots(db_path=db_path)
     status = mms_registry_cli.registry_status(db_path=db_path)
 
-    assert summary["imported_count"] == 1
+    assert summary["imported_count"] == len(default_paths)
     assert summary["model_count"] >= 39
     assert summary["fact_count"] >= summary["model_count"]
-    assert status["counts"]["source_snapshot"] == 1
-    assert status["counts"]["source_check"] == 1
+    assert status["counts"]["source_snapshot"] == len(default_paths)
+    assert status["counts"]["source_check"] == len(default_paths)
     assert status["source_freshness"]["due_count"] == 0
     assert status["counts"]["model_identity"] >= 30
     assert status["counts"]["model_fact"] == summary["fact_count"]
@@ -336,6 +339,38 @@ def test_scheduled_refresh_from_file_imports_openrouter_and_candidates(tmp_path:
     assert second["openrouter_fetch"]["reason"] == "not_due"
     assert status["counts"]["source_snapshot"] >= 2
     assert status["counts"]["candidate_change"] >= 1
+
+
+def test_openrouter_diff_unions_refs_across_calibration_snapshots(tmp_path: Path) -> None:
+    """The diff baseline is the union of all calibration snapshots' refs.
+
+    Snapshots recorded after 2026-05-21 carry no OpenRouter refs; a latest-only
+    baseline silently turned drift detection into a no-op (T8c phase-2 ruling 1).
+    """
+    db_path = tmp_path / "model-registry.sqlite"
+    db = mms_registry.open_registry(db_path)
+    try:
+        mms_registry.import_source_snapshot(db, REFERENCE_JSON)
+        newer = tmp_path / "2026-09-10-no-openrouter-refs.json"
+        newer.write_text(
+            json.dumps({"models": [{"alias": "glm-5.3", "provider_catalog_references": []}]}),
+            encoding="utf-8",
+        )
+        mms_registry.import_source_snapshot(db, newer)
+    finally:
+        db.close()
+
+    catalog_path = tmp_path / "openrouter-models.json"
+    catalog_path.write_text(json.dumps({"data": []}), encoding="utf-8")
+    mms_registry_cli.fetch_openrouter_catalog(db_path=db_path, from_file=catalog_path)
+
+    diff = mms_registry_cli.diff_openrouter_catalog(db_path=db_path)
+
+    # refs still come from the older 2026-05-21 snapshot even though a newer
+    # snapshot without refs was recorded after it.
+    assert diff["matched_reference_count"] >= 33
+    assert diff["missing_reference_count"] >= 33
+    assert diff["stored_count"] >= 1
 
 
 def test_registry_command_refresh_sources_and_status(capsys, tmp_path: Path) -> None:
@@ -820,9 +855,10 @@ def test_mmf_config_save_plan_is_read_only_and_reports_no_draft_changes(tmp_path
     assert not (config_dir / "cache").exists()
 
 
-def test_mms_config_save_plan_blocks_stable_root_without_writing(tmp_path: Path) -> None:
+def test_mms_config_save_plan_on_fresh_preview_root_is_read_only(tmp_path: Path) -> None:
+    """save-plan never writes; on the (only) preview root it reports preview mode."""
     real_home = tmp_path / "home"
-    stable_root = real_home / ".config" / "mms"
+    preview_root = real_home / ".config" / "mms-next"
     env = os.environ.copy()
     env.update(
         {
@@ -850,13 +886,13 @@ def test_mms_config_save_plan_blocks_stable_root_without_writing(tmp_path: Path)
     assert payload["schema"] == mms_registry_cli.REGISTRY_V2_SAVE_PLAN_SCHEMA
     assert payload["read_only"] is True
     assert payload["root"]["command"] == "mms"
-    assert payload["root"]["mode"] == "stable"
-    assert payload["root"]["config_root"] == str(stable_root)
+    assert payload["root"]["mode"] == "preview"
+    assert payload["root"]["config_root"] == str(preview_root)
     assert payload["actual_save_enabled"] is False
     assert payload["would_write"]["db_candidate_revision"] is False
-    assert "stable_root_human_only" in payload["blocked_reasons"]
+    assert payload["would_write"]["generated_latest_approved_bundle"] is False
     assert "no_draft_changes" in payload["blocked_reasons"]
-    assert not stable_root.exists()
+    assert not preview_root.exists()
 
 
 def _registry_v2_candidate_config() -> dict:

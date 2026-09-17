@@ -33,6 +33,14 @@ def _patch_real_home(monkeypatch, mms_launchers, real_home: Path):
 def test_get_export_env_includes_mms_model_name_for_standard_runners(monkeypatch, tmp_path):
     import mms_launchers
 
+    # Preview roots fail closed without a verified bundle (T8c R1).
+    from _bundle_helpers import write_minimal_latest_approved_bundle
+    from mms_capability_resolver import clear_capability_resolver_caches
+
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(tmp_path / "config-root"))
+    write_minimal_latest_approved_bundle(tmp_path / "config-root")
+    clear_capability_resolver_caches()
+
     real_home = tmp_path / "real-home"
     real_home.mkdir()
     _patch_real_home(monkeypatch, mms_launchers, real_home)
