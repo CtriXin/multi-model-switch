@@ -5,3 +5,7 @@
 根因是原生 `<dialog>.showModal()` 会把焦点抢到右上角关闭按钮，React 的 `autoFocus` 被冲掉。这次修在共享 Dialog 上，所以带 `autoFocus` 的弹窗（会话重命名、工作区重命名、搜索会话）都按这个来。
 
 继续使用 5.x Preview 通道。
+
+## 升级须知
+
+本版修复重命名弹窗的输入焦点，沿用现有配置和会话。5.x 继续为 Preview；降回 4.x Stable 需使用安装器显式指定 stable。
