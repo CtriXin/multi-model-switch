@@ -32,7 +32,7 @@ export function SkillPicker({ skills, selected, toggle, close, error, example, l
       <div className="explorer-search">
         <label className="picker-search">
           <Search size={17} />
-          <input autoFocus aria-label="搜索 skills" placeholder="想做什么？例如保存进度、检查改动…"
+          <input autoFocus data-autofocus="" aria-label="搜索 skills" placeholder="想做什么？例如保存进度、检查改动…"
             value={query} onChange={e => setQuery(e.target.value)} />
         </label>
       </div>
