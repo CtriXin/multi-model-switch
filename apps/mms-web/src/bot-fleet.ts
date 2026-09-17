@@ -102,12 +102,12 @@ export function familyChipLabel(
 }
 
 export function fleetPreviewLabel(policy: BotFleetPolicy, families: string[], presets: Preset[] = []): string {
-  if (!policy.enabled) return "已关闭，下一句由它自己做";
+  if (!policy.enabled) return "";
   if (policy.families.length) {
     const names = policy.families.map((family) => familyChipLabel(family, policy, presets));
-    return `指定 ${names.length} 家：${names.join("、")} · ${policy.intensity === "intense" ? "高强度" : "听意见"}`;
+    return `场外 ${names.length} 家：${names.join("、")} · ${policy.intensity === "intense" ? "认真" : "轻量"}`;
   }
   const auto = families.slice(0, policy.maxFamilies);
-  if (auto.length < 2) return "现在凑不够两家，会自己看并标明不是多方审";
-  return `默认 ${policy.maxFamilies} 家${policy.intensity === "intense" ? "高强度" : "便宜对照"}`;
+  if (auto.length < 2) return "场外凑不够两家，会自己看并标明不是多方";
+  return `发送即问场外 · 默认 ${policy.maxFamilies} 家${policy.intensity === "intense" ? "认真" : "轻量"}`;
 }

@@ -197,7 +197,7 @@ def test_fleet_plan_uses_owner_bot_not_new_colleagues():
     closed = fleet_plan(owner, presets, "让几个模型评审这次改动", {"enabled": False})
     assert closed["mode"] == "direct" and closed["source"] == "fleet-disabled"
     assert plan.get("notice")
-    assert "并行听 2 家" in plan["notice"]
+    assert "问场外 2 家" in plan["notice"]
     again = fleet_plan(owner, presets, "让几个模型评审这次改动", {"hintShown": True})
     assert again["mode"] == "fleet"
     assert not again.get("notice")

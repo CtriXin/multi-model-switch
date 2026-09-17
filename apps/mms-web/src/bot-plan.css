@@ -102,9 +102,11 @@
   display: none;
 }
 .bot-fleet-take-card {
-  min-width: 220px;
-  max-width: 320px;
-  padding: 10px 12px;
+  min-width: 200px;
+  max-width: 240px;
+  max-height: 148px;
+  overflow: hidden;
+  padding: 8px 10px;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--surface);
@@ -113,6 +115,13 @@
 .bot-fleet-take-card.is-pinned-card {
   box-shadow: none;
   max-width: none;
+  max-height: 220px;
+  overflow: auto;
+}
+.bot-fleet-take-hint {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 11px;
 }
 .bot-fleet-take-card strong {
   display: block;

@@ -1642,6 +1642,14 @@
   line-height: 1.4;
 }
 
+.bot-fleet-bar.is-collapsed {
+  margin-bottom: 6px;
+}
+
+.bot-fleet-door:not(.is-on) {
+  color: var(--muted);
+}
+
 .bot-fleet-family-wrap {
   position: relative;
 }

@@ -62,17 +62,17 @@ export function BotFleetBar({
   }
 
   return (
-    <div className={"bot-fleet-bar" + (policy.enabled ? "" : " is-collapsed")} aria-label="多方听意见">
+    <div className={"bot-fleet-bar" + (policy.enabled ? "" : " is-collapsed")} aria-label="寻求场外帮助">
       <div className="bot-fleet-row">
         <button
           type="button"
-          className={"bot-fleet-chip" + (policy.enabled ? " is-on" : "")}
+          className={"bot-fleet-chip bot-fleet-door" + (policy.enabled ? " is-on" : "")}
           aria-pressed={policy.enabled}
           disabled={locked}
-          title={policy.enabled ? "关闭后，发送只问当前 Bot" : "打开后，发送会按下面的设置听多家意见"}
+          title={policy.enabled ? "关掉后发送只问当前 Bot" : "打开后，发送会去问场外几家"}
           onClick={() => patch({ enabled: !policy.enabled })}
         >
-          多方听意见
+          寻求场外帮助
         </button>
         {policy.enabled && (
           <>
@@ -83,7 +83,7 @@ export function BotFleetBar({
           aria-pressed={policy.intensity === "opinions"}
           onClick={() => patch({ intensity: "opinions" })}
         >
-          听意见
+          轻量
         </button>
         <button
           type="button"
@@ -92,7 +92,7 @@ export function BotFleetBar({
           aria-pressed={policy.intensity === "intense"}
           onClick={() => patch({ intensity: "intense" })}
         >
-          高强度
+          认真
         </button>
         <button
           type="button"
@@ -177,7 +177,7 @@ export function BotFleetBar({
         </div>
       )}
       {policy.enabled && (
-        <p className="bot-fleet-preview">{fleetPreviewLabel(policy, families, presets)} · 发送即可</p>
+        <p className="bot-fleet-preview">{fleetPreviewLabel(policy, families, presets)}</p>
       )}
     </div>
   );

@@ -39,9 +39,9 @@ DEFAULT_FLEET_POLICY = {
     "hintShown": False,
 }
 UNDERFILLED_REASON = "现在只有一家能用，我自己看了，不是多方评审。"
-FLEET_DISABLED_REASON = "多方听意见已关闭，由当前 Bot 直接完成。"
+FLEET_DISABLED_REASON = "场外帮助已关掉，由当前 Bot 直接完成。"
 FLEET_FIRST_HINT = (
-    "这次会并行听 {n} 家。开着「多方听意见」时，发送都会这样扇出；关掉则只问当前 Bot。"
+    "这次会问场外 {n} 家。开着「寻求场外帮助」时发送就会去问；关掉则只问当前 Bot。"
 )
 FLEET_WORKER_PROMPT = (
     "只用下面三行，每行不超过 40 字，不要空行、不要 markdown、不要再分发：\n"

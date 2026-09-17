@@ -8,34 +8,47 @@ function shortLabel(step: BotPlanStep): string {
   return parts[parts.length - 1] || label;
 }
 
-function TakeBody({ step }: { step: BotPlanStep }) {
+function clip(text: string, limit: number): string {
+  const value = String(text || "").trim();
+  if (value.length <= limit) return value;
+  return value.slice(0, limit).trimEnd() + "…";
+}
+
+function TakeBody({ step, compact = false }: { step: BotPlanStep; compact?: boolean }) {
   const take = step.result;
+  const limit = compact ? 72 : 400;
   if (take?.conclusion || take?.dissent || take?.risk) {
     return (
       <>
         {take.conclusion && (
           <p>
             <span>结论</span>
-            {take.conclusion}
+            {clip(take.conclusion, limit)}
           </p>
         )}
         {take.dissent && (
           <p>
             <span>不同</span>
-            {take.dissent}
+            {clip(take.dissent, limit)}
           </p>
         )}
         {take.risk && (
           <p>
             <span>风险</span>
-            {take.risk}
+            {clip(take.risk, limit)}
           </p>
         )}
+        {compact && <p className="bot-fleet-take-hint">点芯片看完</p>}
       </>
     );
   }
   if (take?.summary) {
-    return <p>{take.summary}</p>;
+    return (
+      <>
+        <p>{clip(take.summary, compact ? 90 : 600)}</p>
+        {compact && <p className="bot-fleet-take-hint">点芯片看完</p>}
+      </>
+    );
   }
   return <p className="bot-fleet-take-empty">还没回</p>;
 }
@@ -67,7 +80,7 @@ export function FleetPills({
             <div className="bot-fleet-take-menu">
               <div className="bot-fleet-take-card">
                 <strong>{shortLabel(step)}</strong>
-                <TakeBody step={step} />
+                <TakeBody step={step} compact />
               </div>
             </div>
           </div>

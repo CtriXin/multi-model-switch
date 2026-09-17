@@ -2602,7 +2602,7 @@ export function BotChat({
             busy={busy}
             onChange={(next) => {
               void onUpdateBot(bot.id, { fleetPolicy: next }).catch((cause) => {
-                setError(cause instanceof Error ? cause.message : "多方听意见设置未保存。");
+                setError(cause instanceof Error ? cause.message : "场外帮助设置未保存。");
               });
             }}
           />
@@ -2717,8 +2717,8 @@ export function BotChat({
                   className="bot-chat-send"
                   type="submit"
                   disabled={disabled || busy || !value.trim() || !bot}
-                  aria-label={busy ? "发送中" : hasPendingQuestion ? "回复" : runAt ? "定时执行" : normalizeFleetPolicy(bot?.fleetPolicy).enabled ? "听一遍" : "发送"}
-                  title={busy ? "发送中" : hasPendingQuestion ? "回复" : runAt ? "定时执行" : normalizeFleetPolicy(bot?.fleetPolicy).enabled ? "按上面的设置听一遍" : "发送"}
+                  aria-label={busy ? "发送中" : hasPendingQuestion ? "回复" : runAt ? "定时执行" : normalizeFleetPolicy(bot?.fleetPolicy).enabled ? "问场外" : "发送"}
+                  title={busy ? "发送中" : hasPendingQuestion ? "回复" : runAt ? "定时执行" : normalizeFleetPolicy(bot?.fleetPolicy).enabled ? "发送即问场外" : "发送"}
                 >
                   {busy ? (
                     <LoaderCircle className="bot-spin" size={15} />
