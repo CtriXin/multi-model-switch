@@ -57,19 +57,28 @@ body,
   border-right: 1px solid var(--line);
   color: var(--ink);
 }
-.brand {
+.brand-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
   min-height: 56px;
-  padding: 14px 18px;
+  padding: 8px 10px 8px 18px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 10px;
+}
+.brand {
+  min-height: 0;
+  padding: 6px 8px 6px 0;
   gap: 12px;
   display: flex;
   align-items: center;
   border: 0;
   background: transparent;
   cursor: pointer;
-  width: 100%;
+  width: auto;
+  flex: 0 1 auto;
+  min-width: 0;
   text-align: left;
-  border-bottom: 1px solid var(--line);
-  margin-bottom: 10px;
   transition: background 120ms ease;
 }
 .brand:hover {
@@ -1731,7 +1740,7 @@ body,
 }
 
 .app-version { color: var(--muted); font-size: max(11px, 0.8571rem); font-weight: 400; letter-spacing: 0; white-space: nowrap; }
-.brand > .app-version { margin-left: 2px; font-size: max(11px, 0.7857rem); }
+.brand-row > .app-version { margin-left: 0; flex-shrink: 0; font-size: max(11px, 0.7857rem); }
 /* Settings is a sheet now; the version rides the tab row it replaced. */
 .settings-tabs > .app-version { margin-left: auto; align-self: center; }
 .platform-capability {
