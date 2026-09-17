@@ -561,6 +561,39 @@
   white-space: nowrap;
 }
 
+.bot-chat-title-row .bot-chat-model-line {
+  display: inline-block;
+  vertical-align: middle;
+  margin: 0;
+  padding: 1px 7px;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--muted);
+  background: var(--soft);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: min(480px, 45vw);
+  min-width: 0;
+  flex-shrink: 1;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+  user-select: none;
+}
+
+.bot-chat-title-row .bot-chat-model-line:hover {
+  background: color-mix(in srgb, var(--accent) 10%, var(--soft));
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
+  color: var(--ink);
+}
+
+.bot-chat-title-row .bot-chat-model-line:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .bot-chat-title-group p {
   margin: 0;
   font-size: 12px;
@@ -1916,6 +1949,7 @@
   font-size: 12px;
   color: var(--muted);
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .bot-state-dot {
@@ -2686,6 +2720,11 @@
     height: 56px;
     flex: 0 0 56px;
     padding: 0 16px;
+  }
+  .bot-chat-title-row .bot-chat-model-line {
+    max-width: min(220px, 40vw);
+    font-size: 10px;
+    padding: 0 6px;
   }
   .bot-chat-stream {
     padding: 16px 16px 12px;
