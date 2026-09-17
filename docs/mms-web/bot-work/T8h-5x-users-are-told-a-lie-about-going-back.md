@@ -76,8 +76,15 @@ available = bool(remote and current and remote > current)
 
 ### 3. 把两处承诺改成真话(必须)
 
-- `UpdateCenter.tsx:93` 那句「切回 4.x 稳定版即可继续留在稳定线」要改掉。切回通道 ≠ 回到稳定线。
-- `docs/mms-web/RELEASE-v4.22.3.md` 里「随时可逆」那句要更正。**历史发布说明可以改**,留一句说明是事后更正即可 —— 让它继续挂着一句假承诺更糟。
+一共三处,**全部都要改**(我逐条核对过,在 `main` 和 `dev` 两条线上都还在):
+
+| 文件 | 现在写的 | 问题 |
+|---|---|---|
+| `apps/mms-web/src/UpdateCenter.tsx:93` | 「切回 4.x 稳定版即可继续留在稳定线」 | 切回通道 ≠ 回到稳定线 |
+| `docs/mms-web/CHANGELOG.md:16` | 「把更新通道选成 `5.x 预览版` 或 `4.x 稳定版`,检查更新,确认升级」 | 把双向说成对称的,实际只有 4→5 能走通 |
+| `docs/mms-web/RELEASE-v4.22.3.md:11` | 「选回稳定版就继续留在稳定线,**随时可逆**」 | 直接的假承诺 |
+
+`RELEASE-v4.22.3.md` 是历史发布说明,**可以改**:留一句说明这是事后更正即可 —— 让它继续挂着一句假承诺更糟。`CHANGELOG.md` 那条要写清方向性:4.x → 5.x 在 Pilot 内可以走完,5.x → 4.x 需要安装器。
 
 ---
 
@@ -112,7 +119,7 @@ available = bool(remote and current and remote > current)
 
 ## 六、边界
 
-- 只改 `mms_web/update_guidance.py`、`apps/mms-web/src/UpdateCenter.tsx`(+ 必要时 `updates.py` 传递线别)、`docs/mms-web/RELEASE-v4.22.3.md`,以及重建后的 `mms_web_static/`。
+- 只改 `mms_web/update_guidance.py`、`apps/mms-web/src/UpdateCenter.tsx`(+ 必要时 `updates.py` 传递线别)、`docs/mms-web/CHANGELOG.md`、`docs/mms-web/RELEASE-v4.22.3.md`,以及重建后的 `mms_web_static/`。
 - **不要**动 `available = remote > current`。
 - **不要**实现一键降级(见第二节)。
 - **不要**动 `install.sh`。
