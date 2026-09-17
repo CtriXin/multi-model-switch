@@ -1,7 +1,7 @@
 from mms_web.bot_coordinator import (make_plan, parse_model_plan, build_planner_prompt, direct_plan,
                                      looks_multi_goal, looks_fleet_review, fleet_presets, fleet_plan,
                                      is_split_plan, normalize_fleet_policy, parse_fleet_verdict,
-                                     set_plan_status, transition_plan, transition_step,
+                                     parse_fleet_take, set_plan_status, transition_plan, transition_step,
                                      normalize_step_status, MAX_PLAN_HISTORY, UNDERFILLED_REASON)
 from mms_web.bot_computer import EgoComputer
 
@@ -223,6 +223,17 @@ def test_parse_fleet_verdict_keeps_disagreement_first():
     raw = parse_fleet_verdict("这是一段没有标题的长文。")
     assert raw["judgment"].startswith("这是一段")
     assert raw["disagreements"] == []
+    inline = parse_fleet_verdict(
+        "分歧：无 风险：skill 被当成执行体。 共识：属于 harness 层。 判断：我同意 harness 层定位。"
+    )
+    assert inline["disagreements"] == []
+    assert inline["risks"] == ["skill 被当成执行体。"]
+    assert "harness" in inline["consensus"][0]
+    assert inline["judgment"].startswith("我同意")
+    take = parse_fleet_take("结论：属于 harness 层。 不同意：当成 agent。 风险：职责混乱。")
+    assert take["conclusion"].startswith("属于")
+    assert take["dissent"].startswith("当成")
+    assert take["risk"].startswith("职责")
 
 
 def test_family_fallback_is_mms_core_not_a_second_table():

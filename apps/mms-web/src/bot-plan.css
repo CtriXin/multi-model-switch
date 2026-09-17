@@ -29,13 +29,19 @@
   font-size: 0.8125rem;
   line-height: 1.45;
 }
-.bot-fleet-verdict {
+.bot-fleet-verdict,
+.bot-fleet-live {
   display: flex;
   flex-direction: column;
   gap: 10px;
   margin: 8px 0 4px;
 }
-.bot-fleet-verdict-block h3,
+.bot-fleet-verdict-scan {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 20px;
+}
+.bot-fleet-verdict-scan h3,
 .bot-fleet-verdict-consensus summary {
   margin: 0 0 4px;
   font-size: 0.75rem;
@@ -44,8 +50,94 @@
 }
 .bot-fleet-verdict-judgment {
   margin: 0;
-  font-size: 0.9375rem;
-  line-height: 1.5;
+  font-size: 1.05rem;
+  line-height: 1.45;
+  font-weight: 600;
+}
+.bot-fleet-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.bot-fleet-pill-wrap {
+  position: relative;
+}
+.bot-fleet-pill {
+  appearance: none;
+  margin: 0;
+  min-height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.bot-fleet-pill-done {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+}
+.bot-fleet-pill-running,
+.bot-fleet-pill-dispatched {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+}
+.bot-fleet-pill.is-on {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
+.bot-fleet-take-menu {
+  display: none;
+  position: absolute;
+  left: 0;
+  bottom: 100%;
+  z-index: 40;
+  padding: 0 0 10px;
+}
+.bot-fleet-pill-wrap:hover .bot-fleet-take-menu,
+.bot-fleet-pill-wrap:focus-within .bot-fleet-take-menu,
+.bot-fleet-pill-wrap.is-pinned .bot-fleet-take-menu {
+  display: block;
+}
+.bot-fleet-pill-wrap.is-pinned .bot-fleet-take-menu {
+  display: none;
+}
+.bot-fleet-take-card {
+  min-width: 220px;
+  max-width: 320px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--ink) 12%, transparent);
+}
+.bot-fleet-take-card.is-pinned-card {
+  box-shadow: none;
+  max-width: none;
+}
+.bot-fleet-take-card strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+.bot-fleet-take-card p {
+  margin: 0 0 6px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.bot-fleet-take-card p span {
+  display: inline-block;
+  min-width: 2.5em;
+  margin-right: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.bot-fleet-take-empty {
+  color: var(--muted);
+}
+@media (max-width: 720px) {
+  .bot-fleet-verdict-scan {
+    grid-template-columns: 1fr;
+  }
 }
 .bot-fleet-verdict-list {
   margin: 0;

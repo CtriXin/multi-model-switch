@@ -60,6 +60,9 @@ FLEET_MERGE_INTRO = (
 _VERDICT_HEADING = re.compile(
     r"^\*{0,2}(分歧|风险|共识|判断)\*{0,2}\s*[:：]?\s*(.*)$"
 )
+_SECTION_SPLIT = re.compile(r"(分歧|风险|共识|判断)\s*[:：]\s*")
+_TAKE_SPLIT = re.compile(r"(结论|不同意|风险)\s*[:：]\s*")
+_EMPTY_VERDICT = {"无", "没有", "无。", "无分歧", "无风险"}
 
 _CHEAP_MARKERS = ("flash", "turbo", "highspeed", "mini", "air", "lite", "haiku", "small", "fast")
 _INTENSE_MARKERS = ("opus", "sonnet", "thinking", "max", "pro", "heavy", "astra", "k3", "5.4", "5.6", "gpt-6")
@@ -315,33 +318,28 @@ def _strip_verdict_bullet(text: str) -> str:
     return re.sub(r"^[-*•、]+\s*", "", str(text or "").strip()).strip()
 
 
+def _verdict_items(body: str) -> list[str]:
+    chunks = []
+    for piece in re.split(r"[\n;；]", str(body or "")):
+        item = _strip_verdict_bullet(piece)
+        if item and item not in _EMPTY_VERDICT:
+            chunks.append(item[:200])
+    return chunks[:8]
+
+
 def parse_fleet_verdict(text) -> dict:
-    """Split a merge reply into 分歧 / 风险 / 共识 / 判断. Fallback keeps raw judgment."""
+    """Split a merge reply into 分歧 / 风险 / 共识 / 判断. Works on one line too."""
     raw = str(text or "").strip()
+    parts = _SECTION_SPLIT.split(raw)
     sections = {"分歧": [], "风险": [], "共识": [], "判断": ""}
-    current = None
-    for line in raw.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        match = _VERDICT_HEADING.match(stripped)
-        if match:
-            current = match.group(1)
-            rest = _strip_verdict_bullet(match.group(2))
-            if current == "判断":
-                if rest:
-                    sections["判断"] = rest
-            elif rest and rest not in {"无", "没有", "无。"}:
-                sections[current].append(rest[:200])
-            continue
-        if current == "判断":
-            extra = _strip_verdict_bullet(stripped)
-            if extra:
-                sections["判断"] = (sections["判断"] + " " + extra).strip()[:800]
-        elif current:
-            item = _strip_verdict_bullet(stripped)
-            if item and item not in {"无", "没有", "无。"}:
-                sections[current].append(item[:200])
+    index = 1
+    while index + 1 < len(parts):
+        heading, body = parts[index], parts[index + 1]
+        if heading == "判断":
+            sections["判断"] = _strip_verdict_bullet(body.replace("\n", " "))[:800]
+        else:
+            sections[heading] = _verdict_items(body)
+        index += 2
     judgment = sections["判断"].strip()
     if not judgment and not any(sections[key] for key in ("分歧", "风险", "共识")):
         judgment = raw[:400]
@@ -351,6 +349,22 @@ def parse_fleet_verdict(text) -> dict:
         "consensus": sections["共识"][:8],
         "judgment": judgment[:800],
     }
+
+
+def parse_fleet_take(text) -> dict:
+    """Parse a worker's 结论 / 不同意 / 风险, including one-line replies."""
+    raw = str(text or "").strip()
+    parts = _TAKE_SPLIT.split(raw)
+    take = {"conclusion": "", "dissent": "", "risk": ""}
+    mapping = {"结论": "conclusion", "不同意": "dissent", "风险": "risk"}
+    index = 1
+    while index + 1 < len(parts):
+        field = mapping.get(parts[index])
+        body = _strip_verdict_bullet(parts[index + 1].replace("\n", " "))[:200]
+        if field and body and body not in _EMPTY_VERDICT:
+            take[field] = body
+        index += 2
+    return take
 
 
 def normalize_step_status(status):

@@ -333,6 +333,8 @@ export type BotPlanStepStatus =
 export interface BotPlanStepResult {
   summary: string;
   conclusion?: string;
+  dissent?: string;
+  risk?: string;
   evidence?: string;
   artifacts?: Array<{ taskId: string; url?: string; label?: string }>;
 }

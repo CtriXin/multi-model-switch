@@ -3,7 +3,8 @@ import { Check, ChevronRight, LoaderCircle, X } from "lucide-react";
 import { PixelAvatar } from "./Bot";
 import type { BotDefinition, BotTask } from "./Bot";
 import { request } from "./api";
-import type { BotFleetVerdict, BotPlanHistoryEntry, BotPlanStep } from "./types";
+import type { BotPlanHistoryEntry, BotPlanStep } from "./types";
+import { FleetLivePills, FleetVerdict } from "./BotFleetListen";
 import "./bot-plan.css";
 
 const UNDO_WINDOW_MS = 30_000;
@@ -71,47 +72,6 @@ export function formatPlanTimeline(history?: BotPlanHistoryEntry[]): string {
       return time ? `${entry.to} ${time}` : entry.to;
     })
     .join(" → ");
-}
-
-function VerdictList({ items, empty }: { items: string[]; empty: string }) {
-  if (!items.length) {
-    return <p className="bot-fleet-verdict-empty">{empty}</p>;
-  }
-  return (
-    <ul className="bot-fleet-verdict-list">
-      {items.map((item, index) => (
-        <li key={index}>{item}</li>
-      ))}
-    </ul>
-  );
-}
-
-export function FleetVerdict({ verdict }: { verdict: BotFleetVerdict }) {
-  return (
-    <div className="bot-fleet-verdict">
-      {verdict.judgment && (
-        <section className="bot-fleet-verdict-block">
-          <h3>判断</h3>
-          <p className="bot-fleet-verdict-judgment">{verdict.judgment}</p>
-        </section>
-      )}
-      <section className="bot-fleet-verdict-block">
-        <h3>分歧</h3>
-        <VerdictList items={verdict.disagreements} empty="没有实质分歧" />
-      </section>
-      <section className="bot-fleet-verdict-block">
-        <h3>风险</h3>
-        <VerdictList items={verdict.risks} empty="没标出额外风险" />
-      </section>
-      <details className="bot-fleet-verdict-consensus">
-        <summary>
-          <ChevronRight size={13} className="bot-plan-chevron" />
-          共识{verdict.consensus.length ? ` · ${verdict.consensus.length}` : ""}
-        </summary>
-        <VerdictList items={verdict.consensus} empty="没有单独列出的共识" />
-      </details>
-    </div>
-  );
 }
 
 export function stepDisplayName(step: BotPlanStep, bots: BotDefinition[]): string {
@@ -246,13 +206,14 @@ export function BotPlan({ task, bots }: { task: BotTask; bots: BotDefinition[] }
         <span className={`bot-plan-tag bot-plan-tag-${statusTier}`}>
           {statusLabel}
         </span>
-        {plan.reason && <span className="bot-plan-reason">{plan.reason}</span>}
+        {!fleet && plan.reason && <span className="bot-plan-reason">{plan.reason}</span>}
         {plan.notice && <p className="bot-plan-notice">{plan.notice}</p>}
         {plan.source === "fallback" && <span className="bot-plan-tag bot-plan-tag-muted">关键词兜底</span>}
         {plan.source === "user" && <span className="bot-plan-tag bot-plan-tag-muted">已修改</span>}
       </div>
-      {fleet && plan.verdict && <FleetVerdict verdict={plan.verdict} />}
-      {(!fleet || !plan.verdict) && (
+      {fleet && plan.verdict && <FleetVerdict verdict={plan.verdict} steps={plan.steps} />}
+      {fleet && !plan.verdict && <FleetLivePills steps={plan.steps} />}
+      {!fleet && (
       <ul className="bot-plan-steps">
         {plan.steps.map((step) => (
           <StepRow
@@ -264,25 +225,6 @@ export function BotPlan({ task, bots }: { task: BotTask; bots: BotDefinition[] }
           />
         ))}
       </ul>
-      )}
-      {fleet && plan.verdict && (
-        <details className="bot-plan-detail">
-          <summary>
-            <ChevronRight size={13} className="bot-plan-chevron" />
-            各家原文
-          </summary>
-          <ul className="bot-plan-steps">
-            {plan.steps.map((step) => (
-              <StepRow
-                key={step.id}
-                step={step}
-                bots={bots}
-                busy={busy}
-                onAction={(action, stepId) => void act(action, stepId)}
-              />
-            ))}
-          </ul>
-        </details>
       )}
       {hasDetails && (
         <details className="bot-plan-detail">

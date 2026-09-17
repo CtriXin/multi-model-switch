@@ -26,8 +26,8 @@ from .bot_memory import BotMemoryStore, BotMemoryError
 from .bot_communications import BotCommunications
 from .bot_coordinator import (plan_for, direct_plan, build_planner_prompt, parse_model_plan, sanitize_plan,
                               looks_multi_goal, looks_fleet_review, fleet_plan, is_split_plan,
-                              normalize_fleet_policy, parse_fleet_verdict, set_plan_status, transition_plan,
-                              transition_step, normalize_step_status, FLEET_MERGE_INTRO)
+                              normalize_fleet_policy, parse_fleet_verdict, parse_fleet_take, set_plan_status,
+                              transition_plan, transition_step, normalize_step_status, FLEET_MERGE_INTRO)
 from . import bot_retry
 from .bot_notify import Notifier
 
@@ -1005,7 +1005,10 @@ class BotRuntime(BotCommunications):
         outcome = child.get("outcome") or {}
         summary = str(outcome.get("summary") or child.get("result") or child.get("error") or "")[:600]
         result = {"summary": summary}
-        if outcome.get("summary"):
+        take = parse_fleet_take(summary)
+        if any(take.values()):
+            result.update({key: value for key, value in take.items() if value})
+        elif outcome.get("summary"):
             result["conclusion"] = str(outcome["summary"])[:4000]
         if outcome.get("evidence"):
             result["evidence"] = str(outcome["evidence"])[:4000]
