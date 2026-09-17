@@ -196,7 +196,7 @@ class UpdateService:
         installation = describe(self.coordinator.source) if self.coordinator else {}
         from .update_guidance import upgrade_guidance
         guidance = upgrade_guidance(VERSION, latest if available else {}, installation=installation,
-                                    config_root=getattr(self.app, 'config_root', None))
+                                    config_root=getattr(self.app, 'config_root', None), channel=channel)
         return {'currentVersion': VERSION, 'channel': channel, 'latest': latest, 'updateAvailable': available,
                 'whatsNew': self.whats_new(),
                 'enabled': self.enabled(), 'checking': self._checking,
