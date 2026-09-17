@@ -254,3 +254,20 @@ def test_schedule_commands_reject_bad_input_locally(worker, command):
     # A spelling mistake in the rule never reaches the worker endpoint.
     assert result.returncode != 0
     assert WorkerHandler.requests == []
+
+
+@pytest.mark.parametrize(
+    "command, expected_payload",
+    [
+        ("model list", {"op": "list", "botId": "bot-parent", "taskId": "task-parent"}),
+        ("model switch Beta", {"op": "switch", "query": "Beta", "botId": "bot-parent", "taskId": "task-parent"}),
+        ("model switch kimi k3", {"op": "switch", "query": "kimi k3", "botId": "bot-parent", "taskId": "task-parent"}),
+    ],
+)
+def test_model_commands_map_to_worker_payloads(worker, command, expected_payload):
+    result = run_client(worker, *command.split())
+    assert result.returncode == 0, result.stderr
+    body = WorkerHandler.requests[-1]["body"]
+    assert body["action"] == "model"
+    assert body["requestId"]
+    assert {key: value for key, value in body.items() if key not in {"action", "requestId"}} == expected_payload

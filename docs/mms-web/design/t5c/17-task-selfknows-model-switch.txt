@@ -1,0 +1,7 @@
+--- instruction | 你现在用的是什么模型？你能自己换模型吗？
+--- progress | bash
+{"models":[{"id":"web:pi:newapi-personal-tokyo:MiniMax-M2.7","name":"MiniMax-M2.7","channel":"newapi-personal-tokyo","modelId":"newapi-personal-tokyo:MiniMax-M2.7","current":false,"pending":false},{"id":"web:pi:newapi-tencent:MiniMax-M2.7","name":"MiniMax-M2.7","channel":"newapi-tencent","modelId":"newapi-tencent:MiniMax-M2.7","current":false,"pending":false},{"id":"web:pi:newapi-personal-tok
+--- progress | bash
+{"ok":true,"taskId":"task_8a5744e054d3453c","message":"已记录，最终状态以 Pi 本轮结束为准。"}
+--- message | 我当前运行的模型是 `gemini-3.8-flash-high`（渠道 newapi-personal-tokyo）。我可以自己切换模型，通过 `model switch` 指定后会在下一轮任务生效，目前有 61 个可用模型。如果需要更换，随时告诉我目标模型名称。
+--- result | 我当前运行的模型是 gemini-3.8-flash-high（渠道 newapi-personal-tokyo）。我可以自己切换模型，通过内部 model switch 命令切换后会在下一轮任务生效，目前可用列表共有 61 个模型可选。如果你需要换模型，告诉我目标名称即可。

@@ -271,3 +271,36 @@ schedule: {
 - schedule 触发产生的 task 带 `scheduleId`，走正常 `_finish` 路径，因此完成/失败事件照常进入 `notifications.json`，payload 里多一个 `scheduleId` 字段；不新增 `EVENT_TYPES`，“跳过”用 system 消息而不是通知。
 - Bot 自己的子命令（`bot_client.py`）：`schedule create <prompt...> --every 3h|180m|10800s | --daily HH:MM | --weekly mon..sun HH:MM | --once ISO8601 [--overlap skip|queue] [--timezone IANA]`、`schedule list`、`schedule pause|resume|delete <schedule_id>`。Bot 只能操作自己（当前 task 的 `botId`）名下的 schedule，越界返回 `BOT_SCOPE`（403）。
 - Bot 提示词里的命令清单由 `bot_client.py` 的 argparse 注册信息生成（`command_catalog_text()`），不再手写，避免“能力存在但 Bot 不知道”。行为性指示（先 list 再 dispatch、不要循环轮询、`complete` 不是用户验收等）仍手写。
+
+## v2.7 对话里换模型（下一轮生效）
+
+用户在对话里就能换 Bot 的模型：Bot 自己知道有这个能力、拿得到当前通道里真实可用的模型列表、换不了会如实说，界面上看得见当前模型与下一轮待生效模型。
+
+### 语义：记录，下一轮生效
+
+- `model switch` 只写 Bot 的 `pendingPresetId`，不动 `presetId`。当前这一轮继续用原模型；下一次 `_launch` 取模型时消费 `pendingPresetId`：正式落成 `presetId`、清空 `pendingPresetId`、在该 task 上写一条 system 消息（“本轮起使用模型 X。”），并同步刷新 Bot 的 `model` / `channel` 展示字段。两个特例：匹配到的就是当前模型时直接返回“已经在用”不写 pending；`pendingPresetId == presetId` 时消费只清 pending、不动会话。
+- 消费时仍走 `executor.validate()`：模型在记录与生效之间变得不可用，则**取消这次切换**——清空 `pendingPresetId`、本轮退回用户自己正在用的 `presetId` 照常启动（不重置 `sessionId`，不白扔会话历史）、写一条指名不可用模型的 system 消息。不清 pending 会把 Bot 永久卡在失败循环里。
+- 生效时会新建会话：preset 变了 `sessionId` 重置为 None（同 `update_bot` 换 preset 的既有语义），否则持久 session 仍跑旧模型，“下一轮生效”就是空话。
+- `update_bot` 收到非空 `pendingPresetId` 时校验它在可用列表里，不在就拒绝（`BOT_MODEL_UNAVAILABLE`，409），无效值进不了状态。
+- Bot 执行中的会话级切换（`POST /sessions/:id/model`，`model_switch.py`）与这条路无关，Bot 的 Pi 会话不走它。
+- `update_bot` 的 `BOT_BUSY`（preset 作用域）保持原样：对话路径走 `pendingPresetId`，不触发它。
+
+### 模型来源优先级（高 → 低）
+
+1. `task["presetIdOverride"]` —— 计划为这一步明确指定的模型，最高。
+2. `bot["pendingPresetId"]` —— 对话里刚换的，下一轮生效。
+3. `bot["presetId"]` —— Bot 的默认模型。
+
+带 `presetIdOverride` 的任务里仍可调用 `model switch`，但它改的是第 2 档，返回语会明说“这一轮是计划指定的 X，你的切换从下一个没有被计划指定模型的任务开始生效”；`pendingPresetId` 不会被带 override 的任务消费。
+
+### CLI 与匹配
+
+- 子命令：`model list`（列出 `harness == "pi"` 且 `available` 的 preset，标注当前与待生效）、`model switch <query...>`。可用列表永远来自 `catalog.snapshot()` 的真值，筛选逻辑是 `bot_executor.available_presets()`，`validate()` 与 worker 共用同一份。
+- 名称匹配只在可用列表上做，字段范围 `id` / `name` / `modelId` / `channel`，归一化规则（去首尾空白、去尾部“吧。！!”、小写、去 `[\s._:/-]`）与前端捷径 `apps/mms-web/src/bot-model-switch.ts` 相同，两端钉同一份样例 `apps/mms-web/tests/fixtures/model-match-cases.json`（后端测试也读它）。已知差异：Python 与 JS 的 `\s` / strip / trim 字符集不同，BOM / NEL / FS 这类不可见控制符两端剥法不一致，见 fixture 的 `knownDivergent`。
+- 恰好 1 条才切换；多条返回 `BOT_MODEL_AMBIGUOUS`（409，消息带候选，Bot 用 `wait` 的选项把候选给用户挑）；0 条返回 `BOT_MODEL_NOT_FOUND`（404，消息带可用列表）；显式指定存在但不可用的 preset id 返回 `BOT_MODEL_UNAVAILABLE`（409）。能力/价格等语义匹配不在范围内——“换个便宜的”走“匹配不到 → 列出可选项”。
+- 切换成功的返回值带中文结果句，同时写一条 system 消息到当前 task，即使模型没有转述，界面上也有记录。
+
+### 前端
+
+- 对话输入框的既有捷径（`parseBotSettingCommand` 拦住“把模型改成 X”）改写为同样的语义：写 `pendingPresetId`、复用 `bot-model-switch.ts` 的同一套匹配，匹配不到时列出可用模型而不是只说“说得更具体一点”；命中当前模型时不发 patch。两条入口同一语义，不留并行路径。
+- `BotDefinition.modelName`（从未有值的声明）对齐为后端的 `model`，派发表单的 Bot 选项现在能显示当前模型。用户实际可见的“当前 X · 下一轮 Y”在 **Bot 对话页头部**（`Bot.tsx` 的 `bot-chat-model-line`）。BotStudio 的 `BotEditor` 里同样接了一行，但该编辑器目前在 UI 上没有打开入口（`setEditor` 全文件只有 `onClose` 一处调用），那几行是预留接线；`BotStudio.tsx` 里 `onUpdateBot` 白名单上的 `pendingPresetId` 是活的且必需——对话捷径的 patch 靠它才不被丢掉。

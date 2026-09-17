@@ -1,0 +1,11 @@
+--- instruction | 你现在用的是什么模型？你能切换自己的模型吗？用 model list 看看实际可用的模型，一两句话告诉我。
+--- progress | Pi 已接收任务。
+--- progress | session
+会话已通过 MMS 启动路径创建
+--- progress | bash
+{"models":[{"id":"web:pi:newapi-personal-tokyo:MiniMax-M2.7","name":"MiniMax-M2.7","channel":"newapi-personal-tokyo","modelId":"newapi-personal-tokyo:MiniMax-M2.7","current":false,"pending":false},{"id":"web:pi:newapi-tencent:MiniMax-M2.7","name":"MiniMax-M2.7","channel":"newapi-tencent","modelId":"newapi-tencent:MiniMax-M2.7","current":false,"pending":false},{"id":"web:pi:newapi-personal-tokyo:MiniMax-M3","name":"MiniMax-M3","channel":"newapi-personal-tokyo","modelId":"newapi-personal-tokyo:MiniMax-M3","current":false,"pending":false},{"id":"web:pi:newapi-company:MiniMax-M3","name":"Mini
+--- progress | 当前模型：deepseek-v4-flash（渠道 newapi-personal-tokyo）。可以切：model switch <名称或关键词>，下一轮任务生效，本轮仍是 deepseek-v4-flash。model list 返回 61 个可切换项（含 claude-opus-4-6-thinking、gpt-5.6-*、glm-5.x、qwen3.x、kimi-for-coding、MiniMax-M3 等，多数按 newapi-personal-tokyo / newapi-company / newapi-tencent / uscrsopenai 渠道区分）。需要我切到哪个？
+--- progress | bash
+{"ok":true,"taskId":"task_9ccd45742c274289","message":"已记录，最终状态以 Pi 本轮结束为准。"}
+--- message | 我现在跑的是 **deepseek-v4-flash**（渠道 newapi-personal-tokyo）。可以自己切——用 `model switch <名称>`，下一轮任务起生效；`model list` 显示共 61 个可切换项（claude-opus-4-6-thinking、gpt-5.6-luna/sol/terra、glm-5.3、qwen3.8-max-preview、kimi-for-coding 等，按 personal-tokyo / company / tencent / uscrsopenai 渠道区分）。要切哪个？告诉我名字或关键词就行。
+--- result | 当前模型：deepseek-v4-flash（渠道 newapi-personal-tokyo）。可以切：model switch <名称或关键词>，下一轮任务生效，本轮仍是 deepseek-v4-flash。model list 返回 61 个可切换项（含 claude-opus-4-6-thinking、gpt-5.6-*、glm-5.x、qwen3.x、kimi-for-coding、MiniMax-M3 等，多数按 newapi-personal-tokyo / newapi-company / newapi-tencent / uscrsopenai 渠道区分）。需要我切到哪个？

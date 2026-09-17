@@ -1,0 +1,226 @@
+{
+  "comment": "双端（mms_web/bot_executor.py 的 match_presets 与 apps/mms-web/src/bot-model-switch.ts 的 matchAvailablePresets）共用同一份匹配样例：两侧规则相同、钉同一份 fixture。已知差异：Python 与 JS 的 \\s / strip / trim 字符集不同，BOM、NEL(\\x85)、FS(\\x1c) 这类不可见控制符两边剥法不一致，见 knownDivergent；这些输入不出现在 cases 里，cases 断言的是两端必须一致的匹配结果 id 列表。",
+  "presets": [
+    {
+      "id": "pi:alpha",
+      "name": "Alpha",
+      "channel": "主通道",
+      "modelId": "alpha-1",
+      "harness": "pi",
+      "available": true,
+      "description": "稳定的通用模型"
+    },
+    {
+      "id": "pi:beta",
+      "name": "Beta",
+      "channel": "主通道",
+      "modelId": "beta-1",
+      "harness": "pi",
+      "available": true,
+      "description": "便宜快速的备用模型"
+    },
+    {
+      "id": "pi:gamma-pro",
+      "name": "Gamma Pro",
+      "channel": "备用",
+      "modelId": "gamma-pro",
+      "harness": "pi",
+      "available": true,
+      "description": "高性能模型"
+    },
+    {
+      "id": "pi:gamma-mini",
+      "name": "Gamma Mini",
+      "channel": "备用",
+      "modelId": "gamma-mini",
+      "harness": "pi",
+      "available": true,
+      "description": "轻量模型"
+    },
+    {
+      "id": "codex:gpt",
+      "name": "Codex GPT",
+      "channel": "主通道",
+      "modelId": "gpt-5",
+      "harness": "codex",
+      "available": true,
+      "description": "编程助手"
+    },
+    {
+      "id": "pi:down",
+      "name": "Down",
+      "channel": "主通道",
+      "modelId": "down-1",
+      "harness": "pi",
+      "available": false,
+      "description": "已下线"
+    },
+    {
+      "id": "web:pi:tokyo:MiniMax-M3",
+      "name": "MiniMax-M3",
+      "channel": "newapi-personal-tokyo",
+      "modelId": "MiniMax-M3",
+      "harness": "pi",
+      "available": true,
+      "description": "通用对话"
+    },
+    {
+      "id": "web:pi:tokyo:gpt-5.6-luna",
+      "name": "gpt-5.6-luna",
+      "channel": "newapi-personal-tokyo",
+      "modelId": "gpt-5.6-luna",
+      "harness": "pi",
+      "available": true,
+      "description": "新一代模型"
+    }
+  ],
+  "cases": [
+    {
+      "query": "beta",
+      "expect": [
+        "pi:beta"
+      ]
+    },
+    {
+      "query": "BETA",
+      "expect": [
+        "pi:beta"
+      ]
+    },
+    {
+      "query": "Beta 吧",
+      "expect": [
+        "pi:beta"
+      ]
+    },
+    {
+      "query": "beta。",
+      "expect": [
+        "pi:beta"
+      ]
+    },
+    {
+      "query": "beta！",
+      "expect": [
+        "pi:beta"
+      ]
+    },
+    {
+      "query": "beta!",
+      "expect": [
+        "pi:beta"
+      ]
+    },
+    {
+      "query": "pi:alpha",
+      "expect": [
+        "pi:alpha"
+      ]
+    },
+    {
+      "query": "Alpha_1",
+      "expect": [
+        "pi:alpha"
+      ]
+    },
+    {
+      "query": " gamma  pro ",
+      "expect": [
+        "pi:gamma-pro"
+      ]
+    },
+    {
+      "query": "gamma-pro",
+      "expect": [
+        "pi:gamma-pro"
+      ]
+    },
+    {
+      "query": "gamma",
+      "expect": [
+        "pi:gamma-pro",
+        "pi:gamma-mini"
+      ]
+    },
+    {
+      "query": "备用",
+      "expect": [
+        "pi:gamma-pro",
+        "pi:gamma-mini"
+      ]
+    },
+    {
+      "query": "主通道",
+      "expect": [
+        "pi:alpha",
+        "pi:beta"
+      ]
+    },
+    {
+      "query": "minimax m3",
+      "expect": [
+        "web:pi:tokyo:MiniMax-M3"
+      ]
+    },
+    {
+      "query": "5.6",
+      "expect": [
+        "web:pi:tokyo:gpt-5.6-luna"
+      ]
+    },
+    {
+      "query": "codex",
+      "expect": []
+    },
+    {
+      "query": "down",
+      "expect": []
+    },
+    {
+      "query": "不存在的模型",
+      "expect": []
+    },
+    {
+      "query": "12345",
+      "expect": []
+    },
+    {
+      "query": "ＢＥＴＡ",
+      "expect": []
+    },
+    {
+      "query": "gpt-5.6-*",
+      "expect": []
+    },
+    {
+      "query": "beta+~",
+      "expect": []
+    },
+    {
+      "query": "便宜",
+      "expect": []
+    }
+  ],
+  "knownDivergent": [
+    {
+      "query": "﻿beta",
+      "note": "JS trim 剥 BOM，Python strip 不剥"
+    },
+    {
+      "query": "beta﻿",
+      "note": "同上（尾部 BOM）"
+    },
+    {
+      "query": "beta",
+      "note": "Python \\s 剥 NEL(\\x85)，JS \\s 不剥"
+    },
+    {
+      "query": "beta",
+      "note": "同上（尾部 NEL）"
+    },
+    {
+      "query": "BETA\u001c",
+      "note": "Python \\s 剥 FS(\\x1c)，JS \\s 不剥"
+    }
+  ]
+}

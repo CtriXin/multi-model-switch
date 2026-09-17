@@ -1,0 +1,5 @@
+--- system | 本轮起使用模型 qwen3.8-flash。
+--- message | 429: {"message":"Your token-plan 1-week quota has been exhausted. The quota will reset at 09-18 10:16:00 UTC.","type":"insufficient_quota","param":"","code":"insufficient_quota"}
+--- result | 
+
+429: {"message":"Your token-plan 1-week quota has been exhausted. The quota will reset at 09-18 10:16:00 UTC.","type":"insufficient_quota","param":"","code":"insufficient_quota"}
