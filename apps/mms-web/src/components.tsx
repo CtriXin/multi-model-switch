@@ -249,11 +249,13 @@ export function EventView({
   continuation = false,
   intermediate = false,
   turnStartedAt,
+  startReading = false,
 }: {
   continuation?: boolean;
   intermediate?: boolean;
   disconnected?: boolean;
   turnStartedAt?: string;
+  startReading?: boolean;
   event: SessionEvent;
   action?: (
     path: string,
@@ -264,7 +266,7 @@ export function EventView({
   busy: boolean;
   approve: (id: string, decision: "allow" | "deny", value?: string) => void;
 }) {
-  const [reading, setReading] = useState(false);
+  const [reading, setReading] = useState(startReading);
   const thinking =
     !disconnected &&
     detail.session.state === "running" &&

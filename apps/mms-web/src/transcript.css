@@ -66,6 +66,7 @@ dialog.reply-reader::backdrop {
   }
   .reply-reader-body {
     padding: 20px 16px 28px;
+    max-height: calc(96dvh - 120px);
   }
 }
 @media (prefers-reduced-motion: reduce) {

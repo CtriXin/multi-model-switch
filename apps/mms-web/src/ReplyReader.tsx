@@ -14,6 +14,23 @@ export function replyReaderKey(
   return null;
 }
 
+export function applyReplyReaderAction(
+  act: "close" | "copy" | null,
+  actions: { close: () => void; copy: () => void },
+): "close" | "copy" | null {
+  if (act === "close") actions.close();
+  if (act === "copy") actions.copy();
+  return act;
+}
+
+export function focusReplyReaderBody(root: ParentNode | null): boolean {
+  const body = root?.querySelector<HTMLElement>(".reply-reader-body");
+  if (!body) return false;
+  body.tabIndex = -1;
+  body.focus();
+  return true;
+}
+
 export function ReplyReader({
   text,
   title,
@@ -28,8 +45,12 @@ export function ReplyReader({
   const ref = useRef<HTMLDialogElement>(null);
   const [copied, setCopied] = useState(false);
   useEffect(() => {
-    ref.current?.showModal();
-    return () => ref.current?.close();
+    const dialog = ref.current;
+    dialog?.showModal();
+    // showModal() focuses the first control (the close button). Move focus
+    // onto the body so the first Enter copies, matching the footer.
+    focusReplyReaderBody(dialog);
+    return () => dialog?.close();
   }, []);
   function copy() {
     void copyText(text).then((done) => {
@@ -45,25 +66,21 @@ export function ReplyReader({
       aria-labelledby="reply-reader-title"
       onCancel={(event) => {
         event.preventDefault();
-        onClose();
+        applyReplyReaderAction("close", { close: onClose, copy });
       }}
       onClick={(event) => {
         if (event.target === ref.current) onClose();
       }}
       onKeyDown={(event) => {
-        const act = replyReaderKey(
-          event.key,
-          event.nativeEvent.isComposing,
-          (event.target as HTMLElement).tagName,
+        const act = applyReplyReaderAction(
+          replyReaderKey(
+            event.key,
+            event.nativeEvent.isComposing,
+            (event.target as HTMLElement).tagName,
+          ),
+          { close: onClose, copy },
         );
-        if (act === "close") {
-          event.preventDefault();
-          onClose();
-        }
-        if (act === "copy") {
-          event.preventDefault();
-          copy();
-        }
+        if (act) event.preventDefault();
       }}
     >
       <header>
@@ -77,7 +94,9 @@ export function ReplyReader({
           <X size={18} />
         </button>
       </header>
-      <div className="reply-reader-body">{children}</div>
+      <div className="reply-reader-body" tabIndex={-1}>
+        {children}
+      </div>
       <footer>
         <span>Esc 关闭</span>
         <span>·</span>
