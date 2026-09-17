@@ -30,3 +30,19 @@ test('quick Bot model selection waits for the API and propagates rejection',asyn
   const failed=menu.props.change('bad');reject(new Error('fixture rejection'));
   await assert.rejects(failed,/fixture rejection/);
 });
+
+import { botModelSelectionPatch } from '../src/bot-model-switch.ts';
+test('actual header and settings callbacks replace pending instead of mutating the running model', async () => {
+  for (const file of ['Bot.tsx','BotPresetPanel.tsx']) {
+    const source=fs.readFileSync(new URL('../src/'+file,import.meta.url),'utf8');
+    const callback=source.match(/change=\{(async \(?presetId\)? => \{[\s\S]*?botModelSelectionPatch[\s\S]*?\})\}/)?.[1];
+    assert.ok(callback, file+' must use the next-round boundary');
+    for (const chosen of ['new','current']) {
+      const calls=[];
+      const context={bot:{id:'b',presetId:'current',pendingPresetId:'old-pending',status:'running'},botModelSelectionPatch,onUpdateBot:async (...args)=>calls.push(args)};
+      const fn=vm.runInNewContext('('+callback+')',context);
+      await fn(chosen);
+      assert.deepEqual(calls,[['b',{pendingPresetId:chosen==='current'?'':chosen}]]);
+    }
+  }
+});

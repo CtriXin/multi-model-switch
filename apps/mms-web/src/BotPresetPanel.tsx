@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { Settings2, X, Plus, Trash2, Check, LoaderCircle } from "lucide-react";
 import type { BotDefinition } from "./Bot";
 import type { Model, Preset } from "./types";
+import { botModelSelectionPatch } from "./bot-model-switch";
 import { ModelPicker } from "./LaunchOptions";
 import {
   parsePreset,
@@ -318,7 +319,7 @@ export function BotPresetPanel({
             workspaceId={bot.workspaceId || "default"}
             value={bot.pendingPresetId || bot.presetId || ""}
             change={async (presetId) => {
-              await onUpdateBot?.(bot.id, { presetId: presetId || null });
+              await onUpdateBot?.(bot.id, botModelSelectionPatch(presetId, bot.presetId));
             }}
             favorites={favorites}
             toggleFavorite={(id) =>

@@ -20,3 +20,9 @@ test('evening label and date agree at 20:00 and across month/year boundaries', (
     assert.equal(result.label,label);assert.equal(result.date.getTime(),expected.getTime());
   }
 });
+
+import { botModelSelectionPatch } from '../src/bot-model-switch.ts';
+test('model picker stages changes and returning to current cancels an existing pending model', () => {
+  assert.deepEqual(botModelSelectionPatch('new','current'), {pendingPresetId:'new'});
+  assert.deepEqual(botModelSelectionPatch('current','current'), {pendingPresetId:''});
+});

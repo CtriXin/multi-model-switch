@@ -41,6 +41,7 @@ import {
 import { previewType } from "./bot-artifact-preview";
 import type { BotChildResult, BotPendingQuestion, BotTaskPlan, Model, Preset } from "./types";
 import { isPreview, mutate, request } from "./api";
+import { botModelSelectionPatch } from "./bot-model-switch";
 import { fleetSelectionError } from "./bot-fleet";
 import { nextEvening } from "./bot-schedules";
 import { BotModelPicker } from "./BotModelPicker";
@@ -1994,7 +1995,9 @@ export function BotChat({
   }, [scheduleForm.kind, schedulePopoverOpen, schedulePanelOpen]);
   useEffect(() => {
     if (!schedulePopoverOpen) return;
-    const timer = window.setTimeout(() => setScheduleNow(new Date()), nextEvening(scheduleNow).date.getTime() - Date.now() + 50);
+    const midnight = new Date(scheduleNow.getFullYear(), scheduleNow.getMonth(), scheduleNow.getDate() + 1);
+    const boundary = Math.min(midnight.getTime(), nextEvening(scheduleNow).date.getTime());
+    const timer = window.setTimeout(() => setScheduleNow(new Date()), Math.max(0, boundary - Date.now()) + 50);
     return () => window.clearTimeout(timer);
   }, [schedulePopoverOpen, scheduleNow]);
   const composerScheduleInvalid = validateComposerForm(scheduleForm);
@@ -2334,7 +2337,7 @@ export function BotChat({
               )}
               {bot && <BotModelPicker bot={bot} presets={presets} models={models}
                 disabled={disabled || isPreview || !onUpdateBot}
-                change={async presetId => { await onUpdateBot?.(bot.id, { presetId }); }} />}
+                change={async presetId => { await onUpdateBot?.(bot.id, botModelSelectionPatch(presetId, bot.presetId)); }} />}
 
             </div>
             {editingDesc && bot ? (
@@ -2415,7 +2418,7 @@ export function BotChat({
               className={"bot-quiet-button" + (schedulePanelOpen ? " is-active" : "")}
               type="button"
               onClick={() => {
-                if (onboardingEditing && closePresetRef.current?.() === false) return;
+                // The preset panel capture handler already guards this outside click.
                 setSchedulePanelOpen((prev) => !prev);
               }}
               aria-label="打开定时面板"
