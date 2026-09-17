@@ -2717,12 +2717,25 @@
     margin-top: 0;
   }
   .bot-chat-header {
-    height: 56px;
-    flex: 0 0 56px;
-    padding: 0 16px;
+    height: auto;
+    flex: 0 0 auto;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 16px;
+  }
+  .bot-chat-header .bot-chat-identity {
+    flex: 0 0 100%;
+  }
+  .bot-chat-header .bot-chat-title-group {
+    flex: 1;
+  }
+  .bot-chat-header-actions {
+    width: 100%;
+    justify-content: flex-end;
   }
   .bot-chat-title-row .bot-chat-model-line {
     max-width: min(220px, 40vw);
+    min-width: 96px;
     font-size: 10px;
     padding: 0 6px;
   }
