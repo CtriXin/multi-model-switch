@@ -39,9 +39,9 @@ test("availableFleetFamilies skips unavailable and Other", () => {
 
 test("fleetPreviewLabel tells the user what the next click will do", () => {
   const policy = normalizeFleetPolicy();
-  assert.match(fleetPreviewLabel(policy, ["GLM", "Kimi"]), /发送即问场外/);
+  assert.match(fleetPreviewLabel(policy, ["GLM", "Kimi"]), /发出去会再问 2 家/);
   assert.equal(fleetPreviewLabel({ ...policy, enabled: false }, ["GLM", "Kimi"]), "");
-  assert.match(fleetPreviewLabel({ ...policy, families: ["Kimi", "GLM"] }, ["Kimi", "GLM"]), /场外 2 家/);
+  assert.match(fleetPreviewLabel({ ...policy, families: ["Kimi", "GLM"] }, ["Kimi", "GLM"]), /再问 2 家/);
 });
 
 test("remembered model becomes the chip label", () => {

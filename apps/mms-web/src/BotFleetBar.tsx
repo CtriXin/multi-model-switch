@@ -69,7 +69,7 @@ export function BotFleetBar({
           className={"bot-fleet-chip bot-fleet-door" + (policy.enabled ? " is-on" : "")}
           aria-pressed={policy.enabled}
           disabled={locked}
-          title={policy.enabled ? "关掉后发送只问当前 Bot" : "打开后，发送会去问场外几家"}
+          title={policy.enabled ? "关掉就只问我" : "打开的话，发出去会再问几家"}
           onClick={() => patch({ enabled: !policy.enabled })}
         >
           寻求场外帮助
@@ -83,7 +83,7 @@ export function BotFleetBar({
           aria-pressed={policy.intensity === "opinions"}
           onClick={() => patch({ intensity: "opinions" })}
         >
-          轻量
+          听听
         </button>
         <button
           type="button"
@@ -92,7 +92,7 @@ export function BotFleetBar({
           aria-pressed={policy.intensity === "intense"}
           onClick={() => patch({ intensity: "intense" })}
         >
-          认真
+          问仔细
         </button>
         <button
           type="button"

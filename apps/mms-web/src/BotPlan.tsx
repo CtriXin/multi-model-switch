@@ -200,9 +200,9 @@ export function BotPlan({ task, bots }: { task: BotTask; bots: BotDefinition[] }
   }
 
   return (
-    <div className={`bot-plan bot-plan-${status}`} aria-label={plan.mode === "fleet" ? "模型意见" : "分工计划"}>
+    <div className={`bot-plan bot-plan-${status}`} aria-label={plan.mode === "fleet" ? "他们怎么说" : "分工计划"}>
       <div className="bot-plan-head">
-        <span className="bot-plan-title">{plan.mode === "fleet" ? "模型意见" : "分工计划"}</span>
+        <span className="bot-plan-title">{plan.mode === "fleet" ? "他们怎么说" : "分工计划"}</span>
         <span className={`bot-plan-tag bot-plan-tag-${statusTier}`}>
           {statusLabel}
         </span>

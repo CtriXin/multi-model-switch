@@ -38,7 +38,7 @@ function TakeBody({ step, compact = false }: { step: BotPlanStep; compact?: bool
             {clip(take.risk, limit)}
           </p>
         )}
-        {compact && <p className="bot-fleet-take-hint">点芯片看完</p>}
+        {compact && <p className="bot-fleet-take-hint">点开看完</p>}
       </>
     );
   }
@@ -46,7 +46,7 @@ function TakeBody({ step, compact = false }: { step: BotPlanStep; compact?: bool
     return (
       <>
         <p>{clip(take.summary, compact ? 90 : 600)}</p>
-        {compact && <p className="bot-fleet-take-hint">点芯片看完</p>}
+        {compact && <p className="bot-fleet-take-hint">点开看完</p>}
       </>
     );
   }
@@ -72,7 +72,7 @@ export function FleetPills({
               type="button"
               className={"bot-fleet-pill bot-fleet-pill-" + (step.status || "pending") + (pinned ? " is-on" : "")}
               aria-pressed={pinned}
-              title="悬停看这家，点击钉住"
+              title="挪上来看一眼，点开看完"
               onClick={() => onPin(pinned ? "" : step.id)}
             >
               {shortLabel(step)}
@@ -135,11 +135,11 @@ export function FleetVerdict({
       <div className="bot-fleet-verdict-scan">
         <div>
           <h3>分歧</h3>
-          <VerdictItems items={verdict.disagreements} empty="没有实质分歧" />
+          <VerdictItems items={verdict.disagreements} empty="没什么分歧" />
         </div>
         <div>
           <h3>风险</h3>
-          <VerdictItems items={verdict.risks} empty="没标出额外风险" />
+          <VerdictItems items={verdict.risks} empty="没提风险" />
         </div>
       </div>
       <FleetPills steps={steps} pinnedId={pinnedId} onPin={setPinnedId} />
@@ -152,9 +152,9 @@ export function FleetVerdict({
       <details className="bot-fleet-verdict-consensus">
         <summary>
           <ChevronRight size={13} className="bot-plan-chevron" />
-          共识
+          大家都认的
         </summary>
-        <VerdictItems items={verdict.consensus} empty="没有单独列出的共识" />
+        <VerdictItems items={verdict.consensus} empty="没单写" />
       </details>
     </div>
   );

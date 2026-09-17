@@ -105,9 +105,9 @@ export function fleetPreviewLabel(policy: BotFleetPolicy, families: string[], pr
   if (!policy.enabled) return "";
   if (policy.families.length) {
     const names = policy.families.map((family) => familyChipLabel(family, policy, presets));
-    return `场外 ${names.length} 家：${names.join("、")} · ${policy.intensity === "intense" ? "认真" : "轻量"}`;
+    return `再问 ${names.length} 家：${names.join("、")} · ${policy.intensity === "intense" ? "问仔细" : "听听"}`;
   }
   const auto = families.slice(0, policy.maxFamilies);
-  if (auto.length < 2) return "场外凑不够两家，会自己看并标明不是多方";
-  return `发送即问场外 · 默认 ${policy.maxFamilies} 家${policy.intensity === "intense" ? "认真" : "轻量"}`;
+  if (auto.length < 2) return "凑不齐两家，我自己看，不当成多方";
+  return `发出去会再问 ${policy.maxFamilies} 家${policy.intensity === "intense" ? "，问仔细" : ""}`;
 }
