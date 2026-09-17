@@ -990,3 +990,24 @@ def test_a_failed_create_does_not_consume_a_once_schedule(tmp_path):
         assert rt._schedules[once["id"]]["nextRunAt"] is None
     finally:
         rt.close()
+
+
+def test_an_error_parked_once_explains_the_late_run(tmp_path):
+    executor = FlakyValidateExecutor()
+    rt = runtime(tmp_path, executor)
+    try:
+        worker = bot(rt, "补触发说明", "ws-once-error-note")
+        past = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+        once = rt.create_schedule(worker["id"], {"prompt": "一次提醒", "rule": {"kind": "once", "at": past}})
+        executor.broken = True
+        rt.tick(); drain_launch(rt)
+        assert rt._schedules[once["id"]]["lastSkip"]["reason"] == "error"
+        executor.broken = False
+        rt.tick(); drain_launch(rt)
+        fired = rt.list_tasks(bot_id=worker["id"])
+        assert len(fired) == 1
+        notes = [message["content"] for message in rt.list_messages(fired[0]["id"])]
+        assert any("没能建出任务" in content and "现在补触发" in content for content in notes)
+        assert not any("因暂停" in content for content in notes)
+    finally:
+        rt.close()

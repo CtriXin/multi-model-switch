@@ -109,12 +109,14 @@ export interface BotSummaryTask {
 }
 
 import { parsePreset, getPresetSummary } from "./bot-presets.ts";
+import { describeRule, nextEnabledSchedule, type BotSchedule } from "./bot-schedules.ts";
 
 export interface BotSummaryBot {
   id: string;
   status: BotStatus;
   description?: string;
   systemPrompt?: string;
+  wakeEnabled?: boolean;
   pendingQuestion?: { taskId?: string; question?: string; options?: string[]; since?: string } | null;
 }
 
@@ -123,6 +125,7 @@ export function getBotSecondLine(
   task?: BotSummaryTask,
   allTasks?: BotSummaryTask[],
   referenceNow?: Date,
+  schedules?: BotSchedule[],
 ): string | null {
   const botTasks = allTasks?.filter((t) => t.botId === bot.id) || (task ? [task] : []);
 
@@ -147,13 +150,27 @@ export function getBotSecondLine(
     return waitReasonLabel(waitingTask.waitReason) || waitingTask.waitReason.trim();
   }
 
-  // 3. 下次定时（"明天 09:00 · 任务前 12 字"）
-  const scheduledTask = botTasks.find((t) => t.status === "scheduled" || Boolean(t.runAt))
-    || (task && (task.status === "scheduled" || Boolean(task.runAt)) ? task : undefined);
-  if (scheduledTask?.runAt) {
-    const timeLabel = formatScheduledTaskTime(scheduledTask.runAt, referenceNow);
-    const snippet = (scheduledTask.prompt || "").trim().slice(0, 12);
-    return snippet ? `${timeLabel} · ${snippet}` : timeLabel;
+  // 3. 下次定时：读 schedule 实体。wakeEnabled 是总闸，优先于单条描述。
+  if (schedules && schedules.length) {
+    if (bot.wakeEnabled === false) return "自动唤醒已关闭";
+    const next = nextEnabledSchedule(schedules);
+    if (!next) return "定时已暂停";
+    const when = formatScheduledTaskTime(next.nextRunAt, referenceNow);
+    const count = schedules.length > 1 ? ` · 共 ${schedules.length} 条` : "";
+    if (next.rule?.kind === "once") {
+      return `${when}${count}`;
+    }
+    const period = describeRule(next.rule);
+    return `${period} · 下次 ${when}${count}`;
+  }
+  if (schedules === undefined) {
+    const scheduledTask = botTasks.find((t) => t.status === "scheduled" || Boolean(t.runAt))
+      || (task && (task.status === "scheduled" || Boolean(task.runAt)) ? task : undefined);
+    if (scheduledTask?.runAt) {
+      const timeLabel = formatScheduledTaskTime(scheduledTask.runAt, referenceNow);
+      const snippet = (scheduledTask.prompt || "").trim().slice(0, 12);
+      return snippet ? `${timeLabel} · ${snippet}` : timeLabel;
+    }
   }
 
   // 4. 预设摘要（Bot 有向导预设时显示摘要；不再显示模型最后一条回复）
