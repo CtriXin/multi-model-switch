@@ -1153,3 +1153,38 @@ Mutation（都实际跑过，还原后 302 全绿）：
 3. `reusedSession` 是新加的 task 字段（给证据与测试用）；若不想暴露到接口，需要在 `_view` 里过滤。
 
 耗时：约 1 小时 40 分（含真机两轮、门禁等待与 mutation）· 归因：[AGENT]/[TOOL]
+
+## 20:23 +08 · GPT-6 · b7e8c8e283844b7d
+现象: 独立 worktree 不包含 ignored impeccable skill，context.mjs MODULE_NOT_FOUND。
+处置: 从已安装原 skill 绝对路径读取，在当前应用目录运行 context。
+耗时: 未单独计时 · 归因:[TOOL]
+
+## 20:29 +08 · GPT-6 · b7e8c8e283844b7d
+现象: root npm ci 缺少 lockfile，实际 lock 在 apps/mms-web。
+处置: 在 Web 子项目使用 --workspaces=false 安装已锁定依赖，无新增依赖。
+耗时: 未单独计时 · 归因:[AGENT]
+
+## 20:43 +08 · GPT-6 · b7e8c8e283844b7d
+现象: 把 stride next 默认的人类可读文本当作 JSON，JSONDecodeError。
+处置: 直接回读 next 文本，继续原 attempt；未重建 task。
+耗时: 未单独计时 · 归因:[AGENT]
+
+## 21:00 +08 · gpt-6 · b7e8c8e283844b7d
+现象：安装的 lark-cli 缺少 form-share 快捷命令；官方 skill 与二进制存在版本差异。
+处置：读取官方 larksuite/cli form_share.go 与 share_common.go，使用已文档化的原生 GET/PATCH；逐字段修改并回读，无全局升级。
+耗时：未单独计时 · 归因：[TOOL]
+
+## 21:00 +08 · gpt-6 · b7e8c8e283844b7d
+现象：ego-browser 返回 “The user has taken control of this task space, so browser commands are paused.”
+处置：遵守 hard stop，不切换其他浏览器或用低层请求冒充真页验证；继续独立的飞书 API 配置与代码工作。匿名真页验收等待用户明确恢复浏览器。
+耗时：2.657 秒 · 归因：[TOOL]
+
+## 21:04 +08 · gpt-6 · b7e8c8e283844b7d
+现象：drive member-list 缺少 docs:permission.member:retrieve；表单 submit 后立即 record-list 尚无记录。
+处置：不升级权限；新建 Base 未添加成员，回读 link_share=closed。等待正常异步落库后回读到 QA 记录，仅验证真实接收，不冒充匿名浏览器验收。
+耗时：未单独计时 · 归因：[外部]
+
+## 21:08 +08 · gpt-6 · b7e8c8e283844b7d
+现象：同步 dev 5.1.5 时预构建 JS rename/rename、build.json/index.html 冲突，源码无冲突。
+处置：在本任务分支合入已 fetch 的 dev，用源码完整重建 mms_web_static，不手工拼接压缩产物；Node 265 与 fresh-user 765 + 5 subtests 通过。
+耗时：build 6.56 秒；gate 176.41 秒 · 归因：[外部]

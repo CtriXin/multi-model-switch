@@ -90,6 +90,18 @@ class WebApplication:
                                executor=PiBotExecutor(self.sessions, self.catalog),
                                computer=EgoComputer(state_root))
         self.bots.can_dispatch = lambda: not self.maintenance
+        from .feedback import FeedbackService
+        self.feedback = FeedbackService(state_root)
+
+    def feedback_status(self) -> dict:
+        status = self.feedback.status()
+        # Do not invite while another session is working or needs an answer.
+        sessions = self.sessions.list_sessions() if self.sessions else []
+        busy = any(s.get("state") not in {"idle", "completed", "stopped", "error"}
+                   for s in sessions)
+        busy = busy or any(t.get("status") in {"queued", "starting", "running", "waiting"}
+                           for t in self.bots.list_tasks())
+        return {**status, "idle": not busy, "eligible": status["eligible"] and not busy and not self.maintenance}
 
     def _model_settings(self):
         if not hasattr(self, "model_settings"):
@@ -322,6 +334,8 @@ class WebApplication:
         return service.adopt(row, payload)
 
     def get(self, parts: list[str], query: dict[str, list[str]] | None = None) -> dict:
+        if parts == ["feedback"]:
+            return self.feedback_status()
         if parts == ["bots"]:
             return {"bots": self.bots.list_bots(), "capabilities": self.bots.capabilities()}
         if parts == ["bots", "status"]:
@@ -428,9 +442,20 @@ class WebApplication:
                 return {"ok": True}
             if self.maintenance:
                 raise WebError("UPDATE_IN_PROGRESS", "正在验证更新，会话已保留，请稍后再试。", 409)
-            return self._post(parts, payload)
+            result = self._post(parts, payload)
+            try:
+                self.feedback.observe(parts, payload, result)
+            except (OSError, ValueError, TypeError, KeyError):
+                # Feedback bookkeeping must never turn an accepted task into
+                # an apparent failure or cause the user to resend their work.
+                pass
+            return result
 
     def _post(self, parts: list[str], payload: dict) -> dict:
+        if parts == ["feedback", "invitation"]:
+            if payload.get("action") == "claim" and not self.feedback_status()["eligible"]:
+                return {"claimed": False}
+            return self.feedback.invitation(payload)
         if parts == ["bots"]:
             return self.bots.create_bot(payload)
         if parts == ["bots", "auto", "tasks"]:
