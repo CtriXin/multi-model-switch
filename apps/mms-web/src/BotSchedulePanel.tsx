@@ -20,7 +20,6 @@ import {
   defaultComposerForm,
   describeRule,
   formFromRule,
-  localTimezone,
   overlapPolicyLabel,
   remainingScheduleQuota,
   scheduleErrorMessage,
@@ -218,11 +217,12 @@ export function BotSchedulePanel({
     setSaving(true);
     setError("");
     try {
-      const rule = composerRuleFromForm(form);
+      const schedule = schedules.find((item) => item.id === editingId);
+      if (!schedule) throw new Error("这条定时已不存在，请刷新后重试。");
+      const ruleChanged = JSON.stringify(form) !== JSON.stringify(formFromRule(schedule.rule));
       await mutate(scheduleEditPath(bot.id, editingId), {
         prompt: trimmed,
-        rule,
-        timezone: localTimezone(),
+        ...(ruleChanged ? { rule: composerRuleFromForm(form) } : {}),
         overlapPolicy,
       });
       cancelEdit();

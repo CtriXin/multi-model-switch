@@ -589,3 +589,37 @@ def test_pending_preset_id_survives_restart(tmp_path):
         assert reloaded.get_bot(worker["id"])["pendingPresetId"] == "pi:beta"
     finally:
         reloaded.close()
+
+
+def test_switch_back_to_current_model_cancels_pending_switch(tmp_path):
+    rt = runtime(tmp_path)
+    try:
+        bot = make_bot(rt)
+        task = rt.create_task({"botId": bot["id"], "prompt": "keep current"})
+        rt.worker(task["id"], {"action": "model", "op": "switch", "query": "beta"})
+        result = rt.worker(task["id"], {"action": "model", "op": "switch", "query": "alpha"})
+        assert result["pending"] is None
+        assert not rt.get_bot(bot["id"])["pendingPresetId"]
+        assert "取消" in result["message"]
+        run_task(rt, bot["id"])
+        assert rt.executor.starts[-1]["presetId"] == "pi:alpha"
+    finally:
+        rt.close()
+
+
+def test_one_off_release_failure_is_retried_without_losing_marker(tmp_path, monkeypatch):
+    rt = runtime(tmp_path)
+    try:
+        bot = make_bot(rt)
+        task = rt.create_task({"botId": bot["id"], "prompt": "done"})
+        rt._tasks[task["id"]].update(status="completed", ephemeralSession=True, sessionId="temporary")
+        release = rt.executor.release_session
+        with monkeypatch.context() as patcher:
+            patcher.setattr(rt.executor, "release_session", lambda *_: (_ for _ in ()).throw(OSError("busy")))
+            rt._release_finished_one_off_sessions()
+        assert rt._tasks[task["id"]]["ephemeralSession"] is True
+        rt._release_finished_one_off_sessions()
+        assert rt._tasks[task["id"]]["ephemeralSession"] is False
+        assert rt.executor.released == ["temporary"]
+    finally:
+        rt.close()

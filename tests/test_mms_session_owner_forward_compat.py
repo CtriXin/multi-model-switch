@@ -179,3 +179,46 @@ class SessionOwnerHttpTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_retiring_bot_session_reaps_actual_child_and_preserves_history(tmp_path):
+    import subprocess
+    import sys
+    from unittest.mock import Mock
+    from mms_web.drivers.pi_rpc import PiRpcDriver
+    from mms_web.bot_executor import PiBotExecutor
+    state = tmp_path / "state"
+    path = _write_session(state, "one-off", owner="bot", botId="bot_1")
+    service = _make_service(state)
+    live = service._get("one-off")
+    live.events = [{"id": "answer", "kind": "assistant", "text": "saved answer"}]
+    process = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.buffer.read()"],
+                               stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               start_new_session=True)
+    live.driver = PiRpcDriver(process, Mock())
+    executor = PiBotExecutor.__new__(PiBotExecutor)
+    executor.sessions = service
+    try:
+        assert process.poll() is None
+        executor.release_session("one-off", "release-test")
+        assert process.poll() is not None
+        assert path.is_file()
+        detail = service.get_session("one-off")
+        assert detail["session"]["archived"] is True
+        assert detail["events"][0]["text"] == "saved answer"
+    finally:
+        service.close()
+        process.wait(timeout=5)
+
+
+def test_retiring_session_refuses_pilot_owner(tmp_path):
+    import pytest
+    _write_session(tmp_path, "pilot")
+    service = _make_service(tmp_path)
+    try:
+        with pytest.raises(WebError) as caught:
+            service.retire_bot_session("pilot")
+        assert caught.value.code == "INVALID_SESSION_OWNER"
+        assert not service.get_session("pilot")["session"]["archived"]
+    finally:
+        service.close()

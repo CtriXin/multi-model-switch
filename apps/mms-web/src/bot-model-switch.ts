@@ -35,7 +35,7 @@ export type ModelSwitchReply = {
 // 匹配不到就问，不要猜：0 条列出可选项，多条返回候选，只有恰好 1 条才切换。
 // 切换写成 pendingPresetId，下一轮任务起生效，与后端 model switch 同一语义。
 // 命中当前已经在用的模型时不发 patch（避免白扔一整个会话历史）。
-export function resolveModelSwitch(query: string, presets: Preset[], currentPresetId?: string | null): ModelSwitchReply {
+export function resolveModelSwitch(query: string, presets: Preset[], currentPresetId?: string | null, pendingPresetId?: string | null): ModelSwitchReply {
   const matches = matchAvailablePresets(query, presets);
   if (!matches.length) {
     const names = availablePresets(presets).map((item) => item.name);
@@ -52,7 +52,9 @@ export function resolveModelSwitch(query: string, presets: Preset[], currentPres
   }
   const preset = matches[0];
   if (currentPresetId && preset.id === currentPresetId) {
-    return { patch: null, message: `已经在用 ${preset.name} 了，没有需要切换的。` };
+    return pendingPresetId
+      ? { patch: { pendingPresetId: "" }, message: `已取消待生效的切换，继续使用 ${preset.name}。` }
+      : { patch: null, message: `已经在用 ${preset.name} 了，没有需要切换的。` };
   }
   return {
     patch: { pendingPresetId: preset.id },

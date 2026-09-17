@@ -1186,13 +1186,13 @@ function canPreviewArtifact(artifact: BotArtifact) {
   return previewType(artifact).kind !== "unsupported";
 }
 
-function parseBotSettingCommand(content: string, presets: Preset[], currentPresetId?: string | null) {
+function parseBotSettingCommand(content: string, presets: Preset[], currentPresetId?: string | null, pendingPresetId?: string | null) {
   const name = content.match(/(?:把|将)?(?:我的)?(?:bot\s*)?(?:名字|名称)(?:改成|改为|叫|设为)\s*[“「\"]?(.+?)[”」\"]?$/i)
     || content.match(/^(?:你|bot)?(?:以后)?叫\s*[“「\"]?(.+?)[”」\"]?$/i);
   if (name?.[1]?.trim()) return { patch: { name: name[1].trim() }, message: `好，之后我就叫「${name[1].trim()}」。` };
   const model = content.match(/(?:把|将)?(?:默认)?模型(?:改成|改为|换成|用|设为)\s*[“「\"]?(.+?)[”」\"]?$/i)
     || content.match(/^(?:切换(?:到)?|换(?:成)?|用)\s*([a-z][a-z0-9._ -]*\d[a-z0-9._ -]*?)(?:吧|模型)?[。！!]?$/i);
-  if (model?.[1]?.trim()) return resolveModelSwitch(model[1], presets, currentPresetId);
+  if (model?.[1]?.trim()) return resolveModelSwitch(model[1], presets, currentPresetId, pendingPresetId);
   return null;
 }
 
@@ -2111,7 +2111,7 @@ export function BotChat({
     setBusy(true);
     setError("");
     try {
-      const setting = parseBotSettingCommand(content, presets, bot?.presetId);
+      const setting = parseBotSettingCommand(content, presets, bot?.presetId, bot?.pendingPresetId);
       if (setting && onUpdateBot) {
         if (!setting.patch) {
           setSettingNotice(setting.message);

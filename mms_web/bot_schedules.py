@@ -191,7 +191,7 @@ def _local_instant(wall: datetime, zone) -> datetime:
     instant, i.e. the first valid local time after the gap.  An ambiguous local
     time (fall back) resolves to its first occurrence (``fold=0``).
     """
-    candidate = wall.replace(tzinfo=zone)
+    candidate = wall.replace(tzinfo=zone, fold=0)
     first = candidate.astimezone(timezone.utc)
     if first.astimezone(zone).replace(tzinfo=None) == wall:
         return first
@@ -228,8 +228,11 @@ def next_run_at(rule: dict, timezone_name: str, *, after: datetime,
         every = int(rule["everySeconds"])
         base = previous or after
         if base <= after:
-            steps = int((after - base).total_seconds() // every) + 1
-            base = base + timedelta(seconds=every * steps)
+            try:
+                steps = int((after - base).total_seconds() // every) + 1
+                base = base + timedelta(seconds=every * steps)
+            except OverflowError:
+                raise WebError("INVALID_SCHEDULE_RULE", "定时间隔超出可表示的日期范围。", 400) from None
         return base
     if kind not in {"daily", "weekly"}:
         raise WebError("INVALID_SCHEDULE_RULE", "不支持的定时类型。", 400)
@@ -242,7 +245,11 @@ def next_run_at(rule: dict, timezone_name: str, *, after: datetime,
         candidate += timedelta(days=(int(rule["weekday"]) - wall.weekday()) % 7)
     if candidate <= wall:
         candidate += timedelta(days=1 if kind == "daily" else 7)
-    return _local_instant(candidate, zone)
+    instant = _local_instant(candidate, zone)
+    if instant <= after:
+        candidate += timedelta(days=1 if kind == "daily" else 7)
+        instant = _local_instant(candidate, zone)
+    return instant
 
 
 def advance(schedule: dict, *, now: datetime) -> tuple[dict, int]:
@@ -411,9 +418,10 @@ def apply_update(schedule: dict, payload: dict, *, now: datetime) -> dict:
         rule = normalize_rule(payload.get("rule") or updated["rule"])
         zone = normalize_timezone(payload.get("timezone", updated["timezone"]))
         updated["rule"], updated["timezone"] = rule, zone
-        # An edited rule restarts from now; it never inherits a stale due time
-        # or a paused/busy marker from the shape it replaced.
-        updated["nextRunAt"] = rule["at"] if rule["kind"] == "once" else _iso(next_run_at(rule, zone, after=now))
-        updated["lastSkip"] = None
+        # Only a changed timing rule restarts the clock. Full-form clients
+        # may echo the existing rule when changing just the prompt.
+        if rule != schedule["rule"] or zone != schedule["timezone"]:
+            updated["nextRunAt"] = rule["at"] if rule["kind"] == "once" else _iso(next_run_at(rule, zone, after=now))
+            updated["lastSkip"] = None
     updated["updatedAt"] = now.astimezone(timezone.utc).isoformat(timespec="milliseconds")
     return updated

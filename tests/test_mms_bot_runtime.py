@@ -1369,3 +1369,63 @@ def test_a_second_wait_without_a_question_does_not_reuse_the_first(tmp_path):
         assert runtime.list_bots()[0]["pendingQuestion"] is None
     finally:
         runtime.close()
+
+
+def test_schedule_task_and_advanced_due_time_are_one_durable_write(tmp_path, monkeypatch):
+    rt, _ = make_runtime(tmp_path)
+    bot = make_bot(rt)
+    schedule = rt.create_schedule(bot["id"], {"prompt": "scheduled", "rule": {"kind": "once", "at": "2020-01-01T00:00:00+00:00"}})
+    rt.max_concurrent = 0  # Observe persistence without starting the fake executor.
+    snapshots = []
+    persist = rt._persist
+    def capture():
+        persist()
+        snapshots.append(json.loads((rt.root / "state.json").read_text()))
+    monkeypatch.setattr(rt, "_persist", capture)
+    try:
+        rt.tick()
+        assert snapshots
+        for snapshot in snapshots:
+            tasks = list(snapshot["tasks"].values())
+            assert len(tasks) == 1
+            assert tasks[0]["scheduleId"] == schedule["id"]
+            assert snapshot["schedules"][schedule["id"]]["nextRunAt"] is None
+            assert snapshot["schedules"][schedule["id"]]["lastTaskId"] == tasks[0]["id"]
+        restored_root = tmp_path / "restart"
+        (restored_root / "bots").mkdir(parents=True)
+        (restored_root / "bots/state.json").write_text(json.dumps(snapshots[0]))
+        restarted, _ = make_runtime(restored_root)
+        restarted.max_concurrent = 0
+        try:
+            restarted.tick()
+            assert len(restarted.list_tasks()) == 1
+        finally:
+            restarted.close()
+    finally:
+        rt.close()
+
+
+@pytest.mark.parametrize("concurrency", [0, 1])
+def test_schedule_store_failure_never_starts_executor(tmp_path, monkeypatch, concurrency):
+    rt, executor = make_runtime(tmp_path)
+    bot = make_bot(rt)
+    rt.create_schedule(bot["id"], {"prompt": "scheduled", "rule": {"kind": "once", "at": "2020-01-01T00:00:00+00:00"}})
+    rt.max_concurrent = concurrency
+    try:
+        with monkeypatch.context() as patcher:
+            def fail_write():
+                raise OSError("store full")
+            patcher.setattr(rt, "_persist", fail_write)
+            with pytest.raises(OSError, match="store full"):
+                rt.tick()
+            assert executor.started == {}
+            assert not rt._workers
+            assert all(task["status"] == "queued" for task in rt._tasks.values())
+        rt.tick(); drain_launch(rt)
+        durable = json.loads((rt.root / "state.json").read_text())
+        assert len(durable["tasks"]) == 1
+        assert len(executor.started) == concurrency
+        rt.tick(); drain_launch(rt)
+        assert len(rt._tasks) == 1 and len(executor.started) == concurrency
+    finally:
+        rt.close()

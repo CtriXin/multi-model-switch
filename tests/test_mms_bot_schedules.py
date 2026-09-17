@@ -250,3 +250,29 @@ def test_format_local_renders_the_schedule_timezone_and_survives_bad_input():
     assert format_local("2026-09-17T01:00:00+00:00", "Asia/Singapore") == "2026-09-17 09:00（Asia/Singapore）"
     assert format_local("not-a-time", "Asia/Singapore") == "not-a-time"
     assert format_local("2026-09-17T01:00:00+00:00", "Mars/Olympus") == "2026-09-17T01:00:00+00:00"
+
+
+def test_content_edit_with_unchanged_rule_preserves_due_time_and_timezone():
+    schedule = build_schedule("bot_1", {"prompt": "old", "rule": {"kind": "interval", "everySeconds": 3600},
+                                      "timezone": "America/New_York"}, existing_count=0, now=at(2026, 9, 17, 0, 0))
+    changed = apply_update(schedule, {"prompt": "new", "rule": schedule["rule"],
+                                      "timezone": schedule["timezone"]}, now=at(2026, 9, 17, 0, 50))
+    assert changed["prompt"] == "new"
+    assert changed["nextRunAt"] == schedule["nextRunAt"]
+    assert changed["timezone"] == "America/New_York"
+    retimed = apply_update(changed, {"rule": {"kind": "interval", "everySeconds": 7200}}, now=at(2026, 9, 17, 0, 50))
+    assert retimed["nextRunAt"] != changed["nextRunAt"]
+
+
+@pytest.mark.parametrize("every", [10**30, 10**400])
+def test_unrepresentable_interval_is_a_validation_error(every):
+    with pytest.raises(WebError) as caught:
+        build_schedule("bot_1", {"prompt": "far future", "rule": {"kind": "interval", "everySeconds": every}},
+                       existing_count=0, now=at(2026, 9, 17, 0, 0))
+    assert caught.value.code == "INVALID_SCHEDULE_RULE" and caught.value.status == 400
+
+
+def test_creation_in_second_dst_fold_waits_until_next_day():
+    rule = {"kind": "daily", "atLocalTime": "01:30"}
+    result = bot_schedules.next_run_at(rule, "America/New_York", after=at(2026, 11, 1, 6, 10))
+    assert result == at(2026, 11, 2, 6, 30)

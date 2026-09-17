@@ -83,3 +83,11 @@ test("bot chat header renders the current and next-round model line", () => {
   assert.ok(block.includes("bot.pendingPresetId"), "next-round model comes from pendingPresetId");
   assert.ok(block.includes("bot.model"), "current model comes from bot.model");
 });
+
+
+test("switching back to the current model cancels the queued change", () => {
+  const pending = resolveModelSwitch("beta", PRESETS, "pi:alpha").patch.pendingPresetId;
+  const reverted = resolveModelSwitch("alpha", PRESETS, "pi:alpha", pending);
+  assert.deepEqual(reverted.patch, { pendingPresetId: "" });
+  assert.match(reverted.message, /取消/);
+});

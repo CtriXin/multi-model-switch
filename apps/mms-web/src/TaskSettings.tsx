@@ -23,6 +23,7 @@ export function EffortPicker({
   value,
   levels,
   defaultLevel,
+  allowDefault = true,
   change,
   disabled = false,
   title = "思考强度",
@@ -31,6 +32,7 @@ export function EffortPicker({
   value: string;
   levels: string[];
   defaultLevel?: string;
+  allowDefault?: boolean;
   change: (level: string) => void | Promise<boolean>;
   disabled?: boolean;
   title?: string;
@@ -91,7 +93,7 @@ export function EffortPicker({
                 <span className="effort-menu-unsupported-tag">⚠️</span>
               </div>
             )}
-            <button
+            {allowDefault && <button
               type="button"
               role="menuitemradio"
               aria-checked={isDefaultActive}
@@ -108,7 +110,7 @@ export function EffortPicker({
                 <span className="effort-menu-item-code">默认</span>
               </div>
               {isDefaultActive && <Check size={14} className="effort-menu-check" />}
-            </button>
+            </button>}
             {levels.map((level) => {
               const isSelected = !isUnsupported && isCustom && level === value;
               const isDefault = Boolean(defaultLevel && level === defaultLevel);
@@ -343,7 +345,7 @@ export function SessionSettings({
         <EffortPicker
           value={r?.thinkingLevel || ""}
           levels={sortedLevels}
-          defaultLevel={r?.thinkingLevel}
+          allowDefault={false}
           change={(level) => control("thinking", level)}
           disabled={locked}
           dataGuide="effort"

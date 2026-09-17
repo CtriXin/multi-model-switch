@@ -213,6 +213,7 @@ class BotRuntime(BotCommunications):
         self._file_lock = None
         self._endpoint = ""
         self._load_error = ""
+        self._dispatch_store_pending = False
         self.notifier = Notifier(self.root)
         self.can_dispatch = lambda: True
         self._load()
@@ -510,7 +511,7 @@ class BotRuntime(BotCommunications):
             del rows[:-MAX_MESSAGES]
         return message
 
-    def create_task(self, payload):
+    def create_task(self, payload, *, persist=True):
         with self._lock:
             key, value = self._replay("task", payload)
             if key in self._requests:
@@ -566,7 +567,8 @@ class BotRuntime(BotCommunications):
                 if parent["status"] in TERMINAL:
                     parent.update(status="waiting", waitReason="children", acceptedAt=None)
             self._remember(key, value, task["id"])
-            self._persist()
+            if persist:
+                self._persist()
             return {**self._view(task), "kind": "task"}
 
     def create_schedule(self, bot_id, payload):
@@ -1058,8 +1060,6 @@ class BotRuntime(BotCommunications):
         with self._lock:
             finished = [deepcopy(t) for t in self._tasks.values()
                         if t.get("ephemeralSession") and t.get("sessionId") and t["status"] in TERMINAL]
-            for task in finished:
-                self._task(task["id"])["ephemeralSession"] = False
         release = getattr(self.executor, "release_session", None)
         if not callable(release):
             return
@@ -1067,7 +1067,15 @@ class BotRuntime(BotCommunications):
             try:
                 release(task["sessionId"], f"release-{task['id']}")
             except Exception:
-                pass
+                continue  # Retain the marker so a later sweep can retry.
+            with self._lock:
+                live = self._task(task["id"])
+                live["ephemeralSession"] = False
+                try:
+                    self._persist()
+                except Exception:
+                    live["ephemeralSession"] = True
+                    raise
 
     def _notify(self, task, event_type, wait_reason=None, note=""):
         """Best-effort delivery; a broken receiver never fails the task."""
@@ -1601,10 +1609,11 @@ class BotRuntime(BotCommunications):
                     task.update(status="waiting", waitReason="connection", error="暂时无法确认执行状态，正在恢复连接；工作目录仍被保留。", updatedAt=now())
                     self._persist()
         launches = []
+        before_launch = []
         with self._lock:
             if not self.can_dispatch():
                 return
-            changed = self._deliver_mailbox()
+            changed = self._deliver_mailbox() or self._dispatch_store_pending
             # _advance_plan may create child tasks; iterate over a snapshot.
             for task in list(self._tasks.values()):
                 if task.get("orphanAlive") and not self.executor.orphan_alive(task):
@@ -1649,7 +1658,11 @@ class BotRuntime(BotCommunications):
                 reason = "" if not armed else ("上一轮仍在运行" if holding else (f"错过了 {skipped} 次触发" if skipped else ""))
                 fired = None
                 try:
-                    fired = self.create_task({"botId": bot["id"], "prompt": updated["prompt"]}) if armed and not holding and not skipped else None
+                    # Publish the task, schedule linkage and advanced due time
+                    # together in tick's final atomic store write, before launch.
+                    fired = self.create_task({"botId": bot["id"], "prompt": updated["prompt"],
+                                              "requestId": f"schedule:{schedule['id']}:{due_at}"},
+                                             persist=False) if armed and not holding and not skipped else None
                 except Exception:
                     fired, reason = None, "创建任务失败"
                 if fired:
@@ -1709,6 +1722,7 @@ class BotRuntime(BotCommunications):
                         task["queueReason"] = "等待 Bot 或工作环境空闲"
                         changed = True
                     continue
+                before_launch.append((task, deepcopy(task), bot, bot["status"]))
                 task.update(status="starting", updatedAt=now(), startedAt=now(), turn=task["turn"] + 1,
                             launchRequestId=f"bot-{task['id']}-{task['turn'] + 1}", token=secrets.token_urlsafe(32),
                             seenEvents={}, cancelRequested=False, declaredResult=None, declaredError=None,
@@ -1720,7 +1734,19 @@ class BotRuntime(BotCommunications):
                 launches.append((deepcopy(task), deepcopy(bot)))
                 changed = True
             if changed:
-                self._persist()
+                self._dispatch_store_pending = True
+                try:
+                    self._persist()
+                except Exception:
+                    # No worker has started. Keep the linked schedule/task in
+                    # memory, but undo resource reservations and retry the write
+                    # before any later dispatch (including with concurrency=0).
+                    for live, previous, bot, status in before_launch:
+                        live.clear()
+                        live.update(previous)
+                        bot["status"] = status
+                    raise
+                self._dispatch_store_pending = False
         for task, bot in launches:
             thread = threading.Thread(target=self._launch, args=(task, bot), daemon=True, name=f"mms-{task['id']}")
             self._workers.add(thread)
@@ -2220,6 +2246,16 @@ class BotRuntime(BotCommunications):
         current_name = next((str(p.get("name") or "") for p in snapshot.get("presets", [])
                              if p.get("id") == current_id), "")
         if preset.get("id") == current_id:
+            if bot.get("pendingPresetId"):
+                with self._lock:
+                    live = self._bot(task["botId"])
+                    live["pendingPresetId"] = ""
+                    live["updatedAt"] = now()
+                    message = f"已取消待生效的切换，继续使用 {preset.get('name')}。"
+                    self._message(task["id"], "system", message, task["botId"])
+                    self._persist()
+                return {"ok": True, "pending": None,
+                        "current": {"id": current_id or None, "name": current_name}, "message": message}
             return {"ok": True, "pending": None,
                     "current": {"id": current_id or None, "name": current_name},
                     "message": f"已经在用 {preset.get('name')} 了，没有需要切换的。"}

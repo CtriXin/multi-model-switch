@@ -232,20 +232,8 @@ class PiBotExecutor:
             self._retire_session(session_id, request_id)
 
     def _retire_session(self, session_id, request_id):
-        """Stop and archive a session this Bot only used once.
-
-        Best effort on purpose: a throwaway session staying visible is a
-        cosmetic residue, never a reason to fail the task that owned it.
-        """
-        for payload in ({"requestId": request_id + "-stop"},
-                        {"requestId": request_id + "-archive", "archived": True}):
-            try:
-                if "archived" in payload:
-                    self.sessions.manage(session_id, payload)
-                else:
-                    self.sessions.stop(session_id, payload)
-            except Exception:
-                pass
+        """Close the owned process and retain its transcript/artifact metadata."""
+        self.sessions.retire_bot_session(session_id)
 
     def release_session(self, session_id, request_id):
         """Public seam for a task-owned one-off session (see BotRuntime._finish)."""

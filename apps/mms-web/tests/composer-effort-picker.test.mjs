@@ -353,3 +353,28 @@ test("GuidedTour filters out effort step when hasEffort is false and removes fal
   assert.match(html, /tour-card/);
 });
 
+
+
+function nodes(element) {
+  if (!element || typeof element !== "object") return [];
+  if (Array.isArray(element)) return element.flatMap(nodes);
+  return [element, ...nodes(element.props?.children)];
+}
+
+test("live session effort menu sends only explicit runtime levels", async () => {
+  const calls = [];
+  const tree = SessionSettings({
+    detail: { session: { id: "s1", state: "idle", capabilities: { send: true } },
+      runtime: { alive: true, thinkingLevel: "high", supportedThinkingLevels: ["low", "high"] } },
+    busy: false, action: async (...args) => { calls.push(args); return true; }, more() {},
+    presets: [], models: [], favorites: [], toggleFavorite() {},
+  });
+  const picker = nodes(tree).find(node => node.type === EffortPicker);
+  assert.ok(picker, "SessionSettings must mount the picker");
+  const popover = EffortPicker(picker.props);
+  const buttons = nodes(popover.props.children(() => {})).filter(node => node.type === "button");
+  assert.equal(buttons.length, 2, "live runtime has no empty/default reset command");
+  buttons[0].props.onClick();
+  await Promise.resolve();
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [["/sessions/s1/control", { action: "thinking", value: "low" }]]);
+});

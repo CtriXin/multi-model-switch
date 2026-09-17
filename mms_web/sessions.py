@@ -1047,6 +1047,25 @@ class SessionService(SessionActions, SessionSideQuestions):
                 session.persist(self._state_dir)
                 return session.detail_view()
 
+    def retire_bot_session(self, session_id: str) -> None:
+        """Release a task-owned Bot process without deleting its saved history."""
+        session = self._get(session_id)
+        with session.mutation_lock:
+            if session.meta.get("owner") != "bot":
+                raise WebError("INVALID_SESSION_OWNER", "只能释放 Bot 拥有的临时会话。", 409)
+            with session.lock:
+                session.stop_requested = True
+                driver = session.driver
+            self._close_side_questions(session)
+            if driver is not None:
+                driver.close()
+            if session.alive():
+                raise WebError("SESSION_BUSY", "会话进程尚未退出，请稍后重试释放。", 409)
+            with session.lock:
+                session.meta["archived"] = True
+                session.state = "stopped"
+                session.persist(self._state_dir)
+
     def close(self) -> None:
         with self._lock:
             self._closed = True
