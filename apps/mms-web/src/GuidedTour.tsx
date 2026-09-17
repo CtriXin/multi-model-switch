@@ -34,33 +34,39 @@ function visibleTarget(selectors: string[]) {
 }
 
 /** A non-modal top-layer coachmark. It never intercepts clicks on the real controls. */
-export function GuidedTour({ step, move, close, help, example, modelReady, configure, hasSession }: {
+export function GuidedTour({ step, move, close, help, example, modelReady, configure, hasSession, hasEffort = true }: {
   step: TourStep; move: (step: TourStep) => void; close: () => void; help: () => void;
   example: (text: string) => void; modelReady: boolean; configure: boolean; hasSession: boolean;
+  hasEffort?: boolean;
 }) {
   const layer = useRef<HTMLDivElement>(null);
   const card = useRef<HTMLElement>(null);
   const [layout, setLayout] = useState<Layout>({ box: null, left: 12, top: 80, side: "none", arrow: 24, paused: false });
-  const steps = modelReady ? tourSteps.filter(s => s !== "connection") : [...tourSteps];
+  const steps = tourSteps
+    .filter((s) => (modelReady ? s !== "connection" : true))
+    .filter((s) => (!hasEffort ? s !== "effort" : true));
   const index = steps.indexOf(step);
   const firstCount = steps.indexOf("reply") + 1;
   const item = content[step];
   const more = index >= firstCount;
+
+  useEffect(() => {
+    if (!hasEffort && step === "effort") {
+      const idx = steps.indexOf("model");
+      move(steps[idx >= 0 ? idx + 1 : 0] || "compose");
+    }
+  }, [hasEffort, step, steps, move]);
+
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>;
     let previous = "";
     let scrolled: HTMLElement | null = null;
     let focusCard = true;
     let lastMenu: Element | null = null;
-    if (step === "effort" && !document.querySelector('[data-guide="effort"]') && !document.querySelector('.studio-popover:popover-open [data-guide="effort"]')) document.querySelector<HTMLButtonElement>('.task-settings-trigger')?.click();
     const update = () => {
       // Real dialogs (connection, file picker, model choice) own focus while open.
       const paused = !!document.querySelector('dialog[open]:not([data-guide-dialog="settings"])');
       const menu = document.querySelector('.studio-popover:popover-open');
-      if (step === "effort") {
-        const advanced = menu?.querySelector<HTMLDetailsElement>('[data-guide="model-advanced"]');
-        if (advanced && !advanced.open) advanced.open = true;
-      }
       if (paused) layer.current?.hidePopover();
       else if (layer.current) {
         if (menu !== lastMenu && layer.current.matches(':popover-open')) layer.current.hidePopover();

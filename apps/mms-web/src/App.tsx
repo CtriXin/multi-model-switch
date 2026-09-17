@@ -1060,7 +1060,10 @@ export function App() {
     page === "session" && atBottom && !sessionError,
     connected && !statusesStale,
   );
-  const tour = guideStep && modelReady && !setupOpen && page !== "bots" ? <GuidedTour step={guideStep} move={beginGuideStep} close={() => setGuideStep(null)} help={() => requestNavigation(() => { setSettingsOpen(false); setGuideStep(null); setGuideOpen(true); })} example={guideExample} modelReady={data.presets.some(p => p.available)} configure={!!data.capabilities.configure} hasSession={page === "session" && !!detail} /> : null;
+  const tourHasEffort = page === "session"
+    ? Boolean(detail?.runtime && ((detail.runtime.supportedThinkingLevels && detail.runtime.supportedThinkingLevels.length > 0) || detail.runtime.thinkingLevel))
+    : Boolean(launchFacts.facts && launchFacts.facts.supportedThinkingLevels && launchFacts.facts.supportedThinkingLevels.length > 0);
+  const tour = guideStep && modelReady && !setupOpen && page !== "bots" ? <GuidedTour step={guideStep} move={beginGuideStep} close={() => setGuideStep(null)} help={() => requestNavigation(() => { setSettingsOpen(false); setGuideStep(null); setGuideOpen(true); })} example={guideExample} modelReady={data.presets.some(p => p.available)} configure={!!data.capabilities.configure} hasSession={page === "session" && !!detail} hasEffort={tourHasEffort} /> : null;
   return (
     <div className="app-shell" data-page={page}>
       {navOpen && (
@@ -1807,9 +1810,12 @@ export function App() {
                     const issues = [...modelRequirementIssues(recipe.recipe, facts.model), ...requiredSkillMatches(recipe.recipe.requiredSkills, found.skills, extras.skills).issues];
                     if (issues.length) throw new Error(issues.join(" "));
                   }
+                  const supported = launchFacts.facts?.supportedThinkingLevels || [];
+                  const isEffortValid = !effort || (supported.length > 0 && supported.includes(effort));
+                  const validThinkingLevel = isEffortValid ? (effort || undefined) : undefined;
                   const ok = await runAction("/sessions", {
                     workspaceId, presetId, title: text.length > 42 ? text.slice(0, 42) + "…" : text, prompt: text,
-                    planMode, thinkingLevel: effort || undefined, ...extras,
+                    planMode, thinkingLevel: validThinkingLevel, ...extras,
                     ...(recipe ? { recipeRequirements: { ...recipe.recipe.modelRequirements, skills: recipe.recipe.requiredSkills } } : {}),
                   }, true);
                   if (ok && recipe) { setRecipe(null); setRecipeConfirmed(""); }

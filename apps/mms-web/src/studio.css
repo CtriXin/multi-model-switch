@@ -876,6 +876,30 @@ body,
   flex-shrink: 0;
   color: var(--accent);
 }
+.task-effort-trigger.effort-trigger-unsupported {
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--line));
+  background: color-mix(in srgb, var(--danger) 6%, transparent);
+}
+.task-effort-trigger .task-effort-unsupported-icon {
+  color: var(--danger);
+}
+.task-effort-trigger .task-effort-unsupported {
+  color: var(--danger);
+  font-weight: 550;
+}
+.effort-menu-item.effort-menu-unsupported {
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--danger) 30%, transparent);
+  cursor: default;
+}
+.effort-menu-item.effort-menu-unsupported .warning-text {
+  color: var(--danger);
+  font-weight: 550;
+}
+.effort-menu-unsupported-tag {
+  font-size: max(11px, 0.7857rem);
+  flex-shrink: 0;
+}
 .task-model-name {
   color: var(--ink);
   font-size: max(11px, 0.8571rem);

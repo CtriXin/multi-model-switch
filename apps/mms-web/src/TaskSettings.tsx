@@ -6,7 +6,7 @@ import { availableRoutesForModel, channelLabel } from "./modelSelection";
 import { QuickModelMenu } from "./QuickModelMenu";
 import { Popover } from "./Popover";
 
-const LEVEL_ORDER = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+const LEVEL_ORDER = Object.keys(effortLabels);
 
 export function sortLevels(levels: string[]): string[] {
   return [...new Set(levels)].sort((a, b) => {
@@ -36,23 +36,37 @@ export function EffortPicker({
   title?: string;
   dataGuide?: string;
 }) {
+  const isCustom = Boolean(value && value !== "");
+  const isUnsupported = Boolean(isCustom && !levels.includes(value));
+  const isDefaultActive = !isCustom || !value;
+  const defaultLabel = (defaultLevel && effortLabels[defaultLevel]) || defaultLevel || "无";
+
   const currentEffort = value || defaultLevel || levels[0] || "medium";
   const currentLabel = effortLabels[currentEffort] || currentEffort;
 
   return (
     <Popover
       title={title}
-      className="task-settings-trigger task-effort-trigger"
-      panelWidth={200}
+      className={`task-settings-trigger task-effort-trigger ${isUnsupported ? "effort-trigger-unsupported" : ""}`}
+      panelWidth={220}
       disabled={disabled}
       dataGuide={dataGuide}
       label={
-        <>
-          <Brain size={13} className="task-effort-icon" />
-          <span className="task-effort-prefix">思考 · </span>
-          <span className="task-effort">{currentLabel}</span>
-          <ChevronDown size={13} />
-        </>
+        isUnsupported ? (
+          <>
+            <Brain size={13} className="task-effort-icon task-effort-unsupported-icon" />
+            <span className="task-effort-prefix">思考 · </span>
+            <span className="task-effort task-effort-unsupported">此通道不支持 {value}，请重选</span>
+            <ChevronDown size={13} />
+          </>
+        ) : (
+          <>
+            <Brain size={13} className="task-effort-icon" />
+            <span className="task-effort-prefix">思考 · </span>
+            <span className="task-effort">{currentLabel}</span>
+            <ChevronDown size={13} />
+          </>
+        )
       }
     >
       {(close) => (
@@ -62,8 +76,41 @@ export function EffortPicker({
             <small>推理与分析深度</small>
           </div>
           <div className="effort-menu-list">
+            {isUnsupported && (
+              <div
+                role="option"
+                aria-selected="true"
+                className="effort-menu-item effort-menu-unsupported active disabled"
+              >
+                <div className="effort-menu-item-info">
+                  <span className="effort-menu-item-label warning-text">
+                    此通道不支持 {value}，请重选
+                  </span>
+                  <span className="effort-menu-item-code">不支持</span>
+                </div>
+                <span className="effort-menu-unsupported-tag">⚠️</span>
+              </div>
+            )}
+            <button
+              type="button"
+              role="menuitemradio"
+              aria-checked={isDefaultActive}
+              className={`effort-menu-item ${isDefaultActive ? "active" : ""}`}
+              onClick={() => {
+                void change("");
+                close();
+              }}
+            >
+              <div className="effort-menu-item-info">
+                <span className="effort-menu-item-label">
+                  MMS 默认 · {defaultLabel}
+                </span>
+                <span className="effort-menu-item-code">默认</span>
+              </div>
+              {isDefaultActive && <Check size={14} className="effort-menu-check" />}
+            </button>
             {levels.map((level) => {
-              const isSelected = level === currentEffort;
+              const isSelected = !isUnsupported && isCustom && level === value;
               const isDefault = Boolean(defaultLevel && level === defaultLevel);
               return (
                 <button
@@ -228,8 +275,8 @@ export function SessionSettings({
       ...(r?.thinkingLevel ? [r.thinkingLevel] : []),
     ]),
   ];
-  const hasEffort = Boolean(r && (rawLevels.length > 0 || r.model?.reasoning));
-  const sortedLevels = sortLevels(rawLevels.length > 0 ? rawLevels : ["low", "medium", "high"]);
+  const hasEffort = Boolean(r && rawLevels.length > 0);
+  const sortedLevels = sortLevels(rawLevels);
 
   return (
     <>

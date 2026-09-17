@@ -234,4 +234,122 @@ test("CSS stylesheet contains all effort trigger and menu styles", () => {
   assert.match(css, /\.effort-menu-item\s*\{/);
   assert.match(css, /\.task-effort-prefix\s*\{\s*display:\s*none;\s*\}/);
   assert.match(css, /\.composer-context\s*\{[^}]*gap:\s*4px;/);
+  assert.match(css, /\.effort-trigger-unsupported\s*\{/);
+  assert.match(css, /\.task-effort-unsupported\s*\{/);
+  assert.match(css, /\.effort-menu-unsupported\s*\{/);
 });
+
+test("EffortPicker renders MMS default as the first option and handles clearing effort (rework 3)", () => {
+  let changedValue = null;
+  const html = renderToStaticMarkup(
+    React.createElement(EffortPicker, {
+      value: "",
+      levels: ["low", "medium", "high"],
+      defaultLevel: "high",
+      change: (v) => { changedValue = v; },
+    })
+  );
+
+  // First item must be MMS 默认
+  assert.match(html, /MMS 默认 · 深入/);
+  // Default option should be marked active when value is empty
+  assert.match(html, /class="[^"]*effort-menu-item[^"]*active[^"]*"[^>]*>[^<]*<div[^>]*>[^<]*<span[^>]*>MMS 默认/);
+  // Trigger button shows the default level label
+  assert.match(html, /<span class="task-effort">深入<\/span>/);
+});
+
+test("EffortPicker displays unsupported warning when saved value is not in supported levels (rework 4)", () => {
+  const html = renderToStaticMarkup(
+    React.createElement(EffortPicker, {
+      value: "max",
+      levels: ["low", "medium", "high"],
+      defaultLevel: "medium",
+      change: () => {},
+    })
+  );
+
+  // Trigger button shows warning text and warning styling
+  assert.match(html, /此通道不支持 max，请重选/);
+  assert.match(html, /effort-trigger-unsupported/);
+  assert.match(html, /task-effort-unsupported/);
+
+  // Menu must have an active item clearly marking the unsupported state
+  assert.match(html, /effort-menu-unsupported/);
+  assert.match(html, /此通道不支持 max，请重选/);
+});
+
+test("SessionSettings does NOT fabricate effort levels when supportedThinkingLevels is empty (rework 5)", () => {
+  const noThinkingDetail = {
+    session: {
+      id: "s2",
+      title: "No Thinking Session",
+      state: "ready",
+      modelName: "Basic-Model",
+      capabilities: { send: true },
+      presetId: "p2",
+      harness: "pi",
+    },
+    runtime: {
+      alive: true,
+      supportedThinkingLevels: [],
+      thinkingLevel: undefined,
+      model: { reasoning: true }, // reasoning is true, but runtime provides no supportedThinkingLevels
+    },
+    events: [],
+    artifacts: [],
+  };
+
+  const html = renderToStaticMarkup(
+    React.createElement(SessionSettings, {
+      detail: noThinkingDetail,
+      busy: false,
+      action: async () => true,
+      more: () => {},
+      presets: [{ id: "p2", name: "Basic-Model", modelId: "basic", available: true, harness: "pi" }],
+      models: [{ id: "basic", name: "Basic-Model", family: "basic" }],
+      favorites: [],
+      toggleFavorite: () => {},
+    })
+  );
+
+  // Must NOT render EffortPicker or fabricated low/medium/high
+  assert.doesNotMatch(html, /class="[^"]*task-effort-trigger/);
+  assert.doesNotMatch(html, /class="effort-menu"/);
+});
+
+test("GuidedTour filters out effort step when hasEffort is false and removes fallback click (rework 6)", () => {
+  const tourSrc = fs.readFileSync(path.resolve(__dirname, "../src/GuidedTour.tsx"), "utf-8");
+
+  // Verify that the fallback click on task-settings-trigger has been completely removed
+  assert.doesNotMatch(tourSrc, /document\.querySelector<HTMLButtonElement>\('\.task-settings-trigger'\)\?\.click\(\)/);
+
+  // Verify that hasEffort filters effort step
+  const guideContentMock = { starterPrompt: "test prompt" };
+  const guidedTourExports = loadModule("../src/GuidedTour.tsx", {
+    "lucide-react": {
+      ...lucideMock,
+      ArrowLeft: () => React.createElement("span", { className: "lucide-arrow-left" }),
+      ArrowRight: () => React.createElement("span", { className: "lucide-arrow-right" }),
+      X: () => React.createElement("span", { className: "lucide-x" }),
+    },
+    "./guide-content": guideContentMock,
+  });
+
+  const { GuidedTour } = guidedTourExports;
+  const html = renderToStaticMarkup(
+    React.createElement(GuidedTour, {
+      step: "model",
+      move: () => {},
+      close: () => {},
+      help: () => {},
+      example: () => {},
+      modelReady: true,
+      configure: false,
+      hasSession: false,
+      hasEffort: false,
+    })
+  );
+
+  assert.match(html, /tour-card/);
+});
+
