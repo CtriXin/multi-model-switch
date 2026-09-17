@@ -6,6 +6,7 @@ import importlib
 import json
 import mimetypes
 import secrets
+import socketserver
 import os
 import threading
 import traceback
@@ -40,6 +41,15 @@ def _adapter(module: str, name: str, **kwargs):
             raise
         return None
     return getattr(loaded, name)(**kwargs)
+
+
+class PilotHTTPServer(ThreadingHTTPServer):
+    def server_bind(self):
+        # HTTPServer does reverse DNS here, which can freeze every mutation
+        # for 30 seconds on networks without PTR replies. Pilot does not use
+        # CGI/server_name, so keep the literal host and do no DNS on binding.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
 
 
 class WebApplication:
@@ -669,7 +679,7 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
             except Exception as exc:
                 self._error(exc)
 
-    server = ThreadingHTTPServer((app.access.bind_address(), port), Handler)
+    server = PilotHTTPServer((app.access.bind_address(), port), Handler)
     server.daemon_threads = True
     app.listeners = RemoteListeners(Handler, server.server_address[1])
     app.listeners.sync(app.access.extra_binds())
@@ -707,7 +717,7 @@ class RemoteListeners:
             if address in self._servers:
                 continue
             try:
-                extra = ThreadingHTTPServer((address, self._port), self._handler)
+                extra = PilotHTTPServer((address, self._port), self._handler)
             except OSError as error:
                 # A point-to-point tunnel endpoint may refuse a bind. Skip it
                 # and say so rather than failing the whole switch.

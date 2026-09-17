@@ -327,4 +327,12 @@ jobs:
       - name: Fail only on tests this PR breaks
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: python3 scripts/ci_pytest_regression.py
+        run: python3 scripts/ci_pytest_regression.py --report-dir "${{ runner.temp }}/pytest-reports"
+
+      - name: Upload absolute pytest results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-results
+          path: ${{ runner.temp }}/pytest-reports
+          retention-days: 14
