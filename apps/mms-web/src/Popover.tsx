@@ -1,5 +1,6 @@
 import { useId, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
+import { popoverPlacement, readView } from "./popover-placement";
 
 /** Native top-layer popover: Escape, outside-click and focus return are browser-owned. */
 export function Popover({
@@ -23,12 +24,17 @@ export function Popover({
 }) {
   const id = useId();
   const panel = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
   const [style, setStyle] = useState<CSSProperties>({});
   const [open, setOpen] = useState(false);
+  function place(box: DOMRect) {
+    setStyle(popoverPlacement(box, readView(), { wide, panelWidth }));
+  }
   return (
     <>
       <button
         type="button"
+        ref={trigger}
         className={className}
         disabled={disabled}
         popoverTarget={disabled ? undefined : id}
@@ -38,28 +44,7 @@ export function Popover({
         data-guide={dataGuide}
         onClick={(event) => {
           if (disabled) return;
-          const box = event.currentTarget.getBoundingClientRect();
-          const targetWidth = wide ? 400 : panelWidth || 340;
-          const width = Math.min(targetWidth, window.innerWidth - 24);
-          // Room on each side, minus the 10px gap to the trigger and a 12px viewport margin.
-          const roomBelow = window.innerHeight - box.bottom - 22;
-          const roomAbove = box.top - 22;
-          // Prefer below; flip when it cannot fit there and the other side has more room.
-          const above = roomBelow < 360 && roomAbove > roomBelow;
-          setStyle({
-            width,
-            left: Math.max(
-              12,
-              Math.min(box.right - width, window.innerWidth - width - 12),
-            ),
-            // Never extend past the viewport edge: the panel scrolls instead.
-            maxHeight: Math.max(160, above ? roomAbove : roomBelow),
-            // Lets content size its own scroll region to the room actually available.
-            ["--popover-room" as string]: `${Math.max(160, above ? roomAbove : roomBelow)}px`,
-            ...(above
-              ? { bottom: window.innerHeight - box.top + 10, top: "auto" }
-              : { top: box.bottom + 10, bottom: "auto" }),
-          });
+          place(event.currentTarget.getBoundingClientRect());
         }}
       >
         {label}
@@ -71,9 +56,11 @@ export function Popover({
         className="studio-popover"
         style={style}
         aria-label={title}
-        onToggle={(event) =>
-          setOpen(event.currentTarget.matches(":popover-open"))
-        }
+        onToggle={(event) => {
+          const next = event.currentTarget.matches(":popover-open");
+          setOpen(next);
+          if (next && trigger.current) place(trigger.current.getBoundingClientRect());
+        }}
       >
         {typeof children === "function"
           ? children(() => panel.current?.hidePopover(), open)

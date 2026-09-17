@@ -1183,3 +1183,8 @@ Mutation（都实际跑过，还原后 302 全绿）：
 现象：drive member-list 缺少 docs:permission.member:retrieve；表单 submit 后立即 record-list 尚无记录。
 处置：不升级权限；新建 Base 未添加成员，回读 link_share=closed。等待正常异步落库后回读到 QA 记录，仅验证真实接收，不冒充匿名浏览器验收。
 耗时：未单独计时 · 归因：[外部]
+
+## 21:08 +08 · gpt-6 · b7e8c8e283844b7d
+现象：同步 dev 5.1.5 时预构建 JS rename/rename、build.json/index.html 冲突，源码无冲突。
+处置：在本任务分支合入已 fetch 的 dev，用源码完整重建 mms_web_static，不手工拼接压缩产物；Node 265 与 fresh-user 765 + 5 subtests 通过。
+耗时：build 6.56 秒；gate 176.41 秒 · 归因：[外部]
