@@ -206,6 +206,7 @@ export function ModelExplorer({
         <label className="picker-search">
           <Search size={17} />
           <input
+            data-autofocus=""
             autoFocus
             aria-label="搜索模型或通道"
             placeholder="搜索模型、公司或通道…"
