@@ -68,11 +68,11 @@ The two lines **cannot coexist on one machine**. To switch, re-run the installer
 with the other `--channel`; config, channels and session history all live in the
 same config root (`~/.config/mms-next`) and are not cleared by switching.
 
-> **How to switch**: Pilot's "Version and updates" dialog has an **update
-> channel** select for `4.x stable` and `5.x preview`. Picking one only changes
-> what it checks for; the upgrade still waits for you to confirm, and choosing
-> stable again keeps this install on the stable line. The two channels cache
-> their checks separately. Re-running the installer with `--channel` also works.
+> **How to switch**: Pilot's "Version and updates" dialog selects `4.x stable`
+> or `5.x preview` and checks for versions newer than the installed version.
+> Each channel caches its checks separately. Selecting stable while running
+> 5.x does not downgrade to 4.x; rerun the installer with `--channel stable`
+> to switch back, preserving config and history.
 
 Patch `z` is channel-local. A single-commit release increments `z` once; a composite release covering multiple validated commits also increments `z` once.
 

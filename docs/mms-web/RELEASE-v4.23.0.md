@@ -7,10 +7,13 @@
 - committee 传递已选模型的明确 protocol，保持 Anthropic Messages / OpenAI Responses 路由边界。
 - 打开手机访问时绑定监听器不再做反向 DNS，避免慢 PTR 查询阻塞整个 Pilot；关闭时释放监听端口。
 - 应用内更新成功后写回安装版本和真实发布通道，保留语言偏好；写入失败显示警告。文件替换失败时恢复旧文件。
+- Windows 临时文件替换遇到瞬时权限/占用错误时做有界重试；失败保留旧数据并报告错误，更新检查不会静默失败。
 - 更新通道收到错误 JSON 类型时返回可处理的请求错误。
 - 首次 OpenCode bootstrap、批准 bundle 校验和 config export 增加隔离回归；缺失或损坏的 bundle 继续 fail closed。
 
 ## 升级须知
+
+Pilot 的通道选择仅检查较新版本；已安装 5.x 时，降回 4.x 需重跑安装器并指定 stable 通道。
 
 升级保持原有 config root、账号和历史记录。仍是 4.x stable 线；5.x Bot 工作台通过 Preview 通道获取。
 
