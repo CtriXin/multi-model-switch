@@ -336,6 +336,10 @@ def discover(port_base: int = DEFAULT_PORT_BASE, limit: int = PORT_SEARCH_LIMIT,
         # The header is authoritative. The command line is a fallback for a
         # Pilot older than the header, and the only source for pid and source.
         mine = fingerprint == mine_fingerprint if fingerprint else (bool(argv) and state == str(mine_root))
+        if mine:
+            # The fingerprint is authoritative even when process inspection
+            # is unavailable. Read credentials only from that matched root.
+            state = str(Path(mine_root).expanduser().resolve())
         entry = {
             "port": port,
             "pid": pid,

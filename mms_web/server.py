@@ -772,7 +772,7 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
                 if not isinstance(payload, dict):
                     raise WebError("INVALID_BODY", "请求内容必须是一个对象。")
                 answer = app.bots.worker(worker_id, payload) if worker else app.post(parts, payload)
-                self._json(200, answer, headers=None if worker else self._switch_cookie(parts, payload, answer))
+                self._json(200, answer, headers=() if worker else self._switch_cookie(parts, payload, answer))
             except (BrokenPipeError, ConnectionResetError):
                 pass
             except Exception as exc:
