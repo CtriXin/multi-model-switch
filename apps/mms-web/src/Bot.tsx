@@ -2005,6 +2005,7 @@ export function BotChat({
   const [onboardingBusy, setOnboardingBusy] = useState(false);
   const [onboardingDone, setOnboardingDone] = useState(false);
   const [onboardingEditing, setOnboardingEditing] = useState(false);
+  const closePresetRef = useRef<(() => boolean) | null>(null);
   const [onboardingError, setOnboardingError] = useState("");
   const [settingNotice, setSettingNotice] = useState("");
   const streamRef = useRef<HTMLDivElement>(null);
@@ -2040,19 +2041,6 @@ export function BotChat({
     setSchedulePanelOpen(false);
     setError("");
   }, [bot?.id]);
-  useEffect(() => {
-    if (!onboardingEditing) return;
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key !== "Escape") return;
-      // Renaming owns Escape while its input has focus, so one press only
-      // cancels the rename instead of also closing the preset editor.
-      const active = document.activeElement;
-      if (active instanceof HTMLElement && active.classList.contains("bot-chat-title-input")) return;
-      setOnboardingEditing(false);
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onboardingEditing]);
   useEffect(() => {
     const stream = streamRef.current;
     if (stream && followLatest.current) stream.scrollTop = stream.scrollHeight;
@@ -2431,7 +2419,8 @@ export function BotChat({
               className={"bot-quiet-button" + (onboardingEditing ? " is-active" : "")}
               type="button"
               onClick={() => {
-                setOnboardingEditing((prev) => !prev);
+                if (onboardingEditing) closePresetRef.current?.();
+                else setOnboardingEditing(true);
                 setSchedulePanelOpen(false);
               }}
               aria-label="打开设定"
@@ -2447,8 +2436,8 @@ export function BotChat({
               className={"bot-quiet-button" + (schedulePanelOpen ? " is-active" : "")}
               type="button"
               onClick={() => {
+                if (onboardingEditing && closePresetRef.current?.() === false) return;
                 setSchedulePanelOpen((prev) => !prev);
-                setOnboardingEditing(false);
               }}
               aria-label="打开定时面板"
               aria-pressed={schedulePanelOpen}
@@ -3265,6 +3254,7 @@ export function BotChat({
       <BotPresetPanel
         bot={bot}
         onClose={() => setOnboardingEditing(false)}
+        requestCloseRef={closePresetRef}
         onUpdateBot={onUpdateBot}
         preview={isPreview}
         presets={presets}

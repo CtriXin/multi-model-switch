@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BookOpen, Plus, RefreshCw } from "lucide-react";
 import { request } from "./api";
 import { Dialog } from "./components";
@@ -15,6 +15,8 @@ export function ProjectMaterials({ workspaceId }: { workspaceId: string }) {
   const [data, setData] = useState<Snapshot>();
   const [draft, setDraft] = useState({ ...emptyDraft, id: "" });
   const [editing, setEditing] = useState(false);
+  const titleInput = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (editing) titleInput.current?.focus(); }, [editing, draft.id]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -56,7 +58,7 @@ export function ProjectMaterials({ workspaceId }: { workspaceId: string }) {
         <p className="materials-workspace">{data?.workspace}</p>
         <p className="section-note">停用或删除只影响后续消息；已经发送的内容仍在原会话历史中。</p>
         <div className="materials-toolbar">
-          <button type="button" disabled={busy || !data} onClick={() => { setDraft({ ...emptyDraft, id: "" }); setEditing(true); setNotice(""); }}><Plus size={14} />添加资料</button>
+          <button type="button" disabled={busy || !data} onClick={() => { setDraft({ ...emptyDraft, id: "" }); setEditing(true); titleInput.current?.focus(); setNotice(""); }}><Plus size={14} />添加资料</button>
           <button type="button" disabled={busy} onClick={() => void refresh()}><RefreshCw size={14} />刷新列表</button>
           <span>{data?.items.length || 0} / 20 条</span>
         </div>
@@ -70,7 +72,7 @@ export function ProjectMaterials({ workspaceId }: { workspaceId: string }) {
               <p>{item.content.slice(0, 110)}{item.content.length > 110 ? "…" : ""}</p>
               <small>手动保存 · v{item.revision} · {new Date(item.updatedAt).toLocaleString()}</small>
               <div>
-                <button type="button" disabled={busy} aria-label={`编辑资料 ${item.title}`} onClick={() => { setDraft({ id: item.id, title: item.title, content: item.content, enabled: item.enabled }); setEditing(true); setNotice(""); }}>编辑</button>
+                <button type="button" disabled={busy} aria-label={`编辑资料 ${item.title}`} onClick={() => { setDraft({ id: item.id, title: item.title, content: item.content, enabled: item.enabled }); setEditing(true); titleInput.current?.focus(); setNotice(""); }}>编辑</button>
                 <button type="button" disabled={busy} aria-label={`${item.enabled ? "停用" : "启用"}资料 ${item.title}`} onClick={() => void change("save", { id: item.id, title: item.title, content: item.content, enabled: !item.enabled })}>{item.enabled ? "停用" : "启用"}</button>
                 <button type="button" disabled={busy} aria-label={`删除资料 ${item.title}`} onClick={() => setDeleteId(item.id)}>删除</button>
               </div>
@@ -82,7 +84,7 @@ export function ProjectMaterials({ workspaceId }: { workspaceId: string }) {
             </article>)}
           </div>
           {editing && <form className="material-editor" onSubmit={event => { event.preventDefault(); void change("save", { ...draft, ...(draft.id ? {} : { id: undefined }) }); }}>
-            <label>标题<input aria-label="资料标题" maxLength={80} value={draft.title} disabled={busy} onChange={event => setDraft({ ...draft, title: event.target.value })} placeholder="例如：项目背景" /></label>
+            <label>标题<input ref={titleInput} aria-label="资料标题" maxLength={80} value={draft.title} disabled={busy} onChange={event => setDraft({ ...draft, title: event.target.value })} placeholder="例如：项目背景" /></label>
             <label>正文<textarea aria-label="资料正文" value={draft.content} disabled={busy} onChange={event => setDraft({ ...draft, content: event.target.value })} placeholder="只填写希望在这个项目中持续使用的资料或要求。" /></label>
             <label className="material-toggle">保存后在新消息中使用<input type="checkbox" role="switch" aria-label="保存后在新消息中使用" checked={draft.enabled} disabled={busy} onChange={event => setDraft({ ...draft, enabled: event.target.checked })} /></label>
             <p className="section-note">单条最多 20 KB，总量最多 80 KB；大文件请直接引用原路径。</p>

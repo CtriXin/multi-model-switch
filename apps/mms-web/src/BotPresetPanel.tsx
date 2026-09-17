@@ -14,6 +14,7 @@ import {
 import type { OnboardingAnswers } from "./bot-presets";
 
 interface BotPresetPanelProps {
+  requestCloseRef?: { current: (() => boolean) | null };
   bot: BotDefinition;
   onClose: () => void;
   onUpdateBot?: (botId: string, patch: Partial<BotDefinition>) => Promise<void>;
@@ -33,9 +34,12 @@ function FieldChipSelector({
   options: string[];
   onChange: (val: string) => void;
 }) {
+  const customInput = useRef<HTMLInputElement>(null);
   const [customActive, setCustomActive] = useState(false);
   const isPredefined = Boolean(value && options.includes(value));
   const showCustom = customActive || (!isPredefined && Boolean(value));
+
+  useEffect(() => { if (customActive) customInput.current?.focus(); }, [customActive]);
 
   return (
     <div className="bot-preset-field">
@@ -59,6 +63,7 @@ function FieldChipSelector({
           className={`bot-onboarding-chip${showCustom ? " is-selected" : ""}`}
           onClick={() => {
             setCustomActive(true);
+            customInput.current?.focus();
           }}
         >
           自定义
@@ -67,6 +72,7 @@ function FieldChipSelector({
       {showCustom && (
         <div style={{ marginTop: 6 }}>
           <input
+            ref={customInput}
             type="text"
             className="bot-preset-extra-input"
             value={value || ""}
@@ -81,6 +87,7 @@ function FieldChipSelector({
 
 export function BotPresetPanel({
   bot,
+  requestCloseRef,
   presets = [],
   models = [],
   onClose,
@@ -99,6 +106,10 @@ export function BotPresetPanel({
   const [favorites, setFavorites] = useState<string[]>([]);
 
   const panelRef = useRef<HTMLElement>(null);
+  const returnFocus = useRef(typeof document === "undefined" ? null : document.activeElement as HTMLElement);
+  useEffect(() => () => {
+    if (returnFocus.current?.isConnected && (document.activeElement === document.body || panelRef.current?.contains(document.activeElement))) returnFocus.current.focus();
+  }, []);
   const initialPromptRef = useRef(bot.systemPrompt || "");
 
   useEffect(() => {
@@ -224,16 +235,17 @@ export function BotPresetPanel({
         typeof window !== "undefined" && typeof window.confirm === "function"
           ? window.confirm("当前工作预设已修改，确定要放弃未保存的修改并关闭吗？")
           : true;
-      if (discard) {
-        onClose();
-      }
-    } else {
-      onClose();
+      if (!discard) return false;
     }
+    onClose();
+    return true;
   };
 
   useEffect(() => {
-    const handlePointerDown = (e: PointerEvent) => {
+    if (requestCloseRef) requestCloseRef.current = handleClose;
+    const hasTopLayer = () => Boolean(document.querySelector("dialog[open], [popover]:popover-open"));
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (hasTopLayer()) return;
       const panel = panelRef.current;
       if (!panel) return;
       const target = e.target as HTMLElement | null;
@@ -245,23 +257,25 @@ export function BotPresetPanel({
         return;
       }
 
-      handleClose();
+      if (!handleClose()) { e.preventDefault(); e.stopPropagation(); }
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
+      if (e.key === "Escape" && !e.defaultPrevented && !e.isComposing && !hasTopLayer() && !(document.activeElement as HTMLElement)?.classList.contains("bot-chat-title-input")) {
+        e.preventDefault();
         e.stopPropagation();
         handleClose();
       }
     };
 
-    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("click", handleOutsideClick, true);
     window.addEventListener("keydown", handleKeyDown);
     return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
+      if (requestCloseRef) requestCloseRef.current = null;
+      document.removeEventListener("click", handleOutsideClick, true);
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [onClose]);
+  }, [onClose, requestCloseRef]);
 
   return (
     <aside ref={panelRef} className="bot-memory-panel bot-preset-panel" aria-label={`${bot.name} 的工作预设`}>
