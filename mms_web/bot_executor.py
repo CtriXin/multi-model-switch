@@ -162,17 +162,28 @@ class PiBotExecutor:
         session_id = bot.get("sessionId")
         before = 0
         baseline = {}
+        reused = False
         if session_id:
             detail = self.sessions.get_session(session_id)
             if detail["session"]["state"] in {"running", "waiting"}:
                 raise WebError("BOT_SESSION_BUSY", "Bot 的会话仍在执行或等待确认。", 409)
-            before = max((e.get("sequence", 0) for e in detail.get("events", [])), default=0)
-            baseline = {a["id"]: a.get("sha256") for a in detail.get("artifacts", [])}
-            self._maybe_compact(session_id, bot, task)
-            if hasattr(self.sessions, "_get") and task.get("token"):
-                self.sessions._get(session_id).secrets.append(task["token"])
-            detail = self.sessions.send(session_id, {"requestId": task["launchRequestId"], "text": prompt})
-        else:
+            if str(detail["session"].get("presetId") or "") != selected["presetId"]:
+                # A conversation grew on the model it was launched with. Sending
+                # this task to it anyway would run the session's model while the
+                # caller asked for another one — the guardrails' first
+                # counterexample (“界面里选中了某个模型，但实际启动时用了另一个”).
+                # Never drop the selected preset silently: start a fresh session
+                # on it instead of continuing the mismatched one.
+                session_id = None
+            else:
+                before = max((e.get("sequence", 0) for e in detail.get("events", [])), default=0)
+                baseline = {a["id"]: a.get("sha256") for a in detail.get("artifacts", [])}
+                self._maybe_compact(session_id, bot, task)
+                if hasattr(self.sessions, "_get") and task.get("token"):
+                    self.sessions._get(session_id).secrets.append(task["token"])
+                detail = self.sessions.send(session_id, {"requestId": task["launchRequestId"], "text": prompt})
+                reused = True
+        if not session_id:
             detail = self._launch_bot_session({
                 "requestId": task["launchRequestId"], "workspaceId": bot.get("workspaceId") or "default",
                 "presetId": selected["presetId"], "title": bot["name"], "prompt": prompt,
@@ -184,7 +195,7 @@ class PiBotExecutor:
         # process was created. Retain its session ID; never turn it into done.
         pid = self.sessions.diagnostics(session_id).get("pid") if hasattr(self.sessions, "diagnostics") else None
         return {"sessionId": session_id, "processId": pid, "baseline": before, "artifactBaseline": baseline,
-                "model": detail["session"].get("modelName", "")}
+                "reusedSession": reused, "model": detail["session"].get("modelName", "")}
 
     def plan(self, prompt, bot, timeout=PLAN_TIMEOUT_SECONDS):
         """One short throwaway planning call on the task Bot's own preset.
@@ -218,15 +229,27 @@ class PiBotExecutor:
                 time.sleep(0.4)
             return None
         finally:
-            for payload in ({"requestId": request_id + "-stop"},
-                            {"requestId": request_id + "-archive", "archived": True}):
-                try:
-                    if "archived" in payload:
-                        self.sessions.manage(session_id, payload)
-                    else:
-                        self.sessions.stop(session_id, payload)
-                except Exception:
-                    pass
+            self._retire_session(session_id, request_id)
+
+    def _retire_session(self, session_id, request_id):
+        """Stop and archive a session this Bot only used once.
+
+        Best effort on purpose: a throwaway session staying visible is a
+        cosmetic residue, never a reason to fail the task that owned it.
+        """
+        for payload in ({"requestId": request_id + "-stop"},
+                        {"requestId": request_id + "-archive", "archived": True}):
+            try:
+                if "archived" in payload:
+                    self.sessions.manage(session_id, payload)
+                else:
+                    self.sessions.stop(session_id, payload)
+            except Exception:
+                pass
+
+    def release_session(self, session_id, request_id):
+        """Public seam for a task-owned one-off session (see BotRuntime._finish)."""
+        self._retire_session(session_id, request_id)
 
     def _maybe_compact(self, session_id, bot, task):
         """Compact only at the idle boundary, using Pi's native RPC."""
