@@ -1126,18 +1126,24 @@ export function App() {
         className={"sidebar " + (navOpen ? "open" : "")}
         aria-label="工作区与会话"
       >
-        <button
-          className="brand"
-          onClick={() => navigate("new")}
-          aria-label="MMS Pilot 首页"
-        >
-          <Logo />
-          <div className="brand-wordmark">
-            <span className="brand-mms">MMS</span>
-            <span className="brand-pilot">PILOT</span>
-          </div>
-          <AppVersion version={data.appVersion} />
-        </button>
+        <div className="brand-row">
+          <button
+            className="brand"
+            onClick={() => navigate("new")}
+            aria-label="MMS Pilot 首页"
+          >
+            <Logo />
+            <div className="brand-wordmark">
+              <span className="brand-mms">MMS</span>
+              <span className="brand-pilot">PILOT</span>
+            </div>
+          </button>
+          <AppVersion
+            version={data.appVersion}
+            onClick={() => setUpdateOpen(true)}
+            updateAvailable={!!updateStatus?.available}
+          />
+        </div>
         <div className="sidebar-actions">
           <button className="new-task" onClick={() => navigate("new")}>
             <Plus size={17} />
