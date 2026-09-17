@@ -69,6 +69,15 @@ export function UpdateCenter({ ready, open, setOpen, onStatus }: {
     dialog.current?.showModal();
     return () => { dialog.current?.close(); trigger.current?.focus(); };
   }, [open]);
+  useEffect(() => {
+    if (!open) setConfirming(false);
+  }, [open]);
+  useEffect(() => {
+    if (!confirming) return;
+    const root = dialog.current?.querySelector<HTMLElement>(".update-body");
+    root?.scrollTo({ top: 0 });
+    dialog.current?.querySelector<HTMLElement>(".update-confirm h3")?.focus();
+  }, [confirming]);
   async function act(action: string, payload: Record<string, unknown> = {}) {
     setPending(true); setError("");
     try { setData(await request<UpdateStatus>(`/update/${action}`, payload)); }
@@ -85,8 +94,24 @@ export function UpdateCenter({ ready, open, setOpen, onStatus }: {
       <Download size={16} /><span>{phase === "waiting" ? "等待更新" : active ? "更新中" : "有新版"}</span>
     </button>}
     {open && <dialog ref={dialog} className="update-center" aria-labelledby="update-title" onCancel={e => { e.preventDefault(); setOpen(false); }} onClick={e => { if (e.target === dialog.current) setOpen(false); }}>
-      <header><div><h2 id="update-title">版本与更新</h2><p>当前版本 {data ? `v${data.currentVersion}` : "读取中…"}</p></div><button type="button" className="icon-button" aria-label="关闭更新" onClick={() => setOpen(false)}><X size={19} /></button></header>
+      <header><div><h2 id="update-title">版本与更新</h2><p>{confirming && data?.latest.tag ? `当前 v${data.currentVersion} → ${data.latest.tag}` : `当前版本 ${data ? `v${data.currentVersion}` : "读取中…"}`}</p></div><button type="button" className="icon-button" aria-label="关闭更新" onClick={() => setOpen(false)}><X size={19} /></button></header>
       <div className="update-body">
+        {confirming && data?.canUpgrade && !activePhases.has(phase) ? (
+        <section className="update-confirm" aria-label={`确认更新到 ${data.latest.tag}`}>
+          <h3 tabIndex={-1}>确认更新到 {data.latest.tag}</h3>
+          {data.latest.upgradeNotice && <div className="update-warning"><h4>升级须知</h4><div className="update-notes-body"><Markdown remarkPlugins={[remarkGfm]} skipHtml>{data.latest.upgradeNotice}</Markdown></div></div>}
+          <ul className="update-facts">
+            <li>地址不变，仍然是 <code>http://127.0.0.1:{data.port || 8765}</code>；更新完成后这个页面会自动刷新到新版本。</li>
+            <li>{data.installation?.updatesCli
+              ? <>命令行会一起更新：<code>{data.installation.root}</code> 里的 <code>mms</code>、<code>mmf</code> 也会变成 {data.latest.tag}，之后两边版本一致。</>
+              : <>只更新网页服务，命令行保持当前版本。{data.installation?.reason}</>}</li>
+            <li>{allowIdleRestart ? "空闲会话会重启，历史和文件保留，续聊时恢复 Pi。" : "不重启任何会话；执行中、待确认或有排队消息的会话都会等它们结束。"}</li>
+          </ul>
+          <label className="update-preference"><span>允许重启空闲会话<small>历史和文件保留，续聊时恢复 Pi。关掉时保留所有活跃进程。执行中、待确认或有排队消息的会话仍会等待。</small></span><input type="checkbox" role="switch" aria-label="允许重启空闲会话" checked={allowIdleRestart} disabled={pending} onChange={e => setAllowIdleRestart(e.target.checked)} /></label>
+          {(error || data?.error) && <p className="update-error" role="alert">{error || data?.error}</p>}
+        </section>
+        ) : (
+        <>
         <div className="update-check-row"><span>{data?.checking ? "正在检查…" : data?.updateAvailable ? `发现新版 ${data.latest.tag}` : data?.checkedAt && !data.error ? channel === "preview" ? "已是最新 5.x 预览版" : "已是最新 4.x 稳定版" : channel === "preview" ? "检查 5.x 预览版" : "检查 4.x 稳定版"}</span><button type="button" className="text-button" disabled={busy || isPreview || !data} onClick={() => void act("check")}><RefreshCw size={14} />检查更新</button></div>
         {data?.checkedAt ? <p className="update-muted">上次检查：{new Date(data.checkedAt * 1000).toLocaleString()}</p> : null}
         <label className="update-preference"><span>更新通道<small>{channel === "preview" ? "5.x 预览版：包含 Bot 工作台，可能还有变化。" : "4.x 稳定版：当前默认与推荐通道。"}</small></span><select aria-label="更新通道" value={channel} disabled={pending || isPreview || !data} onChange={e => { setConfirming(false); void act("preferences", { channel: e.target.value }); }}><option value="stable">4.x 稳定版</option><option value="preview">5.x 预览版</option></select></label>
@@ -105,18 +130,8 @@ export function UpdateCenter({ ready, open, setOpen, onStatus }: {
         {data?.operation.message && <p className="update-progress" role="status">{data.operation.message}</p>}
         {(error || data?.error) && <p className="update-error" role="alert">{error || data?.error}</p>}
         {isPreview && <p className="update-muted">预览模式不检查或安装更新。</p>}
-        {confirming && data?.canUpgrade && !activePhases.has(phase) && <section className="update-confirm" aria-label={`确认更新到 ${data.latest.tag}`}>
-          <h3>确认更新到 {data.latest.tag}</h3>
-          {data.latest.upgradeNotice && <div className="update-warning"><h4>升级须知</h4><div className="update-notes-body"><Markdown remarkPlugins={[remarkGfm]} skipHtml>{data.latest.upgradeNotice}</Markdown></div></div>}
-          <ul className="update-facts">
-            <li>地址不变，仍然是 <code>http://127.0.0.1:{data.port || 8765}</code>；更新完成后这个页面会自动刷新到新版本。</li>
-            <li>{data.installation?.updatesCli
-              ? <>命令行会一起更新：<code>{data.installation.root}</code> 里的 <code>mms</code>、<code>mmf</code> 也会变成 {data.latest.tag}，之后两边版本一致。</>
-              : <>只更新网页服务，命令行保持当前版本。{data.installation?.reason}</>}</li>
-            <li>{allowIdleRestart ? "空闲会话会重启，历史和文件保留，续聊时恢复 Pi。" : "不重启任何会话；执行中、待确认或有排队消息的会话都会等它们结束。"}</li>
-          </ul>
-          <label className="update-preference"><span>允许重启空闲会话<small>历史和文件保留，续聊时恢复 Pi。关掉时保留所有活跃进程。执行中、待确认或有排队消息的会话仍会等待。</small></span><input type="checkbox" role="switch" aria-label="允许重启空闲会话" checked={allowIdleRestart} disabled={pending} onChange={e => setAllowIdleRestart(e.target.checked)} /></label>
-        </section>}
+        </>
+        )}
       </div>
       <footer>
         <p>更新前检查会话并备份记录。有任务执行、等待确认或排队消息时，会等待完成后再更新。</p>
