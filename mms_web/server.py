@@ -408,7 +408,11 @@ class WebApplication:
                 operation_path = self.state_root / "updates/operation.json"
                 from .updates import read_json
                 operation = read_json(operation_path)
-                private_json(operation_path, {**operation, "phase": "complete", "message": f"已更新到 v{VERSION}，会话历史已保留。", "cancellable": False})
+                from .update_install import record_committed_install
+                warning = record_committed_install(self.config_root, self.state_root, operation, VERSION)
+                message = f"已更新到 v{VERSION}，会话历史已保留。"
+                private_json(operation_path, {**operation, "phase": "complete", "message": message + warning,
+                                              "metadataWarning": warning, "cancellable": False})
                 self.probation_token = ""
                 self.maintenance = False
                 return {"ok": True}

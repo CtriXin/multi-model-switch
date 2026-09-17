@@ -121,7 +121,7 @@ def _release_payload(value):
     body = str(value.get('body') or '')
     from .update_guidance import release_policy
     return {'tag': tag, 'notes': body[:16000], 'upgradeNotice': upgrade_notice(body),
-            'upgradePolicy': release_policy(body),
+            'upgradePolicy': release_policy(body), 'prerelease': value.get('prerelease') is True,
             'publishedAt': str(value.get('published_at') or '')[:80],
             'url': f'https://github.com/{REPO}/releases/tag/{tag}'}
 
@@ -135,6 +135,22 @@ def fetch_release():
     value = json.loads(content)
     if value.get('draft') or value.get('prerelease'):
         raise ValueError('invalid stable release')
+    return _release_payload(value)
+
+
+def fetch_tag_release(tag):
+    """Resolve an old guardian's installed release without guessing its channel."""
+    if not isinstance(tag, str) or not TAG.fullmatch(tag):
+        raise ValueError('invalid release tag')
+    url = f'https://api.github.com/repos/{REPO}/releases/tags/{tag}'
+    request = urllib.request.Request(url, headers={'User-Agent': 'MMS-Pilot', 'Accept': 'application/vnd.github+json'})
+    with urllib.request.build_opener(NoRedirect()).open(request, timeout=5) as response:
+        content = response.read(1024 * 1024 + 1)
+    if len(content) > 1024 * 1024:
+        raise ValueError('release response too large')
+    value = json.loads(content)
+    if not isinstance(value, dict) or value.get('tag_name') != tag or value.get('draft') is not False or not isinstance(value.get('prerelease'), bool):
+        raise ValueError('invalid installed release')
     return _release_payload(value)
 
 

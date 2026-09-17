@@ -82,4 +82,3 @@ def write_bundle(
         files=files,
     )
     return manifest_path
-
