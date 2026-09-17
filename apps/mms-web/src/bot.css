@@ -561,6 +561,25 @@
   white-space: nowrap;
 }
 
+.bot-chat-title-row .bot-chat-model-line {
+  display: inline-flex;
+  align-items: center;
+  margin: 0;
+  padding: 1px 7px;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--muted);
+  background: var(--soft);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+  min-width: 0;
+  flex-shrink: 1;
+}
+
 .bot-chat-title-group p {
   margin: 0;
   font-size: 12px;
@@ -1916,6 +1935,7 @@
   font-size: 12px;
   color: var(--muted);
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .bot-state-dot {
@@ -2686,6 +2706,11 @@
     height: 56px;
     flex: 0 0 56px;
     padding: 0 16px;
+  }
+  .bot-chat-title-row .bot-chat-model-line {
+    max-width: 140px;
+    font-size: 10px;
+    padding: 0 5px;
   }
   .bot-chat-stream {
     padding: 16px 16px 12px;
