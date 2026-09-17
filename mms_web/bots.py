@@ -20,7 +20,10 @@ from uuid import uuid4
 from .file_lock import LOCK_EX, LOCK_NB, flock
 
 from .errors import WebError
-from .bot_executor import _context_percent
+from . import bot_schedules
+from .bot_schedules import (MAX_SCHEDULES_PER_BOT, RECENT_TASK_LIMIT, advance, apply_update,
+                            build_schedule, defer_once, format_local, is_due)
+from .bot_executor import _context_percent, available_presets, match_presets
 from .runtime import private_json
 from .bot_memory import BotMemoryStore, BotMemoryError
 from .bot_communications import BotCommunications
@@ -203,7 +206,7 @@ class BotRuntime(BotCommunications):
         self._stop = threading.Event()
         self._changed = threading.Event()
         self._bots, self._tasks, self._messages, self._artifacts, self._requests = {}, {}, {}, {}, {}
-        self._communications = {}
+        self._schedules, self._communications = {}, {}
         self._launching = set()
         self._workers = set()
         self._thread = None
@@ -227,6 +230,7 @@ class BotRuntime(BotCommunications):
             self._messages = data["messages"]
             self._artifacts = data["artifacts"]
             self._requests = data.get("requests", {})
+            self._schedules = bot_schedules.sanitize_schedules(data.get("schedules"))
             self._communications = data.get("communications", {})
             for task in self._tasks.values():
                 # The old Pi process is not ours after restart. Preserve its
@@ -243,7 +247,9 @@ class BotRuntime(BotCommunications):
                 bot.setdefault("compactAtPercent", 70)
                 bot.setdefault("orchestrationPolicy", "direct-first")
                 bot.setdefault("planner", "model")
+                bot.setdefault("pendingPresetId", "")
             self._migrate_wait_contracts()
+            self._migrate_scheduled_tasks()
         except (OSError, ValueError, KeyError, TypeError):
             self._load_error = "Bot 记录无法读取，原文件已保留；请检查记录后再写入。"
 
@@ -261,7 +267,7 @@ class BotRuntime(BotCommunications):
             self._file_lock = handle
         private_json(self.root / "state.json", {"schema": 2, "bots": self._bots, "tasks": self._tasks,
                     "messages": self._messages, "artifacts": self._artifacts, "requests": self._requests,
-                    "communications": self._communications})
+                    "schedules": self._schedules, "communications": self._communications})
         self._changed.set()
 
     def configure_endpoint(self, url):
@@ -362,6 +368,7 @@ class BotRuntime(BotCommunications):
             bot = {"id": "bot_" + uuid4().hex[:16], "name": text_field(payload, "name", 80, True),
                    "description": text_field(payload, "description", 1000), "systemPrompt": text_field(payload, "systemPrompt", 12000),
                    "workspaceId": text_field(payload, "workspaceId", 500) or "default", "presetId": requested_preset.strip(),
+                   "pendingPresetId": "",
                    "wakeEnabled": payload.get("wakeEnabled", True), "status": "idle", "sessionId": None,
                    "avatarId": avatar_field(payload, "avatarId", PIXEL_AVATAR_IDS, secrets.choice(PIXEL_AVATAR_IDS)),
                    "avatarColor": avatar_field(payload, "avatarColor", PIXEL_AVATAR_COLORS, secrets.choice(PIXEL_AVATAR_COLORS)),
@@ -401,17 +408,23 @@ class BotRuntime(BotCommunications):
             if active and "presetId" in payload and payload.get("presetId") not in (None, "", bot.get("presetId")):
                 raise WebError("BOT_BUSY", "Bot 正在执行当前任务，模型将在本轮结束后才能切换。", 409)
             updated = deepcopy(bot)
-            for key, limit in (("name", 80), ("description", 1000), ("systemPrompt", 12000), ("workspaceId", 500), ("presetId", 500)):
+            for key, limit in (("name", 80), ("description", 1000), ("systemPrompt", 12000), ("workspaceId", 500), ("presetId", 500), ("pendingPresetId", 500)):
                 if key in payload:
                     if key == "workspaceId" and payload[key] in (None, ""):
                         updated[key] = "default"
-                    elif key == "presetId" and payload[key] in (None, ""):
+                    elif key in {"presetId", "pendingPresetId"} and payload[key] in (None, ""):
                         updated[key] = ""
                     else:
                         updated[key] = text_field(payload, key, limit, key in {"name", "presetId"})
             for key, allowed in (("avatarId", PIXEL_AVATAR_IDS), ("avatarColor", PIXEL_AVATAR_COLORS)):
                 if key in payload:
                     updated[key] = avatar_field(payload, key, allowed, updated.get(key, allowed[0]))
+            if updated.get("pendingPresetId") and updated["pendingPresetId"] != bot.get("pendingPresetId"):
+                # 对话路径写入的待生效模型必须是当前真实可启动的 preset；
+                # 无效值直接拒绝，不让它进入状态后在启动时炸。
+                available_ids = {p.get("id") for p in available_presets(self.executor.catalog.snapshot())}
+                if updated["pendingPresetId"] not in available_ids:
+                    raise WebError("BOT_MODEL_UNAVAILABLE", f"模型 {updated['pendingPresetId']} 当前不可用。", 409)
             if "wakeEnabled" in payload:
                 if type(payload["wakeEnabled"]) is not bool:
                     raise WebError("INVALID_REQUEST", "wakeEnabled 必须是布尔值。", 400)
@@ -476,7 +489,9 @@ class BotRuntime(BotCommunications):
             self._communications = {key: row for key, row in self._communications.items()
                                     if row.get("senderBotId") != bot_id and row.get("recipientBotId") != bot_id
                                     and row.get("taskId") not in task_ids and row.get("deliveryTaskId") not in task_ids}
-            removed_resources = task_ids | (old_communication_ids - set(self._communications)) | {bot_id}
+            removed_schedules = {key for key, row in self._schedules.items() if row["botId"] == bot_id}
+            self._schedules = {key: row for key, row in self._schedules.items() if key not in removed_schedules}
+            removed_resources = task_ids | (old_communication_ids - set(self._communications)) | removed_schedules | {bot_id}
             self._requests = {key: value for key, value in self._requests.items()
                               if value.get("resource") not in removed_resources}
             self._bots.pop(bot_id, None)
@@ -499,12 +514,16 @@ class BotRuntime(BotCommunications):
         with self._lock:
             key, value = self._replay("task", payload)
             if key in self._requests:
-                return self.get_task(value)
+                if value in self._schedules:
+                    return {**deepcopy(self._schedules[value]), "kind": "schedule"}
+                return {**self.get_task(value), "kind": "task"}
             bot = self._bot(str(payload.get("botId") or ""))
             self.executor.validate(bot)
             if len(self._tasks) >= MAX_TASKS:
                 raise WebError("TASK_LIMIT", "本地已保存 2,000 个任务，请归档后继续。", 409)
             parent_id = payload.get("parentTaskId")
+            if parent_id and payload.get("runAt"):
+                raise WebError("INVALID_REQUEST", "子任务不能定时执行。", 400)
             if parent_id:
                 parent = self._task(parent_id)
                 ancestor, depth = parent, 0
@@ -517,18 +536,25 @@ class BotRuntime(BotCommunications):
                     raise WebError("BOT_CHILD_LIMIT", "一个任务最多分发 20 个子任务。", 409)
             run_at = parse_time(payload.get("runAt"))
             prompt = text_field(payload, "prompt", 32000, True)
+            if run_at:
+                # A one-off time is no longer a task state; it is its own
+                # schedule entity, so the timer survives restarts and can be
+                # listed, paused or deleted.
+                schedule = self.create_schedule(bot["id"], {"prompt": prompt, "rule": {"kind": "once", "at": run_at}})
+                self._remember(key, value, schedule["id"])
+                return {**schedule, "kind": "schedule"}
             coordinator_plan = plan_for(prompt, bot, list(self._bots.values()))
             task = {"id": "task_" + uuid4().hex[:16], "botId": bot["id"],
                     "prompt": prompt, "parentTaskId": parent_id,
-                    "status": "scheduled" if run_at else "queued", "runAt": run_at, "children": [],
+                    "status": "queued", "runAt": None, "children": [],
                     "result": None, "error": None, "acceptedAt": None, "sessionId": None, "waitReason": None,
                     "turn": 0, "createdAt": now(), "updatedAt": now(), "token": "", "seenEvents": {},
-                    "priority": task_priority(payload), "queueReason": "等待调度" if not run_at else None,
+                    "priority": task_priority(payload), "queueReason": "等待调度",
                     "coordinatorPlan": coordinator_plan}
             task["executionMode"] = coordinator_plan["mode"]
             task["collaborationRequested"] = collaboration_requested(task["prompt"])
             task["outcome"] = None
-            if payload.get("wake") is False and not run_at:
+            if payload.get("wake") is False:
                 task.update(status="waiting", waitReason="manual")
             self._tasks[task["id"]] = task
             self._artifacts[task["id"]] = []
@@ -541,7 +567,55 @@ class BotRuntime(BotCommunications):
                     parent.update(status="waiting", waitReason="children", acceptedAt=None)
             self._remember(key, value, task["id"])
             self._persist()
-            return self._view(task)
+            return {**self._view(task), "kind": "task"}
+
+    def create_schedule(self, bot_id, payload):
+        with self._lock:
+            key, value = self._replay("schedule", payload)
+            if key in self._requests:
+                return deepcopy(self._schedule(bot_id, value))
+            self._bot(bot_id)
+            count = sum(1 for item in self._schedules.values() if item["botId"] == bot_id)
+            schedule = build_schedule(bot_id, payload, existing_count=count,
+                                      now=datetime.now(timezone.utc), created_by=payload.get("createdBy"))
+            self._schedules[schedule["id"]] = schedule
+            self._remember(key, value, schedule["id"])
+            self._persist()
+            return deepcopy(schedule)
+
+    def list_schedules(self, bot_id):
+        with self._lock:
+            self._bot(bot_id)
+            rows = [deepcopy(item) for item in self._schedules.values() if item["botId"] == bot_id]
+            return sorted(rows, key=lambda item: str(item.get("createdAt") or ""))
+
+    def update_schedule(self, bot_id, schedule_id, payload):
+        with self._lock:
+            updated = apply_update(self._schedule(bot_id, schedule_id), payload, now=datetime.now(timezone.utc))
+            self._schedules[schedule_id] = updated
+            self._persist()
+            return deepcopy(updated)
+
+    def delete_schedule(self, bot_id, schedule_id):
+        with self._lock:
+            self._schedule(bot_id, schedule_id)
+            self._schedules.pop(schedule_id, None)
+            self._persist()
+            return {"deleted": True, "scheduleId": schedule_id}
+
+    def set_schedule_enabled(self, bot_id, schedule_id, enabled):
+        with self._lock:
+            schedule = self._schedule(bot_id, schedule_id)
+            schedule["enabled"] = bool(enabled)
+            schedule["updatedAt"] = now()
+            self._persist()
+            return deepcopy(schedule)
+
+    def _schedule(self, bot_id, schedule_id):
+        schedule = self._schedules.get(schedule_id)
+        if not schedule or schedule["botId"] != bot_id:
+            raise WebError("SCHEDULE_NOT_FOUND", "找不到这条定时。", 404)
+        return schedule
 
     def auto_task(self, payload):
         """Route a natural-language request to the best Bot.
@@ -715,6 +789,37 @@ class BotRuntime(BotCommunications):
                     task["waitOptions"] = options
             else:
                 task["waitQuestion"] = ""
+
+    def _migrate_scheduled_tasks(self):
+        """Release legacy ``scheduled`` tasks into independent once-schedules.
+
+        The schedule id is derived from the task id so a load that has not been
+        persisted yet cannot create a second copy of the same migration.
+        """
+        stamp = datetime.now(timezone.utc)
+        for task in self._tasks.values():
+            if task.get("status") != "scheduled":
+                continue
+            note = "原来的定时时间无效，没有迁移；本任务改为等待手动唤醒。"
+            try:
+                run_at = parse_time(task.get("runAt"))
+                count = sum(1 for item in self._schedules.values() if item["botId"] == task["botId"])
+                if not run_at:
+                    pass
+                elif count >= MAX_SCHEDULES_PER_BOT:
+                    note = "原来的定时没有迁移：这个 Bot 已达 20 条定时上限；本任务改为等待手动唤醒。"
+                else:
+                    schedule = build_schedule(task["botId"], {"prompt": task["prompt"], "rule": {"kind": "once", "at": run_at}},
+                                              existing_count=count, now=stamp, created_by="user",
+                                              schedule_id="sch_" + hashlib.sha256(task["id"].encode()).hexdigest()[:16])
+                    self._schedules[schedule["id"]] = schedule
+                    task["scheduleId"] = schedule["id"]
+                    note = "原来的定时已迁移成独立的定时；本任务改为等待手动唤醒。"
+            except Exception:
+                # A broken legacy row must not stop the whole record loading.
+                note = "原来的定时记录无法读取，没有迁移；本任务改为等待手动唤醒。"
+            task.update(status="waiting", waitReason="manual", runAt=None, token="", updatedAt=now())
+            self._message(task["id"], "system", note)
 
     def _last_wait_text(self, task):
         """The most recent user-facing text, used when no explicit question came."""
@@ -1481,11 +1586,6 @@ class BotRuntime(BotCommunications):
                 if task.get("orphanAlive") and not self.executor.orphan_alive(task):
                     task["orphanAlive"] = False
                     changed = True
-                if task["status"] == "scheduled" and task.get("runAt") and self._bot(task["botId"])["wakeEnabled"]:
-                    if datetime.fromisoformat(task["runAt"]) <= datetime.now(timezone.utc):
-                        task.update(status="queued", runAt=None)
-                        self._message(task["id"], "system", "到达计划时间，自动唤醒。")
-                        changed = True
                 if task["status"] == "waiting" and task.get("waitReason") == "user" and task.get("waitSince"):
                     # A question nobody answered for a week is not a pending
                     # conversation any more; close it instead of glowing forever.
@@ -1505,6 +1605,61 @@ class BotRuntime(BotCommunications):
             busy = [t for t in self._tasks.values() if t.get("orphanAlive") or t["status"] in {"starting", "running"} or (t["status"] == "waiting" and t.get("waitReason") not in {"children", "manual", "user", "plan-approval"})]
             busy_bots = {t["botId"] for t in busy}
             busy_workspaces = {self._bot(t["botId"])["workspaceId"] for t in busy}
+            now_dt = datetime.now(timezone.utc)
+            for schedule in list(self._schedules.values()):
+                if not is_due(schedule, now_dt):
+                    continue
+                bot = self._bots.get(schedule["botId"])
+                armed = bool(bot and bot.get("wakeEnabled", True) and schedule["enabled"])
+                holding = bool(bot and bot["id"] in busy_bots and schedule.get("overlapPolicy", "skip") == "skip")
+                due_at = schedule.get("nextRunAt")
+                if schedule["rule"]["kind"] == "once" and (not armed or holding):
+                    # A one-shot gets exactly one chance: keep its due time and
+                    # record why it waits instead of silently consuming it.
+                    parked = defer_once(schedule, stamp=now(), reason="paused" if not armed else "busy")
+                    if parked:
+                        self._schedules[parked["id"]] = parked
+                        changed = True
+                    continue
+                updated, skipped = advance(schedule, now=now_dt)
+                reason = "" if not armed else ("上一轮仍在运行" if holding else (f"错过了 {skipped} 次触发" if skipped else ""))
+                fired = None
+                try:
+                    fired = self.create_task({"botId": bot["id"], "prompt": updated["prompt"]}) if armed and not holding and not skipped else None
+                except Exception:
+                    fired, reason = None, "创建任务失败"
+                if fired:
+                    self._tasks[fired["id"]]["scheduleId"] = updated["id"]
+                    skip_reason = (schedule.get("lastSkip") or {}).get("reason")
+                    if schedule["rule"]["kind"] == "once" and skip_reason in {"paused", "busy", "error"}:
+                        when = format_local(due_at, updated["timezone"])
+                        if skip_reason == "error":
+                            note = f"这条定时原定 {when} 触发，当时没能建出任务，现在补触发。"
+                        else:
+                            note = f"这条定时原定 {when} 触发，因暂停或上一轮未结束而延后，现在补触发。"
+                        self._message(fired["id"], "system", note)
+                    updated.update(lastRunAt=now(), lastTaskId=fired["id"], lastSkip=None,
+                                   recentTaskIds=(updated.get("recentTaskIds") or [])[-(RECENT_TASK_LIMIT - 1):] + [fired["id"]])
+                elif reason and schedule["rule"]["kind"] == "once" and updated.get("nextRunAt") is None:
+                    # create_task failed before anything ran: give the one-shot
+                    # its only chance back instead of consuming it.
+                    # reason="error" is only valid here because advance() never
+                    # skips a once (skipped is always 0 for kind once). If that
+                    # changes, this label would lie.
+                    updated["nextRunAt"] = due_at
+                    parked = defer_once(updated, stamp=now(), reason="error")
+                    if parked is None:
+                        continue  # already parked for this failure: no rewrite
+                    updated = parked
+                    if updated.get("lastTaskId"):
+                        self._message(updated["lastTaskId"], "system", f"定时没有执行（{reason}），已保留待触发。")
+                elif reason:
+                    updated["lastSkip"] = {"at": now(), "reason": "busy" if holding else ("missed" if skipped else "error"), "skipped": skipped}
+                    if updated.get("lastTaskId"):
+                        self._message(updated["lastTaskId"], "system", f"定时没有执行（{reason}），已按规则跳过。")
+                updated["updatedAt"] = now()
+                self._schedules[updated["id"]] = updated
+                changed = True
             queued = sorted(
                 (task for task in self._tasks.values() if task["status"] == "queued"),
                 # Python's sort is stable: omitting the random task id keeps
@@ -1614,8 +1769,39 @@ class BotRuntime(BotCommunications):
                     live["executionMode"] = "direct"
                     self._persist()
                 task = deepcopy(live)
+                # 模型来源优先级（高→低）：task 的 presetIdOverride（计划为这
+                # 一步明确指定）> bot 的 pendingPresetId（对话里刚换，本轮起生
+                # 效并消费）> bot 的 presetId（默认）。带 override 的任务不消费
+                # pending，否则用户的切换会被一个无关的计划子任务吃掉。
                 if task.get("presetIdOverride"):
                     bot = {**bot, "presetId": task["presetIdOverride"]}
+                elif bot.get("pendingPresetId"):
+                    pending = bot["pendingPresetId"]
+                    if pending == bot.get("presetId"):
+                        # 已经在用这个模型：只清 pending，不动会话。
+                        self._bot(bot["id"]).update(pendingPresetId="", updatedAt=now())
+                        self._persist()
+                    else:
+                        try:
+                            selected = self.executor.validate({**bot, "presetId": pending})
+                        except WebError:
+                            # 待生效模型在这期间变得不可用：取消这次切换，清掉
+                            # pending（不清会把 Bot 永久 brick 在失败循环里），本
+                            # 轮退回用户自己正在用的 presetId 继续跑；没换模型就
+                            # 不动 sessionId，不白扔会话历史。
+                            self._bot(bot["id"]).update(pendingPresetId="", updatedAt=now())
+                            self._message(task["id"], "system",
+                                          f"待生效模型 {self._preset_label(pending)} 当前不可用，已取消这次切换；"
+                                          f"本轮继续使用 {bot.get('model') or self._preset_label(bot.get('presetId'))}。你可以重新切换。",
+                                          bot["id"])
+                            self._persist()
+                        else:
+                            # preset 变了就要换新会话（同 update_bot 的既有语义），
+                            # 否则持久 session 仍跑旧模型，“下一轮生效”就成空话了。
+                            bot = {**bot, "presetId": pending, "sessionId": None}
+                            self._bot(bot["id"]).update(selected, pendingPresetId="", sessionId=None, updatedAt=now())
+                            self._message(task["id"], "system", f"本轮起使用模型 {selected['model']}。", bot["id"])
+                            self._persist()
             context = self.root / "contexts" / f"{task['id']}.json"
             private_json(context, {"url": self._endpoint, "token": task["token"], "taskId": task["id"], "botId": bot["id"]})
             with self._lock:
@@ -1903,6 +2089,29 @@ class BotRuntime(BotCommunications):
                 if ancestor["id"] != task_id:
                     raise WebError("BOT_SCOPE", "只能读取当前任务及其子任务。", 403)
             return self.get_task(target)
+        if action == "schedule":
+            if payload.get("botId") and payload["botId"] != task["botId"]:
+                raise WebError("BOT_SCOPE", "只能管理当前 Bot 自己的定时。", 403)
+            op = str(payload.get("op") or "")
+            if op == "create":
+                spec = {key: payload[key] for key in ("prompt", "rule", "timezone", "overlapPolicy", "createdBy", "requestId") if key in payload}
+                return {"schedule": self.create_schedule(task["botId"], spec)}
+            if op == "list":
+                return {"schedules": self.list_schedules(task["botId"])}
+            if op in {"pause", "resume"}:
+                return {"schedule": self.set_schedule_enabled(task["botId"], str(payload.get("scheduleId") or ""), op == "resume")}
+            if op == "delete":
+                return self.delete_schedule(task["botId"], str(payload.get("scheduleId") or ""))
+            raise WebError("INVALID_REQUEST", "schedule 操作必须是 create、list、pause、resume 或 delete。", 400)
+        if action == "model":
+            if payload.get("botId") and payload["botId"] != task["botId"]:
+                raise WebError("BOT_SCOPE", "只能管理当前 Bot 自己的模型。", 403)
+            op = str(payload.get("op") or "")
+            if op == "list":
+                return self._bot_model_list(task["botId"])
+            if op == "switch":
+                return self._bot_model_switch(task, str(payload.get("query") or ""))
+            raise WebError("INVALID_REQUEST", "model 操作必须是 list 或 switch。", 400)
         if action in {"complete", "fail", "wait"}:
             content = str(payload.get("result") or payload.get("error") or payload.get("text") or payload.get("content") or payload.get("reason") or "")[:32000]
             with self._lock:
@@ -1917,3 +2126,81 @@ class BotRuntime(BotCommunications):
                 self._persist()
             return {"ok": True, "taskId": task_id, "message": "已记录，最终状态以 Pi 本轮结束为准。"}
         raise WebError("BOT_ACTION_UNKNOWN", "不支持这个 Bot 工具。", 400)
+
+    def _preset_label(self, preset_id):
+        """Display name for a preset id, falling back to the raw id."""
+        preset_id = str(preset_id or "")
+        catalog = getattr(self.executor, "catalog", None)
+        if not preset_id or catalog is None:
+            return preset_id
+        return next((str(p.get("name") or preset_id) for p in catalog.snapshot().get("presets", [])
+                     if p.get("id") == preset_id), preset_id)
+
+    def _current_preset_id(self, bot):
+        """The preset the Bot would launch with right now, or its raw presetId."""
+        try:
+            return str(self.executor.validate(bot).get("presetId") or "")
+        except WebError:
+            return str(bot.get("presetId") or "")
+
+    def _bot_model_list(self, bot_id):
+        with self._lock:
+            bot = deepcopy(self._bot(bot_id))
+        presets = available_presets(self.executor.catalog.snapshot())
+        current_id = self._current_preset_id(bot)
+        pending_id = str(bot.get("pendingPresetId") or "")
+        models = [{"id": p.get("id"), "name": p.get("name"), "channel": p.get("channel"),
+                   "modelId": p.get("modelId"),
+                   "current": p.get("id") == current_id,
+                   "pending": bool(pending_id) and p.get("id") == pending_id}
+                  for p in presets]
+        current_name = next((str(m["name"]) for m in models if m["current"]), "")
+        pending_name = next((str(m["name"]) for m in models if m["pending"]), "")
+        message = f"当前使用 {current_name or '默认模型'}，共 {len(models)} 个可切换模型。"
+        if pending_name:
+            message += f"已记录下一轮起使用 {pending_name}。"
+        return {"models": models, "current": current_id or None, "pending": pending_id or None,
+                "message": message}
+
+    def _bot_model_switch(self, task, query):
+        with self._lock:
+            bot = deepcopy(self._bot(task["botId"]))
+        snapshot = self.executor.catalog.snapshot()
+        presets = available_presets(snapshot)
+        matches = match_presets(query, presets)
+        if not matches:
+            exact = next((p for p in snapshot.get("presets", []) if p.get("id") == query.strip()), None)
+            if exact is not None:
+                raise WebError("BOT_MODEL_UNAVAILABLE", f"模型 {exact.get('name') or exact.get('id')} 当前不可用。", 409)
+            names = "、".join(str(p.get("name") or p.get("id")) for p in presets) or "无"
+            raise WebError("BOT_MODEL_NOT_FOUND", f"没有找到匹配的可用模型。当前可用：{names}。", 404)
+        if len(matches) > 1:
+            candidates = "、".join(f"{p.get('name')} · {p.get('channel')}" for p in matches[:MAX_WAIT_OPTIONS])
+            raise WebError("BOT_MODEL_AMBIGUOUS", f"有多个模型匹配，请说得更具体。候选：{candidates}。", 409)
+        preset = matches[0]
+        current_id = self._current_preset_id(bot)
+        current_name = next((str(p.get("name") or "") for p in snapshot.get("presets", [])
+                             if p.get("id") == current_id), "")
+        if preset.get("id") == current_id:
+            return {"ok": True, "pending": None,
+                    "current": {"id": current_id or None, "name": current_name},
+                    "message": f"已经在用 {preset.get('name')} 了，没有需要切换的。"}
+        override_id = str(task.get("presetIdOverride") or "")
+        override_name = next((str(p.get("name") or "") for p in snapshot.get("presets", [])
+                              if p.get("id") == override_id), "")
+        label = f"{preset.get('name')} · {preset.get('channel')}"
+        if override_id:
+            message = (f"已记录，从下一个没有被计划指定模型的任务起使用 {label}；"
+                       f"这一轮是计划指定的 {override_name or override_id}，不受影响。")
+        else:
+            message = f"已记录，下一轮起使用 {label}；本轮仍是 {current_name or '当前模型'}。"
+        with self._lock:
+            live = self._bot(task["botId"])
+            live["pendingPresetId"] = preset.get("id")
+            live["updatedAt"] = now()
+            self._message(task["id"], "system", message, task["botId"])
+            self._persist()
+        return {"ok": True,
+                "pending": {"id": preset.get("id"), "name": preset.get("name"), "channel": preset.get("channel")},
+                "current": {"id": current_id or None, "name": current_name},
+                "message": message}

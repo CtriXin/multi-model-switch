@@ -1,0 +1,14 @@
+--- message | 当前 61 个可用模型里没有“蓝 pencilsMax”这个名字（相近的只有 MiniMax / qwen max 系列），我先不乱切，正在等你确认目标。你可以直接回复确切模型名，或从 MiniMax-M3、qwen3.7-max、qwen3.8-max-preview 里挑一个。
+--- instruction | 换成 deepseek
+--- progress | Pi 已接收任务。
+--- progress | bash
+{"models":[{"id":"web:pi:newapi-personal-tokyo:MiniMax-M2.7","name":"MiniMax-M2.7","channel":"newapi-personal-tokyo","modelId":"newapi-personal-tokyo:MiniMax-M2.7","current":false,"pending":false},{"id":"web:pi:newapi-tencent:MiniMax-M2.7","name":"MiniMax-M2.7","channel":"newapi-tencent","modelId":"newapi-tencent:MiniMax-M2.7","current":false,"pending":false},{"id":"web:pi:newapi-personal-tokyo:MiniMax-M3","name":"MiniMax-M3","channel":"newapi-personal-tokyo","modelId":"newapi-personal-toky
+--- progress | bash
+worker 请求失败（HTTP 409）：有多个模型匹配，请说得更具体。候选：deepseek-v4-flash · newapi-personal-tokyo、deepseek-v4-flash · newapi-company、deepseek-v4-flash · newapi-tencent、deepseek-v4-flash-vision-exp · newapi-personal-tokyo。
+
+
+Command exited with code 1
+--- progress | "deepseek" 匹配到多个候选，还没切换。要哪一个？
+--- progress | bash
+{"ok":true,"taskId":"task_c7d746c50a8343ff","message":"已记录，最终状态以 Pi 本轮结束为准。"}
+--- message | “deepseek” 匹配到 4 个候选（deepseek-v4-flash 三个渠道 + deepseek-v4-flash-vision-exp），切换被系统拒绝，尚未生效。等你选一个具体的，我马上切。

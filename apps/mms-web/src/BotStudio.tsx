@@ -17,6 +17,8 @@ import type {
   BotEvent,
   BotTask,
 } from "./Bot";
+import { createdScheduleNotice, isScheduleCreateResult, type BotSchedule } from "./bot-schedules";
+import { formatScheduledTaskTime } from "./bot-visual-system.ts";
 
 interface BotCapability {
   executor?: string;
@@ -136,7 +138,7 @@ function BotEditor({
   const [description, setDescription] = useState(bot?.description || "");
   const [systemPrompt, setSystemPrompt] = useState(bot?.systemPrompt || "");
   const [presetId, setPresetId] = useState(bot?.presetId || "");
-  const [wakeEnabled, setWakeEnabled] = useState(bot?.wakeEnabled || false);
+  const [wakeEnabled, setWakeEnabled] = useState(bot?.wakeEnabled ?? true);
   const [avatarId, setAvatarId] = useState(() => bot?.avatarId || randomItem(PIXEL_AVATARS).id);
   const [avatarColor, setAvatarColor] = useState(() => bot?.avatarColor || randomItem(PIXEL_AVATAR_COLORS));
   const [favorites, setFavorites] = useState<string[]>([]);
@@ -291,6 +293,14 @@ function BotEditor({
             disabled={preview}
           />
           <small className="bot-model-hint">模型和通道分开选择；留空时使用 MMS 默认模型。</small>
+          {bot?.model || bot?.pendingPresetId ? (
+            <small className="bot-model-hint">
+              {bot?.model ? `当前 ${bot.model}` : ""}
+              {bot?.pendingPresetId
+                ? `${bot?.model ? " · " : ""}下一轮 ${presets.find((item) => item.id === bot.pendingPresetId)?.name || bot.pendingPresetId}`
+                : ""}
+            </small>
+          ) : null}
         </label>
         <p className="bot-shared-machine-note">
           共享全局电脑 · 目录由 Bot 自己处理
@@ -310,7 +320,9 @@ function BotEditor({
             checked={wakeEnabled}
             onChange={(event) => setWakeEnabled(event.target.checked)}
           />
-          <span>允许定时任务自动唤醒</span>
+          <span>
+            {wakeEnabled ? "这个 Bot 的定时到点后自动开始" : "定时不会触发，只在你手动唤醒时执行"}
+          </span>
         </label>
         {error && (
           <p className="bot-inline-error" role="alert">
@@ -372,6 +384,7 @@ export function BotStudio({
   const [communications, setCommunications] = useState<BotCommunication[]>([]);
   const [communicationsError, setCommunicationsError] = useState("");
   const [communicationsRefreshKey, setCommunicationsRefreshKey] = useState(0);
+  const [schedulesByBot, setSchedulesByBot] = useState<Record<string, BotSchedule[]>>({});
   const [notifications, setNotifications] = useState<BotNotification[]>(() =>
     readStore<BotNotification[]>(NOTIFY_EVENTS_KEY, []),
   );
@@ -420,6 +433,30 @@ export function BotStudio({
     setCommunicationPeerId(undefined);
   }, [selectedBotId, communicationsRefreshKey]);
 
+  const loadSchedules = useCallback(async (botIds: string[], signal?: AbortSignal) => {
+    if (isPreview || !botIds.length) return;
+    const entries = await Promise.all(
+      botIds.map(async (id) => {
+        try {
+          const response = await request<{ schedules: BotSchedule[] }>(
+            `/bots/${encodeURIComponent(id)}/schedules`,
+            undefined,
+            signal,
+          );
+          return [id, response.schedules || []] as const;
+        } catch {
+          return [id, null] as const;
+        }
+      }),
+    );
+    setSchedulesByBot((current) => {
+      const next = { ...current };
+      for (const [id, rows] of entries) {
+        if (rows) next[id] = rows;
+      }
+      return next;
+    });
+  }, []);
   const sync = useCallback(async (signal?: AbortSignal) => {
     if (isPreview) return;
     const [botResponse, taskResponse, statusResponse] = await Promise.all([
@@ -427,10 +464,15 @@ export function BotStudio({
       request<{ tasks: BotTask[] }>("/tasks", undefined, signal),
       request<BotCapability>("/bots/status", undefined, signal),
     ]);
-    setBots(botResponse.bots || []);
+    const nextBots = botResponse.bots || [];
+    setBots(nextBots);
     setTasks(taskResponse.tasks || []);
     setCapability(statusResponse);
-  }, []);
+    await loadSchedules(
+      nextBots.map((item) => item.id),
+      signal,
+    );
+  }, [loadSchedules]);
   useEffect(() => {
     if (isPreview) return;
     let disposed = false;
@@ -713,6 +755,11 @@ export function BotStudio({
       const deletedId = deleteTarget.id;
       setBots((current) => current.filter((item) => item.id !== deletedId));
       setTasks((current) => current.filter((item) => item.botId !== deletedId));
+      setSchedulesByBot((current) => {
+        const next = { ...current };
+        delete next[deletedId];
+        return next;
+      });
       if (selectedBotId === deletedId) {
         setSelectedBotId(undefined);
         setSelectedTaskId(undefined);
@@ -734,6 +781,34 @@ export function BotStudio({
   const dispatch: BotAction = useCallback(
     async (payload: BotDispatchPayload): Promise<BotDispatchResult> => {
       if (isPreview) {
+        if (payload.runAt) {
+          const schedule: BotSchedule = {
+            id: "sch_preview_" + Date.now().toString(16),
+            botId: payload.botId,
+            prompt: payload.prompt,
+            rule: { kind: "once", at: payload.runAt },
+            timezone: "UTC",
+            enabled: true,
+            overlapPolicy: "skip",
+            nextRunAt: payload.runAt,
+            lastRunAt: null,
+            lastTaskId: null,
+            recentTaskIds: [],
+            lastSkip: null,
+            createdBy: "user",
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          };
+          setSchedulesByBot((current) => ({
+            ...current,
+            [payload.botId]: [...(current[payload.botId] || []), schedule],
+          }));
+          return {
+            kind: "schedule",
+            schedule,
+            message: createdScheduleNotice(schedule, formatScheduledTaskTime),
+          };
+        }
         const mockTask: BotTask = {
           id: "task-preview-" + Date.now(),
           botId: payload.botId,
@@ -749,9 +824,9 @@ export function BotStudio({
           mockTask,
           ...current.filter((item) => item.id !== mockTask.id),
         ]);
-        return { task: mockTask };
+        return { kind: "task", task: mockTask };
       }
-      const task = await run<BotTask>(
+      const created = await run<BotTask & BotSchedule & { kind?: string }>(
         `/bots/${encodeURIComponent(payload.botId)}/tasks`,
         {
           prompt: payload.prompt,
@@ -762,13 +837,30 @@ export function BotStudio({
             : {}),
         },
       );
+      if (isScheduleCreateResult(created)) {
+        const schedule = created as BotSchedule;
+        setSchedulesByBot((current) => ({
+          ...current,
+          [payload.botId]: [
+            ...(current[payload.botId] || []).filter((item) => item.id !== schedule.id),
+            schedule,
+          ],
+        }));
+        refreshInBackground();
+        return {
+          kind: "schedule",
+          schedule,
+          message: createdScheduleNotice(schedule, formatScheduledTaskTime),
+        };
+      }
+      const task = created as BotTask;
       setSelectedTaskId(task.id);
       setTasks((current) => [
         task,
         ...current.filter((item) => item.id !== task.id),
       ]);
       refreshInBackground();
-      return { task };
+      return { kind: "task", task };
     },
     [isPreview, refreshInBackground, run],
   );
@@ -908,6 +1000,7 @@ export function BotStudio({
         <BotList
           bots={bots}
           tasks={tasks}
+          schedulesByBot={schedulesByBot}
           selectedBotId={selectedBotId}
           onSelect={(bot) => {
             setSelectedBotId(bot.id);
@@ -1025,6 +1118,11 @@ export function BotStudio({
           onSelectBot={(bot) => setSelectedBotId(bot.id)}
           onSelectTask={(task) => setSelectedTaskId(task.id)}
           onDispatch={dispatch}
+          schedules={schedulesByBot[(activeBot || selectedBot)?.id || ""] || []}
+          onSchedulesChange={() => {
+            const id = (activeBot || selectedBot)?.id;
+            if (id) void loadSchedules([id]);
+          }}
           onAutoDispatch={autoDispatch}
           onFollowUp={(content) =>
             selectedTask ? followUp(selectedTask.id, content) : undefined
@@ -1071,6 +1169,7 @@ export function BotStudio({
               description: patch.description ?? current.description,
               systemPrompt: patch.systemPrompt ?? current.systemPrompt,
               presetId: patch.presetId ?? current.presetId,
+              pendingPresetId: patch.pendingPresetId ?? current.pendingPresetId,
               wakeEnabled: patch.wakeEnabled ?? current.wakeEnabled,
               avatarId: patch.avatarId ?? current.avatarId,
               avatarColor: patch.avatarColor ?? current.avatarColor,

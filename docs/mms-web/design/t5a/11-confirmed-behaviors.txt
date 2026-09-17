@@ -1,0 +1,7 @@
+[1] paused repeating: nextRunAt advanced: True | lastSkip: None | tasks: 0
+    after resume: tasks: 0 (expect 0: no catch-up)
+[2] overlapPolicy-only edit keeps nextRunAt: True
+    rule edit recomputes from now: True
+[3] past once fires next tick: True | nextRunAt now: None
+[4] previous task has the note: True | no-previous row still records lastSkip: {'at': '2026-09-16T10:18:39.472+00:00', 'reason': 'missed', 'skipped': 864} | no message invented: True
+[5] two schedules in one tick both create a task: ['第一条', '第二条']

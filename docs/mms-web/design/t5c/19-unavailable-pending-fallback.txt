@@ -1,0 +1,3 @@
+--- system | 待生效模型 web:pi:newapi-personal-tokyo:removed-model 当前不可用，已取消这次切换；本轮继续使用 gemini-3.8-flash-high。你可以重新切换。
+--- message | OK
+--- result | OK

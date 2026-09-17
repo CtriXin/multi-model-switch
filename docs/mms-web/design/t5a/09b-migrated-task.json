@@ -1,0 +1,7 @@
+{
+  "id": "task_legacy0000000002",
+  "status": "waiting",
+  "waitReason": "manual",
+  "runAt": null,
+  "scheduleId": "sch_876b22fc8fc7e8a9"
+}

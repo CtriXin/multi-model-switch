@@ -308,6 +308,8 @@ class WebApplication:
             return self.bots.capabilities()
         if parts == ["bots", "notifications"]:
             return self.bots.list_notifications((query or {}).get("since", [None])[0])
+        if len(parts) == 3 and parts[0] == "bots" and parts[2] == "schedules":
+            return {"schedules": self.bots.list_schedules(parts[1])}
         if parts == ["bots", "notifications", "config"]:
             return self.bots.notify_config()
         if len(parts) == 3 and parts[0] == "bots" and parts[2] == "communications":
@@ -444,8 +446,19 @@ class WebApplication:
         if len(parts) == 3 and parts[0] == "bots":
             if parts[2] == "tasks":
                 return self.bots.create_task({**payload, "botId": parts[1]})
+            if parts[2] == "schedules":
+                return self.bots.create_schedule(parts[1], payload)
             if parts[2] == "wake":
                 return self.bots.wake_bot(parts[1])
+        if len(parts) == 4 and parts[0] == "bots" and parts[2] == "schedules":
+            return self.bots.update_schedule(parts[1], parts[3], payload)
+        if len(parts) == 5 and parts[0] == "bots" and parts[2] == "schedules" and parts[3]:
+            if parts[4] == "enable":
+                return self.bots.set_schedule_enabled(parts[1], parts[3], True)
+            if parts[4] == "disable":
+                return self.bots.set_schedule_enabled(parts[1], parts[3], False)
+            if parts[4] == "delete":
+                return self.bots.delete_schedule(parts[1], parts[3])
         if len(parts) == 3 and parts[0] == "tasks":
             task_id, action = parts[1:]
             if action in {"wake", "cancel", "accept"}:

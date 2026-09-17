@@ -76,7 +76,45 @@ test("getBotSecondLine follows strict priority order and returns null when empty
   // 2c. waitingTask other waitReason -> label
   assert.equal(getBotSecondLine(bot, undefined, [waitTask], refNow), "等待你在会话中确认");
 
-  // 3. Next schedule priority ("明天 09:00 · 任务前 12 字")
+  // 3. Next schedule priority from schedule entities
+  const dailySchedule = {
+    id: "sch_1",
+    botId: "bot-1",
+    prompt: "查机票",
+    rule: { kind: "daily", atLocalTime: "09:00" },
+    timezone: "Asia/Singapore",
+    enabled: true,
+    overlapPolicy: "skip",
+    nextRunAt: new Date(2026, 8, 13, 9, 0, 0).toISOString(),
+    lastRunAt: null,
+    lastTaskId: null,
+    lastSkip: null,
+    createdAt: "",
+    updatedAt: "",
+  };
+  assert.equal(
+    getBotSecondLine(bot, undefined, [], refNow, [dailySchedule]),
+    "每天 09:00 · 下次 明天 09:00",
+  );
+  assert.equal(
+    getBotSecondLine({ ...bot, wakeEnabled: false }, undefined, [], refNow, [dailySchedule]),
+    "自动唤醒已关闭",
+  );
+  assert.equal(
+    getBotSecondLine(bot, undefined, [], refNow, [{ ...dailySchedule, enabled: false }]),
+    "定时已暂停",
+  );
+  const second = {
+    ...dailySchedule,
+    id: "sch_2",
+    rule: { kind: "interval", everySeconds: 10800 },
+    nextRunAt: new Date(2026, 8, 14, 9, 0, 0).toISOString(),
+  };
+  assert.equal(
+    getBotSecondLine(bot, undefined, [], refNow, [dailySchedule, second]),
+    "每天 09:00 · 下次 明天 09:00 · 共 2 条",
+  );
+  // legacy runAt fallback only when schedules argument is omitted
   const scheduledTask = {
     botId: "bot-1",
     prompt: "超长定时任务名称用来测试前十二个字截断",

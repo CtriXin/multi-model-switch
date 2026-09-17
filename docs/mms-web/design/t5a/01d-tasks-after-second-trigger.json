@@ -1,0 +1,16 @@
+[
+  {
+    "id": "task_1d1342b9ae084eac",
+    "prompt": "查一次机票",
+    "status": "running",
+    "scheduleId": "sch_f8d26dab09664630",
+    "createdAt": "2026-09-16T03:54:12.366+00:00"
+  },
+  {
+    "id": "task_cf281ae818a04653",
+    "prompt": "查一次机票",
+    "status": "completed",
+    "scheduleId": "sch_f8d26dab09664630",
+    "createdAt": "2026-09-16T03:49:11.917+00:00"
+  }
+]

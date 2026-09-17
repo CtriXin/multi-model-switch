@@ -328,3 +328,13 @@ def test_notification_routes_pull_events_and_round_trip_config(app_client):
 
     status, _, body = request("POST", "/api/v1/bots/notifications/config", {"webhooks": []})
     assert status == 403 and json.loads(body)["error"]["code"] == "INVALID_CSRF"
+
+
+def test_emit_task_carries_the_schedule_id(tmp_path):
+    notifier = Notifier(tmp_path)
+    record = notifier.emit_task({"name": "同事"}, {"id": "task_1", "botId": "bot_1", "prompt": "查机票",
+                                                   "scheduleId": "sch_1", "result": "完成"}, "task.completed")
+    assert record["scheduleId"] == "sch_1"
+    assert notifier.list_events()[-1]["scheduleId"] == "sch_1"
+    assert notifier.emit_task({"name": "同事"}, {"id": "task_2", "botId": "bot_1", "prompt": "普通"},
+                              "task.completed")["scheduleId"] == ""

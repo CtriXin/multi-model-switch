@@ -1,0 +1,22 @@
+[
+  {
+    "id": "sch_636b3d62d44041c3",
+    "prompt": "每天检查一次",
+    "rule": {
+      "kind": "daily",
+      "atLocalTime": "09:00"
+    },
+    "timezone": "Asia/Singapore",
+    "createdBy": "bot"
+  },
+  {
+    "id": "sch_876b22fc8fc7e8a9",
+    "prompt": "旧机制的一次性定时",
+    "rule": {
+      "kind": "once",
+      "at": "2026-09-16T05:06:30.627775+00:00"
+    },
+    "timezone": "Asia/Singapore",
+    "createdBy": "user"
+  }
+]

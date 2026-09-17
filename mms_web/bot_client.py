@@ -3,6 +3,10 @@
 The context file is private, but the worker endpoint is deliberately narrow:
 only an exact loopback URL is accepted and every operation is one authenticated
 JSON POST.  This client does not read MMS configuration or start a process.
+
+The command list the Bot is told about is generated from the argparse
+registration below (see ``command_catalog_text``), so a new subcommand can
+never silently stay unknown to the Bot.
 """
 from __future__ import annotations
 
@@ -16,6 +20,14 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
+
+# The executor runs this file by path (`python .../mms_web/bot_client.py`), so
+# the package root is not on sys.path there.  Keep the module usable both as a
+# script and as ``mms_web.bot_client``.
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from mms_web import bot_schedules  # noqa: E402
+from mms_web.errors import WebError  # noqa: E402
 
 
 _LOOPBACK_PATH = "/api/v1/bot-worker"
@@ -137,7 +149,48 @@ def _text(parts: list[str] | None, *, default: str = "") -> str:
     return " ".join(parts or []).strip() or default
 
 
+# The command catalog is filled by ``_build_parser`` itself: registration and
+# the list the Bot reads are the same act, so the two cannot drift apart.
+_COMMANDS: list[dict[str, str]] = []
+_PARSER: argparse.ArgumentParser | None = None
+
+
+def _parser() -> argparse.ArgumentParser:
+    global _PARSER
+    if _PARSER is None:
+        _PARSER = _build_parser()
+    return _PARSER
+
+
+def command_catalog() -> list[dict[str, str]]:
+    """Every registered subcommand as ``{name, summary, usage}``."""
+    _parser()
+    return [dict(item) for item in _COMMANDS]
+
+
+def command_catalog_text() -> str:
+    """The generated "which commands exist" block embedded in the Bot prompt."""
+    return "\n".join(f"- {item['usage']}：{item['summary']}" for item in command_catalog())
+
+
+def registered_command_names(parser: argparse.ArgumentParser | None = None) -> list[str]:
+    """Subcommand names as argparse actually registered them.
+
+    Used by the gate test; it walks the parser itself (including the nested
+    ``schedule`` operations) instead of trusting a second hand-written list.
+    """
+    parser = parser or _parser()
+    action = next((item for item in parser._actions if isinstance(item, argparse._SubParsersAction)), None)
+    names: list[str] = []
+    for name, sub in (action.choices.items() if action else []):
+        names.append(name)
+        nested = next((item for item in sub._actions if isinstance(item, argparse._SubParsersAction)), None)
+        names.extend(f"{name} {op}" for op in (nested.choices if nested else {}))
+    return names
+
+
 def _build_parser() -> argparse.ArgumentParser:
+    _COMMANDS.clear()
     parser = argparse.ArgumentParser(
         prog="python -m mms_web.bot_client",
         description="在 Pi Bot worker context 中执行一次受限的 Bot 操作",
@@ -157,56 +210,124 @@ def _build_parser() -> argparse.ArgumentParser:
         )
         return command
 
-    with_request_id(commands.add_parser("list", help="列出可派发的 Bot"))
+    def add(name: str, summary: str, usage: str, *, target=None, label: str | None = None) -> argparse.ArgumentParser:
+        _COMMANDS.append({"name": label or name, "summary": summary, "usage": usage})
+        return with_request_id((target if target is not None else commands).add_parser(name, help=summary))
 
-    with_request_id(commands.add_parser("memory-list", help="读取当前 Bot 的长期记忆"))
-    memory_search = with_request_id(commands.add_parser("memory-search", help="搜索当前 Bot 的长期记忆"))
+    add("list", "列出可派发的 Bot", "list")
+
+    add("memory-list", "读取当前 Bot 的长期记忆", "memory-list")
+    memory_search = add("memory-search", "搜索当前 Bot 的长期记忆", "memory-search QUERY")
     memory_search.add_argument("query", nargs="+")
-    memory_remember = with_request_id(commands.add_parser("memory-remember", help="保存一条 Bot 长期记忆"))
+    memory_remember = add("memory-remember", "保存一条 Bot 长期记忆", "memory-remember '内容'")
     memory_remember.add_argument("content", nargs="+")
-    memory_forget = with_request_id(commands.add_parser("memory-forget", help="删除一条 Bot 长期记忆"))
+    memory_forget = add("memory-forget", "删除一条 Bot 长期记忆", "memory-forget ID")
     memory_forget.add_argument("id")
 
-    dispatch = with_request_id(commands.add_parser("dispatch", help="派发子任务"))
+    dispatch = add("dispatch", "向另一个 Bot 派发子任务", "dispatch BOT_ID '任务'")
     dispatch.add_argument("bot_id")
     dispatch.add_argument("prompt", nargs="+")
 
-    message = with_request_id(commands.add_parser("message", help="向另一个 Bot 发消息，空闲时自动唤醒处理"))
+    message = add("message", "向另一个 Bot 发消息，空闲时自动唤醒处理", "message BOT_ID '消息'")
     message.add_argument("bot_id")
     message.add_argument("text", nargs="+")
-    reply = with_request_id(commands.add_parser("reply", help="回复收到的消息，接收方由消息记录确定"))
+    reply = add("reply", "回复收到的消息，接收方由消息记录确定", "reply MESSAGE_ID '回复'")
     reply.add_argument("message_id")
     reply.add_argument("text", nargs="+")
-    with_request_id(commands.add_parser("inbox", help="查看当前 Bot 收到的消息与分工"))
+    add("inbox", "查看当前 Bot 收到的消息与分工", "inbox")
 
-    screenshot = with_request_id(commands.add_parser("screenshot", help="请求 worker 回传截图"))
+    screenshot = add("screenshot", "请求 worker 回传截图", "screenshot --url 'http(s)://...'")
     screenshot.add_argument("--url")
 
-    browser = with_request_id(commands.add_parser("browser", help="在持久 Ego 页面执行一个有限浏览器动作"))
+    browser = add("browser", "在持久 Ego 页面执行一个有限浏览器动作", "browser goto/snapshot/click/fill/press [TARGET] [VALUE]")
     browser.add_argument("operation", choices=("goto", "snapshot", "click", "fill", "press"))
     browser.add_argument("target", nargs="?")
     browser.add_argument("value", nargs="*")
 
-    status = with_request_id(commands.add_parser("status", help="查看当前任务或其后代"))
+    status = add("status", "查看当前任务或其后代", "status [TASK_ID]")
     status.add_argument("task_id", nargs="?")
 
-    wait = with_request_id(commands.add_parser("wait", help="等待子任务或用户"))
+    wait = add("wait", "等待子任务或用户", "wait '要问用户的问题' [--question '明确的问题'] [--option A --option B]")
     wait.add_argument("text", nargs="*")
     wait.add_argument("--question", help="要问用户的问题；省略时从 text 里解析")
     wait.add_argument("--option", action="append", dest="options", default=None,
                       help="快捷回复选项，可重复，最多 4 个")
 
+    schedule = with_request_id(commands.add_parser("schedule", help="管理这个 Bot 的周期定时"))
+    operations = schedule.add_subparsers(dest="schedule_op", required=True)
+    create = add("create", "新建一条周期定时",
+                 "schedule create '要执行的说明' --every 3h|180m|10800s / --daily HH:MM / --weekly mon 09:00 / --once ISO8601"
+                 " [--overlap skip|queue] [--timezone IANA]", target=operations, label="schedule create")
+    create.add_argument("prompt", nargs="+")
+    kinds = create.add_mutually_exclusive_group(required=True)
+    kinds.add_argument("--every", metavar="3h|180m|10800s")
+    kinds.add_argument("--daily", metavar="HH:MM")
+    kinds.add_argument("--weekly", nargs=2, metavar=("WEEKDAY", "HH:MM"))
+    kinds.add_argument("--once", metavar="ISO8601")
+    create.add_argument("--overlap", choices=("skip", "queue"), default="skip")
+    create.add_argument("--timezone")
+    add("list", "列出这个 Bot 的定时", "schedule list", target=operations, label="schedule list")
+    schedule_pause = add("pause", "暂停一条定时", "schedule pause SCHEDULE_ID", target=operations, label="schedule pause")
+    schedule_pause.add_argument("schedule_id")
+    schedule_resume = add("resume", "恢复一条定时", "schedule resume SCHEDULE_ID", target=operations, label="schedule resume")
+    schedule_resume.add_argument("schedule_id")
+    schedule_delete = add("delete", "删除一条定时", "schedule delete SCHEDULE_ID", target=operations, label="schedule delete")
+    schedule_delete.add_argument("schedule_id")
+
+    model = with_request_id(commands.add_parser("model", help="查看或切换这个 Bot 使用的模型"))
+    model_operations = model.add_subparsers(dest="model_op", required=True)
+    add("list", "列出当前实际可切换的模型", "model list", target=model_operations, label="model list")
+    model_switch = add("switch", "切换这个 Bot 的默认模型，下一轮任务起生效", "model switch <名称或关键词>",
+                       target=model_operations, label="model switch")
+    model_switch.add_argument("query", nargs="+")
+
     for name, help_text in (
         ("complete", "标记当前轮次完成"),
         ("fail", "标记当前轮次失败"),
     ):
-        command = with_request_id(commands.add_parser(name, help=help_text))
+        command = add(name, help_text, f"{name} '结果或原因'")
         command.add_argument("text", nargs="*")
     return parser
 
 
+def _schedule_payload(args: argparse.Namespace, context: dict[str, str]) -> tuple[str, dict[str, Any]]:
+    op = str(args.schedule_op)
+    payload: dict[str, Any] = {"op": op, "botId": context["botId"], "taskId": context["taskId"], "createdBy": "bot"}
+    if op == "create":
+        try:
+            if args.every is not None:
+                rule = {"kind": "interval", "everySeconds": bot_schedules.parse_every(args.every)}
+            elif args.daily is not None:
+                rule = {"kind": "daily", "atLocalTime": str(args.daily).strip()}
+            elif args.once is not None:
+                rule = {"kind": "once", "at": str(args.once).strip()}
+            else:
+                weekday, at_local = args.weekly
+                rule = {"kind": "weekly", "weekday": bot_schedules.parse_weekday(weekday),
+                        "atLocalTime": str(at_local).strip()}
+        except WebError as exc:
+            raise BotClientError(exc.message) from exc
+        payload.update({"prompt": _text(args.prompt), "rule": rule, "overlapPolicy": args.overlap})
+        if args.timezone:
+            payload["timezone"] = str(args.timezone).strip()
+        return "schedule", payload
+    if getattr(args, "schedule_id", None):
+        payload["scheduleId"] = args.schedule_id
+    return "schedule", payload
+
+
 def _command_payload(args: argparse.Namespace, context: dict[str, str]) -> tuple[str, dict[str, Any]]:
     command = args.command
+    if command == "schedule":
+        return _schedule_payload(args, context)
+    if command == "model":
+        payload: dict[str, Any] = {"op": str(args.model_op), "botId": context["botId"], "taskId": context["taskId"]}
+        if args.model_op == "switch":
+            query = _text(args.query)
+            if not query:
+                raise BotClientError("model switch 需要模型名称或关键词")
+            payload["query"] = query
+        return "model", payload
     if command == "list":
         return "list", {"botId": context["botId"], "taskId": context["taskId"]}
     if command == "memory-list":
@@ -283,7 +404,7 @@ def _emit(payload: Any, token: str) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = _build_parser()
+    parser = _parser()
     try:
         args = parser.parse_args(argv)
         context = _load_context(args.context)

@@ -1,0 +1,33 @@
+{
+    "schedules": [
+        {
+            "id": "sch_f8d26dab09664630",
+            "botId": "bot_f16fce3913d3463a",
+            "prompt": "\u67e5\u4e00\u6b21\u673a\u7968",
+            "rule": {
+                "kind": "interval",
+                "everySeconds": 300
+            },
+            "timezone": "Asia/Singapore",
+            "enabled": true,
+            "overlapPolicy": "skip",
+            "nextRunAt": "2026-09-16T04:10:58.327486+00:00",
+            "lastRunAt": "2026-09-16T04:04:12.205+00:00",
+            "lastTaskId": "task_e91ccb402b3745f0",
+            "recentTaskIds": [
+                "task_cf281ae818a04653",
+                "task_1d1342b9ae084eac",
+                "task_8047dedca7a043b8",
+                "task_e91ccb402b3745f0"
+            ],
+            "lastSkip": {
+                "at": "2026-09-16T04:06:03.154+00:00",
+                "reason": "missed",
+                "skipped": 864
+            },
+            "createdBy": "user",
+            "createdAt": "2026-09-16T03:44:11.839+00:00",
+            "updatedAt": "2026-09-16T04:06:03.154+00:00"
+        }
+    ]
+}

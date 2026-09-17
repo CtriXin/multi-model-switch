@@ -1,0 +1,73 @@
+[
+  {
+    "id": "task_b80e9463f5d24e41",
+    "botId": "bot_227696ee9f034ce1",
+    "prompt": "用一句话回复 ok",
+    "parentTaskId": null,
+    "status": "running",
+    "runAt": null,
+    "children": [],
+    "result": null,
+    "error": null,
+    "acceptedAt": null,
+    "sessionId": "s-1fd36c00c0bf",
+    "waitReason": null,
+    "turn": 1,
+    "createdAt": "2026-09-16T03:45:30.174+00:00",
+    "updatedAt": "2026-09-16T03:45:32.061+00:00",
+    "priority": 50,
+    "queueReason": null,
+    "coordinatorPlan": {
+      "version": 2,
+      "mode": "direct",
+      "ownerBotId": "bot_227696ee9f034ce1",
+      "reason": "普通任务由当前 Bot 直接完成。",
+      "steps": [
+        {
+          "id": "s1",
+          "kind": "execute",
+          "botId": "bot_227696ee9f034ce1",
+          "goal": "",
+          "dependsOn": [],
+          "presetId": null,
+          "status": "pending",
+          "taskId": null,
+          "onFailure": "retry"
+        }
+      ],
+      "candidates": [],
+      "merge": "owner",
+      "modelDecision": false,
+      "source": "direct-first",
+      "status": "running",
+      "history": [
+        {
+          "at": "2026-09-16T03:45:30.176+00:00",
+          "from": null,
+          "to": "auto",
+          "by": "system"
+        },
+        {
+          "at": "2026-09-16T03:45:32.048+00:00",
+          "from": "auto",
+          "to": "running",
+          "by": "system"
+        }
+      ]
+    },
+    "executionMode": "direct",
+    "collaborationRequested": false,
+    "outcome": null,
+    "scheduleId": "sch_52406b138d89460c",
+    "startedAt": "2026-09-16T03:45:30.175+00:00",
+    "cancelRequested": false,
+    "waitRequested": false,
+    "forceStopSent": false,
+    "cancelAt": null,
+    "completedAt": null,
+    "planResolved": true,
+    "planDecidedAt": "2026-09-16T03:45:30.176+00:00",
+    "processId": 14077,
+    "model": "MiniMax-M2.7"
+  }
+]

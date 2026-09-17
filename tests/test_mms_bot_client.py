@@ -192,3 +192,82 @@ def test_wait_without_the_new_flags_keeps_the_old_payload(worker):
         "action": "wait",
         "requestId": "wait-2",
     }
+
+
+@pytest.mark.parametrize(
+    ("command", "expected_payload"),
+    [
+        ("schedule create 查机票 --every 3h", {
+            "op": "create", "prompt": "查机票",
+            "rule": {"kind": "interval", "everySeconds": 10800},
+            "overlapPolicy": "skip", "botId": "bot-parent", "taskId": "task-parent", "createdBy": "bot",
+        }),
+        ("schedule create 检查文档 --daily 09:00 --overlap queue --timezone Asia/Singapore", {
+            "op": "create", "prompt": "检查文档",
+            "rule": {"kind": "daily", "atLocalTime": "09:00"},
+            "overlapPolicy": "queue", "timezone": "Asia/Singapore",
+            "botId": "bot-parent", "taskId": "task-parent", "createdBy": "bot",
+        }),
+        ("schedule create 周报 --weekly mon 08:30", {
+            "op": "create", "prompt": "周报",
+            "rule": {"kind": "weekly", "weekday": 0, "atLocalTime": "08:30"},
+            "overlapPolicy": "skip", "botId": "bot-parent", "taskId": "task-parent", "createdBy": "bot",
+        }),
+        ("schedule create 提醒 --weekly 周日 20:00", {
+            "op": "create", "prompt": "提醒",
+            "rule": {"kind": "weekly", "weekday": 6, "atLocalTime": "20:00"},
+            "overlapPolicy": "skip", "botId": "bot-parent", "taskId": "task-parent", "createdBy": "bot",
+        }),
+        ("schedule create 一次性提醒 --once 2026-09-17T09:00:00+08:00", {
+            "op": "create", "prompt": "一次性提醒",
+            "rule": {"kind": "once", "at": "2026-09-17T09:00:00+08:00"},
+            "overlapPolicy": "skip", "botId": "bot-parent", "taskId": "task-parent", "createdBy": "bot",
+        }),
+        ("schedule list", {"op": "list", "botId": "bot-parent", "taskId": "task-parent", "createdBy": "bot"}),
+        ("schedule pause sch_1", {
+            "op": "pause", "scheduleId": "sch_1", "botId": "bot-parent", "taskId": "task-parent", "createdBy": "bot",
+        }),
+        ("schedule resume sch_1", {
+            "op": "resume", "scheduleId": "sch_1", "botId": "bot-parent", "taskId": "task-parent", "createdBy": "bot",
+        }),
+        ("schedule delete sch_1", {
+            "op": "delete", "scheduleId": "sch_1", "botId": "bot-parent", "taskId": "task-parent", "createdBy": "bot",
+        }),
+    ],
+)
+def test_schedule_commands_map_to_worker_payloads(worker, command, expected_payload):
+    result = run_client(worker, *command.split())
+    assert result.returncode == 0, result.stderr
+    body = WorkerHandler.requests[-1]["body"]
+    assert body["action"] == "schedule"
+    assert body["requestId"]
+    assert {key: value for key, value in body.items() if key not in {"action", "requestId"}} == expected_payload
+
+
+@pytest.mark.parametrize("command", [
+    "schedule create 坏间隔 --every 3days",
+    "schedule create 坏星期 --weekly someday 09:00",
+    "schedule create 没有周期",
+])
+def test_schedule_commands_reject_bad_input_locally(worker, command):
+    result = run_client(worker, *command.split())
+    # A spelling mistake in the rule never reaches the worker endpoint.
+    assert result.returncode != 0
+    assert WorkerHandler.requests == []
+
+
+@pytest.mark.parametrize(
+    "command, expected_payload",
+    [
+        ("model list", {"op": "list", "botId": "bot-parent", "taskId": "task-parent"}),
+        ("model switch Beta", {"op": "switch", "query": "Beta", "botId": "bot-parent", "taskId": "task-parent"}),
+        ("model switch kimi k3", {"op": "switch", "query": "kimi k3", "botId": "bot-parent", "taskId": "task-parent"}),
+    ],
+)
+def test_model_commands_map_to_worker_payloads(worker, command, expected_payload):
+    result = run_client(worker, *command.split())
+    assert result.returncode == 0, result.stderr
+    body = WorkerHandler.requests[-1]["body"]
+    assert body["action"] == "model"
+    assert body["requestId"]
+    assert {key: value for key, value in body.items() if key not in {"action", "requestId"}} == expected_payload
