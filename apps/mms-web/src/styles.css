@@ -397,8 +397,8 @@ kbd {
   font-size: max(11px, 0.7857rem);
   color: var(--muted);
 }
-.workspace-heading > span:last-child {
-  margin-left: auto;
+.workspace-count {
+  margin: 0;
 }
 .session-link {
   display: flex;

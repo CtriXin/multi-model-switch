@@ -1293,7 +1293,7 @@ export function App() {
                     />
                     <FolderOpen size={14} />
                     <span>{w.id === "default" ? "启动目录" : w.name}</span>
-                    <span>{sessions.length}</span>
+                    <span className="workspace-count">{sessions.length}</span>
                   </button>
                   <div className="workspace-row-actions">
                     <Popover
