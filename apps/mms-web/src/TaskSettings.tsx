@@ -3,7 +3,7 @@ import type { Model, Preset, SessionDetail } from "./types";
 import type { LaunchFacts } from "./ModelExplorer";
 import { EffortSelect } from "./ModelExplorer";
 import { harnessNames } from "./components";
-import { availableHarnesses, availableRoutesForModel, channelLabel, siblingHarnessPreset } from "./modelSelection";
+import { availableRoutesForModel, channelLabel } from "./modelSelection";
 import { QuickModelMenu } from "./QuickModelMenu";
 import { Popover } from "./Popover";
 
@@ -38,7 +38,6 @@ export function TaskSettings({
 }) {
   const preset = presets.find((p) => p.id === value);
   const extraChannels = availableRoutesForModel(presets, preset).length > 1;
-  const harnesses = availableHarnesses(presets, preset);
   const scoped = presets.filter((p) => p.harness === (preset?.harness || "pi"));
   return (
     <Popover
@@ -50,6 +49,9 @@ export function TaskSettings({
           {extraChannels && preset && (
             <span className="task-route-name">{channelLabel(preset, models)}</span>
           )}
+          {preset?.harness && preset.harness !== "pi" && (
+            <span className="task-route-name">{harnessNames[preset.harness] || preset.harness}</span>
+          )}
           {planning && <span className="task-plan">规划</span>}
           <ChevronDown size={13} />
         </>
@@ -58,23 +60,6 @@ export function TaskSettings({
       {(close, open) => open ? (
         <QuickModelMenu presets={scoped} models={models} value={value} favorites={favorites}
           change={change} close={close} notice={planning ? "当前为只读规划模式。" : undefined}>
-          {harnesses.length > 1 && (
-            <label className="task-setting-row">
-              <span>执行工具</span>
-              <select
-                aria-label="执行工具"
-                value={preset?.harness || "pi"}
-                onChange={(e) => {
-                  const next = siblingHarnessPreset(presets, preset, e.target.value);
-                  if (next) change(next.id);
-                }}
-              >
-                {harnesses.map((item) => (
-                  <option key={item} value={item}>{harnessNames[item] || item}</option>
-                ))}
-              </select>
-            </label>
-          )}
           <div className="task-setting-row" data-guide="effort">
             <span>思考强度</span>
             {facts ? (
@@ -97,7 +82,7 @@ export function TaskSettings({
           </label>
           <p className="popover-note">
             {preset?.harness === "grok"
-              ? "Grok 首版按执行模式启动，Web 只读规划开关尚未接入。"
+              ? "当前 Pilot 默认用 Grok 开新会话，可在设置 → 使用里更换。Grok 首版没有 Web 只读规划开关。"
               : planning
               ? "先分析与阅读资料，不修改工作文件。"
               : "可以读取、修改工作文件，并执行命令。"}

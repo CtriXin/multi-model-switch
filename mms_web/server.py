@@ -122,12 +122,49 @@ class WebApplication:
             {**p, "available": False, "reason": "该执行工具的网页交互正在接入，可先选择 Pi。"}
             if p.get("harness") not in allowed else p for p in snapshot.get("presets", [])
         ]
+        capabilities["defaultHarness"] = self.default_web_harness(allowed)
         return {
             **snapshot, "version": "1", "appVersion": VERSION, "mode": "live",
             "capabilities": capabilities, "csrfToken": self.csrf_token,
             **capability_snapshot(),
             "sessions": self.all_sessions(include_cli),
         }
+
+    def default_web_harness(self, allowed: list[str] | None = None) -> str:
+        """Execution tool for new Web sessions on this Pilot instance.
+
+        Stored in the state root, not MMS config. Existing sessions keep the
+        harness they launched with.
+        """
+        from .harness import DEFAULT_WEB_HARNESS
+        from .ui_preferences import UiPreferences
+
+        names = [item for item in (allowed or (self.sessions.capabilities().get("richHarnesses") if self.sessions else None) or [DEFAULT_WEB_HARNESS]) if item]
+        if not names:
+            names = [DEFAULT_WEB_HARNESS]
+        saved = str(UiPreferences(self.state_root).read().get("webHarness") or "").strip()
+        env = str(os.environ.get("MMS_WEB_HARNESS") or "").strip().lower()
+        for candidate in (saved, env, DEFAULT_WEB_HARNESS, *names):
+            if candidate in names:
+                return candidate
+        return names[0]
+
+    def _preset_for_default_harness(self, preset_id: str) -> str:
+        wanted = self.default_web_harness()
+        raw = str(preset_id or "")
+        if not raw.startswith("web:"):
+            return raw
+        parts = raw.split(":", 2)
+        if len(parts) < 3 or parts[1] == wanted:
+            return raw
+        candidate = f"web:{wanted}:{parts[2]}"
+        presets = (self.catalog.snapshot() if self.catalog else {}).get("presets") or []
+        available = {
+            str(item.get("id") or "")
+            for item in presets
+            if isinstance(item, dict) and item.get("available") and item.get("harness") == wanted
+        }
+        return candidate if candidate in available else raw
 
     def _cli_sessions(self) -> list[dict]:
         """Sessions started from the command line, read from Pi's own files.
@@ -539,6 +576,8 @@ class WebApplication:
             service = self._sessions()
             if not service.capabilities().get("launch"):
                 raise WebError("CAPABILITY_UNAVAILABLE", "当前会话路径尚未就绪，未启动模型。", 409)
+            payload = dict(payload or {})
+            payload["presetId"] = self._preset_for_default_harness(str(payload.get("presetId") or ""))
             return service.launch(payload)
         if len(parts) == 3 and parts[0] == "sessions" and parts[2] == "adopt":
             return self.adopt_cli_session(parts[1], payload)

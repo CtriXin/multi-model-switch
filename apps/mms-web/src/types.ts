@@ -267,6 +267,9 @@ export interface Bootstrap {
     /** A read-only sidecar model is available, so questions that need
      *  judgement can be answered too. Without it those fail closed. */
     sidecarCompletion?: boolean;
+    richHarnesses?: Harness[];
+    /** New Web sessions on this Pilot use this execution tool. */
+    defaultHarness?: Harness;
   };
   workspaces: Workspace[];
   models: Model[];

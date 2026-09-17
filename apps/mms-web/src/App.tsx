@@ -75,6 +75,7 @@ import type { RecipeDraft } from "./Recipe";
 import { SettingsPage } from "./SettingsPage";
 import { TaskSettings, SessionSettings } from "./TaskSettings";
 import { Popover } from "./Popover";
+import { siblingHarnessPreset } from "./modelSelection";
 import { useLaunchFacts, readRoutePreferences } from "./ModelExplorer";
 import { ModelPicker, WorkspaceDialog } from "./LaunchOptions";
 import { BotStudio } from "./BotStudio";
@@ -852,12 +853,23 @@ export function App() {
     effortChoice.id === presetId
       ? effortChoice.level
       : readRoutePreferences()[presetId]?.effort || "";
+  const defaultHarness = data.capabilities.defaultHarness || "pi";
+  function presetOnDefaultHarness(id: string) {
+    const current = data.presets.find((item) => item.id === id);
+    return siblingHarnessPreset(data.presets, current, defaultHarness)?.id || id;
+  }
   function selectTaskPreset(id: string) {
-    if (id !== presetId) {
-      setPresetId(id);
+    const next = presetOnDefaultHarness(id);
+    if (next !== presetId) {
+      setPresetId(next);
       setEffortChoice({ id: "", level: "" });
     }
   }
+  useEffect(() => {
+    if (!presetId || !data.presets.length) return;
+    const next = presetOnDefaultHarness(presetId);
+    if (next !== presetId) setPresetId(next);
+  }, [defaultHarness, data.presets, presetId]);
 
   const artifact =
     detail?.artifacts.find((a) => a.id === artifactId) || detail?.artifacts[0];
@@ -1968,6 +1980,10 @@ export function App() {
             setSelectToCopy={setSelectToCopy}
             enterToSend={enterToSend}
             setEnterToSend={setEnterToSend}
+            onHarnessChange={async (harness) => {
+              await mutate("/ui-preferences", { webHarness: harness });
+              await load();
+            }}
             presetId={presetId}
             selectPreset={selectTaskPreset}
             workspaceId={workspaceId}

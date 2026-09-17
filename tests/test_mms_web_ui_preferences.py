@@ -7,7 +7,7 @@ from mms_version import VERSION
 from mms_web.server import WebApplication
 from mms_web.ui_preferences import UiPreferences
 
-EMPTY = {"tourSeen": False, "whatsNewSeenVersion": ""}
+EMPTY = {"tourSeen": False, "whatsNewSeenVersion": "", "webHarness": ""}
 
 
 def test_tour_seen_defaults_false_and_persists(tmp_path):
@@ -28,8 +28,8 @@ def test_the_release_notes_marker_is_a_version_not_a_flag(tmp_path):
 
     assert prefs.update({"whatsNewSeenVersion": "4.16.0"}) == {**EMPTY, "whatsNewSeenVersion": "4.16.0"}
     # The two keys are independent: neither write clears the other.
-    assert prefs.update({"tourSeen": True}) == {"tourSeen": True, "whatsNewSeenVersion": "4.16.0"}
-    assert UiPreferences(tmp_path / "state").read() == {"tourSeen": True, "whatsNewSeenVersion": "4.16.0"}
+    assert prefs.update({"tourSeen": True}) == {**EMPTY, "tourSeen": True, "whatsNewSeenVersion": "4.16.0"}
+    assert UiPreferences(tmp_path / "state").read() == {**EMPTY, "tourSeen": True, "whatsNewSeenVersion": "4.16.0"}
     # Anything a browser could put there is bounded before it is written.
     assert len(prefs.update({"whatsNewSeenVersion": "9" * 500})["whatsNewSeenVersion"]) == 64
     assert prefs.update({"whatsNewSeenVersion": None})["whatsNewSeenVersion"] == ""
@@ -42,15 +42,15 @@ def test_a_never_used_install_is_stamped_before_the_browser_sees_it(tmp_path):
     would race it and sometimes greet a first-time user with a changelog.
     """
     prefs = UiPreferences(tmp_path / "state")
-    assert prefs.read(seed_version="4.17.0") == {"tourSeen": False, "whatsNewSeenVersion": "4.17.0"}
+    assert prefs.read(seed_version="4.17.0") == {**EMPTY, "whatsNewSeenVersion": "4.17.0"}
     # Written, not just returned: the next read agrees without seeding again.
-    assert prefs.read() == {"tourSeen": False, "whatsNewSeenVersion": "4.17.0"}
+    assert prefs.read() == {**EMPTY, "whatsNewSeenVersion": "4.17.0"}
 
     # An install that already exists is an upgrade, and keeps its empty value
     # so the notes get shown.
     used = UiPreferences(tmp_path / "used")
     used.update({"tourSeen": True})
-    assert used.read(seed_version="4.17.0") == {"tourSeen": True, "whatsNewSeenVersion": ""}
+    assert used.read(seed_version="4.17.0") == {**EMPTY, "tourSeen": True}
 
 
 def test_ui_preferences_routes(tmp_path):
@@ -66,7 +66,14 @@ def test_ui_preferences_routes(tmp_path):
         assert app.post(["ui-preferences"], {"whatsNewSeenVersion": "4.16.0"}) == {
             "tourSeen": True,
             "whatsNewSeenVersion": "4.16.0",
+            "webHarness": "",
         }
+        assert app.post(["ui-preferences"], {"webHarness": "grok"})["webHarness"] == "grok"
+        assert app.get(["ui-preferences"])["webHarness"] == "grok"
+        assert app.post(["ui-preferences"], {"webHarness": "claude"})["webHarness"] == "grok"
         assert (Path(tmp_path) / "state" / "ui-preferences.json").is_file()
+        assert first.get("webHarness") == ""
+        assert app.default_web_harness(["pi", "grok"]) == "grok"
+        assert app._preset_for_default_harness("web:pi:gw:m") == "web:pi:gw:m"
     finally:
         app.close()

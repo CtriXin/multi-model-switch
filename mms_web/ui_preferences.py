@@ -12,8 +12,10 @@ from .runtime import private_json
 _BOOL_KEYS = ("tourSeen",)
 # The version whose release notes this install has already shown. A version
 # string rather than a flag, so every upgrade surfaces its own notes once.
-_STRING_KEYS = ("whatsNewSeenVersion",)
+# webHarness is this Pilot instance's default execution tool for new sessions.
+_STRING_KEYS = ("whatsNewSeenVersion", "webHarness")
 _MAX_STRING = 64
+_HARNESS_VALUES = ("", "pi", "grok")
 
 
 class UiPreferences:
@@ -39,7 +41,10 @@ class UiPreferences:
             value = {}
         result = {key: value.get(key) is True for key in _BOOL_KEYS}
         for key in _STRING_KEYS:
-            result[key] = str(value.get(key) or "")[:_MAX_STRING]
+            text = str(value.get(key) or "")[:_MAX_STRING]
+            if key == "webHarness" and text not in _HARNESS_VALUES:
+                text = ""
+            result[key] = text
         return result
 
     def update(self, payload) -> dict:
@@ -50,6 +55,9 @@ class UiPreferences:
                     current[key] = payload.get(key) is True
             for key in _STRING_KEYS:
                 if key in payload:
-                    current[key] = str(payload.get(key) or "")[:_MAX_STRING]
+                    text = str(payload.get(key) or "")[:_MAX_STRING]
+                    if key == "webHarness" and text not in _HARNESS_VALUES:
+                        continue
+                    current[key] = text
         private_json(self.path, current)
         return current

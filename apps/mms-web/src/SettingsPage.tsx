@@ -5,8 +5,9 @@ import type { Bootstrap } from "./types";
 import { RemoteAccessSection } from "./RemoteAccess";
 import { Models } from "./Models";
 import { FONT_FAMILIES } from "./App";
-import { AppVersion, Dialog } from "./components";
+import { AppVersion, Dialog, harnessNames } from "./components";
 import { SkillSourcesSetting } from "./SkillSources";
+import type { Harness } from "./types";
 
 export function SettingsPage({
   openUpdates,
@@ -38,6 +39,7 @@ export function SettingsPage({
   selectToCopy, setSelectToCopy,
   enterToSend, setEnterToSend,
   requestNavigation, editStateChanged, startTask,
+  onHarnessChange,
 }: {
   openUpdates: () => void;
   updateAvailable: boolean;
@@ -78,6 +80,7 @@ export function SettingsPage({
   setSelectToCopy: (on: boolean) => void;
   enterToSend: boolean;
   setEnterToSend: (on: boolean) => void;
+  onHarnessChange?: (harness: Harness) => Promise<void> | void;
 }) {
   const [tab, setTab] = useState("models");
   return (
@@ -280,6 +283,28 @@ export function SettingsPage({
         </section>
       ) : tab === "usage" ? (
         <section className="general-settings">
+          {(data.capabilities.richHarnesses || []).length > 1 && (
+            <div className="preference-row">
+              <div>
+                <h2>执行工具</h2>
+                <p>
+                  这个 Pilot 新开的会话使用谁来跑。已在进行的会话不会改。保存在本实例，不是模型服务配置。
+                </p>
+              </div>
+              <div className="appearance-options">
+                {(data.capabilities.richHarnesses || []).map((id) => (
+                  <button
+                    key={id}
+                    type="button"
+                    aria-pressed={(data.capabilities.defaultHarness || "pi") === id}
+                    onClick={() => void onHarnessChange?.(id)}
+                  >
+                    {harnessNames[id] || id}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <label className="preference-row">
             <div>
               <h2>按 Enter 发送</h2>
