@@ -562,8 +562,8 @@
 }
 
 .bot-chat-title-row .bot-chat-model-line {
-  display: inline-flex;
-  align-items: center;
+  display: inline-block;
+  vertical-align: middle;
   margin: 0;
   padding: 1px 7px;
   font-size: 11px;
@@ -575,7 +575,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 240px;
+  max-width: min(480px, 45vw);
   min-width: 0;
   flex-shrink: 1;
   cursor: pointer;
@@ -2722,9 +2722,9 @@
     padding: 0 16px;
   }
   .bot-chat-title-row .bot-chat-model-line {
-    max-width: 140px;
+    max-width: min(220px, 40vw);
     font-size: 10px;
-    padding: 0 5px;
+    padding: 0 6px;
   }
   .bot-chat-stream {
     padding: 16px 16px 12px;
