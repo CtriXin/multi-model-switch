@@ -55,6 +55,7 @@ export function ModelPicker({
       >
         <span>
           <strong>{selected?.name || "选择模型"}</strong>
+          <small>{selected?.channel || "选择接入通道"}</small>
 
         </span>
         <ChevronDown size={14} />
