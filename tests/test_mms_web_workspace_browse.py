@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -6,8 +7,11 @@ import pytest
 
 from mms_web.errors import WebError
 from mms_web.workspace_browse import (
+    EXCLUDED,
     GENERIC_CODE,
     GENERIC_MESSAGE,
+    _is_under,
+    _list_drives,
     browse_workspaces,
     classify_user_path,
 )
@@ -221,3 +225,53 @@ def test_choose_has_no_remaining_source_callers():
         assert "/workspaces/choose" not in text
         assert "FolderBrowserDialog" not in text
         assert "choose folder" not in text
+
+
+def test_windows_paths_compare_case_insensitively(monkeypatch):
+    """C:\\Users and c:\\users are the same place; relative_to alone is not."""
+    monkeypatch.setattr("mms_web.workspace_browse._windows_platform", lambda: True)
+    assert _is_under(Path(r"C:\Users\Admin"), Path(r"c:\users"))
+    assert _is_under(Path(r"c:\users\admin\src"), Path(r"C:\Users\Admin"))
+    assert _is_under(Path(r"C:\Users"), Path("C:\\Users\\"))
+    assert not _is_under(Path(r"C:\UsersElsewhere"), Path(r"C:\Users"))
+    assert not _is_under(Path(r"D:\Users\Admin"), Path(r"C:\Users"))
+
+
+def test_list_drives_uses_os_listdrives_when_available(monkeypatch):
+    monkeypatch.setattr("mms_web.workspace_browse._windows_platform", lambda: True)
+    monkeypatch.setattr(os, "listdrives", lambda: ["C:\\", "D:", "c:\\"], raising=False)
+    monkeypatch.setattr(os.path, "exists", lambda path: pytest.fail("fallback must not run"))
+    assert _list_drives() == ["C:\\", "D:\\"]
+
+
+def test_list_drives_falls_back_to_letter_probing_without_os_listdrives(monkeypatch):
+    """Python 3.11 is still supported and has no os.listdrives()."""
+    monkeypatch.setattr("mms_web.workspace_browse._windows_platform", lambda: True)
+    monkeypatch.delattr(os, "listdrives", raising=False)
+    monkeypatch.setattr(os.path, "exists", lambda path: path in ("C:\\", "E:\\"))
+    assert _list_drives() == ["C:\\", "E:\\"]
+
+
+def test_list_drives_is_empty_off_windows(monkeypatch):
+    monkeypatch.setattr("mms_web.workspace_browse._windows_platform", lambda: False)
+    assert _list_drives() == []
+
+
+def test_posix_root_is_listable_and_stays_filtered(tmp_path, monkeypatch):
+    """Contract: an explicit absolute path is a legal starting point, / included.
+
+    Enumerating directories already exists through creating a workspace and
+    browsing it with /files/tree, so this adds no surface. It is asserted here
+    so that tightening or loosening it later is a deliberate act.
+    """
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr("mms_web.workspace_browse.real_home", lambda: home)
+    monkeypatch.setattr("mms_web.workspace_browse._mounted_volumes", lambda: [])
+    monkeypatch.setattr("mms_web.workspace_browse._windows_platform", lambda: False)
+    result = browse_workspaces(_catalog(), {"path": "/"})
+    assert result["path"] == "/"
+    names = {row["name"] for row in result["entries"]}
+    assert names, "the filesystem root lists its directories"
+    assert not any(name.startswith(".") for name in names)
+    assert not any(name in EXCLUDED for name in names)

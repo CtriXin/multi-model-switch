@@ -6,6 +6,7 @@ workspace yet, and it must not open a system dialog to do it.
 """
 from __future__ import annotations
 
+import ntpath
 import os
 import re
 from pathlib import Path, PureWindowsPath
@@ -75,7 +76,7 @@ def _list_drives() -> list[str]:
     seen = set()
     for item in listed:
         text = item if item.endswith(("\\", "/")) else item + "\\"
-        key = os.path.normcase(text)
+        key = ntpath.normcase(text)
         if key in seen:
             continue
         seen.add(key)
@@ -147,15 +148,20 @@ def _ancestors_until_ceiling(path: Path) -> list[Path]:
 
 def _same(left: Path, right: Path) -> bool:
     if _windows_platform():
-        return os.path.normcase(str(left)) == os.path.normcase(str(right))
+        return ntpath.normcase(str(left)) == ntpath.normcase(str(right))
     return left == right
 
 
 def _is_under(child: Path, parent: Path) -> bool:
     try:
         if _windows_platform():
-            child.relative_to(parent)
-            return True
+            # Windows paths are case-insensitive but relative_to is not, so
+            # C:\\Users and c:\\users would compare as different places.
+            # ntpath.normcase applies Windows rules on every platform, which
+            # is also what lets this branch be tested from macOS.
+            child_key = ntpath.normcase(str(child))
+            parent_key = ntpath.normcase(str(parent)).rstrip("\\")
+            return child_key == parent_key or child_key.startswith(parent_key + "\\")
         return child == parent or parent in child.parents
     except (ValueError, OSError):
         return False
@@ -185,7 +191,7 @@ def _known_roots(catalog, extra: list[Path]) -> list[Path]:
     unique: list[Path] = []
     seen: set[str] = set()
     for root in roots:
-        key = os.path.normcase(str(root)) if _windows_platform() else str(root)
+        key = ntpath.normcase(str(root)) if _windows_platform() else str(root)
         if key in seen:
             continue
         seen.add(key)
@@ -204,18 +210,18 @@ def _entry(name: str, path: str, kind: str = "folder") -> dict:
 def _computer_listing(catalog) -> dict:
     home = real_home()
     entries = [_entry(home.name or "Home", str(home), "home")]
-    seen = {os.path.normcase(str(home)) if _windows_platform() else str(home)}
+    seen = {ntpath.normcase(str(home)) if _windows_platform() else str(home)}
     for workspace in _workspace_paths(catalog):
         if _is_under(workspace, home) or _same(workspace, home):
             continue
-        key = os.path.normcase(str(workspace)) if _windows_platform() else str(workspace)
+        key = ntpath.normcase(str(workspace)) if _windows_platform() else str(workspace)
         if key in seen:
             continue
         seen.add(key)
         entries.append(_entry(workspace.name or str(workspace), str(workspace), "folder"))
     if _windows_platform():
         for drive in _list_drives():
-            key = os.path.normcase(drive)
+            key = ntpath.normcase(drive)
             if key in seen:
                 continue
             seen.add(key)
