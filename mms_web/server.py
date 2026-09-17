@@ -7,6 +7,7 @@ import json
 import mimetypes
 import secrets
 import os
+import socketserver
 import threading
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -487,6 +488,28 @@ class WebApplication:
             self.sessions.close()
 
 
+class NoReverseDNSHTTPServer(ThreadingHTTPServer):
+    """A ThreadingHTTPServer whose bind never does reverse DNS.
+
+    The stock ``HTTPServer.server_bind`` resolves ``socket.getfqdn(host)``.
+    That is a reverse DNS query, and on networks whose router does not answer
+    PTR records — common on home LANs — it blocks for the resolver's full
+    timeout, measured at 30s on the reporting machine. Both constructors below
+    run while the caller holds the mutation lock, so one slow query froze
+    every request in the Pilot behind the remote-access switch.
+
+    ``server_name`` is only consumed by the stdlib's CGI plumbing, which this
+    server never runs. Do not "clean up" this override back to getfqdn:
+    binding an address must stay a local operation.
+    """
+
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = host
+        self.server_port = port
+
+
 def create_server(app: WebApplication, static_root: Path, port: int = 8765):
     root = static_root.resolve()
     import hashlib
@@ -687,7 +710,7 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
             except Exception as exc:
                 self._error(exc)
 
-    server = ThreadingHTTPServer((app.access.bind_address(), port), Handler)
+    server = NoReverseDNSHTTPServer((app.access.bind_address(), port), Handler)
     server.daemon_threads = True
     app.listeners = RemoteListeners(Handler, server.server_address[1])
     app.listeners.sync(app.access.extra_binds())
@@ -725,7 +748,7 @@ class RemoteListeners:
             if address in self._servers:
                 continue
             try:
-                extra = ThreadingHTTPServer((address, self._port), self._handler)
+                extra = NoReverseDNSHTTPServer((address, self._port), self._handler)
             except OSError as error:
                 # A point-to-point tunnel endpoint may refuse a bind. Skip it
                 # and say so rather than failing the whole switch.
