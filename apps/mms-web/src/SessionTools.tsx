@@ -3,6 +3,7 @@ import {
   Archive,
   Copy,
   Download,
+  Expand,
   GitBranch,
   MoreHorizontal,
   Pencil,
@@ -429,17 +430,30 @@ export function MessageActions({
   eventId,
   text,
   action,
+  onRead,
 }: {
   detail: SessionDetail;
   eventId: string;
   text: string;
   action?: Action;
+  onRead?: () => void;
 }) {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState("");
   return (
     <div className="message-action-slot">
       <div className="message-actions">
+        {onRead && (
+          <button
+            type="button"
+            title="专注阅读这条回复"
+            aria-label="专注阅读"
+            onClick={onRead}
+          >
+            <Expand size={13} />
+            <span>专注阅读</span>
+          </button>
+        )}
         <button
           title="复制 Markdown 原文"
           aria-label={copied ? "已复制" : "复制"}
