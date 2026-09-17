@@ -22,16 +22,21 @@ const sandbox = {
   exports: mod.exports,
   require: (req) => {
     if (req === "react") return React;
-    if (req === "./api") return { getSession: async () => ({}) };
+    if (req === "./api") return { getSession: async () => ({}), isPreview: false };
     return {};
   },
   console,
 };
 vm.createContext(sandbox);
 vm.runInContext(transpiled, sandbox);
-const { conversationAtBottom, shouldMarkResultRead } = mod.exports;
+const {
+  conversationAtBottom,
+  shouldMarkResultRead,
+  writeReadReceipt,
+  shouldAdoptBaselineReceipt,
+} = mod.exports;
 
-test("opening a session is not a read; only the visible bottom counts", () => {
+test("viewingBottom is what marks a result read", () => {
   assert.equal(
     shouldMarkResultRead({
       hasOutputToken: true,
@@ -102,5 +107,57 @@ test("conversationAtBottom uses the live scrollbar, not selected-row state", () 
     conversationAtBottom({ scrollHeight: 500, scrollTop: 0, clientHeight: 800 }),
     true,
     "content that fits the viewport is fully visible",
+  );
+});
+
+test("writeReadReceipt stores the token that later clears unread", () => {
+  const receipts = {};
+  writeReadReceipt(receipts, "s1", "tok-1");
+  assert.equal(receipts.s1, "tok-1");
+  const src = fs.readFileSync(
+    path.resolve(__dirname, "../src/SessionAttention.ts"),
+    "utf-8",
+  );
+  assert.match(src, /receipts\[id\] = token/);
+  assert.match(src, /writeReadReceipt\(receipts\.current,\s*id,\s*token\)/);
+});
+
+test("first-load baseline swallows already-idle sessions except in preview", () => {
+  assert.equal(
+    shouldAdoptBaselineReceipt({
+      preview: false,
+      inBaseline: true,
+      hasStoredReceipt: false,
+      wasBusy: false,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldAdoptBaselineReceipt({
+      preview: true,
+      inBaseline: true,
+      hasStoredReceipt: false,
+      wasBusy: false,
+    }),
+    false,
+    "preview must keep unread so ?preview=1 can show 已完成",
+  );
+  assert.equal(
+    shouldAdoptBaselineReceipt({
+      preview: false,
+      inBaseline: true,
+      hasStoredReceipt: true,
+      wasBusy: false,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldAdoptBaselineReceipt({
+      preview: false,
+      inBaseline: true,
+      hasStoredReceipt: false,
+      wasBusy: true,
+    }),
+    false,
   );
 });

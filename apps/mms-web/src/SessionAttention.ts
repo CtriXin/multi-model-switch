@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { getSession } from "./api";
+import { getSession, isPreview } from "./api";
 import type { Session, SessionDetail } from "./types";
 
 const storageKey = "mms-web-read-results-v1";
@@ -58,6 +58,24 @@ export function shouldMarkResultRead(input: {
       input.visible &&
       input.connected,
   );
+}
+
+export function writeReadReceipt(
+  receipts: Record<string, string>,
+  id: string,
+  token: string,
+): void {
+  receipts[id] = token;
+}
+
+export function shouldAdoptBaselineReceipt(input: {
+  preview: boolean;
+  inBaseline: boolean;
+  hasStoredReceipt: boolean;
+  wasBusy: boolean;
+}): boolean {
+  if (input.preview) return false;
+  return input.inBaseline && !input.hasStoredReceipt && !input.wasBusy;
 }
 
 export function useSessionAttention(
@@ -143,11 +161,14 @@ export function useSessionAttention(
           if (!token) continue;
           revisions.current.set(s.id, s.updatedAt);
           if (
-            baseline.current?.has(s.id) &&
-            !(s.id in receipts.current) &&
-            !busy.current.has(s.id)
+            shouldAdoptBaselineReceipt({
+              preview: isPreview,
+              inBaseline: Boolean(baseline.current?.has(s.id)),
+              hasStoredReceipt: s.id in receipts.current,
+              wasBusy: busy.current.has(s.id),
+            })
           ) {
-            receipts.current[s.id] = token;
+            writeReadReceipt(receipts.current, s.id, token);
             save();
           }
           if (receipts.current[s.id] !== token)
@@ -192,10 +213,10 @@ export function useSessionAttention(
     )
       return;
     const id = detail.session.id;
-    // Opening the session is not a read receipt. The latest output must be
-    // on screen — scroll at the bottom — before the row goes quiet.
+    // openSession follows the latest output, so viewingBottom becomes true
+    // after that jump. A session already parked mid-transcript does not.
     const frame = requestAnimationFrame(() => {
-      receipts.current[id] = token;
+      writeReadReceipt(receipts.current, id, token);
       save();
       setUnread((old) =>
         old[id] === token
