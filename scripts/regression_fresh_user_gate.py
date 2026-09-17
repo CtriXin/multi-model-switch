@@ -47,6 +47,10 @@ _SCRUB_ENV_KEYS = {
     "ANTHROPIC_MODEL",
     "MMS_MODEL_NAME",
     "CLAUDE_CODE_SUBAGENT_MODEL",
+    "MMS_COMMAND_NAME",
+    "MMS_PI_SKILLS_OVERLAY",
+    "LANG",
+    "LC_ALL",
 }
 
 _PY_COMPILE_TARGETS = [
@@ -576,12 +580,14 @@ class _Executor:
 runtime = BotRuntime(state_root=state_root, executor=_Executor())
 bot = runtime.create_bot({"name": "Gate Bot", "description": "channel switch gate",
                           "systemPrompt": "keep the gate honest"})
-task = runtime.create_task({"botId": bot["id"], "prompt": "ping the gate",
-                            "runAt": "2099-01-01T00:00:00+00:00"})
+schedule = runtime.create_task({"botId": bot["id"], "prompt": "ping the gate",
+                                "runAt": "2099-01-01T00:00:00+00:00"})
+if schedule.get("kind") != "schedule" or not schedule.get("nextRunAt"):
+    raise SystemExit(f"scheduled submission did not create a schedule: {schedule}")
 BotMemoryStore(state_root).remember(bot["id"], "the gate bot likes regression tests")
 UiPreferences(state_root).read(seed_version=VERSION)
-print(json.dumps({"version": VERSION, "botId": bot["id"], "taskId": task["id"],
-                  "runAt": task["runAt"], "loadError": runtime._load_error}))
+print(json.dumps({"version": VERSION, "botId": bot["id"], "scheduleId": schedule["id"],
+                  "nextRunAt": schedule["nextRunAt"], "loadError": runtime._load_error}))
 """
 
 _CHANNEL_SWITCH_VERIFY_PROBE = """
@@ -612,13 +618,19 @@ if runtime._load_error:
 bots = {bot["id"]: bot for bot in runtime.list_bots()}
 if expected["botId"] not in bots:
     raise SystemExit(f"bot missing after the round trip: {sorted(bots)}")
-tasks = runtime.list_tasks(bot_id=expected["botId"])
-if not any(task["id"] == expected["taskId"] and task.get("runAt") for task in tasks):
-    raise SystemExit("scheduled task lost across the round trip")
+schedules = runtime.list_schedules(expected["botId"])
+if not any(schedule["id"] == expected["scheduleId"]
+           and schedule.get("nextRunAt") == expected["nextRunAt"]
+           and schedule.get("enabled")
+           and schedule.get("rule", {}).get("kind") == "once"
+           for schedule in schedules):
+    raise SystemExit("schedule lost or changed across the round trip")
+if runtime.list_tasks(bot_id=expected["botId"]):
+    raise SystemExit("future schedule unexpectedly created an immediate task")
 notes = json.dumps(BotMemoryStore(state_root).get(expected["botId"]), ensure_ascii=False)
 if "regression" not in notes:
     raise SystemExit("bot memory note lost across the round trip")
-print(json.dumps({"bots": len(bots), "tasks": len(tasks), "schema": raw["schema"]}))
+print(json.dumps({"bots": len(bots), "schedules": len(schedules), "schema": raw["schema"]}))
 """
 
 
@@ -854,7 +866,8 @@ def _smoke_channel_switch_round_trip() -> None:
             [
                 sys.executable, "-c", _CHANNEL_SWITCH_VERIFY_PROBE,
                 str(newer_tree), str(state_root),
-                json.dumps({"botId": written["botId"], "taskId": written["taskId"]}),
+                json.dumps({"botId": written["botId"], "scheduleId": written["scheduleId"],
+                            "nextRunAt": written["nextRunAt"]}),
             ],
             env=newer_env,
         )
