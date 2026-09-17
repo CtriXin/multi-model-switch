@@ -1,0 +1,64 @@
+{
+  "step_session_a": {
+    "id": "s-a0f9750c1419",
+    "title": "执行者甲",
+    "workspaceId": "default",
+    "harness": "pi",
+    "modelName": "glm-5.3",
+    "presetId": "web:pi:newapi-personal-tokyo:glm-5.3",
+    "providerName": "newapi-tokyo",
+    "channel": "newapi-personal-tokyo",
+    "state": "idle",
+    "activity": null,
+    "updatedAt": "2026-09-17T06:20:54.779+00:00",
+    "lastEventAt": "2026-09-17T06:20:54.779+00:00",
+    "heartbeatAt": "2026-09-17T06:20:54.749+00:00",
+    "owner": "bot",
+    "archived": true,
+    "cwd": "/Users/xin/.local/share/stride/tasks/40b7e258eeda4dc1/workspace",
+    "forkedFrom": null,
+    "capabilities": {
+      "send": true,
+      "stop": true,
+      "approve": false,
+      "steer": true,
+      "queueControl": true
+    },
+    "btwNative": true,
+    "botId": "bot_5020b10dc5024c42"
+  },
+  "step_session_b": {
+    "id": "s-bd1093684d9b",
+    "title": "执行者乙",
+    "workspaceId": "default",
+    "harness": "pi",
+    "modelName": "glm-5.3",
+    "presetId": "web:pi:newapi-personal-tokyo:glm-5.3",
+    "providerName": "newapi-tokyo",
+    "channel": "newapi-personal-tokyo",
+    "state": "idle",
+    "activity": null,
+    "updatedAt": "2026-09-17T06:22:43.786+00:00",
+    "lastEventAt": "2026-09-17T06:22:43.786+00:00",
+    "heartbeatAt": "2026-09-17T06:22:43.758+00:00",
+    "owner": "bot",
+    "archived": true,
+    "cwd": "/Users/xin/.local/share/stride/tasks/40b7e258eeda4dc1/workspace",
+    "forkedFrom": null,
+    "capabilities": {
+      "send": true,
+      "stop": true,
+      "approve": false,
+      "steer": true,
+      "queueControl": true
+    },
+    "btwNative": true,
+    "botId": "bot_170c59e215e24615"
+  },
+  "pilot_sidebar": [],
+  "checks": {
+    "step_session_a_archived": true,
+    "main_session_a_still_live": true,
+    "pilot_sidebar_hides_bot_sessions": true
+  }
+}

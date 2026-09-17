@@ -1,0 +1,12 @@
+{
+  "port": 61731,
+  "appVersion": "5.0.4",
+  "rev": "9110141d",
+  "presets": {
+    "web:pi:newapi-personal-tokyo:kimi-for-coding-highspeed": "kimi-for-coding-highspeed",
+    "web:pi:newapi-personal-tokyo:deepseek-v4-flash": "deepseek-v4-flash",
+    "web:pi:newapi-personal-tokyo:glm-5.3": "glm-5.3",
+    "web:pi:newapi-personal-tokyo:MiniMax-M3": "MiniMax-M3"
+  },
+  "missing": []
+}

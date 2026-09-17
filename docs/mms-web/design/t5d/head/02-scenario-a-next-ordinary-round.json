@@ -1,0 +1,125 @@
+{
+  "task": {
+    "id": "task_415ab4cde8314723",
+    "botId": "bot_5020b10dc5024c42",
+    "prompt": "只回复：收到。",
+    "parentTaskId": null,
+    "status": "completed",
+    "runAt": null,
+    "children": [],
+    "result": "收到",
+    "error": null,
+    "acceptedAt": null,
+    "sessionId": "s-51942aa1c23d",
+    "waitReason": null,
+    "turn": 1,
+    "createdAt": "2026-09-17T06:20:55.447+00:00",
+    "updatedAt": "2026-09-17T06:22:16.762+00:00",
+    "priority": 50,
+    "queueReason": null,
+    "coordinatorPlan": {
+      "version": 2,
+      "mode": "direct",
+      "ownerBotId": "bot_5020b10dc5024c42",
+      "reason": "普通任务由当前 Bot 直接完成。",
+      "steps": [
+        {
+          "id": "s1",
+          "kind": "execute",
+          "botId": "bot_5020b10dc5024c42",
+          "goal": "",
+          "dependsOn": [],
+          "presetId": null,
+          "status": "done",
+          "taskId": null,
+          "onFailure": "retry"
+        }
+      ],
+      "candidates": [],
+      "merge": "owner",
+      "modelDecision": false,
+      "source": "direct-first",
+      "status": "done",
+      "history": [
+        {
+          "at": "2026-09-17T06:22:09.126+00:00",
+          "from": null,
+          "to": "auto",
+          "by": "system"
+        },
+        {
+          "at": "2026-09-17T06:22:11.151+00:00",
+          "from": "auto",
+          "to": "running",
+          "by": "system"
+        },
+        {
+          "at": "2026-09-17T06:22:16.762+00:00",
+          "from": "running",
+          "to": "merging",
+          "by": "system"
+        },
+        {
+          "at": "2026-09-17T06:22:16.762+00:00",
+          "from": "merging",
+          "to": "done",
+          "by": "system"
+        }
+      ]
+    },
+    "executionMode": "direct",
+    "collaborationRequested": false,
+    "outcome": {
+      "summary": "收到",
+      "evidence": null,
+      "changes": null,
+      "pending": null,
+      "next": null,
+      "raw": "收到"
+    },
+    "startedAt": "2026-09-17T06:22:09.125+00:00",
+    "cancelRequested": false,
+    "waitRequested": false,
+    "forceStopSent": false,
+    "cancelAt": null,
+    "completedAt": "2026-09-17T06:22:16.762+00:00",
+    "planResolved": true,
+    "planDecidedAt": "2026-09-17T06:22:09.127+00:00",
+    "processId": 65028,
+    "reusedSession": false,
+    "model": "MiniMax-M3",
+    "waitQuestion": "",
+    "waitOptions": [],
+    "waitSince": null
+  },
+  "worker": {
+    "id": "bot_5020b10dc5024c42",
+    "name": "执行者甲",
+    "description": "计划步骤的目标 Bot",
+    "systemPrompt": "",
+    "workspaceId": "default",
+    "presetId": "web:pi:newapi-personal-tokyo:MiniMax-M3",
+    "pendingPresetId": "",
+    "wakeEnabled": true,
+    "status": "idle",
+    "sessionId": "s-51942aa1c23d",
+    "avatarId": "round",
+    "avatarColor": "#ff9f91",
+    "createdAt": "2026-09-17T06:20:31.026+00:00",
+    "updatedAt": "2026-09-17T06:22:09.167+00:00",
+    "memoryEnabled": true,
+    "memoryBudgetTokens": 2000,
+    "autoCompact": true,
+    "compactAtPercent": 70,
+    "orchestrationPolicy": "direct-first",
+    "planner": "model",
+    "model": "MiniMax-M3",
+    "channel": "newapi-personal-tokyo",
+    "pendingQuestion": null
+  },
+  "checks": {
+    "model": "MiniMax-M3",
+    "pending_cleared": true,
+    "new_session": true
+  }
+}

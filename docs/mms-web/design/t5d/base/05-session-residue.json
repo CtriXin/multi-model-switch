@@ -1,0 +1,10 @@
+{
+  "step_session_a": null,
+  "step_session_b": null,
+  "pilot_sidebar": [],
+  "checks": {
+    "step_session_a_archived": false,
+    "main_session_a_still_live": true,
+    "pilot_sidebar_hides_bot_sessions": true
+  }
+}
