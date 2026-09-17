@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { getSession } from "./api";
+import { getSession, isPreview } from "./api";
 import type { Session, SessionDetail } from "./types";
 
 const storageKey = "mms-web-read-results-v1";
@@ -35,6 +35,47 @@ export function resultToken(detail: SessionDetail): string {
   for (let i = 0; i < content.length; i++)
     hash = Math.imul(hash ^ content.charCodeAt(i), 16777619);
   return `${output.nativeTimestamp || output.id}:${hash >>> 0}`;
+}
+
+const BOTTOM_SLACK = 100;
+
+export function conversationAtBottom(
+  el: { scrollHeight: number; scrollTop: number; clientHeight: number },
+  slack = BOTTOM_SLACK,
+): boolean {
+  return el.scrollHeight - el.scrollTop - el.clientHeight < slack;
+}
+
+export function shouldMarkResultRead(input: {
+  hasOutputToken: boolean;
+  viewingBottom: boolean;
+  visible: boolean;
+  connected: boolean;
+}): boolean {
+  return Boolean(
+    input.hasOutputToken &&
+      input.viewingBottom &&
+      input.visible &&
+      input.connected,
+  );
+}
+
+export function writeReadReceipt(
+  receipts: Record<string, string>,
+  id: string,
+  token: string,
+): void {
+  receipts[id] = token;
+}
+
+export function shouldAdoptBaselineReceipt(input: {
+  preview: boolean;
+  inBaseline: boolean;
+  hasStoredReceipt: boolean;
+  wasBusy: boolean;
+}): boolean {
+  if (input.preview) return false;
+  return input.inBaseline && !input.hasStoredReceipt && !input.wasBusy;
 }
 
 export function useSessionAttention(
@@ -120,11 +161,14 @@ export function useSessionAttention(
           if (!token) continue;
           revisions.current.set(s.id, s.updatedAt);
           if (
-            baseline.current?.has(s.id) &&
-            !(s.id in receipts.current) &&
-            !busy.current.has(s.id)
+            shouldAdoptBaselineReceipt({
+              preview: isPreview,
+              inBaseline: Boolean(baseline.current?.has(s.id)),
+              hasStoredReceipt: s.id in receipts.current,
+              wasBusy: busy.current.has(s.id),
+            })
           ) {
-            receipts.current[s.id] = token;
+            writeReadReceipt(receipts.current, s.id, token);
             save();
           }
           if (receipts.current[s.id] !== token)
@@ -158,11 +202,21 @@ export function useSessionAttention(
   }, [signature, connected, retry]);
   const token = detail ? resultToken(detail) : "";
   useEffect(() => {
-    if (!detail || !token || !viewingBottom || !visible || !connected) return;
+    if (
+      !detail ||
+      !shouldMarkResultRead({
+        hasOutputToken: Boolean(token),
+        viewingBottom,
+        visible,
+        connected,
+      })
+    )
+      return;
     const id = detail.session.id;
-    // A selected row is not a read receipt. Wait until its actual output is rendered.
+    // openSession follows the latest output, so viewingBottom becomes true
+    // after that jump. A session already parked mid-transcript does not.
     const frame = requestAnimationFrame(() => {
-      receipts.current[id] = token;
+      writeReadReceipt(receipts.current, id, token);
       save();
       setUnread((old) =>
         old[id] === token

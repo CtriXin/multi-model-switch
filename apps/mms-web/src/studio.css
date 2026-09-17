@@ -182,11 +182,11 @@ body,
   color: var(--muted);
 }
 .workspace-heading {
-  /* The right inset is permanently reserved for the hover actions, so the
-     folder name truncates in the same place whether or not they are shown.
-     Fading the name on hover instead left it running under the icons: the
-     fade landed inside the name's own box, which extends past where the
-     buttons begin. */
+  /* Keep a right slot so the name truncates in the same place at rest and
+     on hover. The count and the ⋯/+ actions share that slot: they never
+     show together, so the number sits on the trailing edge instead of
+     stopping short of empty reserved space. */
+  position: relative;
   padding: 5px 62px 5px 8px;
   font-size: max(11px, 0.8571rem);
   gap: 7px;
@@ -197,9 +197,16 @@ body,
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.workspace-heading > span:last-child {
+.workspace-count {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  margin: 0;
   font-size: max(11px, 0.7143rem);
+  font-variant-numeric: tabular-nums;
   opacity: 0.7;
+  pointer-events: none;
 }
 .workspace-group + .workspace-group {
   margin-top: 16px;
@@ -237,9 +244,9 @@ body,
 .workspace-row-actions .icon-button {
   padding: 3px;
 }
-/* The count would sit under the action buttons; hide it while they show. */
-.workspace-group:hover .workspace-heading > span:last-child,
-.workspace-group:focus-within .workspace-heading > span:last-child {
+/* Count and actions share the trailing slot. */
+.workspace-group:hover .workspace-count,
+.workspace-group:focus-within .workspace-count {
   opacity: 0;
 }
 /* A touch device has no hover, and a tap on a row opens the session, so
@@ -262,6 +269,9 @@ body,
   }
   .workspace-row-actions .new-in-folder {
     display: none;
+  }
+  .workspace-count {
+    opacity: 0;
   }
 }
 .workspace-tools {

@@ -397,8 +397,8 @@ kbd {
   font-size: max(11px, 0.7857rem);
   color: var(--muted);
 }
-.workspace-heading > span:last-child {
-  margin-left: auto;
+.workspace-count {
+  margin: 0;
 }
 .session-link {
   display: flex;
@@ -548,6 +548,13 @@ kbd {
   gap: 20px;
   align-items: center;
   margin-left: auto;
+}
+.topbar-actions .status.compact {
+  align-self: center;
+  margin: 0;
+  width: 30px;
+  height: 30px;
+  justify-content: center;
 }
 .icon-button {
   border: 0;
@@ -3720,9 +3727,8 @@ dialog:has(> .dialog-body .model-explorer) > .dialog-body > header {
   flex: 0 0 7px;
   position: relative;
 }
-.status.compact {
+.session-link .status.compact {
   align-self: flex-start;
-  margin: 6px 2px 0 0;
   overflow: visible;
 }
 .status.idle .status-dot,
@@ -3799,6 +3805,7 @@ dialog:has(> .dialog-body .model-explorer) > .dialog-body > header {
   background: var(--danger-bg);
 }
 .current-activity.idle,
+.current-activity.pending,
 .current-activity.stopped,
 .current-activity.completed {
   background: transparent;

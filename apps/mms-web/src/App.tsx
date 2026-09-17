@@ -70,7 +70,10 @@ import { SideQuestions, useSideQuestions } from "./SideQuestions";
 import { wireMode } from "./message-control";
 import { ConversationOutline } from "./ConversationOutline";
 import { CurrentActivity, sessionStatus } from "./SessionStatus";
-import { useSessionAttention } from "./SessionAttention";
+import {
+  conversationAtBottom,
+  useSessionAttention,
+} from "./SessionAttention";
 import { FilesPanel } from "./FilesPanel";
 import { RuntimePanel, SessionMenu, exportConversation } from "./SessionTools";
 import { RecipeImport, readRecipeDraft, saveRecipeDraft } from "./Recipe";
@@ -328,7 +331,7 @@ export function App() {
   );
   const [artifactId, setArtifactId] = useState("");
   const [selectionRequest, setSelectionRequest] = useState<{ nonce: string; sessionId: string; selection: FileSelection }>();
-  const [atBottom, setAtBottom] = useState(true);
+  const [atBottom, setAtBottom] = useState(false);
   const [autoCollapseProcess, setAutoCollapseProcess] = useState(() => readSetting("mms-web-auto-collapse-process", true));
   const [processForced, setProcessForced] = useState<{
     collapsed: boolean;
@@ -587,9 +590,30 @@ export function App() {
   }, []);
   const latestEvent = detail?.events.at(-1);
   useEffect(() => {
-    if (followOutput.current && scroll.current)
-      scroll.current.scrollTop = scroll.current.scrollHeight;
-  }, [selectedId, latestEvent?.id, latestEvent?.text, latestEvent?.thinking]);
+    const el = scroll.current;
+    if (!el || page !== "session") return;
+    const sync = () => {
+      if (followOutput.current) el.scrollTop = el.scrollHeight;
+      setAtBottom(conversationAtBottom(el));
+    };
+    sync();
+    const frame = requestAnimationFrame(sync);
+    const ro = new ResizeObserver(sync);
+    ro.observe(el);
+    const content = el.firstElementChild;
+    if (content) ro.observe(content);
+    return () => {
+      cancelAnimationFrame(frame);
+      ro.disconnect();
+    };
+  }, [
+    page,
+    selectedId,
+    latestEvent?.id,
+    latestEvent?.text,
+    latestEvent?.thinking,
+    detail?.events.length,
+  ]);
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
@@ -801,7 +825,7 @@ export function App() {
     history.replaceState(null, "", "#session=" + encodeURIComponent(id));
     followOutput.current = true;
     holdPosition.current = false;
-    setAtBottom(true);
+    setAtBottom(false);
     currentSelection.current = id;
     setSelectedId(id);
     setDetail(null);
@@ -1290,7 +1314,7 @@ export function App() {
                     />
                     <FolderOpen size={14} />
                     <span>{w.id === "default" ? "启动目录" : w.name}</span>
-                    <span>{sessions.length}</span>
+                    <span className="workspace-count">{sessions.length}</span>
                   </button>
                   <div className="workspace-row-actions">
                     <Popover
@@ -1422,18 +1446,24 @@ export function App() {
                     </button>
                   </div>
                   {!collapsed.includes(w.id) &&
-                    sessions.slice(0, shownPerWorkspace[w.id] ?? 8).map((s) => (
+                    sessions.slice(0, shownPerWorkspace[w.id] ?? 8).map((s) => {
+                      const unread = Boolean(signals.unread[s.id]);
+                      const row = sessionStatus(
+                        s,
+                        !connected || statusesStale,
+                        unread,
+                      );
+                      return (
                       <div className="session-row" key={s.id}>
                       <button
                         className={
                           "session-link " +
                           (selectedId === s.id ? "selected " : "") +
-                          (signals.unread[s.id] ? "has-unread " : "") +
+                          (unread ? "has-unread " : "") +
                           (signals.flashes[s.id] ? "just-completed" : "")
                         }
-                        data-phase={
-                          sessionStatus(s, !connected || statusesStale).phase
-                        }
+                        data-phase={row.phase}
+                        data-unread={unread ? "true" : "false"}
                         aria-current={selectedId === s.id ? "page" : undefined}
                         key={s.id}
                         onClick={() => openSession(s.id)}
@@ -1442,26 +1472,20 @@ export function App() {
                           session={s}
                           compact
                           disconnected={!connected || statusesStale}
+                          unread={unread}
                         />
                         <span className="session-link-copy">
                           <span className="session-title-row">
                             <strong>{s.title}</strong>
-                            {signals.unread[s.id] && (
+                            {unread && (
                               <span className="new-reply-badge">新回复</span>
                             )}
                           </span>
                           <small>
                             <span
-                              className={
-                                "session-phase " +
-                                sessionStatus(s, !connected || statusesStale)
-                                  .phase
-                              }
+                              className={"session-phase " + row.phase}
                             >
-                              {
-                                sessionStatus(s, !connected || statusesStale)
-                                  .label
-                              }
+                              {row.label}
                             </span>
                             <span>·</span>
                             {s.owner === "cli" && (
@@ -1596,7 +1620,8 @@ export function App() {
                         )}
                       </Popover>
                       </div>
-                    ))}
+                    );
+                    })}
                   {!collapsed.includes(w.id) &&
                     sessions.length > (shownPerWorkspace[w.id] ?? 8) && (
                       <button
@@ -1728,6 +1753,7 @@ export function App() {
                 compact
                 session={detail.session}
                 disconnected={!connected || statusesStale || !!sessionError}
+                unread={Boolean(signals.unread[detail.session.id])}
               />
             )}
             {page === "session" && (
@@ -1962,6 +1988,7 @@ export function App() {
                         <Status
                           session={s}
                           disconnected={!connected || statusesStale}
+                          unread={Boolean(signals.unread[s.id])}
                         />
                         <ChevronRight size={16} />
                       </button>
@@ -2076,10 +2103,10 @@ export function App() {
                   onScroll={() => {
                     const el = scroll.current;
                     if (el) {
+                      const atEnd = conversationAtBottom(el);
                       followOutput.current =
-                        !holdPosition.current &&
-                        el.scrollHeight - el.scrollTop - el.clientHeight < 100;
-                      setAtBottom(followOutput.current);
+                        !holdPosition.current && atEnd;
+                      setAtBottom(atEnd);
                     }
                   }}
                 >
@@ -2181,6 +2208,7 @@ export function App() {
                   <CurrentActivity
                     session={detail.session}
                     disconnected={!connected || statusesStale || !!sessionError}
+                    unread={Boolean(signals.unread[detail.session.id])}
                   />
                   <div className="session-workbar">
                     <button

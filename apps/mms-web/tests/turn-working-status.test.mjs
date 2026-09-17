@@ -25,6 +25,7 @@ const statusSandbox = {
     if (req === "react") return React;
     if (req === "lucide-react") return {
       Check: () => null,
+      Circle: () => null,
       CircleAlert: () => null,
       Pause: () => null,
       CircleHelp: () => null,
@@ -144,9 +145,32 @@ test("turnWorkingHint provides clear status hint for thinking, tool, responding 
   };
   assert.equal(turnWorkingHint(waitingInputSession), "等待你的回答");
 
-  // Fallback for null or unknown activity
+  // Fallback for null or unknown activity: already-read idle is pending
   const idleSession = { state: "idle", activity: null };
-  assert.equal(turnWorkingHint(idleSession), "本轮执行完成");
+  assert.equal(turnWorkingHint(idleSession), "就绪 · 随时发送消息");
+  assert.equal(turnWorkingHint(idleSession, false, true), "本轮执行完成");
+});
+
+test("sidebar phases distinguish loading, tool, unread complete and read pending", () => {
+  const disconnected = false;
+  assert.equal(
+    sessionStatus({ state: "running", activity: { phase: "responding" } }, disconnected).phase,
+    "responding",
+  );
+  assert.equal(
+    sessionStatus({ state: "running", activity: { phase: "responding" } }, disconnected).label,
+    "正在输出",
+  );
+  assert.equal(
+    sessionStatus({ state: "running", activity: { phase: "tool", toolName: "bash" } }, disconnected).label,
+    "执行工具",
+  );
+  const settled = { state: "idle", activity: null };
+  assert.equal(sessionStatus(settled, disconnected, true).phase, "completed");
+  assert.equal(sessionStatus(settled, disconnected, true).label, "已完成");
+  assert.equal(sessionStatus(settled, disconnected, false).phase, "pending");
+  assert.equal(sessionStatus(settled, disconnected, false).label, "待命");
+  assert.equal(sessionStatus(settled).phase, "pending");
 });
 
 test("activityHints exports correct hints for all active phases", () => {
