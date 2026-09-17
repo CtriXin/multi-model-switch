@@ -230,7 +230,7 @@ export function WorkspaceDialog({ close, added, reference, initialQuery = "", su
       ? "从这台电脑逐层打开"
       : loading && !shown.length ? "正在查找…" : query ? `找到 ${shown.length} 个文件夹` : "最近和常用的文件夹";
   const activeFolder = rows[activeIndex];
-  const truncated = Object.values(truncatedAt).some(Boolean);
+  const truncatedPaths = Object.keys(truncatedAt).filter((path) => truncatedAt[path]);
   return (
     <Dialog title={reference ? "引用文件夹" : "找到你的项目"} close={() => dismissWorkspaceDialog(close, abortAction)}>
       <p className="dialog-intro">{reference
@@ -260,7 +260,7 @@ export function WorkspaceDialog({ close, added, reference, initialQuery = "", su
         onSelectShown={(item) => void select({ id: item.id || "", name: item.name, path: item.path })}
         rows={rows}
         activeIndex={activeIndex}
-        truncated={truncated}
+        truncatedPaths={truncatedPaths}
         onHighlightRow={setActiveIndex}
         onToggleRow={(path) => void toggle(path)}
         onTreeKeyDown={(e) => { onTreeKey(e); }}
