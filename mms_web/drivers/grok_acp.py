@@ -86,6 +86,7 @@ class GrokAcpDriver:
         self._steering: list[str] = []
         self._steer_notice_sent = False
         self._prompt_ids: set[int] = set()
+        self._replay = False
         self._exit_code: int | None = None
         self._stderr_tail = ""
         self._exit_notified = False
@@ -302,14 +303,16 @@ class GrokAcpDriver:
         self._apply_model_state((meta or {}).get("modelState") if isinstance(meta, dict) else None)
         session = None
         if self._resume_session_id:
-            try:
-                session = self._rpc(
-                    "session/load",
-                    {"sessionId": self._resume_session_id, "cwd": self._cwd, "mcpServers": []},
-                    timeout=timeout,
-                )
-            except (WebError, RpcTimeoutError, DriverClosedError):
-                session = None
+            self._replay = True
+            params = {"sessionId": self._resume_session_id, "cwd": self._cwd, "mcpServers": []}
+            for method in ("session/load", "session/resume"):
+                try:
+                    session = self._rpc(method, params, timeout=timeout)
+                except (WebError, RpcTimeoutError, DriverClosedError):
+                    session = None
+                if isinstance(session, dict) and session.get("sessionId"):
+                    break
+            self._replay = False
         if not isinstance(session, dict) or not session.get("sessionId"):
             session = self._rpc(
                 "session/new",
@@ -661,6 +664,15 @@ class GrokAcpDriver:
 
     def _handle_update(self, update: dict) -> None:
         kind = str(update.get("sessionUpdate") or "")
+        if self._replay and kind in {
+            "agent_message_chunk",
+            "agent_message",
+            "agent_thought_chunk",
+            "agent_thought",
+            "tool_call",
+            "tool_call_update",
+        }:
+            return
         if kind in {"agent_message_chunk", "agent_message"}:
             self._ensure_assistant()
             text = _content_text(update.get("content") if "content" in update else update)

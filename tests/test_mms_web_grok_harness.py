@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import time
 from pathlib import Path
@@ -124,6 +125,52 @@ def test_grok_approval_confirm(service):
         ),
         message="approved reply",
     )
+
+
+def test_grok_resume_reuses_native_session(tmp_path, monkeypatch):
+    runtime = tmp_path / "state" / "runtimes" / "g1"
+    runtime.mkdir(parents=True)
+
+    class RootedCatalog(FakeCatalog):
+        def resolve_launch(self, preset_id: str, workspace_id: str) -> dict:
+            payload = super().resolve_launch(preset_id, workspace_id)
+            payload["runtime"]["_webConfigRoot"] = str(runtime)
+            return payload
+
+    monkeypatch.setattr("mms_web.sessions.probe_mms_pi_seam", lambda: {"available": False, "reason": "pi unused"})
+    monkeypatch.setattr("mms_web.sessions.probe_mms_grok_seam", lambda: {"available": True, "injected": True})
+    svc = SessionService(
+        config_root=tmp_path / "config",
+        state_root=tmp_path / "state",
+        catalog=RootedCatalog(),
+        launch_plan_builder=launch_bridge.fixed_command_plan_builder([sys.executable, FIXTURE_CHILD]),
+        real_launch=True,
+    )
+    try:
+        detail = svc.launch({
+            "requestId": "grok-resume-1",
+            "workspaceId": "ws",
+            "presetId": "web:grok:prov:dummy",
+            "prompt": "hello grok",
+        })
+        session_id = detail["session"]["id"]
+        wait_for(lambda: svc.get_session(session_id)["session"]["state"] == "idle", message="first settle")
+        saved = json.loads((runtime / "resume.json").read_text(encoding="utf-8"))
+        assert saved.get("grokSessionId")
+        live = svc._sessions[session_id]
+        assert live.can_resume()
+        live.driver.close(graceful_timeout=2)
+        wait_for(lambda: not live.alive(), message="child closed")
+        svc.send(session_id, {"requestId": "grok-resume-2", "text": "after restart"})
+        wait_for(
+            lambda: [e["text"] for e in svc.get_session(session_id)["events"] if e["kind"] == "assistant"]
+            == ["echo: hello grok", "echo: after restart"],
+            message="resumed turn",
+        )
+        texts = [e["text"] for e in svc.get_session(session_id)["events"] if e["kind"] == "assistant"]
+        assert "REPLAY should not appear" not in "".join(texts)
+    finally:
+        svc.close()
 
 
 def test_non_web_harness_still_rejected(service):

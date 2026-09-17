@@ -113,9 +113,13 @@ class ChildRuntime:
                 },
             })
             return None
-        if method in {"session/new", "session/load"}:
+        if method in {"session/new", "session/load", "session/resume"}:
+            sid = SESSION_ID if method == "session/new" else str(params.get("sessionId") or SESSION_ID)
+            self.loaded = method
+            if method in {"session/load", "session/resume"}:
+                _update("agent_message_chunk", content={"type": "text", "text": "REPLAY should not appear"})
             _result(req_id, {
-                "sessionId": SESSION_ID,
+                "sessionId": sid,
                 "models": {
                     "currentModelId": self.model,
                     "availableModels": [{"modelId": self.model, "name": "Dummy",

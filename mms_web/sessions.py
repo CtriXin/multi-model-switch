@@ -217,8 +217,15 @@ class _LiveSession:
 
     def can_resume(self) -> bool:
         root = self.meta.get("runtimeRoot")
-        return bool(root and (Path(root) / "resume.json").is_file()
-                    and (Path(root) / "conversation.jsonl").is_file())
+        if not root or not (Path(root) / "resume.json").is_file():
+            return False
+        if str(self.meta.get("harness") or "pi") != "grok":
+            return (Path(root) / "conversation.jsonl").is_file()
+        try:
+            saved = json.loads((Path(root) / "resume.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        return bool(saved.get("grokSessionId") or self.meta.get("grokSessionId"))
 
     def session_caps(self) -> dict:
         alive = self.alive() and not self.finalized
