@@ -106,6 +106,18 @@
 
 **验证**:造 410 个子目录,真机进去必须看到提示。
 
+## 已经替你做掉的两条(必改 7、8)
+
+机主一度找不到执行人,我先动手做了后端这两条,**已推到 `codex/stride-7e934fe611bc41b4`**(commit `0b11f941`)。你 pull 之后它们就在,不用重做 —— 下面两节留着是为了让你知道改了什么、以及怎么验。
+
+顺带做的还有:合并了最新 `main`(分支原来落后一个 release),以及那条 `/` 可列的契约测试(见"我的裁决"一节)。
+
+`tests/test_mms_web_workspace_browse.py` 现在 **18 passed**(原 13)。两条 mutation 我跑过:把 `_is_under` 退回裸 `relative_to` → 红;删掉 `ascii_uppercase` 回退分支 → 红。
+
+**前端那六条(必改 1-6)我一行没碰**,都归你。
+
+---
+
 ## 必改 7 · `_list_drives()` 零覆盖
 
 盘符层是这个 PR 唯一的 Windows 专有逻辑,而它的两个测试(`test_mms_web_workspace_browse.py:149`、`test_mms_web_windows_workspace_picker.py:16`)**都把整个 `_list_drives` monkeypatch 掉了**,所以 `os.listdrives` 分支和 `string.ascii_uppercase` 回退分支的覆盖率是 **0**。
