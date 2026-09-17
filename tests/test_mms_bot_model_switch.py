@@ -9,7 +9,7 @@ from unittest.mock import patch
 import pytest
 
 from mms_web import model_switch
-from mms_web.bot_executor import available_presets, match_presets
+from mms_web.bot_executor import PiBotExecutor, available_presets, match_presets
 from mms_web.bots import BotRuntime
 from mms_web.errors import WebError
 
@@ -34,20 +34,28 @@ class FakeCatalog:
 
 
 class CatalogExecutor:
-    """Fake executor whose validate/start mirror PiBotExecutor's preset resolution.
+    """Fake executor for the runtime's own model and session decisions.
 
-    start() is deliberately faithful about session reuse: when the Bot already
-    owns a session, the real PiBotExecutor sends the prompt to that session and
-    the freshly selected preset is discarded — the effective model is whatever
-    the reused session was launched with. Only a fresh launch uses the new
-    preset. The earlier version of this fake recorded the requested preset
-    either way, which signed off behavior production does not have.
+    start() serves what the runtime asks for the way those requests are meant
+    to be served: a supplied session is continued, so the effective model is
+    whatever that session was launched with, and no supplied session means a
+    fresh launch on the selected preset.
+
+    The real PiBotExecutor additionally refuses to continue a session that runs
+    another model — a backstop for callers that forget to resolve the session
+    themselves. That backstop is covered against the real executor in
+    test_reused_session_running_another_model_* below. The runtime must decide
+    the model/session pairing itself and never lean on the backstop, so this
+    double does not implement it: a runtime that handed over a mismatched
+    session again would show the old model as effective here, and the override
+    tests below would fail on exactly that assertion.
     """
 
     def __init__(self, presets):
         self.catalog = FakeCatalog(presets)
         self.starts = []
         self.sessions = {}
+        self.released = []
 
     def available(self):
         return True
@@ -79,6 +87,12 @@ class CatalogExecutor:
     def cancel(self, task):
         return None
 
+    def release_session(self, session_id, request_id):
+        # Mirrors the real seam: a released session is gone from the list and
+        # cannot be continued by a later task.
+        self.released.append(session_id)
+        self.sessions.pop(session_id, None)
+
     def artifact(self, session_id, artifact_id, revision):
         return {"content": "", "mimeType": "text/plain"}
 
@@ -104,6 +118,9 @@ def complete_one(rt, task_id):
         rt.tick()
         drain_launch(rt)
         if rt.get_task(task_id)["status"] == "completed":
+            # One more tick: one-off sessions are released at the top of tick,
+            # outside the scheduler lock.
+            rt.tick()
             return rt.get_task(task_id)
         time.sleep(0.005)
     return rt.get_task(task_id)
@@ -347,31 +364,29 @@ def test_update_bot_rejects_an_unknown_pending_preset_without_touching_state(tmp
         rt.close()
 
 
-def test_preset_override_is_chosen_but_a_reused_session_still_runs_the_old_model(tmp_path):
-    # Characterization test for a known defect OUTSIDE this package: the
-    # presetIdOverride branch of _launch swaps bot["presetId"] but keeps the
-    # durable session, and PiBotExecutor only applies the preset when it
-    # launches a NEW session — so an override on a Bot that already ran once
-    # is silently ignored. The fix (resetting the session for overrides) is a
-    # separate package for the T2 planning chain. WHEN THAT FIX LANDS THIS
-    # TEST TURNS RED — update it then; do not treat the redness as a T5c
-    # regression.
-    #
-    # What this test does lock (the T5c contract): an override round never
-    # consumes the user's pendingPresetId, and the pending switch takes effect
-    # on the next ordinary round.
+def test_preset_override_runs_in_its_own_session_on_the_overridden_model(tmp_path):
+    # T5d: a plan step that names a model must actually run on it, even for a
+    # Bot that already owns a durable conversation. That was silently false:
+    # the override swapped bot["presetId"] but kept the session, and the
+    # reused session keeps running the model it was launched with.
     rt = runtime(tmp_path)
     try:
         worker = make_bot(rt)
         executor = rt.executor
         first = run_task(rt, worker["id"])
+        main_session = rt.get_bot(worker["id"])["sessionId"]
         rt.worker(first["id"], {"action": "model", "op": "switch", "query": "beta"})
         planned = run_task(rt, worker["id"], prompt="计划指定的一步", override="pi:gamma-pro")
         assert planned["status"] == "completed"
-        # Known defect, stated honestly: the override round reused the old
-        # session, so the effective model is still pi:alpha, not pi:gamma-pro.
-        assert executor.starts[-1]["hadSession"] is True
-        assert executor.starts[-1]["presetId"] == "pi:alpha"
+        # The step ran on the model the plan named, in a session of its own.
+        assert executor.starts[-1]["presetId"] == "pi:gamma-pro"
+        assert executor.starts[-1]["model"] == "Gamma Pro"
+        assert executor.starts[-1]["hadSession"] is False
+        assert planned["sessionId"] != main_session
+        assert planned["model"] == "Gamma Pro"
+        # The Bot's main conversation is neither replaced nor consumed: the
+        # one-off session belongs to the task, not to the Bot.
+        assert rt.get_bot(worker["id"])["sessionId"] == main_session
         # The T5c contract holds: a planned step must not eat the pending switch.
         bot = rt.get_bot(worker["id"])
         assert bot["pendingPresetId"] == "pi:beta" and bot["presetId"] == "pi:alpha"
@@ -380,8 +395,133 @@ def test_preset_override_is_chosen_but_a_reused_session_still_runs_the_old_model
         assert executor.starts[-1]["hadSession"] is False
         assert rt.get_bot(worker["id"])["pendingPresetId"] == ""
         assert followup["status"] == "completed"
+        kinds = [(m["type"], m["content"]) for m in rt.list_messages(planned["id"])]
+        assert ("system", "本轮由计划指定使用模型 Gamma Pro。") in kinds
     finally:
         rt.close()
+
+
+def test_preset_override_leaves_the_bot_main_conversation_untouched(tmp_path):
+    # The step is a side branch, not a new main line: after it, an ordinary
+    # round must still continue the same conversation the Bot had before.
+    rt = runtime(tmp_path)
+    try:
+        worker = make_bot(rt)
+        executor = rt.executor
+        first = run_task(rt, worker["id"])
+        main_session = rt.get_bot(worker["id"])["sessionId"]
+        run_task(rt, worker["id"], prompt="计划指定的一步", override="pi:gamma-pro")
+        third = run_task(rt, worker["id"], prompt="接着刚才聊")
+        assert third["status"] == "completed"
+        assert executor.starts[-1]["presetId"] == "pi:alpha"
+        assert executor.starts[-1]["hadSession"] is True
+        assert third["sessionId"] == main_session
+        assert first["sessionId"] == main_session
+        assert rt.get_bot(worker["id"])["sessionId"] == main_session
+    finally:
+        rt.close()
+
+
+def test_preset_override_one_off_session_is_stopped_and_archived(tmp_path):
+    # Nothing adopts that session, so nobody would stop it: it must not linger
+    # in Pilot's session list next to the Bot's real conversation.
+    rt = runtime(tmp_path)
+    try:
+        worker = make_bot(rt)
+        executor = rt.executor
+        run_task(rt, worker["id"])
+        main_session = rt.get_bot(worker["id"])["sessionId"]
+        planned = run_task(rt, worker["id"], prompt="计划指定的一步", override="pi:gamma-pro")
+        assert planned["sessionId"] != main_session
+        assert executor.released == [planned["sessionId"]]
+        assert rt.get_bot(worker["id"])["sessionId"] == main_session
+    finally:
+        rt.close()
+
+
+def test_an_ordinary_round_never_releases_the_bot_session(tmp_path):
+    rt = runtime(tmp_path)
+    try:
+        worker = make_bot(rt)
+        run_task(rt, worker["id"])
+        run_task(rt, worker["id"], prompt="第二轮")
+        assert rt.executor.released == []
+        assert rt.get_bot(worker["id"])["sessionId"]
+    finally:
+        rt.close()
+
+
+class ReuseSessions:
+    """Minimal session service for exercising the real PiBotExecutor.start()."""
+
+    def __init__(self, preset_id, model_name="Alpha"):
+        self.preset_id, self.model_name = preset_id, model_name
+        self.launched, self.sent = [], []
+
+    def capabilities(self):
+        return {"launch": True}
+
+    def get_session(self, session_id):
+        return {"session": {"id": session_id, "state": "idle", "presetId": self.preset_id,
+                            "modelName": self.model_name},
+                "events": [], "artifacts": []}
+
+    def send(self, session_id, payload):
+        self.sent.append((session_id, payload))
+        return {"session": {"id": session_id, "presetId": self.preset_id, "modelName": self.model_name}}
+
+    def launch(self, payload):
+        self.launched.append(payload)
+        return {"session": {"id": "s-new", "presetId": payload.get("presetId"),
+                            "modelName": payload.get("presetId")}}
+
+    def launch_bot(self, payload, bot_id):
+        return self.launch({**payload, "owner": "bot", "botId": bot_id})
+
+    def diagnostics(self, session_id):
+        return {}
+
+
+def test_a_reused_session_that_runs_the_selected_model_is_continued(tmp_path):
+    sessions = ReuseSessions("pi:alpha")
+    executor = PiBotExecutor(sessions, FakeCatalog(PRESETS))
+    bot = {"id": "bot_1", "name": "worker", "presetId": "pi:alpha", "workspaceId": "ws-1",
+           "sessionId": "s-main"}
+    task = {"id": "task_1", "prompt": "继续", "launchRequestId": "launch-1"}
+    outcome = executor.start(task, bot, tmp_path / "context.json")
+    assert [session_id for session_id, _ in sessions.sent] == ["s-main"]
+    assert sessions.launched == []
+    assert outcome["sessionId"] == "s-main" and outcome["reusedSession"] is True
+
+
+def test_reused_session_running_another_model_is_never_silently_reused(tmp_path):
+    # The core defense of T5d: a conversation grew on one model. Continuing it
+    # under another model runs the session's model while the caller asked for a
+    # different one — the guardrails' first counterexample. It must not be
+    # ignored: the selected preset wins, in a fresh session.
+    sessions = ReuseSessions("pi:alpha", model_name="Alpha")
+    executor = PiBotExecutor(sessions, FakeCatalog(PRESETS))
+    bot = {"id": "bot_1", "name": "worker", "presetId": "pi:gamma-pro", "workspaceId": "ws-1",
+           "sessionId": "s-main"}
+    task = {"id": "task_1", "prompt": "换模型跑一步", "launchRequestId": "launch-1"}
+    outcome = executor.start(task, bot, tmp_path / "context.json")
+    assert sessions.sent == []
+    assert sessions.launched[0]["presetId"] == "pi:gamma-pro"
+    assert outcome["sessionId"] == "s-new" and outcome["reusedSession"] is False
+
+
+def test_reused_session_without_a_recorded_preset_is_not_assumed_to_match(tmp_path):
+    # Same rule, weaker evidence: a session that does not say which model it
+    # runs cannot be proven to run the selected one, so it is not reused.
+    sessions = ReuseSessions("")
+    executor = PiBotExecutor(sessions, FakeCatalog(PRESETS))
+    bot = {"id": "bot_1", "name": "worker", "presetId": "pi:alpha", "workspaceId": "ws-1",
+           "sessionId": "s-main"}
+    task = {"id": "task_1", "prompt": "继续", "launchRequestId": "launch-1"}
+    outcome = executor.start(task, bot, tmp_path / "context.json")
+    assert sessions.sent == []
+    assert sessions.launched[0]["presetId"] == "pi:alpha"
+    assert outcome["reusedSession"] is False
 
 
 def test_switch_during_overridden_task_says_so_in_the_reply(tmp_path):

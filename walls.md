@@ -1100,3 +1100,56 @@ Mutation（都实际跑过）：M1 fake 忠实化后旧断言 gamma-pro → **�
 需要 Fable 确认：无新增；首版确认项 1（消费时重置 sessionId）在返工中保留并被 R3/R4 细化（不可用/同模型两种不动 session 的特例），确认项 3 被返工包反转并已按反转实现。
 
 耗时: 约 1 小时 40 分（含 mutation、门禁与三轮真机验证）· 归因: [AGENT]/[TOOL]
+
+
+## 2026-09-17 14:48 +08 · deepseek-v4-flash (pi) · 370e87ec37e741df
+
+包：T5d（`docs/mms-web/bot-work/T5d-planned-step-model-actually-applies.md`）——让计划步骤指定的模型真的生效。Stride task 40b7e258eeda4dc1，base `origin/dev` = 9110141d（T5a/T5b/T5c 都已进 dev）。未 merge。
+
+需求：一个计划步骤可以带 `presetId`（落成子任务的 `presetIdOverride`），但它对任何跑过一次任务的 Bot 都静默失效——那一步用 Bot 的旧模型跑完，界面没有任何线索。修掉消费端，加一道根本防御，并把 T5c 留下的 characterization test 转正。
+
+处置（三层）：
+1. `bot_executor.py` 的 `start()`：复用会话前先读该会话自己的 `presetId`（`get_session(id)["session"]["presetId"]`，launch 时写入、会话级 model switch 同步更新），与 `selected["presetId"]` 不一致（或会话没记 preset）就不复用、按选中 preset 新起会话；返回值加 `reusedSession`。真值来源选会话而不是"在 Bot 上再记一份"，理由写进 BOTS.md v2.8（两份记录对不上就是这个 bug 的成因）。
+2. `bots.py` 的 `_launch()`：带 `presetIdOverride` 的任务强制 `sessionId=None` 起**一次性会话**，launch 成功后只写 `task["sessionId"]` + `ephemeralSession`，**不回写 `bot["sessionId"]`**；override 与 Bot 当前模型不同时补一条 system 消息"本轮由计划指定使用模型 X。"。没有照抄 pending 的解法（那会把主对话切碎）。
+3. `bots.py` 新增 `_release_finished_one_off_sessions()`：`tick()` 开头在锁外把已终态的一次性会话 stop + archive（沿用 `plan()` 同一套）；顺带清掉"重启时被打断"的残留。
+写入端（`bots.py:1275` 落 `presetIdOverride` 那处）与 plan schema 未动。文档：BOTS.md 加 v2.8。
+
+改动文件：`git diff --stat`
+```
+ docs/mms-web/BOTS.md               |  12 ++-
+ mms_web/bot_executor.py            |  57 +++++++----
+ mms_web/bots.py                    |  44 ++++++++-
+ tests/test_mms_bot_model_switch.py | 192 ++++++++++++++++++++++++++++++++-----
+ 4 files changed, 258 insertions(+), 47 deletions(-)
+（另新增 docs/mms-web/design/t5d/：run-verify.py、SUMMARY.md、base/ 与 head/ 两套原始证据）
+```
+
+测试 / 门禁（base/head 绝对数）：
+- 定向 12 文件（bot 相关全部 + `test_mms_web_bots.py`）：base **296 passed** / head **302 passed**（+6 新测试；T5c 那条 characterization test 改名 + 改断言转正）
+- `npx tsc --noEmit -p apps/mms-web`：**0 错**
+- `node --test apps/mms-web/tests/*.test.mjs`（glob 带 `*.test.mjs`）：**155 pass / 0 fail**
+- `python3 scripts/ci_pytest_regression.py --base origin/dev`：base 65 failing / 2811，head 65 failing / 2817，No test that passes on the base commit fails here（exit 0）
+- `python3 scripts/regression_fresh_user_gate.py`（完整、串行、`env -u MMS_CONFIG_ROOT -u REAL_HOME -u ORIGINAL_HOME -u MMS_REAL_HOME -u XDG_CONFIG_HOME`）：**1 failed / 717 passed**；唯一失败 `tests/test_pi_launcher.py::test_launch_pi_rewrites_deprecated_antigravity_gemini_alias_to_live_replacement` 在 base 上逐字相同（本机 pi skills-overlay 参数，既存）
+
+Mutation（都实际跑过，还原后 302 全绿）：
+- **M1** 删掉 executor 的 preset 比对 → 2 failed：`test_reused_session_running_another_model_is_never_silently_reused`（红在 `assert sessions.sent == []`：真 executor 把 prompt 发进了旧会话）+ `test_reused_session_without_a_recorded_preset_is_not_assumed_to_match`
+- **M2** override 分支退回原样（不重置 `sessionId`）→ `test_preset_override_runs_in_its_own_session_on_the_overridden_model` 红在 `assert executor.starts[-1]["presetId"] == "pi:gamma-pro"`（实际 `pi:alpha`），正是包内点名的那条断言
+- **M3** 把"不回写 `bot['sessionId']`"改回回写 → `test_preset_override_leaves_the_bot_main_conversation_untouched` 红在 `hadSession is True`（下一轮复用了 override 的一次性会话）
+
+真机验证（base 端口 61731、head 61732；各自独立 `--state-root`，`--config-root ~/.config/mms-next` 只读；未碰 8767/60824/8765/8766，未用 pkill，只 kill 自己启动的 PID；证据 `docs/mms-web/design/t5d/`）：
+- 同一天、同一脚本（`run-verify.py`）、同一组真实预设分别打 base 与 head：owner `kimi-for-coding-highspeed`、worker 自己的模型 `deepseek-v4-flash`、计划指定 `glm-5.3`、pending `MiniMax-M3`；override ≠ worker 默认模型，肉眼可辨。
+- **base 复现（包内硬要求）**：计划步骤要求 `glm-5.3`，`task.model` 实际 **`deepseek-v4-flash`**，而且是在 **worker 主会话**里跑的（`step_session_is_not_main_conversation: false`），任务里没有任何说明；无 `reusedSession` 字段。
+- **head**：同一步实际 **`glm-5.3`**（`task.model` 与子任务会话 `presetId`/`modelName` 一致），会话是它自己的一次性会话，`bot.sessionId` 不变，`pendingPresetId` 未被吃掉，任务里有"本轮由计划指定使用模型 glm-5.3。"，跑完该会话已 `archived: true`；之后普通轮照旧消费 pending（`MiniMax-M3`、新会话）；场景 B（关掉长期记忆）：override 之后的续聊轮仍在**同一个主会话**、仍用 `deepseek-v4-flash`，并从历史答出"紫色河马在弹钢琴 42"。
+- `~/.config/mms-next` 跑前跑后文件指纹逐字节相同（`e0f889ce45cab5f78bba0e24dee8998764326e8edbf5e8dbae2c73c1c133e68a`）；两个实例已停。
+
+未完成 / 未验证：
+- "服务重启时正在跑 override 步骤"这个场景没有单独构造；该残留由下一次 `tick()` 的 sweep 收掉（或下一次启动后第一次 tick）。
+- 没有花额度验证"模型自述自己是哪个模型"（模型自述不可靠）；生效模型以任务记录 + 会话 `presetId`/`modelName` + 上游返回为准。
+- 前端零改动，bundle 未重建（无 `apps/mms-web/src` 变更）。
+
+需要 Fable 确认：
+1. runtime 层测试替身 `CatalogExecutor` **不复刻** executor 的 preset 兜底（它按"给什么会话就继续什么会话"服务，真兜底由真 executor 的用例覆盖）。只有这样才能让 M2 红在 effective preset 那条断言——复刻兜底的话 M2 行为等价、测不出来。替身 docstring 里写明了这一点与理由。
+2. 一次性会话是**无条件**的：override 值恰好等于 Bot 当前模型时也起新会话（只跳过那条 system 消息），与包内"主对话不该被计划的子步骤占用/切碎"的裁决一致。
+3. `reusedSession` 是新加的 task 字段（给证据与测试用）；若不想暴露到接口，需要在 `_view` 里过滤。
+
+耗时：约 1 小时 40 分（含真机两轮、门禁等待与 mutation）· 归因：[AGENT]/[TOOL]
