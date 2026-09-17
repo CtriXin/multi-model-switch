@@ -8,12 +8,18 @@ export function Popover({
   children,
   className = "",
   wide = false,
+  panelWidth,
+  disabled = false,
+  dataGuide,
 }: {
   label: ReactNode;
   title: string;
   children: ReactNode | ((close: () => void, open: boolean) => ReactNode);
   className?: string;
   wide?: boolean;
+  panelWidth?: number;
+  disabled?: boolean;
+  dataGuide?: string;
 }) {
   const id = useId();
   const panel = useRef<HTMLDivElement>(null);
@@ -24,13 +30,17 @@ export function Popover({
       <button
         type="button"
         className={className}
-        popoverTarget={id}
+        disabled={disabled}
+        popoverTarget={disabled ? undefined : id}
         aria-label={title}
         aria-expanded={open}
-        aria-controls={id}
+        aria-controls={disabled ? undefined : id}
+        data-guide={dataGuide}
         onClick={(event) => {
+          if (disabled) return;
           const box = event.currentTarget.getBoundingClientRect();
-          const width = Math.min(wide ? 400 : 340, window.innerWidth - 24);
+          const targetWidth = wide ? 400 : panelWidth || 340;
+          const width = Math.min(targetWidth, window.innerWidth - 24);
           // Room on each side, minus the 10px gap to the trigger and a 12px viewport margin.
           const roomBelow = window.innerHeight - box.bottom - 22;
           const roomAbove = box.top - 22;

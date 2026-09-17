@@ -752,7 +752,7 @@ body,
 .composer-context {
   justify-content: flex-end;
   flex-wrap: nowrap;
-  gap: 0;
+  gap: 4px;
 }
 .task-settings-trigger {
   display: flex;
@@ -768,6 +768,113 @@ body,
 }
 .task-settings-trigger:hover {
   background: var(--soft);
+}
+.task-effort-trigger {
+  cursor: pointer;
+  user-select: none;
+}
+.task-effort-trigger:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.task-effort-trigger .task-effort-icon {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.task-effort-trigger .task-effort-prefix {
+  color: var(--muted);
+  font-size: max(11px, 0.7857rem);
+  white-space: nowrap;
+}
+.task-effort-trigger .task-effort {
+  color: var(--ink);
+  font-weight: 550;
+  font-size: max(11px, 0.7857rem);
+  white-space: nowrap;
+}
+/* Quick Effort Menu Popover */
+.effort-menu {
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  gap: 2px;
+}
+.effort-menu-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 6px 8px 6px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 4px;
+}
+.effort-menu-header > span {
+  font-size: max(11px, 0.7857rem);
+  font-weight: 600;
+  color: var(--ink);
+}
+.effort-menu-header > small {
+  font-size: max(10px, 0.7143rem);
+  color: var(--muted);
+}
+.effort-menu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.effort-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  font: inherit;
+  font-size: max(11px, 0.8571rem);
+  cursor: pointer;
+}
+.effort-menu-item:hover,
+.effort-menu-item:focus-visible {
+  background: var(--soft);
+}
+.effort-menu-item.active {
+  color: var(--accent);
+  background: var(--soft);
+  font-weight: 550;
+}
+.effort-menu-item-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+.effort-menu-item-label {
+  color: var(--ink);
+}
+.effort-menu-item.active .effort-menu-item-label {
+  color: var(--accent);
+}
+.effort-menu-item-code {
+  font-size: max(10px, 0.7143rem);
+  color: var(--muted);
+}
+.effort-menu-item-tag {
+  font-size: max(10px, 0.6429rem);
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--soft);
+  color: var(--muted);
+  border: 1px solid var(--line);
+}
+.effort-menu-check {
+  flex-shrink: 0;
+  color: var(--accent);
 }
 .task-model-name {
   color: var(--ink);
@@ -1497,12 +1604,15 @@ body,
     gap: 5px;
   }
   .task-model-name {
-    max-width: 150px;
+    max-width: 125px;
     font-size: max(11px, 0.7857rem);
   }
   .task-route-name {
     max-width: 85px;
     font-size: max(11px, 0.6429rem);
+  }
+  .task-effort-prefix {
+    display: none;
   }
   .task-effort {
     font-size: max(11px, 0.7143rem);
