@@ -610,3 +610,12 @@
   border-color: color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
+
+/* A delivered message that a late delete could not withdraw. Not an error. */
+.conversation-content .delivery-note {
+  display: block;
+  margin: 0 0 6px 39px;
+  font-size: max(11px, 0.7857rem);
+  color: var(--muted);
+  text-align: right;
+}

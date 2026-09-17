@@ -146,8 +146,14 @@ export function Turn({events, completed, forced, report, steered, isLatestTurn, 
     {isRunning && collapsed && <span className="turn-process-live-dot" title="正在执行中" aria-label="正在执行中" />}
     {!!failures && <span className="process-failure">{failures} 项失败</span>}
   </button>;
+  const userNote = user ? deliveryLabel(user) : "";
   return <section className="conversation-turn">
-    {user && <EventView {...props} event={user} />}
+    {user && (
+      <>
+        {!!userNote && <small className="delivery-note">{userNote}</small>}
+        <EventView {...props} event={user} />
+      </>
+    )}
     {!!process.length && <div className="turn-process">
       {controls}
       <ProcessEvents {...props} events={collapsed ? pinned : process} />

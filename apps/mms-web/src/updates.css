@@ -14,6 +14,8 @@
    whole block, so a two-line description does not push it off centre. */
 .update-preference input { margin-top: 1px; }
 .update-preference small { display: block; margin-top: 4px; color: var(--muted); }
+.update-preference select { min-width: 132px; }
+.update-preview-note { margin: 14px 0 0; padding: 10px 12px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 8%, var(--surface)); color: var(--muted); font-size: 13px; line-height: 1.55; }
 .update-notes { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }
 .update-notes-body { font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; }
 .update-notes-body > :first-child { margin-top: 0; }

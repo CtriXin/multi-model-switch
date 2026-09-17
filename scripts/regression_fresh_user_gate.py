@@ -13,12 +13,18 @@ user-visible flows across install states, not only isolated helper functions.
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
+import tarfile
 import tempfile
+import threading
+import time
+import urllib.request
 from pathlib import Path
 
 
@@ -41,6 +47,10 @@ _SCRUB_ENV_KEYS = {
     "ANTHROPIC_MODEL",
     "MMS_MODEL_NAME",
     "CLAUDE_CODE_SUBAGENT_MODEL",
+    "MMS_COMMAND_NAME",
+    "MMS_PI_SKILLS_OVERLAY",
+    "LANG",
+    "LC_ALL",
 }
 
 _PY_COMPILE_TARGETS = [
@@ -67,6 +77,8 @@ _PYTEST_TARGETS = [
     "tests/test_mms_web_workspace_search.py",
     "tests/test_mms_web_model_settings.py",
     "tests/test_mms_web_merge_regressions.py",
+    "tests/test_mms_channel_switch_contract.py",
+    "tests/test_mms_session_owner_forward_compat.py",
     "tests/test_pi_vision_relay.py",
     "tests/test_mms_web_project_materials.py",
     "tests/test_mms_web_context_flow.py",
@@ -188,6 +200,11 @@ _SCENARIO_MATRIX = [
         "id": "codex-hook-trust-and-history",
         "state": "isolated Codex gateway with inherited/global hook and bounded resume state",
         "coverage": "hook trust does not reprompt and bounded resume/history is preserved safely",
+    },
+    {
+        "id": "channel-switch-round-trip",
+        "state": "one shared state root: the newer line writes a bot, a schedule, bot memory, bot-owned sessions and its update/ui caches; the 4.x line then boots on it; the newer line reads it back",
+        "coverage": "downgrade boots clean (bootstrap 200, no 5xx, no traceback), every bots/ file is untouched byte-for-byte and by mtime, sessions whose owner this line does not know stay out of the list and refuse detail by id while plain web sessions are unaffected, and the upgrade back still finds bot, schedule and memory at schema 2 with no load error; recorded known costs: whatsNewSeenVersion keeps the newer line's version so this line's release notes stay hidden, and the cached update tag still points at the newer line so the update status offers it again",
     },
 ]
 
@@ -532,6 +549,331 @@ def _smoke_pi_btw_bundled_extension() -> None:
         )
 
 
+# -- channel switch ---------------------------------------------------------
+#
+# The owner-defined release model is two install lines over one shared state
+# root: the 4.x stable line (no Bot workspace) and the newer line that has
+# one. Users can move both ways, so each line must tolerate state written by
+# the other. This scenario drives the round trip for real: the peer line is
+# extracted from the local git refs and its own code writes the state root,
+# then this checkout boots a real server on it.
+
+_CHANNEL_SWITCH_WRITE_PROBE = """
+import json, sys
+from pathlib import Path
+
+sys.path.insert(0, sys.argv[1])  # the newer line's tree; cwd would win otherwise
+state_root = Path(sys.argv[2])
+from mms_version import VERSION
+from mms_web.bots import BotRuntime
+from mms_web.bot_memory import BotMemoryStore
+from mms_web.ui_preferences import UiPreferences
+
+
+class _Executor:
+    def available(self):
+        return True
+
+    def validate(self, bot):
+        return {}
+
+
+runtime = BotRuntime(state_root=state_root, executor=_Executor())
+bot = runtime.create_bot({"name": "Gate Bot", "description": "channel switch gate",
+                          "systemPrompt": "keep the gate honest"})
+schedule = runtime.create_task({"botId": bot["id"], "prompt": "ping the gate",
+                                "runAt": "2099-01-01T00:00:00+00:00"})
+if schedule.get("kind") != "schedule" or not schedule.get("nextRunAt"):
+    raise SystemExit(f"scheduled submission did not create a schedule: {schedule}")
+BotMemoryStore(state_root).remember(bot["id"], "the gate bot likes regression tests")
+UiPreferences(state_root).read(seed_version=VERSION)
+print(json.dumps({"version": VERSION, "botId": bot["id"], "scheduleId": schedule["id"],
+                  "nextRunAt": schedule["nextRunAt"], "loadError": runtime._load_error}))
+"""
+
+_CHANNEL_SWITCH_VERIFY_PROBE = """
+import json, sys
+from pathlib import Path
+
+sys.path.insert(0, sys.argv[1])  # the newer line's tree; cwd would win otherwise
+state_root = Path(sys.argv[2])
+expected = json.loads(sys.argv[3])
+from mms_web.bots import BotRuntime
+from mms_web.bot_memory import BotMemoryStore
+
+
+class _Executor:
+    def available(self):
+        return True
+
+    def validate(self, bot):
+        return {}
+
+
+raw = json.loads((state_root / "bots" / "state.json").read_text())
+if raw.get("schema") != 2:
+    raise SystemExit(f"bot store schema drifted: {raw.get('schema')!r}")
+runtime = BotRuntime(state_root=state_root, executor=_Executor())
+if runtime._load_error:
+    raise SystemExit(f"bot store no longer loads after the round trip: {runtime._load_error}")
+bots = {bot["id"]: bot for bot in runtime.list_bots()}
+if expected["botId"] not in bots:
+    raise SystemExit(f"bot missing after the round trip: {sorted(bots)}")
+schedules = runtime.list_schedules(expected["botId"])
+if not any(schedule["id"] == expected["scheduleId"]
+           and schedule.get("nextRunAt") == expected["nextRunAt"]
+           and schedule.get("enabled")
+           and schedule.get("rule", {}).get("kind") == "once"
+           for schedule in schedules):
+    raise SystemExit("schedule lost or changed across the round trip")
+if runtime.list_tasks(bot_id=expected["botId"]):
+    raise SystemExit("future schedule unexpectedly created an immediate task")
+notes = json.dumps(BotMemoryStore(state_root).get(expected["botId"]), ensure_ascii=False)
+if "regression" not in notes:
+    raise SystemExit("bot memory note lost across the round trip")
+print(json.dumps({"bots": len(bots), "schedules": len(schedules), "schema": raw["schema"]}))
+"""
+
+
+def _version_of(tree: Path) -> str:
+    text = (tree / "mms_version.py").read_text(encoding="utf-8")
+    for line in text.splitlines():
+        if line.startswith("VERSION = "):
+            return line.split('"')[1]
+    raise SystemExit(f"cannot read VERSION from {tree}")
+
+
+def _extract_peer_line(dest: Path) -> Path:
+    """Materialize the other install line's code from local git refs."""
+    current_major = int(_version_of(ROOT_DIR).split(".")[0])
+    ref = "origin/dev" if current_major <= 4 else "origin/main"
+    archive = subprocess.run(
+        ["git", "-C", str(ROOT_DIR), "archive", "--format=tar", ref],
+        capture_output=True,
+        check=False,
+    )
+    if archive.returncode != 0:
+        raise SystemExit(f"cannot extract peer line {ref}: {archive.stderr.decode(errors='replace')}")
+    dest.mkdir(parents=True)
+    with tarfile.open(fileobj=io.BytesIO(archive.stdout), mode="r:") as tar:
+        # Source files only: the repo carries symlinks that point outside the
+        # destination, and this gate never needs them.
+        tar.extractall(dest, filter=lambda member, _path: member if (member.isdir() or member.isreg()) else None)
+    peer_major = int(_version_of(dest).split(".")[0])
+    if peer_major == current_major:
+        raise SystemExit(
+            f"peer ref {ref} is also {current_major}.x; the two install lines are not where this gate expects them"
+        )
+    return dest
+
+
+def _write_session_file(state_root: Path, session_id: str, **meta_extra) -> None:
+    sessions_dir = state_root / "sessions"
+    sessions_dir.mkdir(parents=True, exist_ok=True)
+    meta = {
+        "id": session_id,
+        "title": f"title-{session_id}",
+        "workspaceId": "ws-1",
+        "harness": "pi",
+        "modelName": "fake-model",
+        "providerName": "fake-provider",
+        "channel": "default",
+        "createdAt": "2026-09-16T00:00:00+00:00",
+        "updatedAt": "2026-09-16T00:00:00+00:00",
+    }
+    meta.update(meta_extra)
+    (sessions_dir / f"{session_id}.json").write_text(
+        json.dumps({"schema": 1, "session": meta, "state": "idle", "events": []}),
+        encoding="utf-8",
+    )
+
+
+def _snapshot_tree(root: Path) -> dict[str, tuple[bytes, int]]:
+    return {
+        str(path.relative_to(root)): (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    }
+
+
+def _free_port() -> int:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return int(probe.getsockname()[1])
+
+
+def _http_json(port: int, path: str) -> tuple[int, dict]:
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=5) as response:
+            return response.status, json.loads(response.read())
+    except urllib.error.HTTPError as exc:
+        return exc.code, {}
+    except (urllib.error.URLError, OSError):
+        return 0, {}
+
+
+def _smoke_channel_switch_round_trip() -> None:
+    """Newer line writes the state root; the 4.x line boots on it; the newer line reads it back."""
+    current_version = _version_of(ROOT_DIR)
+    with tempfile.TemporaryDirectory(prefix="mms-channel-switch-") as tmp:
+        base = Path(tmp).resolve()
+        home = base / "home"
+        home.mkdir()
+        peer_tree = _extract_peer_line(base / "peer")
+        peer_version = _version_of(peer_tree)
+        # The 4.x stable line has no Bot workspace; the newer line writes it.
+        # This gate flows into the newer line unchanged, so either side of the
+        # checkout must drive the same round trip.
+        if int(current_version.split(".")[0]) <= 4:
+            stable_tree, newer_tree, newer_version = ROOT_DIR, peer_tree, peer_version
+        else:
+            stable_tree, newer_tree, newer_version = peer_tree, ROOT_DIR, current_version
+        print(f"[gate] channel switch: stable line {_version_of(stable_tree)}, newer line {newer_version}", flush=True)
+        newer_env = _env_for_home(home)
+        newer_env["PYTHONPATH"] = str(newer_tree)
+
+        state_root = base / "state"
+        config_root = base / "config"
+        config_root.mkdir()
+        static_root = base / "static"
+        static_root.mkdir()
+        (static_root / "index.html").write_text("<h1>MMS</h1>", encoding="utf-8")
+
+        # Upgrade: the peer line's own code writes its records into the shared
+        # state root (bot, one scheduled task, one memory note, ui flags).
+        completed = _run(
+            "newer line writes its state",
+            [sys.executable, "-c", _CHANNEL_SWITCH_WRITE_PROBE, str(newer_tree), str(state_root)],
+            env=newer_env,
+        )
+        written = json.loads(completed.stdout.strip().splitlines()[-1])
+        if written.get("loadError"):
+            raise SystemExit(f"newer line could not write its own store: {written}")
+
+        # The peer line also owns sessions in the shared sessions/ directory:
+        # one marked with the owner this line does not know, one plain chat.
+        _write_session_file(state_root, "sess-foreign-1", owner="bot", botId=written["botId"])
+        _write_session_file(state_root, "sess-web-1")
+        # ... and its update check cache still points at the newer line's tag.
+        updates_dir = state_root / "updates"
+        updates_dir.mkdir(parents=True, exist_ok=True)
+        newer_tag = f"v{newer_version}"
+        (updates_dir / "check.json").write_text(
+            json.dumps({"checkedAt": time.time(), "latest": {"tag": newer_tag, "notes": ""}, "error": ""}),
+            encoding="utf-8",
+        )
+        bots_snapshot = _snapshot_tree(state_root / "bots")
+        ui_prefs_before = (state_root / "ui-preferences.json").read_bytes()
+        check_cache_before = (updates_dir / "check.json").read_bytes()
+
+        # Downgrade: the 4.x line boots a real server on that state root.
+        port = _free_port()
+        server_env = _env_for_home(home)
+        server_env["PYTHONPATH"] = str(stable_tree)
+        # Keep the background release check off the network so the cached tag
+        # stays exactly what the newer line left behind.
+        server_env["MMS_WEB_UPDATE_CHECK"] = "0"
+        output: list[str] = []
+        process = subprocess.Popen(
+            [
+                sys.executable, "-m", "mms_web",
+                "--port", str(port),
+                "--state-root", str(state_root),
+                "--config-root", str(config_root),
+                "--static-root", str(static_root),
+            ],
+            cwd=stable_tree,
+            env=server_env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+        collector = threading.Thread(target=lambda: output.extend(process.stdout), daemon=True)
+        collector.start()
+        try:
+            booted = False
+            for _ in range(60):
+                if process.poll() is not None:
+                    break
+                status, _payload = _http_json(port, "/api/v1/bootstrap")
+                if status == 200:
+                    booted = True
+                    break
+                time.sleep(0.5)
+            if not booted:
+                raise SystemExit(
+                    "the 4.x line did not boot on the newer-written state root:\n" + "".join(output)
+                )
+
+            status, payload = _http_json(port, "/api/v1/sessions")
+            if status != 200:
+                raise SystemExit(f"session list failed after downgrade: {status}")
+            listed = {row.get("id") for row in payload.get("sessions", [])}
+            if "sess-foreign-1" in listed:
+                raise SystemExit("a session owned by something this line does not know leaked into the list")
+            if "sess-web-1" not in listed:
+                raise SystemExit("a plain web session was hidden after downgrade")
+            status, _payload = _http_json(port, "/api/v1/sessions/sess-foreign-1")
+            if status != 404:
+                raise SystemExit(f"foreign-owned session still opens by id: {status}")
+            status, _payload = _http_json(port, "/api/v1/sessions/sess-web-1")
+            if status != 200:
+                raise SystemExit(f"plain web session no longer opens: {status}")
+
+            # Known costs, asserted so a future fix turns them green instead of
+            # silently changing: the newer line's version stays stamped as seen,
+            # and the cached update tag still offers the newer line back.
+            status, payload = _http_json(port, "/api/v1/ui-preferences")
+            seen = str(payload.get("whatsNewSeenVersion") or "")
+            if seen != newer_version:
+                raise SystemExit(f"whatsNewSeenVersion after downgrade: {seen!r} != {newer_version!r}")
+            print(f"[gate] known cost: this line's release notes stay hidden (seen={seen})", flush=True)
+            status, payload = _http_json(port, "/api/v1/update")
+            latest_tag = str((payload.get("latest") or {}).get("tag") or "")
+            if latest_tag != newer_tag or not payload.get("updateAvailable"):
+                raise SystemExit(
+                    f"cached update tag after downgrade: {latest_tag!r}, available={payload.get('updateAvailable')}"
+                )
+            print(f"[gate] known cost: update status still offers the newer line ({latest_tag})", flush=True)
+        finally:
+            process.terminate()
+            try:
+                process.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=15)
+            collector.join(timeout=5)
+        transcript = "".join(output)
+        if "Traceback" in transcript:
+            raise SystemExit(f"server logged a traceback on the newer-written state root:\n{transcript}")
+
+        # The other line's subtree must be exactly as it was left: the 4.x
+        # line does not know it, so it must not touch it.
+        after = _snapshot_tree(state_root / "bots")
+        if after != bots_snapshot:
+            changed = sorted(set(after) ^ set(bots_snapshot))
+            changed += sorted(
+                key for key in set(after) & set(bots_snapshot) if after[key] != bots_snapshot[key]
+            )
+            raise SystemExit(f"downgrade touched the peer line's files: {changed}")
+        if (state_root / "ui-preferences.json").read_bytes() != ui_prefs_before:
+            raise SystemExit("downgrade rewrote ui-preferences.json")
+        if (updates_dir / "check.json").read_bytes() != check_cache_before:
+            raise SystemExit("downgrade rewrote the cached update check")
+
+        # Upgrade back: the newer line still finds everything it wrote.
+        _run(
+            "newer line reads its state back",
+            [
+                sys.executable, "-c", _CHANNEL_SWITCH_VERIFY_PROBE,
+                str(newer_tree), str(state_root),
+                json.dumps({"botId": written["botId"], "scheduleId": written["scheduleId"],
+                            "nextRunAt": written["nextRunAt"]}),
+            ],
+            env=newer_env,
+        )
+
+
 
 def _print_scenarios() -> None:
     print("[gate] scenario matrix:")
@@ -556,6 +898,10 @@ def main() -> int:
     _smoke_legacy_install_state_matrix()
     _smoke_repeatable_install_dry_run()
     _smoke_pi_btw_bundled_extension()
+    # The channel-switch round trip extracts the peer line and boots a real
+    # server, so it stays in the full gate only; --quick skips it.
+    if not args.quick:
+        _smoke_channel_switch_round_trip()
     _smoke_nsr_low_noise_hook_matrix()
 
     pytest_targets = _QUICK_PYTEST_TARGETS if args.quick else _PYTEST_TARGETS

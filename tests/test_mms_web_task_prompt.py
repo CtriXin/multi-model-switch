@@ -51,3 +51,26 @@ def test_the_probe_reads_the_same_task_the_button_sends():
     component = (ROOT / "apps/mms-web/src/RemoteAccess.tsx").read_text(encoding="utf-8")
     assert 'from "./tunnel-task"' in component
     assert "tunnelTask(" in component
+
+
+def test_connection_poll_never_clears_or_sets_user_action_errors():
+    """Background load() polling must not overwrite or clear user action errors.
+
+    Hard contract for connection banner & error separation:
+    - load() success path must NOT call setError("") (so 8s poll does not clear user errors).
+    - load() catch path must NOT call setError(...) (transient poll failures use connectionHealth).
+    """
+    app_source = (ROOT / "apps" / "mms-web" / "src" / "App.tsx").read_text(encoding="utf-8")
+    assert "const load = useCallback(" in app_source
+    load_block = app_source.split("const load = useCallback(", 1)[1].split("}, []);", 1)[0]
+
+    # Success path in try block must not clear error
+    try_block = load_block.split("try {", 1)[1].split("} catch", 1)[0]
+    assert 'setError("")' not in try_block
+    assert "recordConnectionSuccess()" in try_block
+
+    # Failure path in catch block must not set error
+    catch_block = load_block.split("} catch", 1)[1].split("} finally", 1)[0]
+    assert "setError(" not in catch_block
+    assert "recordConnectionFailure(" in catch_block
+

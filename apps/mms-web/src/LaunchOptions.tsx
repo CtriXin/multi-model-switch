@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronDown, FolderOpen, Search, ArrowUpRight } from "lucide-react";
 import type { Model, Preset, Workspace } from "./types";
 import { Dialog } from "./components";
@@ -83,6 +83,18 @@ export function WorkspaceDialog({ close, added, reference, initialQuery = "", su
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const focus = () => inputRef.current?.focus();
+    focus();
+    const raf = requestAnimationFrame(focus);
+    const timer = setTimeout(focus, 50);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(timer);
+    };
+  }, []);
   useEffect(() => {
     document.getElementById(`workspace-match-${choice}`)?.scrollIntoView({block: "nearest"});
   }, [choice]);
@@ -134,7 +146,7 @@ export function WorkspaceDialog({ close, added, reference, initialQuery = "", su
       <form className="workspace-form" onSubmit={e => { e.preventDefault(); if (shown[choice]) void select(shown[choice]); }}>
         <label className="workspace-search-input">
           <Search size={18} />
-          <input autoFocus value={query} onChange={e => { setQuery(e.target.value); setResults([]); setChoice(0); }}
+          <input ref={inputRef} autoFocus value={query} onChange={e => { setQuery(e.target.value); setResults([]); setChoice(0); }}
             placeholder="输入项目名，如 runtimia 或 multi" autoComplete="off" aria-label="搜索项目文件夹"
             role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls="workspace-matches"
             aria-activedescendant={shown[choice] ? `workspace-match-${choice}` : undefined}

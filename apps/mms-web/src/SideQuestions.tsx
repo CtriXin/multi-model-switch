@@ -17,11 +17,15 @@ import { askSideQuestion, cancelSideQuestion, getSideQuestion } from "./api";
 import { newRequestId } from "./request-id";
 import { formatEventTime, formatEventTimeTitle } from "./time";
 import {
+  btwSeenStorageKey,
   contextScopeLine,
-  defaultExpanded,
   isInFlight,
+  makeBtwChoiceKey,
   mergeSideQuestions,
+  readBtwSeen,
+  resolveCardExpanded,
   routeLine,
+  saveBtwSeen,
   sourceLabel,
   statusLabel,
   summaryLine,
@@ -37,6 +41,8 @@ export interface SideQuestionState {
   cancel: (btwId: string) => Promise<void>;
   notice: string;
   clearNotice: () => void;
+  isExpanded: (row: SideQuestion) => boolean;
+  toggleExpanded: (btwId: string) => void;
 }
 
 /** Side-question state for one session.
@@ -53,14 +59,39 @@ export function useSideQuestions(
 ): SideQuestionState {
   const [local, setLocal] = useState<SideQuestion[]>(empty);
   const [notice, setNotice] = useState("");
+  const [choices, setChoices] = useState<Record<string, boolean>>(readBtwSeen);
   useEffect(() => {
     setLocal(empty);
     setNotice("");
   }, [sessionId]);
+
   const rows = useMemo(
     () => mergeSideQuestions(stored || empty, local),
     [stored, local],
   );
+
+  // Sync choices across browser tabs
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === btwSeenStorageKey) {
+        setChoices(readBtwSeen());
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
+  // Persist choice changes to storage
+  const isMounted = useRef(false);
+  useEffect(() => {
+    if (!isMounted.current) {
+      isMounted.current = true;
+      return;
+    }
+    saveBtwSeen(choices);
+  }, [choices]);
+
   // Only rows that can still change are polled, and they stop the moment the
   // server reports a final status.
   const pending = rows.filter(isInFlight).map((row) => row.btwId);
@@ -96,6 +127,7 @@ export function useSideQuestions(
       clearTimeout(timer);
     };
   }, [sessionId, pendingKey]);
+
   const ask = useCallback(
     async (question: string) => {
       if (!sessionId) throw new Error("先打开一个会话，再发起旁问。");
@@ -108,6 +140,7 @@ export function useSideQuestions(
     },
     [sessionId],
   );
+
   const cancel = useCallback(
     async (btwId: string) => {
       if (!sessionId) return;
@@ -120,7 +153,35 @@ export function useSideQuestions(
     },
     [sessionId],
   );
-  return { rows, ask, cancel, notice, clearNotice: () => setNotice("") };
+
+  const isExpanded = useCallback(
+    (row: SideQuestion): boolean => {
+      return resolveCardExpanded(row, choices, sessionId);
+    },
+    [choices, sessionId],
+  );
+
+  const toggleExpanded = useCallback(
+    (btwId: string) => {
+      const target = rows.find((r) => r.btwId === btwId);
+      if (!target) return;
+      const current = resolveCardExpanded(target, choices, sessionId);
+      const next = !current;
+      const key = makeBtwChoiceKey(sessionId, btwId);
+      setChoices((old) => ({ ...old, [key]: next }));
+    },
+    [rows, choices, sessionId],
+  );
+
+  return {
+    rows,
+    ask,
+    cancel,
+    notice,
+    clearNotice: () => setNotice(""),
+    isExpanded,
+    toggleExpanded,
+  };
 }
 
 function Facts({ row }: { row: SideQuestion }) {
@@ -327,9 +388,8 @@ function Detail({ row, close }: { row: SideQuestion; close: () => void }) {
 
 /** Every side question of one session, oldest first. */
 export function SideQuestions({ state }: { state: SideQuestionState }) {
-  const [choice, setChoice] = useState<Record<string, boolean>>({});
   const [opened, setOpened] = useState("");
-  const { rows, notice, clearNotice, cancel } = state;
+  const { rows, notice, clearNotice, cancel, isExpanded, toggleExpanded } = state;
   const open = rows.find((row) => row.btwId === opened);
   useEffect(() => {
     if (opened && !open) setOpened("");
@@ -345,22 +405,16 @@ export function SideQuestions({ state }: { state: SideQuestionState }) {
           </button>
         </p>
       )}
-      {rows.map((row, index) => {
-        const fallback = defaultExpanded(row, index === rows.length - 1);
-        const expanded = choice[row.btwId] ?? fallback;
-        return (
-          <Card
-            key={row.btwId}
-            row={row}
-            expanded={expanded}
-            toggle={() =>
-              setChoice((old) => ({ ...old, [row.btwId]: !expanded }))
-            }
-            view={() => setOpened(row.btwId)}
-            cancel={() => void cancel(row.btwId)}
-          />
-        );
-      })}
+      {rows.map((row) => (
+        <Card
+          key={row.btwId}
+          row={row}
+          expanded={isExpanded(row)}
+          toggle={() => toggleExpanded(row.btwId)}
+          view={() => setOpened(row.btwId)}
+          cancel={() => void cancel(row.btwId)}
+        />
+      ))}
       {open && <Detail row={open} close={() => setOpened("")} />}
     </section>
   );

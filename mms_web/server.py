@@ -22,6 +22,16 @@ from .errors import WebError
 MAX_BODY = 12 * 1024 * 1024
 
 
+def _remote_access_cookie(token: str, secure: bool) -> str:
+    """The one cookie shape this server hands out for the token gate.
+
+    Both the link that carries the token and the switch that creates it must
+    hand the browser the same cookie, or they fight each other over one name.
+    """
+    return (f"{access.COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000"
+            + ("; Secure" if secure else ""))
+
+
 def _adapter(module: str, name: str, **kwargs):
     try:
         loaded = importlib.import_module(module)
@@ -177,7 +187,7 @@ class WebApplication:
         except Exception:
             bot_session_ids = set()
         own = [s for s in (self._sessions().list_sessions() if self.sessions else [])
-               if s.get("owner") != "bot" and str(s.get("id") or "") not in bot_session_ids]
+               if str(s.get("owner") or "web") == "web" and str(s.get("id") or "") not in bot_session_ids]
         if not include_cli:
             return own
         # A session resumed here owns its Pi session, so drop the read-only
@@ -619,7 +629,8 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
             ):
                 raise WebError("INVALID_CSRF", "页面连接已失效，请刷新后重试。", 403)
 
-        def _send(self, status: int, body: bytes, content_type: str, *, preview=False):
+        def _send(self, status: int, body: bytes, content_type: str, *, preview=False,
+                  headers=()):
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
@@ -636,13 +647,17 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
                              "img-src 'self' data: blob:; connect-src 'self'; "
                              "frame-src 'self' blob:; media-src 'self' blob:; "
                              "object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
+            # Extra headers are appended after the fixed set, never instead of
+            # it: only the response that signs this session in passes any.
+            for name, value in headers:
+                self.send_header(name, value)
             self.end_headers()
             if self.command != "HEAD":
                 self.wfile.write(body)
 
-        def _json(self, status, payload):
+        def _json(self, status, payload, *, headers=()):
             self._send(status, json.dumps(payload, ensure_ascii=False).encode(),
-                       "application/json; charset=utf-8")
+                       "application/json; charset=utf-8", headers=headers)
 
         def _error(self, exc: Exception):
             if isinstance(exc, WebError):
@@ -682,13 +697,32 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
                 secure = self.headers.get("X-Forwarded-Proto", "").lower() == "https"
                 self.send_response(302)
                 self.send_header("Location", split.path + (f"?{query}" if query else ""))
-                self.send_header("Set-Cookie",
-                                 f"{access.COOKIE}={presented}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000"
-                                 + ("; Secure" if secure else ""))
+                self.send_header("Set-Cookie", _remote_access_cookie(presented, secure))
                 self.send_header("Content-Length", "0")
                 self.end_headers()
                 return False
             return True
+
+        def _switch_cookie(self, parts, payload, answer):
+            """Sign this session in when it just turned the switch on.
+
+            Remote mode authenticates every connection, loopback included, and
+            the window that flips the switch has not been asked for a token
+            yet. Handing it the cookie its own link would carry gives it no
+            more than it already had by reaching this page; every other
+            connection still has to present the token. Rolling the token is
+            the same moment, or the replacement would lock out the window
+            that asked for it.
+            """
+            switched = payload.get("regenerate") is True or (
+                payload.get("enabled") is True and answer.get("mode") == "lan")
+            if parts != ["remote-access"] or not switched:
+                return ()
+            token = str(answer.get("token") or "")
+            if not token:
+                return ()
+            secure = self.headers.get("X-Forwarded-Proto", "").lower() == "https"
+            return (("Set-Cookie", _remote_access_cookie(token, secure)),)
 
         def do_GET(self):
             try:
@@ -759,7 +793,8 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
                     raise WebError("INVALID_BODY", "无法读取请求内容。") from None
                 if not isinstance(payload, dict):
                     raise WebError("INVALID_BODY", "请求内容必须是一个对象。")
-                self._json(200, app.bots.worker(worker_id, payload) if worker else app.post(parts, payload))
+                answer = app.bots.worker(worker_id, payload) if worker else app.post(parts, payload)
+                self._json(200, answer, headers=None if worker else self._switch_cookie(parts, payload, answer))
             except (BrokenPipeError, ConnectionResetError):
                 pass
             except Exception as exc:
