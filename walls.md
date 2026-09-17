@@ -1004,3 +1004,152 @@ config-root ~/.config/mms-next），static-root 换成 wt-T1f/mms_web_static，
 - 未写真实 ~/.config/mms* 配置；未 stash/reset/checkout 丢弃任何改动。
 - 只 stage 明确列出的路径，未跟踪的 node_modules 符号链接未进任何提交。
 耗时: 约 40 分钟 · 归因: [AGENT]
+
+## 2026-09-17 01:35 +08 · kimi-k2.5 (pi) · 370e87ec37e741df
+
+包：T5c · 在对话里换 Bot 的模型，下一轮生效
+
+分支 / worktree：`bot/T5c-model-switch-dialogue` / `.worktrees/wt-T5c`，从 `bot/T5a-schedule-backend`（e3e0d4ff）开；PR #270 已在 T5a 的 base 里，无需另行核对。未提交、未 push、未 merge。
+
+需求：用户在对话里换 Bot 的模型；Bot 知道有这个能力、拿得到真实可用列表、换不了如实说、界面看得见当前与下一轮模型。
+
+处置：
+- `bot_executor.py`：抽 `available_presets(catalog)` 纯函数（validate 的 fallback 改用它，返回形状与错误码不变）；新增 `normalize_model_query` / `match_presets`，与前端 `bot-model-switch.ts` 逐字同规则、同样例双端钉住；提示词加两句手写行为指示（先 list 再 switch、不凭印象、多候选用 wait 的"选项：A | B"、下一轮生效）。
+- `bot_client.py`：新增 `model list` / `model switch <query...>` 子命令（嵌套 subparser，提示词清单自动带上）；argv→payload 翻译。
+- `bots.py`：worker 新增 `action == "model"` 分支（+10 行，BOT_SCOPE 照 schedule 段写法）；`_bot_model_list` / `_bot_model_switch` / `_current_preset_id` 三个 helper；`_launch` 取模型处写死三档优先级（override > pending > preset，带注释）；消费 pending 时走 `executor.validate()` 校验、落成 presetId、清空 pending、写 system 消息、**重置 sessionId 起新会话**；Bot 实体加 `pendingPresetId`（create_bot / update_bot 白名单 / _load setdefault 各 1 行）；switch 成功同时写 system 消息到当前 task（模型不转述界面也有记录）。
+- 前端：`BotDefinition.modelName`（恒 undefined 的既存 bug）对齐为后端 `model`，新增 `pendingPresetId`/`channel` 字段；`parseBotSettingCommand` 捷径改写为写 `pendingPresetId` + 复用 `bot-model-switch.ts` 同一套匹配，未命中列出可用模型、多候选列出候选（不再静默挑第一个、不再走 update_bot presetId 撞 BOT_BUSY）；Bot 头部新增一行"当前 X · 下一轮 Y"（复用 `.bot-chat-title-group p` 既有样式，零新 CSS、hex 仍 12）；DispatchForm 选项显示当前模型；BotStudio 编辑器下拉旁同样显示（注：BotEditor 当前在 UI 上没有打开入口，`setEditor` 只有 onClose 一处调用，该显示位是预留接线）；BotStudio 的 onUpdateBot 白名单补 `pendingPresetId`（否则捷径的 patch 会被丢掉）。
+- 文档：BOTS.md 追加 v2.7 一节（语义、优先级、匹配、错误码、前端）。
+
+改动文件：git diff --stat
+```
+ apps/mms-web/src/Bot.tsx        | 24 ++++++----
+ apps/mms-web/src/BotStudio.tsx  |  9 ++++
+ docs/mms-web/BOTS.md            | 31 +++++++++++++
+ mms_web/bot_client.py           | 15 +++++++
+ mms_web/bot_executor.py         | 41 ++++++++++++++++-
+ mms_web/bots.py                 | 97 +++++++++++++++++++++++++++++++++++++++--
+ tests/test_mms_bot_client.py    | 17 ++++++++
+ tests/test_mms_bot_transport.py |  9 ++++
+ tests/test_mms_web_bots.py      | 12 +++++
+ 新增：tests/test_mms_bot_model_switch.py（15 条）、apps/mms-web/src/bot-model-switch.ts、
+      apps/mms-web/tests/bot-model-switch.test.mjs（6 条）、docs/mms-web/design/t5c/
+```
+
+bots.py 实际改动行数：worker `action=="model"` +10；`_launch` 优先级 +13（含 4 行注释，超 10 行预算，原因是优先级注释按包要求写死在该处）；Bot 实体字段 3 处各 1 行；helper 方法约 60 行（包文档允许新增方法，比照 T5a 的 schedule 薄方法模式）。
+
+测试：
+- 定向 11 文件 287 passed（T5a 交付基线 265，+22：新文件 15 + client 3 + transport 1 + web_bots 1 + 既有文件无删改断言）。
+- 覆盖包文档 15 条测试要求逐条：列表过滤与标注、单匹配文案含新旧名、多候选 AMBIGUOUS 不挑第一个、0 条 NOT_FOUND 带列表、不可用 UNAVAILABLE 不回退、下一轮生效且当轮不变、全程不走 model_switch.switch_model（spy 断言）、消费后清空+system 消息、三档优先级组合、override 任务不吃 pending、越界 BOT_SCOPE、CLI argv→payload、T5a 提示词门禁原断言未动（`registered_command_names` 现 22 条 ≥ 20）、前端匹配单测与后端同样例。
+- 消费时 validate 失败（模型在变不可用）走现有 BOT_MODEL_REQUIRED 路径响亮失败（interrupted + 错误文案），不静默回退，pending 保留待恢复后生效。
+
+门禁：
+- py_compile 三文件 OK；tsc 0 错；node --test 129 pass / 0 fail（基线 121）；hex 12 不变；build 通过。
+- `ci_pytest_regression --base bot/T5a-schedule-backend`：base 70/2787、head 70/2807，"No test that passes on the base commit fails here"（exit 0）。
+- `regression_fresh_user_gate.py`：1 failed / 717 passed，失败项与 T5a base 逐字相同（`test_pi_launcher` 别名测试，既存），新增失败 0。
+
+真实验证（端口 61753，state-root /tmp/bot-verify-t5c，config-root ~/.config/mms-next 只读；未碰 60824/8767；证据 docs/mms-web/design/t5c/）：
+1. 问"你现在用的是什么模型，能换吗"→ Bot 真实调用 `model list`（bash 进度含 61 项 JSON），回答"可以切：model switch <名称>，下一轮生效"并列出真实可用模型。证据 02-task1-ask-capability.txt。
+2. "换成 glm-5.3"→ system 消息"已记录，下一轮起使用 glm-5.3 · newapi-personal-tokyo；本轮仍是 deepseek-v4-flash。"+ Bot 如实转述。证据 03。
+3. UI 头部显示"当前 deepseek-v4-flash · 下一轮 glm-5.3"。截图 06（另 05 为对话截图）。
+4. 下一轮任务：task.model=glm-5.3（新 session）、bot.presetId 落成、pending 清空、system"本轮起使用模型 glm-5.3。"。**第一轮验证在此发现真缺陷**：持久 session 复用导致 task.model 仍是旧模型——已在消费时重置 sessionId（同 update_bot 语义）修复，并用 task5（qwen3.8-flash，新 session s-7b887acf13fd）与 task7（gemini-3.8-flash-high）两轮重验通过。证据 08/09/15。
+5. "换成 蓝铅笔Max"→ Bot 撞 BOT_MODEL_NOT_FOUND 后如实回复"61 个可用模型里没有这个名字……我先不乱切"，列出可选项并 wait 等用户，没有假装切换。证据 11。
+6. 答"换成 deepseek"→ BOT_MODEL_AMBIGUOUS 409 带 4 个候选，Bot 没有自己挑，wait 问"要哪一个"。证据 12。补记：Bot 没用"选项：A | B"胶囊格式，已把提示词行为指示补明确（"多候选用 wait 的选项格式"），未再花模型额度重验格式。
+7. 前端捷径：输入框打"把模型改成 glm-5.3"→ 写 pendingPresetId、notice"好，已记下：下一轮起使用 glm-5.3 · newapi-personal-tokyo，本轮仍是当前模型。"，无 BOT_BUSY，消息未发给 Bot。截图 10。
+8. override 子任务（注入 presetIdOverride=glm-5.3 模拟计划步骤产物）：任务 running 中用真实 context token 调 bot-worker `model switch gemini-3.8-flash-high`→ 返回"这一轮是计划指定的 glm-5.3，不受影响；从下一个没有被计划指定模型的任务起使用 gemini-3.8-flash-high"；override 任务完成后 pending 仍在；下一个普通任务生效为 gemini-3.8-flash-high（task.model 实测）。证据 13/14/15。
+
+未完成 / 未验证：
+- 提示词补充"选项：A | B"格式后未再花真实模型额度重验 Bot 是否输出胶囊格式（UI 文案路径已有单测覆盖）。
+- BotStudio 编辑器里的"当前/下一轮"显示位已接线但未做 UI 截图（BotEditor 目前在 UI 上无打开入口）。
+- Bot 在 waiting 状态下 worker token 被吊销（T3d 既有设计），model switch 只能在 running 中调用——与 Bot 实际行为模式一致，未改。
+
+需要 Fable 确认：
+1. **消费 pending 时重置 sessionId 起新会话**（包文档没写，但第一轮真实验证证明不重置则"下一轮生效"落空——持久 session 仍跑旧模型）。参照的是 update_bot 换 presetId 时 `sessionId=None` 的既有语义；副作用是换模型后 Bot 的 Pi 会话历史从头开始（旧会话保留在 Pilot 列表）。
+2. **override 分支的既有同类问题**：`task["presetIdOverride"]` 分支（包外既有代码）也复用 bot 的持久 session，计划指定模型时 session 实际模型可能同样是旧的——本包按"不许改"清单未动，建议另立包核实。
+3. **消费失败（BOT_MODEL_REQUIRED）时 pending 保留**：选择让 pending 留在 Bot 上，模型恢复可用后下一轮仍会尝试生效；每次失败都是响亮的（任务 interrupted + 错误文案）。若 owner 期望失败后自动清除 pending，需一句话规则。
+4. Fable 项 1/2/5/6 按包内默认做法实现：update_bot 的 BOT_BUSY 原样未动（对话路径走 pendingPresetId 绕开）；捷径保留但语义统一为下一轮生效；switch 成功 = 返回值 + system 消息双写；优先级 override > pending > preset。
+5. BotEditor（BotStudio 的编辑对话框）当前没有 UI 打开入口（`setEditor` 仅 onClose 一处），包文档点名的"编辑器显示位"属于暂不可达路径；实际可见的显示位是 Bot 头部那一行。
+
+耗时： 约 2 小时 20 分（含两轮真实验证与门禁等待）· 归因： [AGENT]/[TOOL]
+
+## 2026-09-17 03:10 +08 · kimi-k2.5 (pi) · 370e87ec37e741df（T5c 返工 01）
+
+包：T5c 返工 01（`docs/mms-web/bot-work/T5c-rework-01.md`）——合并前必须清掉的五条 + 三件小事。未提交、未 push、未 merge。
+
+需求 / 处置（逐条）：
+1. **R1 测试诚实化**：`CatalogExecutor.start()` 忠实分叉——复用 session 时 effective = 该 session 启动时的 preset（真实 `PiBotExecutor.start` 只在新建 session 分支用 selected preset）。override 测试改名 `test_preset_override_is_chosen_but_a_reused_session_still_runs_the_old_model`：如实断言 override 轮 `hadSession is True`、effective 仍是旧 preset（known defect characterization，注释写明修复另立包、修好变红时应更新而非当回归）；保留 T5c 契约半边（pending 不被 override 吃掉、下一个普通任务才生效）。`presetIdOverride` 的 session 复用 bug 按返工包要求**没有修**，等另立包。
+2. **R2**：`bot-model-switch.test.mjs` 新增源码块断言（bot-wait-controls 范式），钉住 `bot-chat-model-line` 含 当前/下一轮/`bot.model`/`bot.pendingPresetId`。
+3. **R3（反转首版确认项 3）**：消费 pending 时 validate 失败 → 清 pending、不动 sessionId、退回原 presetId 照常启动、system 消息指名不可用模型；`update_bot` 拒绝不在可用列表的非空 `pendingPresetId`（`BOT_MODEL_UNAVAILABLE` 409，状态逐字节不变，有测试）。
+4. **R4**：`_bot_model_switch` 命中当前模型 → 不写 pending 返回"已经在用 X 了"；消费分支 `pending == presetId` 只清 pending 不动 session；前端 `resolveModelSwitch(query, presets, currentPresetId)` 同样不发 patch。
+5. **R5**：新增共享 fixture `apps/mms-web/tests/fixtures/model-match-cases.json`（23 条 case 断言 match 结果 id 列表、8 个 preset 带 description 诱饵、5 条 knownDivergent），双端测试同读一个文件；`bot_executor.py` docstring、`bot-model-switch.ts` 注释、BOTS.md 三处"逐字一致"改为实话（`\s` 字符集已知差异）。
+
+Mutation（都实际跑过）：M1 fake 忠实化后旧断言 gamma-pro → **红**（正是 override 轮）；M2 删 `bot-chat-model-line` 整块 → **红**（fail 1 正是头部条）；M3 删失败分支 pending 清空 → **红**；M5a 分隔符加 `+~` → **红**（case `beta+~`）；M5b match 多搜 description → **红**（description 诱饵）。全部还原后绿。
+
+三件小事：a. BOTS.md v2.7 前端节改为描述真实可见位置（Bot 头部 `bot-chat-model-line`），注明 BotEditor 无打开入口、那几行是预留接线、`BotStudio.tsx` 白名单上的 `pendingPresetId` 是活的必需。b. 数字订正：T5a 基线实测 **267**（两次复跑稳定），新增 **+20**，267+20=287；首版写的 265/+22 是错的，287 本身没错。c. 真机第 1 条已用不含命令名的原始问法重跑（见下）。
+
+测试：定向 11 文件 **290 passed**（287+3：R3 update_bot 拒绝、R4 ×2）；`node --test apps/mms-web/tests/*.test.mjs` **131 pass / 0 fail**（+2）；`npx tsc --noEmit` 0 错（另修掉 docstring 一处 `\s` SyntaxWarning）；hex **12**；build 通过；`ci_pytest_regression --base bot/T5a-schedule-backend` base 70/2787、head 70/2810 无新增失败（exit 0）；`regression_fresh_user_gate.py` 串行完整跑 1 failed / 717 passed，失败项与 base 逐字相同（`test_pi_launcher` 别名，既存），并发敏感的 `test_install_script_paths` 未红。
+
+真实验证（端口 61439，只 kill 自己启动的 PID，未用 pkill，未碰 8767/60824/8765/8766；证据 docs/mms-web/design/t5c/）：
+- 小事 c：instruction"你现在用的是什么模型？你能自己换模型吗？"（不含任何命令名）→ Bot **自主**调用 `model list`（61 项真实 JSON），回答"我可以自己切换模型"。证据 `17-task-selfknows-model-switch.txt`，旧证据 02 保留。
+- 返工 4："换成 gemini-3.8-flash-high"（当前模型）→ "无需切换"，pending 空，sessionId 前后不变（s-cd9bb9b96586）。证据 `18-switch-to-current-noop.txt`。
+- 返工 3：注入不可用 pending（`removed-model`，模拟记录后通道掉线）→ 任务**完成**（task.model=gemini-3.8-flash-high），system 消息"待生效模型 web:pi:newapi-personal-tokyo:removed-model 当前不可用，已取消这次切换；本轮继续使用 gemini-3.8-flash-high。你可以重新切换。"，pending 清空，sessionId 不变。证据 `19-unavailable-pending-fallback.txt`。
+
+未完成 / 未验证：
+- 返工 8 条（override 实验）按返工包指示不重做，挪到 `presetIdOverride` 修复那个包（且那次 override 值必须 ≠ Bot 当前 presetId）。
+- Bot 多候选用"选项：A | B"胶囊格式的真机表现仍未单独花模型额度验证（提示词已补，单测覆盖文案路径）。
+
+需要 Fable 确认：无新增；首版确认项 1（消费时重置 sessionId）在返工中保留并被 R3/R4 细化（不可用/同模型两种不动 session 的特例），确认项 3 被返工包反转并已按反转实现。
+
+耗时: 约 1 小时 40 分（含 mutation、门禁与三轮真机验证）· 归因: [AGENT]/[TOOL]
+
+
+## 2026-09-17 14:48 +08 · deepseek-v4-flash (pi) · 370e87ec37e741df
+
+包：T5d（`docs/mms-web/bot-work/T5d-planned-step-model-actually-applies.md`）——让计划步骤指定的模型真的生效。Stride task 40b7e258eeda4dc1，base `origin/dev` = 9110141d（T5a/T5b/T5c 都已进 dev）。未 merge。
+
+需求：一个计划步骤可以带 `presetId`（落成子任务的 `presetIdOverride`），但它对任何跑过一次任务的 Bot 都静默失效——那一步用 Bot 的旧模型跑完，界面没有任何线索。修掉消费端，加一道根本防御，并把 T5c 留下的 characterization test 转正。
+
+处置（三层）：
+1. `bot_executor.py` 的 `start()`：复用会话前先读该会话自己的 `presetId`（`get_session(id)["session"]["presetId"]`，launch 时写入、会话级 model switch 同步更新），与 `selected["presetId"]` 不一致（或会话没记 preset）就不复用、按选中 preset 新起会话；返回值加 `reusedSession`。真值来源选会话而不是"在 Bot 上再记一份"，理由写进 BOTS.md v2.8（两份记录对不上就是这个 bug 的成因）。
+2. `bots.py` 的 `_launch()`：带 `presetIdOverride` 的任务强制 `sessionId=None` 起**一次性会话**，launch 成功后只写 `task["sessionId"]` + `ephemeralSession`，**不回写 `bot["sessionId"]`**；override 与 Bot 当前模型不同时补一条 system 消息"本轮由计划指定使用模型 X。"。没有照抄 pending 的解法（那会把主对话切碎）。
+3. `bots.py` 新增 `_release_finished_one_off_sessions()`：`tick()` 开头在锁外把已终态的一次性会话 stop + archive（沿用 `plan()` 同一套）；顺带清掉"重启时被打断"的残留。
+写入端（`bots.py:1275` 落 `presetIdOverride` 那处）与 plan schema 未动。文档：BOTS.md 加 v2.8。
+
+改动文件：`git diff --stat`
+```
+ docs/mms-web/BOTS.md               |  12 ++-
+ mms_web/bot_executor.py            |  57 +++++++----
+ mms_web/bots.py                    |  44 ++++++++-
+ tests/test_mms_bot_model_switch.py | 192 ++++++++++++++++++++++++++++++++-----
+ 4 files changed, 258 insertions(+), 47 deletions(-)
+（另新增 docs/mms-web/design/t5d/：run-verify.py、SUMMARY.md、base/ 与 head/ 两套原始证据）
+```
+
+测试 / 门禁（base/head 绝对数）：
+- 定向 12 文件（bot 相关全部 + `test_mms_web_bots.py`）：base **296 passed** / head **302 passed**（+6 新测试；T5c 那条 characterization test 改名 + 改断言转正）
+- `npx tsc --noEmit -p apps/mms-web`：**0 错**
+- `node --test apps/mms-web/tests/*.test.mjs`（glob 带 `*.test.mjs`）：**155 pass / 0 fail**
+- `python3 scripts/ci_pytest_regression.py --base origin/dev`：base 65 failing / 2811，head 65 failing / 2817，No test that passes on the base commit fails here（exit 0）
+- `python3 scripts/regression_fresh_user_gate.py`（完整、串行、`env -u MMS_CONFIG_ROOT -u REAL_HOME -u ORIGINAL_HOME -u MMS_REAL_HOME -u XDG_CONFIG_HOME`）：**1 failed / 717 passed**；唯一失败 `tests/test_pi_launcher.py::test_launch_pi_rewrites_deprecated_antigravity_gemini_alias_to_live_replacement` 在 base 上逐字相同（本机 pi skills-overlay 参数，既存）
+
+Mutation（都实际跑过，还原后 302 全绿）：
+- **M1** 删掉 executor 的 preset 比对 → 2 failed：`test_reused_session_running_another_model_is_never_silently_reused`（红在 `assert sessions.sent == []`：真 executor 把 prompt 发进了旧会话）+ `test_reused_session_without_a_recorded_preset_is_not_assumed_to_match`
+- **M2** override 分支退回原样（不重置 `sessionId`）→ `test_preset_override_runs_in_its_own_session_on_the_overridden_model` 红在 `assert executor.starts[-1]["presetId"] == "pi:gamma-pro"`（实际 `pi:alpha`），正是包内点名的那条断言
+- **M3** 把"不回写 `bot['sessionId']`"改回回写 → `test_preset_override_leaves_the_bot_main_conversation_untouched` 红在 `hadSession is True`（下一轮复用了 override 的一次性会话）
+
+真机验证（base 端口 61731、head 61732；各自独立 `--state-root`，`--config-root ~/.config/mms-next` 只读；未碰 8767/60824/8765/8766，未用 pkill，只 kill 自己启动的 PID；证据 `docs/mms-web/design/t5d/`）：
+- 同一天、同一脚本（`run-verify.py`）、同一组真实预设分别打 base 与 head：owner `kimi-for-coding-highspeed`、worker 自己的模型 `deepseek-v4-flash`、计划指定 `glm-5.3`、pending `MiniMax-M3`；override ≠ worker 默认模型，肉眼可辨。
+- **base 复现（包内硬要求）**：计划步骤要求 `glm-5.3`，`task.model` 实际 **`deepseek-v4-flash`**，而且是在 **worker 主会话**里跑的（`step_session_is_not_main_conversation: false`），任务里没有任何说明；无 `reusedSession` 字段。
+- **head**：同一步实际 **`glm-5.3`**（`task.model` 与子任务会话 `presetId`/`modelName` 一致），会话是它自己的一次性会话，`bot.sessionId` 不变，`pendingPresetId` 未被吃掉，任务里有"本轮由计划指定使用模型 glm-5.3。"，跑完该会话已 `archived: true`；之后普通轮照旧消费 pending（`MiniMax-M3`、新会话）；场景 B（关掉长期记忆）：override 之后的续聊轮仍在**同一个主会话**、仍用 `deepseek-v4-flash`，并从历史答出"紫色河马在弹钢琴 42"。
+- `~/.config/mms-next` 跑前跑后文件指纹逐字节相同（`e0f889ce45cab5f78bba0e24dee8998764326e8edbf5e8dbae2c73c1c133e68a`）；两个实例已停。
+
+未完成 / 未验证：
+- "服务重启时正在跑 override 步骤"这个场景没有单独构造；该残留由下一次 `tick()` 的 sweep 收掉（或下一次启动后第一次 tick）。
+- 没有花额度验证"模型自述自己是哪个模型"（模型自述不可靠）；生效模型以任务记录 + 会话 `presetId`/`modelName` + 上游返回为准。
+- 前端零改动，bundle 未重建（无 `apps/mms-web/src` 变更）。
+
+需要 Fable 确认：
+1. runtime 层测试替身 `CatalogExecutor` **不复刻** executor 的 preset 兜底（它按"给什么会话就继续什么会话"服务，真兜底由真 executor 的用例覆盖）。只有这样才能让 M2 红在 effective preset 那条断言——复刻兜底的话 M2 行为等价、测不出来。替身 docstring 里写明了这一点与理由。
+2. 一次性会话是**无条件**的：override 值恰好等于 Bot 当前模型时也起新会话（只跳过那条 system 消息），与包内"主对话不该被计划的子步骤占用/切碎"的裁决一致。
+3. `reusedSession` 是新加的 task 字段（给证据与测试用）；若不想暴露到接口，需要在 `_view` 里过滤。
+
+耗时：约 1 小时 40 分（含真机两轮、门禁等待与 mutation）· 归因：[AGENT]/[TOOL]

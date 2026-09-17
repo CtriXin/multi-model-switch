@@ -1,3 +1,4 @@
+import pytest
 """Offline checks: scheduling, failure isolation, concurrency and API security."""
 import json
 import threading
@@ -75,6 +76,27 @@ def test_disabled_auto_check_allows_explicit_manual_check(tmp_path, monkeypatch)
     assert s.fetcher.call_count == 1
     monkeypatch.setenv('MMS_WEB_UPDATE_CHECK', '0')
     assert not s.preferences({'enabled': True})['enabled']
+
+
+def test_preview_channel_is_opt_in_and_keeps_stable_cache_separate(tmp_path):
+    stable = Mock(return_value={'tag': 'v4.22.1', 'notes': 'stable'})
+    preview = Mock(return_value={'tag': 'v5.0.0', 'notes': 'preview'})
+    s = UpdateService(SimpleNamespace(state_root=tmp_path), fetcher=stable,
+                      preview_fetcher=preview, clock=lambda: 100000)
+
+    assert s.status()['channel'] == 'stable'
+    s.preferences({'channel': 'preview'})
+    assert s.status()['channel'] == 'preview'
+    assert not s.status()['updateAvailable']
+    result = s.check(manual=True)
+    assert result['latest']['tag'] == 'v5.0.0'
+    assert preview.call_count == 1
+    assert stable.call_count == 0
+
+    s.preferences({'channel': 'stable'})
+    assert s.status()['latest'] == {}
+    s.check(manual=True)
+    assert stable.call_count == 1
 
 
 def test_failure_keeps_last_release_and_does_not_expose_exception(tmp_path):
@@ -184,3 +206,95 @@ def test_update_history_route_reads_local_release_notes(tmp_path):
     app = WebApplication.__new__(WebApplication)
     with patch('mms_web.updates.release_history', return_value=[{'version': '4.20.0', 'notes': 'x', 'upgradeNotice': ''}]):
         assert WebApplication.get(app, ["update", "history"], {}) == {'releases': [{'version': '4.20.0', 'notes': 'x', 'upgradeNotice': ''}]}
+
+class _FakeResponse:
+    """Matches what ``build_opener(...).open(...)`` hands back: a context
+    manager whose ``read`` returns raw bytes."""
+
+    def __init__(self, payload):
+        self.payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+    def read(self, *_):
+        return self.payload
+
+
+def _release_list(*entries):
+    response = _FakeResponse(json.dumps(list(entries)).encode())
+    opener = SimpleNamespace(open=lambda *a, **k: response)
+    return patch('urllib.request.build_opener', return_value=opener)
+
+
+def test_preview_fetch_only_ever_returns_a_published_prerelease():
+    """The stable line must never be offered as a preview update.
+
+    ``fetch_preview_release`` is the one place that decides what counts as a
+    preview, and the channel test above injects a fake fetcher, so without
+    this the filter itself is unverified: drop the prerelease condition and
+    every other test still passes while the 4.x stable tag starts showing up
+    as a 5.x preview.
+    """
+    from mms_web.updates import fetch_preview_release
+    with _release_list(
+        {'tag_name': 'v4.22.2', 'prerelease': False, 'draft': False, 'body': 'stable'},
+        {'tag_name': 'v5.1.0', 'prerelease': True, 'draft': True, 'body': 'unpublished'},
+        {'tag_name': 'v5.0.0', 'prerelease': True, 'draft': False, 'body': 'older preview'},
+        {'tag_name': 'v5.0.2', 'prerelease': True, 'draft': False, 'body': 'newest preview'},
+    ):
+        assert fetch_preview_release()['tag'] == 'v5.0.2'
+
+
+def test_preview_fetch_refuses_a_list_with_no_published_prerelease():
+    from mms_web.updates import fetch_preview_release
+    with _release_list({'tag_name': 'v4.22.2', 'prerelease': False, 'draft': False, 'body': 'stable'}):
+        try:
+            fetch_preview_release()
+        except ValueError:
+            return
+        raise AssertionError('a stable-only list must not yield a preview release')
+
+
+def test_update_channel_rejects_non_string_and_recovers_corrupt_settings(tmp_path):
+    import pytest
+    from mms_web.errors import WebError
+    s = service(tmp_path)
+    for value in ([], {}, 7, None):
+        with pytest.raises(WebError) as caught:
+            s.preferences({"channel": value})
+        assert caught.value.status == 400
+        private_json(s.root / "settings.json", {"channel": value})
+        assert s.channel() == "stable"
+        assert s.status()["channel"] == "stable"
+
+
+def test_release_payload_retains_the_real_prerelease_flag():
+    from mms_web.updates import _release_payload
+    assert _release_payload({'tag_name': 'v5.1.0', 'prerelease': True})['prerelease'] is True
+    assert _release_payload({'tag_name': 'v4.23.0', 'prerelease': False})['prerelease'] is False
+
+
+@pytest.mark.parametrize('payload,accepted', [
+    ({'tag_name': 'v5.1.0', 'draft': False, 'prerelease': True}, True),
+    ({'tag_name': 'v5.1.0', 'draft': False, 'prerelease': False}, True),
+    ({'tag_name': 'v5.1.1', 'draft': False, 'prerelease': True}, False),
+    ({'tag_name': 'v5.1.0', 'draft': True, 'prerelease': True}, False),
+    ({'tag_name': 'v5.1.0', 'draft': False}, False),
+])
+def test_exact_installed_release_lookup_is_bounded_and_validated(monkeypatch, payload, accepted):
+    import io, json
+    from mms_web import updates
+    class Opener:
+        def open(self, request, timeout):
+            assert request.full_url.endswith('/releases/tags/v5.1.0') and timeout == 5
+            return io.BytesIO(json.dumps(payload).encode())
+    monkeypatch.setattr(updates.urllib.request, 'build_opener', lambda *args: Opener())
+    if accepted:
+        assert updates.fetch_tag_release('v5.1.0')['prerelease'] is payload['prerelease']
+    else:
+        with pytest.raises(ValueError):
+            updates.fetch_tag_release('v5.1.0')

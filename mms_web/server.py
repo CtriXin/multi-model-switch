@@ -6,6 +6,7 @@ import importlib
 import json
 import mimetypes
 import secrets
+import socketserver
 import os
 import threading
 import traceback
@@ -22,6 +23,16 @@ from .errors import WebError
 MAX_BODY = 12 * 1024 * 1024
 
 
+def _remote_access_cookie(token: str, secure: bool) -> str:
+    """The one cookie shape this server hands out for the token gate.
+
+    Both the link that carries the token and the switch that creates it must
+    hand the browser the same cookie, or they fight each other over one name.
+    """
+    return (f"{access.COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000"
+            + ("; Secure" if secure else ""))
+
+
 def _adapter(module: str, name: str, **kwargs):
     try:
         loaded = importlib.import_module(module)
@@ -30,6 +41,15 @@ def _adapter(module: str, name: str, **kwargs):
             raise
         return None
     return getattr(loaded, name)(**kwargs)
+
+
+class PilotHTTPServer(ThreadingHTTPServer):
+    def server_bind(self):
+        # HTTPServer does reverse DNS here, which can freeze every mutation
+        # for 30 seconds on networks without PTR replies. Pilot does not use
+        # CGI/server_name, so keep the literal host and do no DNS on binding.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
 
 
 class WebApplication:
@@ -177,7 +197,7 @@ class WebApplication:
         except Exception:
             bot_session_ids = set()
         own = [s for s in (self._sessions().list_sessions() if self.sessions else [])
-               if s.get("owner") != "bot" and str(s.get("id") or "") not in bot_session_ids]
+               if str(s.get("owner") or "web") == "web" and str(s.get("id") or "") not in bot_session_ids]
         if not include_cli:
             return own
         # A session resumed here owns its Pi session, so drop the read-only
@@ -308,6 +328,8 @@ class WebApplication:
             return self.bots.capabilities()
         if parts == ["bots", "notifications"]:
             return self.bots.list_notifications((query or {}).get("since", [None])[0])
+        if len(parts) == 3 and parts[0] == "bots" and parts[2] == "schedules":
+            return {"schedules": self.bots.list_schedules(parts[1])}
         if parts == ["bots", "notifications", "config"]:
             return self.bots.notify_config()
         if len(parts) == 3 and parts[0] == "bots" and parts[2] == "communications":
@@ -365,40 +387,18 @@ class WebApplication:
             return self._sessions().get_session(parts[1])
         raise WebError("NOT_FOUND", "找不到这个接口。", 404)
 
-    # POSTs that change nothing and can take seconds: a native folder dialog the
-    # user may leave open, and two filesystem sweeps. Holding the mutation lock
-    # through those would stop every other POST — sending a message, stopping a
-    # session, confirming an update — for as long as they run. They only read
-    # state that is written by atomic replace, so a concurrent write is seen
-    # whole or not at all.
-    _UNLOCKED_POSTS = (["workspaces", "choose"], ["workspaces", "search"], ["workspaces", "locate"])
+    # POSTs that change nothing and can take seconds: listing a directory for
+    # the in-app folder picker, and two filesystem sweeps. Holding the mutation
+    # lock through those would stop every other POST — sending a message,
+    # stopping a session, confirming an update — for as long as they run. They
+    # only read state that is written by atomic replace, so a concurrent write
+    # is seen whole or not at all.
+    _UNLOCKED_POSTS = (["workspaces", "browse"], ["workspaces", "search"], ["workspaces", "locate"])
 
     def _post_readonly(self, parts: list[str], payload: dict) -> dict:
-        if parts == ["workspaces", "choose"]:
-            import subprocess
-            import sys
-            if sys.platform == "darwin":
-                command = ["osascript", "-e", 'POSIX path of (choose folder with prompt "选择 MMS 的工作文件夹")']
-            elif sys.platform == "win32":
-                # PowerShell is present on supported Windows installs. Keep
-                # the dialog in the interactive desktop and emit one UTF-8
-                # path so Chinese folder names survive the pipe.
-                script = (
-                    "Add-Type -AssemblyName System.Windows.Forms; "
-                    "$d=New-Object System.Windows.Forms.FolderBrowserDialog; "
-                    "$d.Description='选择 MMS 的工作文件夹'; "
-                    "if($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK){ "
-                    "[Console]::OutputEncoding=[Text.Encoding]::UTF8; "
-                    "[Console]::Write($d.SelectedPath) }"
-                )
-                command = ["powershell.exe", "-NoProfile", "-STA", "-WindowStyle", "Normal", "-ExecutionPolicy", "Bypass", "-Command", script]
-            else:
-                raise WebError("FOLDER_PICKER_UNAVAILABLE", "请直接填写电脑上的文件夹路径。", 409)
-            try:
-                result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", timeout=120)
-            except (OSError, subprocess.TimeoutExpired, UnicodeError) as exc:
-                raise WebError("FOLDER_PICKER_UNAVAILABLE", "无法打开文件夹选择器，请直接填写完整路径。", 409) from exc
-            return {"path": result.stdout.strip() if result.returncode == 0 else ""}
+        if parts == ["workspaces", "browse"]:
+            from .workspace_browse import browse_workspaces
+            return browse_workspaces(self.catalog, payload)
         if not self.catalog:
             raise WebError("CAPABILITY_UNAVAILABLE", "本地服务尚未连接。", 409)
         if parts == ["workspaces", "search"]:
@@ -418,7 +418,11 @@ class WebApplication:
                 operation_path = self.state_root / "updates/operation.json"
                 from .updates import read_json
                 operation = read_json(operation_path)
-                private_json(operation_path, {**operation, "phase": "complete", "message": f"已更新到 v{VERSION}，会话历史已保留。", "cancellable": False})
+                from .update_install import record_committed_install
+                warning = record_committed_install(self.config_root, self.state_root, operation, VERSION)
+                message = f"已更新到 v{VERSION}，会话历史已保留。"
+                private_json(operation_path, {**operation, "phase": "complete", "message": message + warning,
+                                              "metadataWarning": warning, "cancellable": False})
                 self.probation_token = ""
                 self.maintenance = False
                 return {"ok": True}
@@ -444,8 +448,19 @@ class WebApplication:
         if len(parts) == 3 and parts[0] == "bots":
             if parts[2] == "tasks":
                 return self.bots.create_task({**payload, "botId": parts[1]})
+            if parts[2] == "schedules":
+                return self.bots.create_schedule(parts[1], payload)
             if parts[2] == "wake":
                 return self.bots.wake_bot(parts[1])
+        if len(parts) == 4 and parts[0] == "bots" and parts[2] == "schedules":
+            return self.bots.update_schedule(parts[1], parts[3], payload)
+        if len(parts) == 5 and parts[0] == "bots" and parts[2] == "schedules" and parts[3]:
+            if parts[4] == "enable":
+                return self.bots.set_schedule_enabled(parts[1], parts[3], True)
+            if parts[4] == "disable":
+                return self.bots.set_schedule_enabled(parts[1], parts[3], False)
+            if parts[4] == "delete":
+                return self.bots.delete_schedule(parts[1], parts[3])
         if len(parts) == 3 and parts[0] == "tasks":
             task_id, action = parts[1:]
             if action in {"wake", "cancel", "accept"}:
@@ -606,7 +621,8 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
             ):
                 raise WebError("INVALID_CSRF", "页面连接已失效，请刷新后重试。", 403)
 
-        def _send(self, status: int, body: bytes, content_type: str, *, preview=False):
+        def _send(self, status: int, body: bytes, content_type: str, *, preview=False,
+                  headers=()):
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
@@ -623,13 +639,17 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
                              "img-src 'self' data: blob:; connect-src 'self'; "
                              "frame-src 'self' blob:; media-src 'self' blob:; "
                              "object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
+            # Extra headers are appended after the fixed set, never instead of
+            # it: only the response that signs this session in passes any.
+            for name, value in headers:
+                self.send_header(name, value)
             self.end_headers()
             if self.command != "HEAD":
                 self.wfile.write(body)
 
-        def _json(self, status, payload):
+        def _json(self, status, payload, *, headers=()):
             self._send(status, json.dumps(payload, ensure_ascii=False).encode(),
-                       "application/json; charset=utf-8")
+                       "application/json; charset=utf-8", headers=headers)
 
         def _error(self, exc: Exception):
             if isinstance(exc, WebError):
@@ -669,13 +689,32 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
                 secure = self.headers.get("X-Forwarded-Proto", "").lower() == "https"
                 self.send_response(302)
                 self.send_header("Location", split.path + (f"?{query}" if query else ""))
-                self.send_header("Set-Cookie",
-                                 f"{access.COOKIE}={presented}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000"
-                                 + ("; Secure" if secure else ""))
+                self.send_header("Set-Cookie", _remote_access_cookie(presented, secure))
                 self.send_header("Content-Length", "0")
                 self.end_headers()
                 return False
             return True
+
+        def _switch_cookie(self, parts, payload, answer):
+            """Sign this session in when it just turned the switch on.
+
+            Remote mode authenticates every connection, loopback included, and
+            the window that flips the switch has not been asked for a token
+            yet. Handing it the cookie its own link would carry gives it no
+            more than it already had by reaching this page; every other
+            connection still has to present the token. Rolling the token is
+            the same moment, or the replacement would lock out the window
+            that asked for it.
+            """
+            switched = payload.get("regenerate") is True or (
+                payload.get("enabled") is True and answer.get("mode") == "lan")
+            if parts != ["remote-access"] or not switched:
+                return ()
+            token = str(answer.get("token") or "")
+            if not token:
+                return ()
+            secure = self.headers.get("X-Forwarded-Proto", "").lower() == "https"
+            return (("Set-Cookie", _remote_access_cookie(token, secure)),)
 
         def do_GET(self):
             try:
@@ -746,13 +785,14 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
                     raise WebError("INVALID_BODY", "无法读取请求内容。") from None
                 if not isinstance(payload, dict):
                     raise WebError("INVALID_BODY", "请求内容必须是一个对象。")
-                self._json(200, app.bots.worker(worker_id, payload) if worker else app.post(parts, payload))
+                answer = app.bots.worker(worker_id, payload) if worker else app.post(parts, payload)
+                self._json(200, answer, headers=() if worker else self._switch_cookie(parts, payload, answer))
             except (BrokenPipeError, ConnectionResetError):
                 pass
             except Exception as exc:
                 self._error(exc)
 
-    server = ThreadingHTTPServer((app.access.bind_address(), port), Handler)
+    server = PilotHTTPServer((app.access.bind_address(), port), Handler)
     server.daemon_threads = True
     app.listeners = RemoteListeners(Handler, server.server_address[1])
     app.listeners.sync(app.access.extra_binds())
@@ -792,7 +832,7 @@ class RemoteListeners:
             if address in self._servers:
                 continue
             try:
-                extra = ThreadingHTTPServer((address, self._port), self._handler)
+                extra = PilotHTTPServer((address, self._port), self._handler)
             except OSError as error:
                 # A point-to-point tunnel endpoint may refuse a bind. Skip it
                 # and say so rather than failing the whole switch.

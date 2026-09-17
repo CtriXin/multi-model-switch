@@ -164,16 +164,21 @@ export async function cancelSideQuestion(
 export async function mutate<T>(
   path: string,
   payload: Record<string, unknown>,
+  signal?: AbortSignal,
 ): Promise<T> {
   if (!isPreview) {
     const fingerprint = JSON.stringify([path, payload]);
     if (uncertainMutation?.fingerprint !== fingerprint)
       uncertainMutation = { fingerprint, requestId: newRequestId() };
     try {
-      const result = await request<T>(path, {
-        ...payload,
-        requestId: uncertainMutation.requestId,
-      });
+      const result = await request<T>(
+        path,
+        {
+          ...payload,
+          requestId: uncertainMutation.requestId,
+        },
+        signal,
+      );
       uncertainMutation = null;
       return result;
     } catch (error) {

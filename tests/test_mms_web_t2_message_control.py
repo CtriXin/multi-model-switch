@@ -702,16 +702,32 @@ def test_wire_duplicate_steer_request_writes_one_command(tmp_path, seeded_seam):
                    what="in-flight tool observed")
 
         first = service.send(sid, {"requestId": "w-dup", "text": "只引导一次", "mode": "steer"})
+        original = next(e for e in user_events(first) if e["text"] == "只引导一次")
+        wait_until(lambda: user_status(service.get_session(sid), "只引导一次") == "delivered",
+                   what="steering message delivered before replay")
+        wait_until(lambda: session_event(service.get_session(sid), kind="assistant", text="已按引导调整方向") is not None,
+                   what="steered reply lands before replay")
+        wait_until(lambda: service.get_session(sid)["session"]["state"] == "idle",
+                   what="steered turn settles before replay")
+        # Consumption legitimately re-sequences a queued event. Check live
+        # replay with a fact produced strictly after the original response,
+        # rather than assuming event prefixes or delivery states never change.
+        marker = "n-after-first-steer-response"
+        assert all(e["id"] != marker for e in first["events"])
+        service._apply_driver_event(service._get(sid), {
+            "id": marker, "kind": "notice", "text": "replay freshness marker",
+        })
         replay = service.send(sid, {"requestId": "w-dup", "text": "只引导一次", "mode": "steer"})
-        current = service.get_session(sid)
-        replay_ids = [e["id"] for e in replay["events"]]
-        current_ids = [e["id"] for e in current["events"]]
-        assert current_ids[:len(replay_ids)] == replay_ids, \
-            "a replay must return a live-prefix view, not an unrelated stale snapshot"
-        assert user_status(first, "只引导一次") == user_status(replay, "只引导一次")
-        wire = snapshot()
-        steers = [c for c in wire_in(wire) if c.get("type") == "steer"]
-        assert len(steers) == 1, "a replayed steer must not hit the wire twice"
+        assert any(e["id"] == marker for e in replay["events"]), "replay must return current session facts"
+        matching = [e for e in user_events(replay) if e["text"] == "只引导一次"]
+        assert len(matching) == 1 and matching[0]["id"] == original["id"]
+        assert matching[0]["status"] == "delivered"
+        reply = session_event(replay, kind="assistant", text="已按引导调整方向")
+        assert reply is not None and original["id"] in reply.get("steeredBy", [])
+        assert replay["session"]["state"] == "idle"
+        steers = [c for c in wire_in(snapshot()) if c.get("type") == "steer"]
+        assert len(steers) == 1 and steers[0]["message"] == "只引导一次", \
+            "a replayed steer must not hit the wire twice"
     finally:
         teardown()
 

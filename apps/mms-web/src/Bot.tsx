@@ -42,6 +42,26 @@ import { previewType } from "./bot-artifact-preview";
 import type { BotChildResult, BotPendingQuestion, BotTaskPlan, Model, Preset } from "./types";
 import { isPreview, mutate, request } from "./api";
 import { BotPresetPanel } from "./BotPresetPanel";
+import { BotSchedulePanel } from "./BotSchedulePanel";
+import {
+  INTERVAL_HOUR_PRESETS,
+  MAX_SCHEDULES_PER_BOT,
+  WEEKDAY_LABELS,
+  apiErrorCode,
+  composerRuleFromForm,
+  createdScheduleNotice,
+  defaultComposerForm,
+  describeComposerChip,
+  describeRule,
+  intervalSecondsFromHours,
+  localTimezone,
+  onceLocalToIso,
+  remainingScheduleQuota,
+  scheduleErrorMessage,
+  validateComposerForm,
+  type BotSchedule,
+  type ComposerScheduleForm,
+} from "./bot-schedules";
 import {
   suggestBotName,
   looksLikeStandingInstruction,
@@ -59,6 +79,7 @@ import type {
   WizardAnswerEntry,
   WizardQuestion,
 } from "./bot-presets";
+import { resolveModelSwitch } from "./bot-model-switch";
 import "./bot.css";
 
 export type BotStatus = "idle" | "busy" | "paused";
@@ -78,11 +99,13 @@ export interface BotDefinition {
   description: string;
   systemPrompt: string;
   presetId: string | null;
+  pendingPresetId?: string | null;
   workspaceId: string | null;
   status: BotStatus;
   wakeEnabled: boolean;
   sessionId?: string | null;
-  modelName?: string;
+  model?: string;
+  channel?: string;
   memoryEnabled?: boolean;
   memoryBudgetTokens?: number;
   autoCompact?: boolean;
@@ -112,6 +135,7 @@ export interface BotTask {
   originMessageId?: string | null;
   senderBotId?: string | null;
   acceptedAt?: string | null;
+  scheduleId?: string | null;
   createdAt: string;
   updatedAt: string;
   outcome?: BotOutcome | null;
@@ -138,6 +162,7 @@ export interface BotEvent {
   type: "instruction" | "message" | "progress" | "approval" | "wait" | "result" | "error" | "handoff" | "system";
   content: string;
   createdAt: string;
+  scheduleId?: string | null;
 }
 export interface BotArtifact {
   id: string;
@@ -158,8 +183,11 @@ export interface BotDispatchPayload {
 }
 export interface BotDispatchResult {
   task?: BotTask;
+  schedule?: BotSchedule;
+  kind?: "task" | "schedule";
   message?: string;
 }
+export type { BotSchedule };
 export type BotAction = (
   payload: BotDispatchPayload,
 ) => Promise<BotDispatchResult | void> | BotDispatchResult | void;
@@ -499,6 +527,7 @@ export function BotCard({
   selected = false,
   task,
   tasks = [],
+  schedules = [],
   onSelect,
   onWake,
   onEdit,
@@ -508,6 +537,7 @@ export function BotCard({
   selected?: boolean;
   task?: BotTask;
   tasks?: BotTask[];
+  schedules?: BotSchedule[];
   onSelect?: (bot: BotDefinition) => void;
   onWake?: (botId: string) => void;
   onEdit?: (bot: BotDefinition) => void;
@@ -539,7 +569,7 @@ export function BotCard({
     : getIndicatorStatus(bot, task, tasks);
   const secondLine = bot.pendingQuestion
     ? "等你回复"
-    : getBotSecondLine(bot, task, tasks);
+    : getBotSecondLine(bot, task, tasks, undefined, schedules);
 
   return (
     <article className={`bot-card bot-card-${bot.status}${selected ? " is-selected" : ""}`}>
@@ -628,6 +658,7 @@ export function BotCard({
 export function BotList({
   bots,
   tasks = [],
+  schedulesByBot = {},
   selectedBotId,
   onSelect,
   onWake,
@@ -637,6 +668,7 @@ export function BotList({
 }: {
   bots: BotDefinition[];
   tasks?: BotTask[];
+  schedulesByBot?: Record<string, BotSchedule[]>;
   selectedBotId?: string;
   onSelect?: (bot: BotDefinition) => void;
   onWake?: (botId: string) => void;
@@ -679,6 +711,7 @@ export function BotList({
                   ].includes(task.status),
               )}
               tasks={tasks}
+              schedules={schedulesByBot[bot.id] || []}
               onSelect={onSelect}
               onWake={onWake}
               onEdit={onEdit}
@@ -708,6 +741,126 @@ export function formatLocalDateTime(value?: string | null) {
   const pad = (part: number) => String(part).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
+
+function onceLocalToIsoSafe(form: ComposerScheduleForm): string {
+  return onceLocalToIso(form.onceDate, form.onceTime);
+}
+
+function DispatchScheduleFields({
+  form,
+  onChange,
+}: {
+  form: ComposerScheduleForm;
+  onChange: (form: ComposerScheduleForm) => void;
+}) {
+  const invalid = validateComposerForm(form);
+  return (
+    <div className="bot-dispatch-schedule-fields">
+      <div className="bot-schedule-kind-tabs" role="tablist" aria-label="定时类型">
+        {(
+          [
+            ["once", "一次"],
+            ["daily", "每天"],
+            ["weekly", "每周"],
+            ["interval", "每 N 小时"],
+          ] as const
+        ).map(([kind, label]) => (
+          <button
+            key={kind}
+            type="button"
+            role="tab"
+            aria-selected={form.kind === kind}
+            className={`bot-schedule-kind-tab${form.kind === kind ? " is-selected" : ""}`}
+            onClick={() => onChange({ ...form, kind })}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {form.kind === "once" && (
+        <div className="bot-schedule-custom-row">
+          <input
+            type="date"
+            className="bot-schedule-select"
+            value={form.onceDate}
+            onChange={(event) => onChange({ ...form, onceDate: event.target.value })}
+            aria-label="日期"
+          />
+          <input
+            type="text"
+            className="bot-schedule-time-input"
+            value={form.onceTime}
+            maxLength={5}
+            onChange={(event) => onChange({ ...form, onceTime: event.target.value })}
+            aria-label="精确时间"
+          />
+        </div>
+      )}
+      {form.kind === "daily" && (
+        <input
+          type="text"
+          className="bot-schedule-time-input"
+          value={form.atLocalTime}
+          maxLength={5}
+          onChange={(event) => onChange({ ...form, atLocalTime: event.target.value })}
+          aria-label="每天时间"
+        />
+      )}
+      {form.kind === "weekly" && (
+        <div className="bot-schedule-weekdays">
+          {WEEKDAY_LABELS.map((label, weekday) => (
+            <button
+              key={label}
+              type="button"
+              className={`bot-schedule-kind-tab${form.weekday === weekday ? " is-selected" : ""}`}
+              onClick={() => onChange({ ...form, weekday })}
+            >
+              {label}
+            </button>
+          ))}
+          <input
+            type="text"
+            className="bot-schedule-time-input"
+            value={form.atLocalTime}
+            maxLength={5}
+            onChange={(event) => onChange({ ...form, atLocalTime: event.target.value })}
+            aria-label="每周时间"
+          />
+        </div>
+      )}
+      {form.kind === "interval" && (
+        <div className="bot-schedule-interval-row">
+          {INTERVAL_HOUR_PRESETS.map((hours) => (
+            <button
+              key={hours}
+              type="button"
+              className={`bot-schedule-kind-tab${form.intervalHours === hours ? " is-selected" : ""}`}
+              onClick={() => onChange({ ...form, intervalHours: hours })}
+            >
+              {hours} 小时
+            </button>
+          ))}
+          <input
+            type="number"
+            min={0.09}
+            step="any"
+            className="bot-schedule-select"
+            value={form.intervalHours}
+            onChange={(event) =>
+              onChange({ ...form, intervalHours: Number(event.target.value) })
+            }
+            aria-label="自定义间隔小时"
+          />
+        </div>
+      )}
+      {invalid && (
+        <p className="bot-schedule-hint" role="status">
+          {invalid}
+        </p>
+      )}
+    </div>
+  );
+}
 export function DispatchForm({
   bots,
   defaultBotId,
@@ -727,7 +880,8 @@ export function DispatchForm({
 }) {
   const [botId, setBotId] = useState(defaultBotId || bots[0]?.id || "");
   const [prompt, setPrompt] = useState("");
-  const [runAt, setRunAt] = useState("");
+  const [scheduleForm, setScheduleForm] = useState<ComposerScheduleForm>(() => defaultComposerForm());
+  const [scheduleArmed, setScheduleArmed] = useState(false);
   const [wake, setWake] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -751,15 +905,40 @@ export function DispatchForm({
     setBusy(true);
     setError("");
     try {
-      await onDispatch({
-        botId,
-        prompt: prompt.trim(),
-        runAt: runAt ? new Date(runAt).toISOString() : undefined,
-        wake,
-        parentTaskId,
-      });
+      if (scheduleArmed) {
+        const invalid = validateComposerForm(scheduleForm);
+        if (invalid) {
+          setError(invalid);
+          setBusy(false);
+          return;
+        }
+        if (scheduleForm.kind === "once") {
+          await onDispatch({
+            botId,
+            prompt: prompt.trim(),
+            runAt: onceLocalToIsoSafe(scheduleForm),
+            wake,
+            parentTaskId,
+          });
+        } else {
+          await mutate(`/bots/${encodeURIComponent(botId)}/schedules`, {
+            prompt: prompt.trim(),
+            rule: composerRuleFromForm(scheduleForm),
+            timezone: localTimezone(),
+            overlapPolicy: "skip",
+          });
+        }
+      } else {
+        await onDispatch({
+          botId,
+          prompt: prompt.trim(),
+          wake,
+          parentTaskId,
+        });
+      }
       setPrompt("");
-      setRunAt("");
+      setScheduleArmed(false);
+      setScheduleForm(defaultComposerForm());
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : "任务未能派发，请稍后重试。",
@@ -785,7 +964,7 @@ export function DispatchForm({
           {bots.map((bot) => (
             <option key={bot.id} value={bot.id}>
               {bot.name}
-              {bot.modelName ? ` · ${bot.modelName}` : ""}
+              {bot.model ? ` · ${bot.model}` : ""}
             </option>
           ))}
         </select>
@@ -801,18 +980,23 @@ export function DispatchForm({
           required
         />
       </label>
-      <label className="bot-field">
-        <span>
-          <span>执行时间</span>
-          <small>留空立即执行</small>
-        </span>
-        <input
-          type="datetime-local"
-          value={toDateTimeValue(runAt)}
-          onChange={(event) => setRunAt(event.target.value)}
-          disabled={disabled || busy}
-        />
-      </label>
+      <fieldset className="bot-field bot-dispatch-schedule" disabled={disabled || busy}>
+        <legend>
+          定时
+          <small>{scheduleArmed ? describeComposerChip(scheduleForm) || "已选择" : "留空立即执行"}</small>
+        </legend>
+        <label className="bot-check">
+          <input
+            type="checkbox"
+            checked={scheduleArmed}
+            onChange={(event) => setScheduleArmed(event.target.checked)}
+          />
+          <span>按周期执行</span>
+        </label>
+        {scheduleArmed && (
+          <DispatchScheduleFields form={scheduleForm} onChange={setScheduleForm} />
+        )}
+      </fieldset>
       <div className="bot-dispatch-footer">
         <label className="bot-check">
           <input
@@ -892,8 +1076,8 @@ export function TaskList({
                 <small>
                   {bots.find((bot) => bot.id === task.botId)?.name ||
                     task.botId}
-                  {task.runAt && task.status === "scheduled"
-                    ? ` · ${formatLocalDateTime(task.runAt)}`
+                  {task.scheduleId
+                    ? " · 由定时触发"
                     : task.queueReason && task.status === "queued"
                       ? ` · ${task.queueReason}`
                       : ""}
@@ -1011,19 +1195,13 @@ function canPreviewArtifact(artifact: BotArtifact) {
   return previewType(artifact).kind !== "unsupported";
 }
 
-function parseBotSettingCommand(content: string, presets: Preset[]) {
+function parseBotSettingCommand(content: string, presets: Preset[], currentPresetId?: string | null, pendingPresetId?: string | null) {
   const name = content.match(/(?:把|将)?(?:我的)?(?:bot\s*)?(?:名字|名称)(?:改成|改为|叫|设为)\s*[“「\"]?(.+?)[”」\"]?$/i)
     || content.match(/^(?:你|bot)?(?:以后)?叫\s*[“「\"]?(.+?)[”」\"]?$/i);
   if (name?.[1]?.trim()) return { patch: { name: name[1].trim() }, message: `好，之后我就叫「${name[1].trim()}」。` };
   const model = content.match(/(?:把|将)?(?:默认)?模型(?:改成|改为|换成|用|设为)\s*[“「\"]?(.+?)[”」\"]?$/i)
     || content.match(/^(?:切换(?:到)?|换(?:成)?|用)\s*([a-z][a-z0-9._ -]*\d[a-z0-9._ -]*?)(?:吧|模型)?[。！!]?$/i);
-  if (model?.[1]?.trim()) {
-    const query = model[1].trim().replace(/[吧。！!]+$/, "").toLowerCase().replace(/[\s._:/-]+/g, "");
-    const preset = presets.find((item) => item.harness === "pi" && item.available && [item.id, item.name, item.modelId, item.channel]
-      .some((value) => value.toLowerCase().replace(/[\s._:/-]+/g, "").includes(query)));
-    if (!preset) return { patch: null, message: `我没找到「${model[1].trim()}」这个可用模型，你可以说得更具体一点。` };
-    return { patch: { presetId: preset.id }, message: `好，默认模型切换为 ${preset.name} · ${preset.channel}。` };
-  }
+  if (model?.[1]?.trim()) return resolveModelSwitch(model[1], presets, currentPresetId, pendingPresetId);
   return null;
 }
 
@@ -1118,7 +1296,7 @@ export function AutoWakeControl({
       <span>
         <strong>自动唤醒</strong>
         <small>
-          {enabled ? "定时任务到点后自动开始" : "仅在手动唤醒后继续"}
+          {enabled ? "这个 Bot 的定时到点后自动开始" : "定时不会触发，只在你手动唤醒时执行"}
         </small>
       </span>
     </label>
@@ -1483,6 +1661,8 @@ export function BotChat({
   onOpenMemory,
   communications = [],
   onOpenCommunications,
+  schedules = [],
+  onSchedulesChange,
   presets = [],
   models = [],
   onUpdateBot,
@@ -1507,6 +1687,8 @@ export function BotChat({
   onOpenMemory?: () => void;
   communications?: BotCommunication[];
   onOpenCommunications?: (peerBotId?: string) => void;
+  schedules?: BotSchedule[];
+  onSchedulesChange?: () => void;
   presets?: Preset[];
   models?: Model[];
   onUpdateBot?: (
@@ -1516,6 +1698,7 @@ export function BotChat({
         BotDefinition,
         | "name"
         | "presetId"
+        | "pendingPresetId"
         | "systemPrompt"
         | "description"
         | "avatarId"
@@ -1530,12 +1713,12 @@ export function BotChat({
   enterToSend?: boolean;
 }) {
   const [value, setValue] = useState("");
-  const [runAt, setRunAt] = useState("");
+  const [scheduleForm, setScheduleForm] = useState<ComposerScheduleForm>(() => defaultComposerForm());
+  const [scheduleArmed, setScheduleArmed] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
-  const [customSchedule, setCustomSchedule] = useState(false);
-  const [customDate, setCustomDate] = useState("");
-  const [customTime, setCustomTime] = useState("09:00");
-  const [customQuickTime, setCustomQuickTime] = useState("09:00");
+  const scheduleTriggerRef = useRef<HTMLButtonElement>(null);
+  const [schedulePopoverOpen, setSchedulePopoverOpen] = useState(false);
+  const [schedulePanelOpen, setSchedulePanelOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [previewArtifact, setPreviewArtifact] = useState<BotArtifact | null>(null);
@@ -1713,47 +1896,73 @@ export function BotChat({
     }
   }
 
+  function armOnce(date: string, time: string) {
+    setScheduleForm((current) => ({ ...current, kind: "once", onceDate: date, onceTime: time }));
+    setScheduleArmed(true);
+    try {
+      popoverRef.current?.hidePopover();
+    } catch {
+      // popover might not be open
+    }
+  }
+
   function selectSchedulePreset(preset: "1h" | "tonight" | "tomorrow") {
     const now = new Date();
     const pad = (n: number) => String(n).padStart(2, "0");
     if (preset === "1h") {
       const d = new Date(now.getTime() + 60 * 60 * 1000);
       d.setSeconds(0, 0);
-      setRunAt(
-        `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`,
+      armOnce(
+        `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
+        `${pad(d.getHours())}:${pad(d.getMinutes())}`,
       );
-    } else if (preset === "tonight") {
-      const d = new Date(
-        now.getFullYear(),
-        now.getMonth(),
-        now.getDate(),
-        20,
-        0,
-        0,
-        0,
-      );
-      if (d.getTime() <= now.getTime()) {
-        d.setDate(d.getDate() + 1);
-      }
-      setRunAt(
-        `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T20:00`,
-      );
-    } else if (preset === "tomorrow") {
-      const d = new Date(
-        now.getFullYear(),
-        now.getMonth(),
-        now.getDate() + 1,
-        9,
-        0,
-        0,
-        0,
-      );
-      setRunAt(
-        `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T09:00`,
-      );
+      return;
     }
-    popoverRef.current?.hidePopover();
-    setCustomSchedule(false);
+    if (preset === "tonight") {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 20, 0, 0, 0);
+      if (d.getTime() <= now.getTime()) d.setDate(d.getDate() + 1);
+      armOnce(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`, "20:00");
+      return;
+    }
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 9, 0, 0, 0);
+    armOnce(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`, "09:00");
+  }
+
+  function placeSchedulePopover() {
+    const popover = popoverRef.current;
+    const trigger = scheduleTriggerRef.current;
+    if (!popover || !trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    popover.style.position = "fixed";
+    popover.style.margin = "0";
+    popover.style.bottom = `${window.innerHeight - rect.top + 6}px`;
+    popover.style.right = `${Math.max(16, window.innerWidth - rect.right)}px`;
+    popover.style.top = "auto";
+    popover.style.left = "auto";
+    popover.style.maxHeight = "min(70vh, 420px)";
+    popover.style.overflow = "auto";
+  }
+
+  function confirmComposerSchedule() {
+    const invalid = validateComposerForm(scheduleForm);
+    if (invalid) {
+      setError(invalid);
+      return;
+    }
+    if (scheduleForm.kind === "interval") {
+      const everySeconds = intervalSecondsFromHours(scheduleForm.intervalHours);
+      if (everySeconds < 300) {
+        setError("定时间隔最短 5 分钟。太频繁会持续消耗模型额度。");
+        return;
+      }
+    }
+    setScheduleArmed(true);
+    setError("");
+    try {
+      popoverRef.current?.hidePopover();
+    } catch {
+      // popover might not be open
+    }
   }
 
   const scheduleDateOptions = (() => {
@@ -1775,6 +1984,23 @@ export function BotChat({
     }
     return options;
   })();
+  useEffect(() => {
+    if (schedulePopoverOpen) placeSchedulePopover();
+  }, [scheduleForm.kind, schedulePopoverOpen]);
+  const composerScheduleInvalid = validateComposerForm(scheduleForm);
+  const composerIntervalSeconds = intervalSecondsFromHours(scheduleForm.intervalHours);
+  const scheduleQuotaText = remainingScheduleQuota(schedules.length);
+  let composerChipLabel = "";
+  if (scheduleArmed) {
+    try {
+      composerChipLabel =
+        scheduleForm.kind === "once"
+          ? formatScheduledTaskTime(onceLocalToIso(scheduleForm.onceDate, scheduleForm.onceTime))
+          : describeRule(composerRuleFromForm(scheduleForm));
+    } catch {
+      composerChipLabel = describeComposerChip(scheduleForm);
+    }
+  }
   const [onboarding, setOnboarding] = useState<{ focus?: string; style?: string; autonomy?: string }>({});
   const [onboardingBusy, setOnboardingBusy] = useState(false);
   const [onboardingDone, setOnboardingDone] = useState(false);
@@ -1809,6 +2035,10 @@ export function BotChat({
     setOnboardingEditing(false);
     setOnboardingError("");
     setSettingNotice("");
+    setScheduleArmed(false);
+    setScheduleForm(defaultComposerForm());
+    setSchedulePanelOpen(false);
+    setError("");
   }, [bot?.id]);
   useEffect(() => {
     if (!onboardingEditing) return;
@@ -1887,7 +2117,7 @@ export function BotChat({
     setBusy(true);
     setError("");
     try {
-      const setting = parseBotSettingCommand(content, presets);
+      const setting = parseBotSettingCommand(content, presets, bot?.presetId, bot?.pendingPresetId);
       if (setting && onUpdateBot) {
         if (!setting.patch) {
           setSettingNotice(setting.message);
@@ -1900,26 +2130,68 @@ export function BotChat({
       }
       // 每条新消息默认开启独立任务，让互不相关的目标可以并发推进。
       // 针对已有任务的补充仍通过任务详情中的跟进入口完成。
-      await onDispatch({
-        botId: bot.id,
-        prompt: content,
-        wake: true,
-        ...(runAt ? { runAt: new Date(runAt).toISOString() } : {}),
-        ...(extra?.fleetDispatch || normalizeFleetPolicy(bot.fleetPolicy).enabled
-          ? { fleetDispatch: true }
-          : {}),
-      });
+      if (scheduleArmed) {
+        const invalid = validateComposerForm(scheduleForm);
+        if (invalid) {
+          setError(invalid);
+          return;
+        }
+        if (schedules.length >= MAX_SCHEDULES_PER_BOT) {
+          setError(remainingScheduleQuota(schedules.length));
+          return;
+        }
+        if (scheduleForm.kind === "once") {
+          const result = await onDispatch({
+            botId: bot.id,
+            prompt: content,
+            wake: true,
+            runAt: onceLocalToIso(scheduleForm.onceDate, scheduleForm.onceTime),
+          });
+          const created = result?.schedule;
+          if (created) {
+            setSettingNotice(createdScheduleNotice(created, formatScheduledTaskTime));
+          } else if (result?.message) {
+            setSettingNotice(result.message);
+          }
+          onSchedulesChange?.();
+        } else {
+          const rule = composerRuleFromForm(scheduleForm);
+          const created = await mutate<BotSchedule>(
+            `/bots/${encodeURIComponent(bot.id)}/schedules`,
+            {
+              prompt: content,
+              rule,
+              timezone: localTimezone(),
+              overlapPolicy: "skip",
+            },
+          );
+          setSettingNotice(createdScheduleNotice(created, formatScheduledTaskTime));
+          onSchedulesChange?.();
+        }
+      } else {
+        await onDispatch({
+          botId: bot.id,
+          prompt: content,
+          wake: true,
+          ...(extra?.fleetDispatch || normalizeFleetPolicy(bot.fleetPolicy).enabled
+            ? { fleetDispatch: true }
+            : {}),
+        });
+      }
       setValue("");
-      setRunAt("");
+      setScheduleArmed(false);
       try {
         popoverRef.current?.hidePopover();
       } catch {
         // popover might not be open
       }
-      setCustomSchedule(false);
     } catch (cause) {
       setError(
-        cause instanceof Error ? cause.message : "消息发送失败，请稍后重试。",
+        scheduleErrorMessage(
+          apiErrorCode(cause),
+          cause instanceof Error ? cause.message : "消息发送失败，请稍后重试。",
+          schedules.length,
+        ),
       );
     } finally {
       setBusy(false);
@@ -2058,6 +2330,43 @@ export function BotChat({
                   label={getBotHeaderStatusText(bot, tasks)}
                 />
               )}
+              {bot && (bot.model || bot.pendingPresetId) && (
+                <p
+                  className="bot-chat-model-line"
+                  role={onUpdateBot ? "button" : undefined}
+                  tabIndex={onUpdateBot ? 0 : -1}
+                  onClick={() => {
+                    if (!onUpdateBot) return;
+                    setOnboardingEditing(true);
+                    setSchedulePanelOpen(false);
+                    setTimeout(() => {
+                      const section = document.getElementById("bot-preset-model-section");
+                      section?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+                      const trigger = section?.querySelector<HTMLElement>(".model-picker-trigger, button");
+                      trigger?.focus();
+                    }, 80);
+                  }}
+                  onKeyDown={(e) => {
+                    if (onUpdateBot && (e.key === "Enter" || e.key === " ")) {
+                      e.preventDefault();
+                      setOnboardingEditing(true);
+                      setSchedulePanelOpen(false);
+                      setTimeout(() => {
+                        const section = document.getElementById("bot-preset-model-section");
+                        section?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+                        const trigger = section?.querySelector<HTMLElement>(".model-picker-trigger, button");
+                        trigger?.focus();
+                      }, 80);
+                    }
+                  }}
+                  title={onUpdateBot ? "点击在设定中切换模型" : "当前模型与下一轮待生效模型"}
+                >
+                  {bot.model ? `当前 ${bot.model}` : ""}
+                  {bot.pendingPresetId
+                    ? `${bot.model ? " · " : ""}下一轮 ${presets.find((item) => item.id === bot.pendingPresetId)?.name || bot.pendingPresetId}`
+                    : ""}
+                </p>
+              )}
             </div>
             {editingDesc && bot ? (
               <div className="bot-chat-desc-edit-wrap">
@@ -2121,6 +2430,7 @@ export function BotChat({
               type="button"
               onClick={() => {
                 setOnboardingEditing((prev) => !prev);
+                setSchedulePanelOpen(false);
               }}
               aria-label="打开设定"
               aria-pressed={onboardingEditing}
@@ -2128,6 +2438,22 @@ export function BotChat({
             >
               <Settings2 size={14} />
               <span>设定</span>
+            </button>
+          )}
+          {bot && (
+            <button
+              className={"bot-quiet-button" + (schedulePanelOpen ? " is-active" : "")}
+              type="button"
+              onClick={() => {
+                setSchedulePanelOpen((prev) => !prev);
+                setOnboardingEditing(false);
+              }}
+              aria-label="打开定时面板"
+              aria-pressed={schedulePanelOpen}
+              title="定时"
+            >
+              <Timer size={14} />
+              <span>定时{schedules.length ? ` · ${schedules.length}` : ""}</span>
             </button>
           )}
           {bot && onOpenCommunications && (
@@ -2411,7 +2737,7 @@ export function BotChat({
                   content={event.content}
                   onSelectOption={sendMessage}
                   onOpenConfig={onUpdateBot ? () => setOnboardingEditing(true) : undefined}
-                  disabled={busy || disabled || isTaskRunning}
+                  disabled={busy || disabled || isTaskRunning || schedulePopoverOpen}
                 />
               </div>
             ))}
@@ -2486,7 +2812,7 @@ export function BotChat({
                   content={resultText}
                   onSelectOption={sendMessage}
                   onOpenConfig={onUpdateBot ? () => setOnboardingEditing(true) : undefined}
-                  disabled={busy || disabled || isTaskRunning}
+                  disabled={busy || disabled || isTaskRunning || schedulePopoverOpen}
                 />
               </div>
             )}
@@ -2684,20 +3010,23 @@ export function BotChat({
           />
           <div className="bot-chat-composer-footer">
             <div className="bot-chat-composer-meta">
-              {runAt && (
+              {scheduleArmed && (
                 <span className="bot-schedule-chip">
                   <Timer size={12} />
-                  <span>{formatScheduledTaskTime(runAt)}</span>
+                  <span>{composerChipLabel}</span>
                   <button
                     type="button"
                     className="bot-schedule-chip-clear"
-                    onClick={() => setRunAt("")}
+                    onClick={() => setScheduleArmed(false)}
                     aria-label="清除定时"
                     title="清除定时"
                   >
                     <X size={12} />
                   </button>
                 </span>
+              )}
+              {scheduleQuotaText && (
+                <span className="bot-schedule-quota-chip">{scheduleQuotaText}</span>
               )}
             </div>
             <div className="bot-chat-send-group">
@@ -2717,8 +3046,8 @@ export function BotChat({
                   className="bot-chat-send"
                   type="submit"
                   disabled={disabled || busy || !value.trim() || !bot}
-                  aria-label={busy ? "发送中" : hasPendingQuestion ? "回复" : runAt ? "定时执行" : "发送"}
-                  title={busy ? "发送中" : hasPendingQuestion ? "回复" : runAt ? "定时执行" : normalizeFleetPolicy(bot?.fleetPolicy).enabled ? "发出去会再问几家" : "发送"}
+                  aria-label={busy ? "发送中" : hasPendingQuestion ? "回复" : scheduleArmed ? "定时执行" : "发送"}
+                  title={busy ? "发送中" : hasPendingQuestion ? "回复" : scheduleArmed ? "定时执行" : normalizeFleetPolicy(bot?.fleetPolicy).enabled ? "发出去会再问几家" : "发送"}
                 >
                   {busy ? (
                     <LoaderCircle className="bot-spin" size={15} />
@@ -2730,21 +3059,14 @@ export function BotChat({
               <button
                 type="button"
                 className="bot-chat-schedule-trigger"
+                ref={scheduleTriggerRef}
                 disabled={disabled || busy || !bot || isTaskRunning}
                 aria-label="定时执行选项"
                 title="定时选项"
-                onClick={(e) => {
-                  const popover = popoverRef.current;
-                  if (!popover) return;
-                  const rect = e.currentTarget.getBoundingClientRect();
-                  popover.style.position = "fixed";
-                  popover.style.margin = "0";
-                  popover.style.bottom = `${window.innerHeight - rect.top + 6}px`;
-                  popover.style.right = `${Math.max(16, window.innerWidth - rect.right)}px`;
-                  popover.style.top = "auto";
-                  popover.style.left = "auto";
+                onClick={() => {
+                  placeSchedulePopover();
                   try {
-                    popover.togglePopover();
+                    popoverRef.current?.togglePopover();
                   } catch {
                     // fallback
                   }
@@ -2759,58 +3081,53 @@ export function BotChat({
               ref={popoverRef}
               className="bot-schedule-popover"
               onToggle={(e: any) => {
-                if (e.newState === "closed") {
-                  setCustomSchedule(false);
-                }
+                setSchedulePopoverOpen(e.newState === "open");
               }}
             >
-              {!customSchedule ? (
-                <div className="bot-schedule-presets">
+              <div className="bot-schedule-kind-tabs" role="tablist" aria-label="定时类型">
+                {(
+                  [
+                    ["once", "一次"],
+                    ["daily", "每天"],
+                    ["weekly", "每周"],
+                    ["interval", "每 N 小时"],
+                  ] as const
+                ).map(([kind, label]) => (
                   <button
+                    key={kind}
                     type="button"
-                    className="bot-schedule-option"
-                    onClick={() => selectSchedulePreset("1h")}
-                  >
-                    <Clock3 size={14} />
-                    <span>1 小时后</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="bot-schedule-option"
-                    onClick={() => selectSchedulePreset("tonight")}
-                  >
-                    <Clock3 size={14} />
-                    <span>今晚 20:00</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="bot-schedule-option"
-                    onClick={() => selectSchedulePreset("tomorrow")}
-                  >
-                    <Calendar size={14} />
-                    <span>明天 09:00</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="bot-schedule-option"
+                    role="tab"
+                    aria-selected={scheduleForm.kind === kind}
+                    className={`bot-schedule-kind-tab${scheduleForm.kind === kind ? " is-selected" : ""}`}
                     onClick={() => {
-                      if (!customDate) {
-                        setCustomDate(scheduleDateOptions[1]?.value || scheduleDateOptions[0]?.value);
-                      }
-                      setCustomSchedule(true);
+                      setScheduleForm((current) => ({ ...current, kind }));
                     }}
                   >
-                    <Calendar size={14} />
-                    <span>自定义…</span>
+                    {label}
                   </button>
-                </div>
-              ) : (
+                ))}
+              </div>
+              {scheduleForm.kind === "once" && (
                 <div className="bot-schedule-custom-panel">
+                  <div className="bot-schedule-presets">
+                    <button type="button" className="bot-schedule-option" onClick={() => selectSchedulePreset("1h")}>
+                      <Clock3 size={14} />
+                      <span>1 小时后</span>
+                    </button>
+                    <button type="button" className="bot-schedule-option" onClick={() => selectSchedulePreset("tonight")}>
+                      <Clock3 size={14} />
+                      <span>今晚 20:00</span>
+                    </button>
+                    <button type="button" className="bot-schedule-option" onClick={() => selectSchedulePreset("tomorrow")}>
+                      <Calendar size={14} />
+                      <span>明天 09:00</span>
+                    </button>
+                  </div>
                   <div className="bot-schedule-custom-row">
                     <select
                       className="bot-schedule-select"
-                      value={customDate || scheduleDateOptions[1]?.value}
-                      onChange={(e) => setCustomDate(e.target.value)}
+                      value={scheduleForm.onceDate || scheduleDateOptions[1]?.value}
+                      onChange={(e) => setScheduleForm((current) => ({ ...current, onceDate: e.target.value }))}
                       aria-label="选择日期"
                     >
                       {scheduleDateOptions.map((opt) => (
@@ -2821,11 +3138,8 @@ export function BotChat({
                     </select>
                     <select
                       className="bot-schedule-select"
-                      value={customQuickTime}
-                      onChange={(e) => {
-                        setCustomQuickTime(e.target.value);
-                        setCustomTime(e.target.value);
-                      }}
+                      value={scheduleForm.onceTime}
+                      onChange={(e) => setScheduleForm((current) => ({ ...current, onceTime: e.target.value }))}
                       aria-label="常用时段"
                     >
                       <option value="09:00">09:00</option>
@@ -2838,37 +3152,103 @@ export function BotChat({
                     <input
                       type="text"
                       className="bot-schedule-time-input"
-                      value={customTime}
+                      value={scheduleForm.onceTime}
                       placeholder="HH:mm"
                       maxLength={5}
-                      onChange={(e) => setCustomTime(e.target.value)}
+                      onChange={(e) => setScheduleForm((current) => ({ ...current, onceTime: e.target.value }))}
                       aria-label="精确时间"
                     />
                   </div>
-                  <div className="bot-schedule-custom-actions">
-                    <button
-                      type="button"
-                      className="bot-schedule-back-btn"
-                      onClick={() => setCustomSchedule(false)}
-                    >
-                      返回
-                    </button>
-                    <button
-                      type="button"
-                      className="bot-schedule-confirm-btn"
-                      onClick={() => {
-                        const d = customDate || scheduleDateOptions[1]?.value || scheduleDateOptions[0]?.value;
-                        const t = customTime.trim() || "09:00";
-                        setRunAt(`${d}T${t}`);
-                        popoverRef.current?.hidePopover();
-                        setCustomSchedule(false);
-                      }}
-                    >
-                      确定
-                    </button>
-                  </div>
                 </div>
               )}
+              {scheduleForm.kind === "daily" && (
+                <div className="bot-schedule-custom-panel">
+                  <label className="bot-field">
+                    <span>每天</span>
+                    <input
+                      type="text"
+                      className="bot-schedule-time-input"
+                      value={scheduleForm.atLocalTime}
+                      maxLength={5}
+                      onChange={(e) => setScheduleForm((current) => ({ ...current, atLocalTime: e.target.value }))}
+                      aria-label="每天时间"
+                    />
+                  </label>
+                </div>
+              )}
+              {scheduleForm.kind === "weekly" && (
+                <div className="bot-schedule-custom-panel">
+                  <div className="bot-schedule-weekdays" role="group" aria-label="星期">
+                    {WEEKDAY_LABELS.map((label, weekday) => (
+                      <button
+                        key={label}
+                        type="button"
+                        className={`bot-schedule-kind-tab${scheduleForm.weekday === weekday ? " is-selected" : ""}`}
+                        onClick={() => setScheduleForm((current) => ({ ...current, weekday }))}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <input
+                    type="text"
+                    className="bot-schedule-time-input"
+                    value={scheduleForm.atLocalTime}
+                    maxLength={5}
+                    onChange={(e) => setScheduleForm((current) => ({ ...current, atLocalTime: e.target.value }))}
+                    aria-label="每周时间"
+                  />
+                </div>
+              )}
+              {scheduleForm.kind === "interval" && (
+                <div className="bot-schedule-custom-panel">
+                  <div className="bot-schedule-interval-row">
+                    {INTERVAL_HOUR_PRESETS.map((hours) => (
+                      <button
+                        key={hours}
+                        type="button"
+                        className={`bot-schedule-kind-tab${scheduleForm.intervalHours === hours ? " is-selected" : ""}`}
+                        onClick={() => setScheduleForm((current) => ({ ...current, intervalHours: hours }))}
+                      >
+                        {hours} 小时
+                      </button>
+                    ))}
+                  </div>
+                  <label className="bot-field">
+                    <span>自定义小时</span>
+                    <input
+                      type="number"
+                      min={0.09}
+                      step="any"
+                      className="bot-schedule-select"
+                      value={scheduleForm.intervalHours}
+                      onChange={(e) =>
+                        setScheduleForm((current) => ({
+                          ...current,
+                          intervalHours: Number(e.target.value),
+                        }))
+                      }
+                      aria-label="自定义间隔小时"
+                    />
+                  </label>
+                  {composerIntervalSeconds < 300 && (
+                    <p className="bot-schedule-hint" role="status">
+                      定时间隔最短 5 分钟。太频繁会持续消耗模型额度。
+                    </p>
+                  )}
+                </div>
+              )}
+              {scheduleQuotaText && <p className="bot-schedule-hint">{scheduleQuotaText}</p>}
+              <div className="bot-schedule-custom-actions">
+                <button
+                  type="button"
+                  className="bot-schedule-confirm-btn"
+                  disabled={Boolean(composerScheduleInvalid)}
+                  onClick={confirmComposerSchedule}
+                >
+                  确定
+                </button>
+              </div>
             </div>
           </div>
           {error && (
@@ -2887,6 +3267,32 @@ export function BotChat({
         preview={isPreview}
         presets={presets}
         models={models}
+      />
+    )}
+    {bot && schedulePanelOpen && (
+      <BotSchedulePanel
+        bot={bot}
+        schedules={schedules}
+        tasks={tasks}
+        preview={isPreview}
+        onClose={() => setSchedulePanelOpen(false)}
+        onChange={onSchedulesChange}
+        onSelectTask={onSelectTask}
+        wakeControl={
+          onUpdateBot ? (
+            <AutoWakeControl
+              enabled={bot.wakeEnabled}
+              onChange={(enabled) => {
+                void onUpdateBot(bot.id, { wakeEnabled: enabled }).catch((cause) => {
+                  setError(
+                    cause instanceof Error ? cause.message : "自动唤醒设置保存失败。",
+                  );
+                });
+              }}
+              disabled={disabled}
+            />
+          ) : null
+        }
       />
     )}
     </>

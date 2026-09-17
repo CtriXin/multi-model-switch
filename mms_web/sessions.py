@@ -15,6 +15,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import logging
 import os
 import re
 import threading
@@ -353,7 +354,15 @@ class _LiveSession:
             "updatedAt": self.updated_at,
         }
         from .runtime import private_json
-        private_json(state_dir / f"{self.meta['id']}.json", payload)
+        target = state_dir / f"{self.meta['id']}.json"
+        try:
+            private_json(target, payload)
+        except OSError:
+            logging.getLogger("mms_web.sessions").exception(
+                "session persist failed for %s; this conversation may not have been saved",
+                self.meta.get("id"),
+            )
+            raise
 
 
 
@@ -481,6 +490,15 @@ class SessionService(SessionActions, SessionSideQuestions):
 
     def get_session(self, session_id: str) -> dict:
         session = self._get(session_id)
+        # Forward compatibility: a newer line may persist sessions owned by
+        # something this line does not know. They stay out of the chat list,
+        # and this line has no legitimate reader of their details, so answer
+        # as if the id did not exist instead of presenting the session as a
+        # plain chat.
+        # Bot details deliberately reuse this by-id path; keep known Bot
+        # sessions accessible while refusing unknown future owners.
+        if str(session.meta.get("owner") or "web") not in {"web", "bot"}:
+            raise WebError("NOT_FOUND", "找不到这个会话。", 404)
         runtime = self.runtime_view(session_id) if not session.alive() or hasattr(session.driver, "request") else session.meta.get("runtimeView", {})
         with session.lock:
             backfill_history(session)
@@ -869,8 +887,18 @@ class SessionService(SessionActions, SessionSideQuestions):
             modes = dict(session.pending_modes)
             if removed:
                 event = session.event_index.get(removed)
+                text = texts.get(removed)
                 if event and event.get("status") == "queued":
-                    event["status"] = "cancelled"
+                    # Same fact as survivors: still in Pi's queue means we
+                    # withdrew it; missing means Pi already took it.
+                    if text is not None and text in waiting:
+                        event["status"] = "cancelled"
+                    else:
+                        event["status"] = "delivered"
+                        event["lateCancel"] = True
+                elif event and event.get("status") == "delivered":
+                    # Delete was in flight when Pi consumed the message.
+                    event["lateCancel"] = True
                 session.forget_pending(removed)
         restored: list[str] = []
         for queued_id in order:
@@ -1027,6 +1055,25 @@ class SessionService(SessionActions, SessionSideQuestions):
             with session.lock:
                 session.persist(self._state_dir)
                 return session.detail_view()
+
+    def retire_bot_session(self, session_id: str) -> None:
+        """Release a task-owned Bot process without deleting its saved history."""
+        session = self._get(session_id)
+        with session.mutation_lock:
+            if session.meta.get("owner") != "bot":
+                raise WebError("INVALID_SESSION_OWNER", "只能释放 Bot 拥有的临时会话。", 409)
+            with session.lock:
+                session.stop_requested = True
+                driver = session.driver
+            self._close_side_questions(session)
+            if driver is not None:
+                driver.close()
+            if session.alive():
+                raise WebError("SESSION_BUSY", "会话进程尚未退出，请稍后重试释放。", 409)
+            with session.lock:
+                session.meta["archived"] = True
+                session.state = "stopped"
+                session.persist(self._state_dir)
 
     def close(self) -> None:
         with self._lock:

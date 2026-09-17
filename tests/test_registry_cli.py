@@ -26,7 +26,7 @@ def test_refresh_sources_imports_reference_snapshot_to_db(tmp_path: Path) -> Non
     assert summary["fact_count"] >= summary["model_count"]
     assert status["counts"]["source_snapshot"] == 1
     assert status["counts"]["source_check"] == 1
-    assert status["source_freshness"]["due_count"] == 0
+    assert mms_registry_cli.source_freshness(db_path=db_path, paths=[REFERENCE_JSON])["due_count"] == 0
     assert status["counts"]["model_identity"] >= 30
     assert status["counts"]["model_fact"] == summary["fact_count"]
 
@@ -820,7 +820,7 @@ def test_mmf_config_save_plan_is_read_only_and_reports_no_draft_changes(tmp_path
     assert not (config_dir / "cache").exists()
 
 
-def test_mms_config_save_plan_blocks_stable_root_without_writing(tmp_path: Path) -> None:
+def test_registry_save_plan_blocks_retired_root_without_writing(tmp_path: Path) -> None:
     real_home = tmp_path / "home"
     stable_root = real_home / ".config" / "mms"
     env = os.environ.copy()
@@ -831,13 +831,13 @@ def test_mms_config_save_plan_blocks_stable_root_without_writing(tmp_path: Path)
             "PYTHONPATH": str(ROOT),
         }
     )
-    env.pop("MMS_CONFIG_ROOT", None)
+    env["MMS_CONFIG_ROOT"] = str(stable_root)
     env.pop("MMS_CONFIG_DIR", None)
     env.pop("MMS_PREVIEW_MODE", None)
     env.pop("MMS_COMMAND_NAME", None)
     env.pop("XDG_CONFIG_HOME", None)
     result = subprocess.run(
-        [sys.executable, str(ROOT / "mms"), "config", "save-plan", "--json"],
+        [sys.executable, str(ROOT / "mms"), "registry", "save-plan", "--config-dir", str(stable_root), "--json"],
         cwd=ROOT,
         env=env,
         text=True,
@@ -850,7 +850,8 @@ def test_mms_config_save_plan_blocks_stable_root_without_writing(tmp_path: Path)
     assert payload["schema"] == mms_registry_cli.REGISTRY_V2_SAVE_PLAN_SCHEMA
     assert payload["read_only"] is True
     assert payload["root"]["command"] == "mms"
-    assert payload["root"]["mode"] == "stable"
+    assert payload["root"]["mode"] == "preview"
+    assert payload["root"]["legacy_root"] is True
     assert payload["root"]["config_root"] == str(stable_root)
     assert payload["actual_save_enabled"] is False
     assert payload["would_write"]["db_candidate_revision"] is False
@@ -3571,3 +3572,51 @@ def test_registry_command_publish_verify_and_resolve(capsys, tmp_path: Path) -> 
     assert "bundle_revision=bundle_" in out
     assert "verified=True" in out
     assert "thinking_control_type=thinkingLevel" in out
+
+
+def test_openrouter_baseline_combines_snapshots_and_keeps_alias_provenance(tmp_path):
+    db_path = tmp_path / "registry.sqlite"
+    def refs(alias, context):
+        return {"alias": alias, "provider_catalog_references": [{"source": "openrouter", "model_id": "vendor/shared",
+                 "context_length": context, "top_provider": {"max_completion_tokens": 50},
+                 "pricing_raw_usd_per_unit": {}, "supported_parameters": []}]}
+    def add(name, models):
+        db = mms_registry.open_registry(db_path)
+        try:
+            return mms_registry.import_raw_source_payload(db, {"models": models},
+                source_kind=mms_registry.CALIBRATION_SOURCE_KIND, source_path=name)["snapshot_id"]
+        finally:
+            db.close()
+    def candidates():
+        db = mms_registry.open_registry(db_path)
+        try:
+            return [dict(row) for row in db.execute("SELECT * FROM candidate_change WHERE status = 'candidate'")]
+        finally:
+            db.close()
+    first = add("A", [refs("alias-a", 100), refs("alias-b", 100)])
+    add("B", [{"alias": "unrelated"}])
+    db = mms_registry.open_registry(db_path)
+    try:
+        mms_registry.import_raw_source_payload(db, {"data": [{"id": "vendor/shared", "context_length": 200,
+            "top_provider": {"max_completion_tokens": 50}, "pricing": {}, "supported_parameters": []}]},
+            source_kind=mms_registry.OPENROUTER_MODELS_SOURCE_KIND, source_path="catalog")
+    finally:
+        db.close()
+    preview = mms_registry_cli.diff_openrouter_catalog(db_path=db_path, store=False)
+    assert preview["change_count"] == 2 and candidates() == []
+    result = mms_registry_cli.diff_openrouter_catalog(db_path=db_path, limit=1)
+    assert result["matched_reference_count"] == 2
+    assert result["stored_count"] == 2 and len(result["changes"]) == 1
+    assert {row["baseline_snapshot_id"] for row in candidates()} == {first}
+    newest = add("C", [refs("alias-a", 150)])
+    mms_registry_cli.diff_openrouter_catalog(db_path=db_path)
+    current = {row["model_key"]: row for row in candidates()}
+    assert len(candidates()) == 2
+    assert current["alias-a"]["baseline_snapshot_id"] == newest
+    assert json.loads(current["alias-a"]["old_value_json"]) == 150
+    assert current["alias-b"]["baseline_snapshot_id"] == first
+    mms_registry_cli.diff_openrouter_catalog(db_path=db_path)
+    assert len(candidates()) == 2
+    add("D", [refs("alias-a", 200)])
+    mms_registry_cli.diff_openrouter_catalog(db_path=db_path)
+    assert [row["model_key"] for row in candidates()] == ["alias-b"]

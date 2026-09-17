@@ -140,3 +140,11 @@ def test_string_opt_in_is_not_treated_as_permission(tmp_path):
         assert c.status()['phase']=='waiting'
         c.cancel();c._thread.join(2)
         close.assert_not_called()
+
+
+def test_selected_release_classification_is_frozen_before_background_work(tmp_path):
+    app, coordinator = setup(tmp_path, Mock(side_effect=ValueError('stop after selection')))
+    private_json(coordinator.root / 'check.json', {'latest': {'tag': 'v99.0.0', 'prerelease': True}})
+    coordinator.start({'target': 'v99.0.0'})
+    coordinator._thread.join(2)
+    assert coordinator.status()['prerelease'] is True

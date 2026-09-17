@@ -17,6 +17,7 @@ import { copyText } from "./clipboard";
 import { ToolEvent } from "./ToolEvent";
 import { messageAnchor } from "./ConversationOutline";
 import { MessageActions } from "./SessionTools";
+import { ReplyReader } from "./ReplyReader";
 import { AttachmentView } from "./MessageMedia";
 import { ContextUsage } from "./ContextUsage";
 import { formatEventTime, formatEventTimeTitle, turnDuration } from "./time";
@@ -248,11 +249,13 @@ export function EventView({
   continuation = false,
   intermediate = false,
   turnStartedAt,
+  startReading = false,
 }: {
   continuation?: boolean;
   intermediate?: boolean;
   disconnected?: boolean;
   turnStartedAt?: string;
+  startReading?: boolean;
   event: SessionEvent;
   action?: (
     path: string,
@@ -263,6 +266,7 @@ export function EventView({
   busy: boolean;
   approve: (id: string, decision: "allow" | "deny", value?: string) => void;
 }) {
+  const [reading, setReading] = useState(startReading);
   const thinking =
     !disconnected &&
     detail.session.state === "running" &&
@@ -303,6 +307,17 @@ export function EventView({
       tabIndex={-1}
       data-event-id={event.id}
       className={`message ${event.kind}${continuation ? " continuation" : ""}${intermediate ? " intermediate" : ""}`}
+      onKeyDown={(e) => {
+        if (event.kind !== "assistant" || !event.text.trim()) return;
+        if (
+          e.key === "Enter" &&
+          !e.nativeEvent.isComposing &&
+          e.target === e.currentTarget
+        ) {
+          e.preventDefault();
+          setReading(true);
+        }
+      }}
     >
       <div className="message-avatar">
         {event.kind === "user" ? "你" : <Logo small />}
@@ -366,9 +381,21 @@ export function EventView({
             eventId={event.id}
             text={event.text}
             action={event.kind === "assistant" ? action : undefined}
+            onRead={
+              event.kind === "assistant" ? () => setReading(true) : undefined
+            }
           />
         )}
       </div>
+      {reading && event.kind === "assistant" && event.text.trim() && (
+        <ReplyReader
+          text={event.text}
+          title={`${harnessNames[detail.session.harness]} · ${event.modelName || detail.session.modelName}`}
+          onClose={() => setReading(false)}
+        >
+          <RichText text={event.text} repair />
+        </ReplyReader>
+      )}
     </article>
   );
 }

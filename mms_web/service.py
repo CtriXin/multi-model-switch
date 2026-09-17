@@ -130,7 +130,7 @@ def help_text(command: str | None = None) -> str:
         f"例子\n{examples}\n\n"
         f"选项\n{options}\n\n"
         "后台启动的日志在 <state-root>/logs/mms-web.log。\n"
-        "手机或另一台电脑访问：设置 → 使用 → 让手机或另一台电脑访问。\n"
+        "手机或另一台电脑访问：设置 → 使用 → 让手机或另一台电脑访问；出门用的域名在开关打开之后填。\n"
         f"每个命令还有自己的 --help，例如 {name} stop --help。\n"
         "更多说明：docs/mms-web/GETTING-STARTED.md"
     )
@@ -336,6 +336,10 @@ def discover(port_base: int = DEFAULT_PORT_BASE, limit: int = PORT_SEARCH_LIMIT,
         # The header is authoritative. The command line is a fallback for a
         # Pilot older than the header, and the only source for pid and source.
         mine = fingerprint == mine_fingerprint if fingerprint else (bool(argv) and state == str(mine_root))
+        if mine:
+            # The fingerprint is authoritative even when process inspection
+            # is unavailable. Read credentials only from that matched root.
+            state = str(Path(mine_root).expanduser().resolve())
         entry = {
             "port": port,
             "pid": pid,

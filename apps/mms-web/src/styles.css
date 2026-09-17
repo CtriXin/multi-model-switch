@@ -397,8 +397,8 @@ kbd {
   font-size: max(11px, 0.7857rem);
   color: var(--muted);
 }
-.workspace-heading > span:last-child {
-  margin-left: auto;
+.workspace-count {
+  margin: 0;
 }
 .session-link {
   display: flex;
@@ -549,6 +549,13 @@ kbd {
   align-items: center;
   margin-left: auto;
 }
+.topbar-actions .status.compact {
+  align-self: center;
+  margin: 0;
+  width: 30px;
+  height: 30px;
+  justify-content: center;
+}
 .icon-button {
   border: 0;
   background: transparent;
@@ -591,6 +598,28 @@ kbd {
   align-items: center;
   gap: 4px;
   color: var(--muted);
+}
+.connection-banner {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 24px;
+  font-size: max(11px, 0.8571rem);
+  color: var(--muted);
+  background: var(--soft);
+  border-bottom: 1px solid var(--line);
+}
+.connection-banner-text {
+  flex: 1;
+}
+.connection-banner-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--danger);
+  opacity: 0.85;
+  display: inline-block;
+  flex-shrink: 0;
 }
 .error-banner {
   display: flex;
@@ -1936,8 +1965,10 @@ dialog:has(.dialog-body.sheet) .dialog-body.sheet > header {
   .result-panel {
     width: 100%;
   }
+  .connection-banner,
   .error-banner {
-    padding: 10px 16px;
+    padding-left: 16px;
+    padding-right: 16px;
   }
   .dialog-body {
     padding: 20px;
@@ -3696,9 +3727,8 @@ dialog:has(> .dialog-body .model-explorer) > .dialog-body > header {
   flex: 0 0 7px;
   position: relative;
 }
-.status.compact {
+.session-link .status.compact {
   align-self: flex-start;
-  margin: 6px 2px 0 0;
   overflow: visible;
 }
 .status.idle .status-dot,
@@ -3775,6 +3805,7 @@ dialog:has(> .dialog-body .model-explorer) > .dialog-body > header {
   background: var(--danger-bg);
 }
 .current-activity.idle,
+.current-activity.pending,
 .current-activity.stopped,
 .current-activity.completed {
   background: transparent;

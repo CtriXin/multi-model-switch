@@ -1,0 +1,2 @@
+{"error": {"code": "SCHEDULE_INTERVAL_TOO_SHORT", "message": "定时间隔最短 5 分钟。"}}
+HTTP 400

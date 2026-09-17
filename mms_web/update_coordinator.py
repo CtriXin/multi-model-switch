@@ -60,7 +60,8 @@ class UpdateCoordinator:
                 raise WebError('UPDATE_UNAVAILABLE', '请先检查更新，并选择可用的稳定版本。', 409)
             self._cancel.clear()
             self._operation = {'id':uuid.uuid4().hex, 'target':target,
-                               'allowIdleRestart':payload.get('allowIdleRestart') is True}
+                               'allowIdleRestart':payload.get('allowIdleRestart') is True,
+                               'prerelease':latest['latest'].get('prerelease')}
             self._status('preparing', '正在下载并检查新版，当前对话可以继续。', cancellable=True)
             self._thread = threading.Thread(target=self._run, args=(target,), name='pilot-safe-update', daemon=True)
             self._thread.start()
@@ -120,6 +121,7 @@ class UpdateCoordinator:
         backup = operation_root/'backup'
         backup_state(self.app.state_root, backup)
         spec = {'id':self._operation['id'], 'target':target, 'source':str(candidate),
+                'prerelease':self._operation.get('prerelease'),
                 'oldSource':str(self.source), 'oldVersion':VERSION, 'python':sys.executable,
                 'state':str(self.app.state_root), 'config':str(self.app.config_root.resolve()),
                 'cwd':os.getcwd(), 'port':self.server.server_address[1],

@@ -1,0 +1,3 @@
+--- system | 已记录，下一轮起使用 glm-5.3 · newapi-personal-tokyo；本轮仍是 deepseek-v4-flash。
+--- message | 已切换：`glm-5.3`（newapi-personal-tokyo 渠道，列表里就这一个候选）已设为 pending，下一轮任务起生效——本轮回复仍然是 deepseek-v4-flash。
+--- result | 已切换：pending = glm-5.3（web:pi:newapi-personal-tokyo:glm-5.3），下一轮任务起生效；本轮仍运行 deepseek-v4-flash。glm-5.3 在可用列表中只有一个候选渠道（newapi-personal-tokyo），无需选择。

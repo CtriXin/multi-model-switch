@@ -182,11 +182,11 @@ body,
   color: var(--muted);
 }
 .workspace-heading {
-  /* The right inset is permanently reserved for the hover actions, so the
-     folder name truncates in the same place whether or not they are shown.
-     Fading the name on hover instead left it running under the icons: the
-     fade landed inside the name's own box, which extends past where the
-     buttons begin. */
+  /* Keep a right slot so the name truncates in the same place at rest and
+     on hover. The count and the ⋯/+ actions share that slot: they never
+     show together, so the number sits on the trailing edge instead of
+     stopping short of empty reserved space. */
+  position: relative;
   padding: 5px 62px 5px 8px;
   font-size: max(11px, 0.8571rem);
   gap: 7px;
@@ -197,9 +197,16 @@ body,
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.workspace-heading > span:last-child {
+.workspace-count {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  margin: 0;
   font-size: max(11px, 0.7143rem);
+  font-variant-numeric: tabular-nums;
   opacity: 0.7;
+  pointer-events: none;
 }
 .workspace-group + .workspace-group {
   margin-top: 16px;
@@ -237,9 +244,9 @@ body,
 .workspace-row-actions .icon-button {
   padding: 3px;
 }
-/* The count would sit under the action buttons; hide it while they show. */
-.workspace-group:hover .workspace-heading > span:last-child,
-.workspace-group:focus-within .workspace-heading > span:last-child {
+/* Count and actions share the trailing slot. */
+.workspace-group:hover .workspace-count,
+.workspace-group:focus-within .workspace-count {
   opacity: 0;
 }
 /* A touch device has no hover, and a tap on a row opens the session, so
@@ -262,6 +269,9 @@ body,
   }
   .workspace-row-actions .new-in-folder {
     display: none;
+  }
+  .workspace-count {
+    opacity: 0;
   }
 }
 .workspace-tools {
@@ -752,7 +762,7 @@ body,
 .composer-context {
   justify-content: flex-end;
   flex-wrap: nowrap;
-  gap: 0;
+  gap: 4px;
 }
 .task-settings-trigger {
   display: flex;
@@ -768,6 +778,137 @@ body,
 }
 .task-settings-trigger:hover {
   background: var(--soft);
+}
+.task-effort-trigger {
+  cursor: pointer;
+  user-select: none;
+}
+.task-effort-trigger:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.task-effort-trigger .task-effort-icon {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.task-effort-trigger .task-effort-prefix {
+  color: var(--muted);
+  font-size: max(11px, 0.7857rem);
+  white-space: nowrap;
+}
+.task-effort-trigger .task-effort {
+  color: var(--ink);
+  font-weight: 550;
+  font-size: max(11px, 0.7857rem);
+  white-space: nowrap;
+}
+/* Quick Effort Menu Popover */
+.effort-menu {
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  gap: 2px;
+}
+.effort-menu-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 6px 8px 6px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 4px;
+}
+.effort-menu-header > span {
+  font-size: max(11px, 0.7857rem);
+  font-weight: 600;
+  color: var(--ink);
+}
+.effort-menu-header > small {
+  font-size: max(10px, 0.7143rem);
+  color: var(--muted);
+}
+.effort-menu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.effort-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  font: inherit;
+  font-size: max(11px, 0.8571rem);
+  cursor: pointer;
+}
+.effort-menu-item:hover,
+.effort-menu-item:focus-visible {
+  background: var(--soft);
+}
+.effort-menu-item.active {
+  color: var(--accent);
+  background: var(--soft);
+  font-weight: 550;
+}
+.effort-menu-item-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+.effort-menu-item-label {
+  color: var(--ink);
+}
+.effort-menu-item.active .effort-menu-item-label {
+  color: var(--accent);
+}
+.effort-menu-item-code {
+  font-size: max(10px, 0.7143rem);
+  color: var(--muted);
+}
+.effort-menu-item-tag {
+  font-size: max(10px, 0.6429rem);
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--soft);
+  color: var(--muted);
+  border: 1px solid var(--line);
+}
+.effort-menu-check {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+.task-effort-trigger.effort-trigger-unsupported {
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--line));
+  background: color-mix(in srgb, var(--danger) 6%, transparent);
+}
+.task-effort-trigger .task-effort-unsupported-icon {
+  color: var(--danger);
+}
+.task-effort-trigger .task-effort-unsupported {
+  color: var(--danger);
+  font-weight: 550;
+}
+.effort-menu-item.effort-menu-unsupported {
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--danger) 30%, transparent);
+  cursor: default;
+}
+.effort-menu-item.effort-menu-unsupported .warning-text {
+  color: var(--danger);
+  font-weight: 550;
+}
+.effort-menu-unsupported-tag {
+  font-size: max(11px, 0.7857rem);
+  flex-shrink: 0;
 }
 .task-model-name {
   color: var(--ink);
@@ -1497,12 +1638,15 @@ body,
     gap: 5px;
   }
   .task-model-name {
-    max-width: 150px;
+    max-width: 125px;
     font-size: max(11px, 0.7857rem);
   }
   .task-route-name {
     max-width: 85px;
     font-size: max(11px, 0.6429rem);
+  }
+  .task-effort-prefix {
+    display: none;
   }
   .task-effort {
     font-size: max(11px, 0.7143rem);
@@ -1627,4 +1771,30 @@ button.app-version.has-update::after { content: ""; display: inline-block; width
 .workspace-matches button > span { display: grid; gap: 4px; flex: 1; min-width: 0; }
 .workspace-matches strong { font-weight: 600; }
 .workspace-matches small { color: var(--muted); font-size: max(11px, .8571rem); overflow-wrap: anywhere; }
+.workspace-folder-tree { width: 100%; min-width: 0; overflow-x: hidden; }
+.workspace-folder-row { width: 100%; min-width: 0; }
+.workspace-matches .workspace-folder-row > .workspace-folder-chevron {
+  flex: 0 0 auto;
+  min-width: 44px;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+}
+.workspace-folder-chevron {
+  display: inline-flex;
+  color: var(--muted);
+}
+.workspace-folder-label {
+  display: grid;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+.workspace-busy { margin: 0; color: var(--muted); }
+@media (prefers-reduced-motion: reduce) {
+  .workspace-folder-chevron { transition: none; }
+}
+@media (max-width: 390px) {
+  .workspace-matches { max-height: min(48dvh, 280px); }
+}
 .preference-row > div { min-width: 0; }

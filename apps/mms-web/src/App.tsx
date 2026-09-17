@@ -37,6 +37,13 @@ import {
 } from "lucide-react";
 import type { Bootstrap, Page, Session, SessionDetail, FileSelection, Workspace } from "./types";
 import { bootstrap, getSession, includeCliSessions, listSessions, isPreview, mutate, request } from "./api";
+import {
+  initialConnectionHealth,
+  recordConnectionFailure,
+  recordConnectionSuccess,
+  resolveActiveBanner,
+  type ConnectionHealth,
+} from "./connection-state";
 import { copyText } from "./clipboard";
 import { newRequestId } from "./request-id";
 import {
@@ -63,7 +70,10 @@ import { SideQuestions, useSideQuestions } from "./SideQuestions";
 import { wireMode } from "./message-control";
 import { ConversationOutline } from "./ConversationOutline";
 import { CurrentActivity, sessionStatus } from "./SessionStatus";
-import { useSessionAttention } from "./SessionAttention";
+import {
+  conversationAtBottom,
+  useSessionAttention,
+} from "./SessionAttention";
 import { FilesPanel } from "./FilesPanel";
 import { RuntimePanel, SessionMenu, exportConversation } from "./SessionTools";
 import { RecipeImport, readRecipeDraft, saveRecipeDraft } from "./Recipe";
@@ -230,6 +240,7 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [connected, setConnected] = useState(false);
   const [statusesStale, setStatusesStale] = useState(false);
+  const [connectionHealth, setConnectionHealth] = useState<ConnectionHealth>(initialConnectionHealth);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [page, setPage] = useState<Page>(() =>
@@ -251,6 +262,7 @@ export function App() {
   const [guideStep, setGuideStep] = useState<TourStep | null>(null);
   const [guideSettingsKey, setGuideSettingsKey] = useState(0);
   const [guideRequest, setGuideRequest] = useState<{ nonce: string; text: string }>();
+  const [resendRequest, setResendRequest] = useState<{ nonce: string; text: string }>();
   const [selectedId, setSelectedId] = useState("");
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [sessionError, setSessionError] = useState("");
@@ -319,7 +331,7 @@ export function App() {
   );
   const [artifactId, setArtifactId] = useState("");
   const [selectionRequest, setSelectionRequest] = useState<{ nonce: string; sessionId: string; selection: FileSelection }>();
-  const [atBottom, setAtBottom] = useState(true);
+  const [atBottom, setAtBottom] = useState(false);
   const [autoCollapseProcess, setAutoCollapseProcess] = useState(() => readSetting("mms-web-auto-collapse-process", true));
   const [processForced, setProcessForced] = useState<{
     collapsed: boolean;
@@ -439,7 +451,7 @@ export function App() {
       if (signal?.aborted) return;
       setData(result);
       setConnected(true);
-      setError("");
+      setConnectionHealth(recordConnectionSuccess());
       setWorkspaceId((old) =>
         result.workspaces.some((w) => w.id === old)
           ? old
@@ -455,7 +467,7 @@ export function App() {
     } catch (e) {
       if (!signal?.aborted) {
         setConnected(false);
-        setError((e as Error).message || "无法连接 MMS 本地服务。");
+        setConnectionHealth((prev) => recordConnectionFailure(prev));
       }
     } finally {
       if (!signal?.aborted) setLoading(false);
@@ -578,9 +590,30 @@ export function App() {
   }, []);
   const latestEvent = detail?.events.at(-1);
   useEffect(() => {
-    if (followOutput.current && scroll.current)
-      scroll.current.scrollTop = scroll.current.scrollHeight;
-  }, [selectedId, latestEvent?.id, latestEvent?.text, latestEvent?.thinking]);
+    const el = scroll.current;
+    if (!el || page !== "session") return;
+    const sync = () => {
+      if (followOutput.current) el.scrollTop = el.scrollHeight;
+      setAtBottom(conversationAtBottom(el));
+    };
+    sync();
+    const frame = requestAnimationFrame(sync);
+    const ro = new ResizeObserver(sync);
+    ro.observe(el);
+    const content = el.firstElementChild;
+    if (content) ro.observe(content);
+    return () => {
+      cancelAnimationFrame(frame);
+      ro.disconnect();
+    };
+  }, [
+    page,
+    selectedId,
+    latestEvent?.id,
+    latestEvent?.text,
+    latestEvent?.thinking,
+    detail?.events.length,
+  ]);
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
@@ -682,11 +715,21 @@ export function App() {
       clearTimeout(timer);
     };
   }, []);
+  useEffect(() => {
+    if (!settingsEdit.busy) {
+      setError((old) =>
+        old === "配置正在保存，请等待保存结束后离开。" ? "" : old,
+      );
+    }
+  }, [settingsEdit.busy]);
   function requestNavigation(action: () => void) {
     if (settingsEdit.busy) {
       setError("配置正在保存，请等待保存结束后离开。");
       return;
     }
+    setError((old) =>
+      old === "配置正在保存，请等待保存结束后离开。" ? "" : old,
+    );
     if (settingsEdit.dirty) {
       setPendingNavigation(() => action);
       return;
@@ -782,7 +825,7 @@ export function App() {
     history.replaceState(null, "", "#session=" + encodeURIComponent(id));
     followOutput.current = true;
     holdPosition.current = false;
-    setAtBottom(true);
+    setAtBottom(false);
     currentSelection.current = id;
     setSelectedId(id);
     setDetail(null);
@@ -960,6 +1003,13 @@ export function App() {
       );
     }
   }
+  function beginSessionRename(session: { id: string; title: string; owner?: string }) {
+    if (session.owner === "cli") {
+      setWorkspaceNotice("终端会话不能在这里改名");
+      return;
+    }
+    setRenameSession({ id: session.id, title: session.title });
+  }
   async function submitSessionRename() {
     if (!renameSession) return;
     const title = renameSession.title.trim();
@@ -1059,7 +1109,10 @@ export function App() {
     page === "session" && atBottom && !sessionError,
     connected && !statusesStale,
   );
-  const tour = guideStep && modelReady && !setupOpen && page !== "bots" ? <GuidedTour step={guideStep} move={beginGuideStep} close={() => setGuideStep(null)} help={() => requestNavigation(() => { setSettingsOpen(false); setGuideStep(null); setGuideOpen(true); })} example={guideExample} modelReady={data.presets.some(p => p.available)} configure={!!data.capabilities.configure} hasSession={page === "session" && !!detail} /> : null;
+  const tourHasEffort = page === "session"
+    ? Boolean(detail?.runtime && ((detail.runtime.supportedThinkingLevels && detail.runtime.supportedThinkingLevels.length > 0) || detail.runtime.thinkingLevel))
+    : Boolean(launchFacts.facts && launchFacts.facts.supportedThinkingLevels && launchFacts.facts.supportedThinkingLevels.length > 0);
+  const tour = guideStep && modelReady && !setupOpen && page !== "bots" ? <GuidedTour step={guideStep} move={beginGuideStep} close={() => setGuideStep(null)} help={() => requestNavigation(() => { setSettingsOpen(false); setGuideStep(null); setGuideOpen(true); })} example={guideExample} modelReady={data.presets.some(p => p.available)} configure={!!data.capabilities.configure} hasSession={page === "session" && !!detail} hasEffort={tourHasEffort} /> : null;
   return (
     <div className="app-shell" data-page={page}>
       {navOpen && (
@@ -1268,7 +1321,7 @@ export function App() {
                     />
                     <FolderOpen size={14} />
                     <span>{w.id === "default" ? "启动目录" : w.name}</span>
-                    <span>{sessions.length}</span>
+                    <span className="workspace-count">{sessions.length}</span>
                   </button>
                   <div className="workspace-row-actions">
                     <Popover
@@ -1400,46 +1453,51 @@ export function App() {
                     </button>
                   </div>
                   {!collapsed.includes(w.id) &&
-                    sessions.slice(0, shownPerWorkspace[w.id] ?? 8).map((s) => (
+                    sessions.slice(0, shownPerWorkspace[w.id] ?? 8).map((s) => {
+                      const unread = Boolean(signals.unread[s.id]);
+                      const row = sessionStatus(
+                        s,
+                        !connected || statusesStale,
+                        unread,
+                      );
+                      return (
                       <div className="session-row" key={s.id}>
                       <button
                         className={
                           "session-link " +
                           (selectedId === s.id ? "selected " : "") +
-                          (signals.unread[s.id] ? "has-unread " : "") +
+                          (unread ? "has-unread " : "") +
                           (signals.flashes[s.id] ? "just-completed" : "")
                         }
-                        data-phase={
-                          sessionStatus(s, !connected || statusesStale).phase
-                        }
+                        data-phase={row.phase}
+                        data-unread={unread ? "true" : "false"}
                         aria-current={selectedId === s.id ? "page" : undefined}
                         key={s.id}
+                        title={s.owner === "cli" ? undefined : "打开会话，双击重命名"}
                         onClick={() => openSession(s.id)}
+                        onDoubleClick={(event) => {
+                          event.preventDefault();
+                          beginSessionRename(s);
+                        }}
                       >
                         <Status
                           session={s}
                           compact
                           disconnected={!connected || statusesStale}
+                          unread={unread}
                         />
                         <span className="session-link-copy">
                           <span className="session-title-row">
                             <strong>{s.title}</strong>
-                            {signals.unread[s.id] && (
+                            {unread && (
                               <span className="new-reply-badge">新回复</span>
                             )}
                           </span>
                           <small>
                             <span
-                              className={
-                                "session-phase " +
-                                sessionStatus(s, !connected || statusesStale)
-                                  .phase
-                              }
+                              className={"session-phase " + row.phase}
                             >
-                              {
-                                sessionStatus(s, !connected || statusesStale)
-                                  .label
-                              }
+                              {row.label}
                             </span>
                             <span>·</span>
                             {s.owner === "cli" && (
@@ -1486,7 +1544,7 @@ export function App() {
                               type="button"
                               className="filter-option"
                               onClick={() => {
-                                setRenameSession({ id: s.id, title: s.title });
+                                beginSessionRename(s);
                                 close();
                               }}
                             >
@@ -1574,7 +1632,8 @@ export function App() {
                         )}
                       </Popover>
                       </div>
-                    ))}
+                    );
+                    })}
                   {!collapsed.includes(w.id) &&
                     sessions.length > (shownPerWorkspace[w.id] ?? 8) && (
                       <button
@@ -1637,11 +1696,27 @@ export function App() {
             className={
               "connection-status " + (connected && !statusesStale ? "online" : "offline")
             }
-            title={connected && !statusesStale ? "本地 Pilot Web 服务已连接" : "本地 Pilot Web 服务等待连接"}
-            aria-label={connected && !statusesStale ? "服务在线" : "服务断开，等待连接"}
+            title={
+              connected && !statusesStale
+                ? "本地 Pilot Web 服务已连接"
+                : connectionHealth.consecutiveFailures > 0
+                  ? "本地 Pilot Web 服务正在重连"
+                  : "本地 Pilot Web 服务等待连接"
+            }
+            aria-label={
+              connected && !statusesStale
+                ? "服务在线"
+                : connectionHealth.consecutiveFailures > 0
+                  ? "正在重连..."
+                  : "需要连接"
+            }
           >
             <span aria-hidden="true">{connected && !statusesStale ? "●" : "!"}</span>
-            {connected && !statusesStale ? "服务在线" : "需要连接"}
+            {connected && !statusesStale
+              ? "服务在线"
+              : connectionHealth.consecutiveFailures > 0
+                ? "正在重连..."
+                : "需要连接"}
           </span>
         </div>
       </aside>
@@ -1690,6 +1765,7 @@ export function App() {
                 compact
                 session={detail.session}
                 disconnected={!connected || statusesStale || !!sessionError}
+                unread={Boolean(signals.unread[detail.session.id])}
               />
             )}
             {page === "session" && (
@@ -1716,7 +1792,20 @@ export function App() {
             </a>
           </div>
         )}
-        {error && (
+        {resolveActiveBanner(error, connectionHealth) === "connection" && (
+          <div className="connection-banner" role="status">
+            <span className="connection-banner-dot" aria-hidden="true" />
+            <span className="connection-banner-text">服务离线，正在尝试重新连接...</span>
+            <button
+              type="button"
+              className="text-button"
+              onClick={() => void load()}
+            >
+              立即重试
+            </button>
+          </div>
+        )}
+        {resolveActiveBanner(error, connectionHealth) === "error" && (
           <div className="error-banner" role="alert">
             <CircleAlert size={17} />
             <span>{error}</span>
@@ -1806,9 +1895,12 @@ export function App() {
                     const issues = [...modelRequirementIssues(recipe.recipe, facts.model), ...requiredSkillMatches(recipe.recipe.requiredSkills, found.skills, extras.skills).issues];
                     if (issues.length) throw new Error(issues.join(" "));
                   }
+                  const supported = launchFacts.facts?.supportedThinkingLevels || [];
+                  const isEffortValid = !effort || (supported.length > 0 && supported.includes(effort));
+                  const validThinkingLevel = isEffortValid ? (effort || undefined) : undefined;
                   const ok = await runAction("/sessions", {
                     workspaceId, presetId, title: text.length > 42 ? text.slice(0, 42) + "…" : text, prompt: text,
-                    planMode, thinkingLevel: effort || undefined, ...extras,
+                    planMode, thinkingLevel: validThinkingLevel, ...extras,
                     ...(recipe ? { recipeRequirements: { ...recipe.recipe.modelRequirements, skills: recipe.recipe.requiredSkills } } : {}),
                   }, true);
                   if (ok && recipe) { setRecipe(null); setRecipeConfirmed(""); }
@@ -1908,6 +2000,7 @@ export function App() {
                         <Status
                           session={s}
                           disconnected={!connected || statusesStale}
+                          unread={Boolean(signals.unread[s.id])}
                         />
                         <ChevronRight size={16} />
                       </button>
@@ -2022,10 +2115,10 @@ export function App() {
                   onScroll={() => {
                     const el = scroll.current;
                     if (el) {
+                      const atEnd = conversationAtBottom(el);
                       followOutput.current =
-                        !holdPosition.current &&
-                        el.scrollHeight - el.scrollTop - el.clientHeight < 100;
-                      setAtBottom(followOutput.current);
+                        !holdPosition.current && atEnd;
+                      setAtBottom(atEnd);
                     }
                   }}
                 >
@@ -2064,6 +2157,12 @@ export function App() {
                         action={runAction}
                         detail={detail}
                         busy={busy}
+                        onResend={(text) =>
+                          setResendRequest({
+                            nonce: String(Date.now()),
+                            text,
+                          })
+                        }
                         approve={(id, decision, value) =>
                           void runAction(
                             "/sessions/" +
@@ -2121,6 +2220,7 @@ export function App() {
                   <CurrentActivity
                     session={detail.session}
                     disconnected={!connected || statusesStale || !!sessionError}
+                    unread={Boolean(signals.unread[detail.session.id])}
                   />
                   <div className="session-workbar">
                     <button
@@ -2225,6 +2325,8 @@ export function App() {
                       />
                     }
                     key={detail.session.id}
+                    guideRequest={resendRequest}
+                    guideHandled={() => setResendRequest(undefined)}
                     selectionRequest={selectionRequest?.sessionId === detail.session.id ? selectionRequest : undefined}
                     selectionHandled={() => setSelectionRequest(undefined)}
                     workspaceId={detail.session.workspaceId}

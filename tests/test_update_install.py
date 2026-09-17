@@ -237,3 +237,133 @@ def test_a_staged_copy_keeps_the_pointer_instead_of_being_overwritten(tmp_path):
 
     assert install_alongside(spec) is False
     assert 'VERSION = "1.0.0"' in (staged_old / "mms_version.py").read_text()
+
+
+def test_promotion_failure_restores_the_file_already_moved_to_backup(tmp_path, monkeypatch):
+    installed = _release(tmp_path / 'installed', version='1.0.0')
+    candidate = _release(tmp_path / 'candidate', version='2.0.0')
+    rename = Path.rename
+
+    def fail_promotion(path, target):
+        if path.name == 'mms_version.py.mms-update-new':
+            raise OSError('promotion failed')
+        return rename(path, target)
+
+    monkeypatch.setattr(Path, 'rename', fail_promotion)
+    with pytest.raises(OSError, match='promotion failed'):
+        install(candidate, installed, tmp_path / 'backup')
+    assert 'VERSION = "1.0.0"' in (installed / 'mms_version.py').read_text()
+    assert (installed / 'mms').read_text().endswith('# 1.0.0\n')
+
+
+def _verified_candidate(tmp_path, monkeypatch, *, prerelease=None):
+    from mms_web import server
+    from mms_web.runtime import private_json
+    from mms_web.update_handoff import install_alongside
+    monkeypatch.setattr(server, '_adapter', lambda *a, **kw: None)
+    app = server.WebApplication(state_root=tmp_path / 'state', config_root=tmp_path / 'config-root')
+    app.probation_token = 'verified-token'
+    app.maintenance = True
+    old = _release(tmp_path / 'installed', version='1.0.0')
+    new = _release(tmp_path / 'staged', version=server.VERSION)
+    spec = _spec(tmp_path, old_source=old, staged=new)
+    spec['target'] = 'v' + server.VERSION
+    # This is the OLD guardian contract: no metadata helper or prerelease flag.
+    assert install_alongside(spec)
+    operation = {'id': 'op-1', 'target': spec['target'], 'phase': 'restarting'}
+    if prerelease is not None:
+        operation['prerelease'] = prerelease
+    private_json(app.state_root / 'updates/operation.json', operation)
+    private_json(app.config_root / 'version.json', {'installed_ref': 'v1.0.0', 'installed_version': 'v1.0.0',
+                 'install_channel': 'stable', 'preferred_language': 'en', 'custom': {'preserve': [1, 2]}})
+    return app, old
+
+
+@pytest.mark.parametrize('prerelease', [True, False])
+def test_old_guardian_new_candidate_records_actual_release_and_preserves_preferences(tmp_path, monkeypatch, prerelease):
+    from mms_web import updates
+    from mms_web.server import VERSION
+    from mms_web.runtime import private_json
+    app, installed = _verified_candidate(tmp_path, monkeypatch)
+    calls = []
+    def release(tag):
+        calls.append(tag)
+        return {'prerelease': prerelease}
+    monkeypatch.setattr(updates, 'fetch_tag_release', release)
+    # Deliberately opposite preference; it must never classify the install.
+    private_json(app.state_root / 'updates/settings.json', {'channel': 'stable' if prerelease else 'preview'})
+    assert app.post(['update', 'commit'], {'token': 'verified-token'}) == {'ok': True}
+    metadata = updates.read_json(app.config_root / 'version.json')
+    assert calls == ['v' + VERSION]
+    assert metadata['installed_ref'] == metadata['installed_version'] == 'v' + VERSION
+    assert metadata['install_channel'] == ('preview' if prerelease else 'stable')
+    assert metadata['release_track'] == ('dev' if prerelease else 'stable')
+    assert metadata['release_track_version'] == VERSION
+    assert metadata['release_track_label'] == VERSION.split('.')[0] + ('.x Preview' if prerelease else '.x Stable')
+    assert metadata['preferred_language'] == 'en' and metadata['custom'] == {'preserve': [1, 2]}
+    assert metadata['source'] == 'pilot-update'
+    assert re.fullmatch(r'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ', metadata['installed_at'])
+    assert f'VERSION = "{VERSION}"' in (installed / 'mms_version.py').read_text()
+    operation = updates.read_json(app.state_root / 'updates/operation.json')
+    assert operation['phase'] == 'complete' and not operation['metadataWarning']
+    assert not app.maintenance and not app.probation_token
+
+
+def test_frozen_prerelease_does_not_need_network_at_commit(tmp_path, monkeypatch):
+    from mms_web import updates
+    app, _ = _verified_candidate(tmp_path, monkeypatch, prerelease=True)
+    monkeypatch.setattr(updates, 'fetch_tag_release', lambda tag: pytest.fail('frozen release must not refetch'))
+    app.post(['update', 'commit'], {'token': 'verified-token'})
+    assert updates.read_json(app.config_root / 'version.json')['install_channel'] == 'preview'
+
+
+@pytest.mark.parametrize('failure', ['write', 'invalid-json', 'unknown-release'])
+def test_metadata_failure_warns_but_commits_verified_source(tmp_path, monkeypatch, failure):
+    from mms_web import runtime, updates
+    from mms_web.server import VERSION
+    app, installed = _verified_candidate(tmp_path, monkeypatch, prerelease=None if failure == 'unknown-release' else True)
+    meta = app.config_root / 'version.json'
+    if failure == 'invalid-json':
+        meta.write_text('{broken')
+    original = meta.read_bytes()
+    writer = runtime.private_json
+    def fail_metadata(path, value):
+        if Path(path) == meta:
+            raise OSError('read-only')
+        return writer(path, value)
+    if failure == 'write':
+        monkeypatch.setattr(runtime, 'private_json', fail_metadata)
+    if failure == 'unknown-release':
+        monkeypatch.setattr(updates, 'fetch_tag_release', lambda tag: (_ for _ in ()).throw(OSError('offline')))
+    assert app.post(['update', 'commit'], {'token': 'verified-token'}) == {'ok': True}
+    operation = updates.read_json(app.state_root / 'updates/operation.json')
+    assert operation['phase'] == 'complete'
+    assert operation['metadataWarning'] and operation['metadataWarning'] in operation['message']
+    assert meta.read_bytes() == original
+    assert f'VERSION = "{VERSION}"' in (installed / 'mms_version.py').read_text()
+    assert not app.maintenance
+
+
+def test_staged_only_or_wrong_version_never_relabels_cli(tmp_path, monkeypatch):
+    from mms_web import updates
+    from mms_web.runtime import private_json
+    from mms_web.update_install import record_committed_install
+    from mms_web.server import VERSION
+    app, _ = _verified_candidate(tmp_path, monkeypatch, prerelease=True)
+    operation = updates.read_json(app.state_root / 'updates/operation.json')
+    before = (app.config_root / 'version.json').read_bytes()
+    receipt = app.state_root / 'updates/operations/op-1/installation.json'
+    private_json(receipt, {'installed': False})
+    assert record_committed_install(app.config_root, app.state_root, operation, VERSION) == ''
+    private_json(receipt, {'installed': True, 'version': 'v1.0.0'})
+    assert record_committed_install(app.config_root, app.state_root, operation, VERSION)
+    assert (app.config_root / 'version.json').read_bytes() == before
+
+
+def test_preview_metadata_displays_the_actual_installed_series(monkeypatch):
+    from mms_core import _release_track_for_channel
+    monkeypatch.delenv('MMS_COMMAND_NAME', raising=False)
+    monkeypatch.delenv('MMS_PREVIEW_MODE', raising=False)
+    result = _release_track_for_channel({'installed_ref': 'v5.1.0', 'install_channel': 'preview'})
+    assert result == {'release_track': 'dev', 'release_track_series': '5.x',
+                      'release_track_version': '5.1.0', 'release_track_label': '5.x Preview'}

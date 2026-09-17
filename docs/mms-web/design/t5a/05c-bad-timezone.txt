@@ -1,0 +1,2 @@
+{"error": {"code": "INVALID_TIMEZONE", "message": "无法识别时区 Mars/Olympus，请使用 IANA 名称，例如 Asia/Singapore。"}}
+HTTP 400

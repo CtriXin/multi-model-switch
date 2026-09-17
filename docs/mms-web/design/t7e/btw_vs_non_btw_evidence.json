@@ -1,0 +1,141 @@
+{
+  "non_btw": {
+    "sessionId": "session-t7e-pure-steer",
+    "detail": {
+      "session": {
+        "id": "session-t7e-pure-steer",
+        "title": "会话 A：纯引导任务（无 BTW）",
+        "workspaceId": "ws-1",
+        "harness": "",
+        "modelName": "",
+        "presetId": "p-1",
+        "providerName": "",
+        "channel": "",
+        "state": "stopped",
+        "activity": null,
+        "updatedAt": "2026-09-16T12:21:00.000Z",
+        "lastEventAt": "2026-09-16T12:20:45.000Z",
+        "heartbeatAt": null,
+        "owner": "web",
+        "archived": false,
+        "cwd": "",
+        "forkedFrom": null,
+        "capabilities": {
+          "send": false,
+          "stop": false,
+          "approve": false,
+          "steer": false,
+          "queueControl": false
+        },
+        "btwNative": false
+      },
+      "events": [
+        {
+          "id": "evt-nb1",
+          "kind": "user",
+          "text": "主任务：分析系统日志并汇总异常",
+          "createdAt": "2026-09-16T12:20:00.000Z"
+        },
+        {
+          "id": "evt-nb2",
+          "kind": "user",
+          "text": "中途引导：优先关注 HTTP 500 相关的错误",
+          "mode": "steer",
+          "createdAt": "2026-09-16T12:20:20.000Z"
+        },
+        {
+          "id": "evt-nb3",
+          "kind": "assistant",
+          "text": "收到引导要求。已完成分析，共发现 3 处 HTTP 500 错误，均由于连接超时引起。",
+          "createdAt": "2026-09-16T12:20:45.000Z"
+        }
+      ],
+      "sideQuestions": [],
+      "artifacts": [],
+      "artifactNotice": "",
+      "runtime": {
+        "contextEvidence": null,
+        "queue": [],
+        "queueSteering": [],
+        "queueFollowUp": [],
+        "pending": [],
+        "alive": false,
+        "cwd": null,
+        "cached": true,
+        "planning": false
+      }
+    }
+  },
+  "btw": {
+    "sessionId": "session-t7e-btw-isolated",
+    "detail": {
+      "session": {
+        "id": "session-t7e-btw-isolated",
+        "title": "会话 B：带 BTW 旁问任务（通道完全隔离）",
+        "workspaceId": "ws-1",
+        "harness": "",
+        "modelName": "",
+        "presetId": "p-1",
+        "providerName": "",
+        "channel": "",
+        "state": "stopped",
+        "activity": null,
+        "updatedAt": "2026-09-16T12:26:00.000Z",
+        "lastEventAt": "2026-09-16T12:25:30.000Z",
+        "heartbeatAt": null,
+        "owner": "web",
+        "archived": false,
+        "cwd": "",
+        "forkedFrom": null,
+        "capabilities": {
+          "send": false,
+          "stop": false,
+          "approve": false,
+          "steer": false,
+          "queueControl": false
+        },
+        "btwNative": false
+      },
+      "events": [
+        {
+          "id": "evt-wb1",
+          "kind": "user",
+          "text": "主任务：启动数据库迁移脚本",
+          "createdAt": "2026-09-16T12:25:00.000Z"
+        },
+        {
+          "id": "evt-wb2",
+          "kind": "assistant",
+          "text": "数据库迁移脚本已顺利执行完成，当前版本已升级至 v2.4。",
+          "createdAt": "2026-09-16T12:25:30.000Z"
+        }
+      ],
+      "sideQuestions": [
+        {
+          "btwId": "btw-isolated-1",
+          "mainSessionId": "session-t7e-btw-isolated",
+          "question": "旁问：当前迁移耗时是否符合预期？",
+          "status": "completed",
+          "answer": "符合预期，本次迁移耗时 2.1 秒，未超过 5 秒警戒线。",
+          "source": "state",
+          "createdAt": "2026-09-16T12:25:10.000Z",
+          "startedAt": "2026-09-16T12:25:10.000Z",
+          "completedAt": "2026-09-16T12:25:12.000Z"
+        }
+      ],
+      "artifacts": [],
+      "artifactNotice": "",
+      "runtime": {
+        "contextEvidence": null,
+        "queue": [],
+        "queueSteering": [],
+        "queueFollowUp": [],
+        "pending": [],
+        "alive": false,
+        "cwd": null,
+        "cached": true,
+        "planning": false
+      }
+    }
+  }
+}

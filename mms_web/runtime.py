@@ -1,6 +1,7 @@
 """Private launch snapshots. Source MMS configuration is only ever read."""
 from __future__ import annotations
 import json
+import logging
 import os
 import shutil
 import tempfile
@@ -8,6 +9,12 @@ import time
 import uuid
 from pathlib import Path
 from .errors import WebError
+
+_LOG = logging.getLogger("mms_web.runtime")
+# Defender (and similar scanners) hold a just-closed temp file for tens of
+# milliseconds. POSIX rename overwrites an open file; Windows does not.
+_REPLACE_BACKOFF_SECONDS = (0.01, 0.02, 0.04, 0.08, 0.16)
+_WINDOWS_TRANSIENT_WINERRORS = {5, 32}  # ERROR_ACCESS_DENIED, ERROR_SHARING_VIOLATION
 
 
 def real_home() -> Path:
@@ -148,16 +155,42 @@ def require_publishable_root(root: Path) -> Path:
     return require_private_root(root)
 
 
+def _transient_replace_error(exc: BaseException) -> bool:
+    """True when a failed os.replace is worth a short retry on Windows."""
+    if isinstance(exc, PermissionError):
+        return True
+    if isinstance(exc, OSError):
+        return getattr(exc, "winerror", None) in _WINDOWS_TRANSIENT_WINERRORS
+    return False
+
+
 def private_json(path: Path, payload) -> None:
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=".web-", suffix=".tmp")
+    replaced = False
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
             json.dump(payload, stream, ensure_ascii=False)
-        os.replace(temporary, path)
+        delays = (0.0,) + _REPLACE_BACKOFF_SECONDS
+        for attempt, delay in enumerate(delays):
+            if delay:
+                time.sleep(delay)
+            try:
+                os.replace(temporary, path)
+                replaced = True
+                return
+            except OSError as exc:
+                last = attempt == len(delays) - 1
+                if last or not _transient_replace_error(exc):
+                    _LOG.warning("atomic replace failed for %s: %s", path, exc)
+                    raise
     finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
+        if not replaced:
+            try:
+                if os.path.exists(temporary):
+                    os.unlink(temporary)
+            except OSError:
+                pass
 
 
 def snapshot_config(source: Path, state_root: Path, *, published_credentials_only: bool = False) -> Path:

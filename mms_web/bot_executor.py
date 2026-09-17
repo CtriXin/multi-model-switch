@@ -1,6 +1,7 @@
 """Bot execution uses the same MMS/Pi sessions as Pilot conversations."""
 from __future__ import annotations
 
+import re
 import shlex
 import sys
 import os
@@ -9,8 +10,46 @@ from pathlib import Path
 from uuid import uuid4
 
 from .errors import WebError
+from .bot_client import command_catalog_text
 
 PLAN_TIMEOUT_SECONDS = 20.0
+
+_MODEL_QUERY_TRAILING = re.compile(r"[吧。！!]+$")
+_MODEL_SEPARATORS = re.compile(r"[\s._:/-]+")
+
+
+def available_presets(catalog):
+    """Pi presets a Bot can actually launch with, from a catalog snapshot."""
+    return [p for p in (catalog or {}).get("presets", [])
+            if p.get("harness") == "pi" and p.get("available")]
+
+
+def _model_field_key(value):
+    return _MODEL_SEPARATORS.sub("", str(value or "").lower())
+
+
+def normalize_model_query(value):
+    """Normalize a spoken model name for matching.
+
+    Same rule as the frontend shortcut in apps/mms-web/src/bot-model-switch.ts,
+    and both sides are pinned to one shared sample file
+    (apps/mms-web/tests/fixtures/model-match-cases.json). Known difference:
+    Python and JS disagree on the \\s / strip / trim charset for invisible
+    control characters (BOM, NEL, FS); those inputs are listed in the
+    fixture's knownDivergent section instead of being asserted equal.
+    """
+    text = _MODEL_QUERY_TRAILING.sub("", str(value or "").strip()).lower()
+    return _MODEL_SEPARATORS.sub("", text)
+
+
+def match_presets(query, presets):
+    """Name matching over the given presets; never guesses across the list."""
+    needle = normalize_model_query(query)
+    if not needle:
+        return []
+    return [p for p in presets
+            if any(needle in _model_field_key(p.get(field))
+                   for field in ("id", "name", "modelId", "channel"))]
 _COMPACT_NOOP_MESSAGES = {
     "nothing to compact (session too small)",
     "already compacted",
@@ -56,7 +95,7 @@ class PiBotExecutor:
         catalog = self.catalog.snapshot()
         preset = next((p for p in catalog.get("presets", []) if p["id"] == bot.get("presetId")), None)
         if not bot.get("presetId"):
-            preset = next((p for p in catalog.get("presets", []) if p.get("harness") == "pi" and p.get("available")), None)
+            preset = next(iter(available_presets(catalog)), None)
         if not preset or preset.get("harness") != "pi" or not preset.get("available"):
             raise WebError("BOT_MODEL_REQUIRED", "MMS 当前没有可启动的 Pi 模型，请先配置一个模型。", 400)
         workspace_id = bot.get("workspaceId") or "default"
@@ -89,8 +128,14 @@ class PiBotExecutor:
             "只有用户需要细节或确实有多个证据时，才用简短 Markdown 列表补充路径、截图或下一步。调用 complete 的内容就是给用户看的最终回报，不要塞入 CLI 日志。\n"
             "不要修改真实模型/账号配置，不要自动发送外部消息或发布。工作目录是操作范围，不是OS沙箱。\n"
             f"内部工具命令（通过 bash 执行）：{command}\n"
-            "子命令：list；dispatch BOT_ID '任务'；message BOT_ID '消息'；reply MESSAGE_ID '回复'；inbox；"
-            "screenshot --url 'http(s)://...'；browser goto/snapshot/click/fill/press；status；complete '结果'；wait '要问用户的问题'；fail '错误'。\n"
+            "可用的内部子命令（冒号后是一句说明；'...' 表示自由文本）：\n"
+            f"{command_catalog_text()}\n"
+            "用户要求周期性、反复或每隔多久做一次的工作时，用 schedule create 建一条定时，"
+            "不要回答做不到，也不要靠自己在任务末尾重新约下一次。\n"
+            "用户要求查看或更换你使用的模型时，先 model list 看当前真实可用的列表，再 model switch；"
+            "匹配不到或有多个候选时如实告诉用户，不要凭印象写模型名，也不要假装已经切换。"
+            "有多个候选时用 wait 等待用户，并另起一行用“选项：A | B”（最多 4 个）把候选给出。"
+            "model switch 从下一轮任务起生效，本轮仍使用当前模型。\n"
             "浏览器工作必须优先交给已安装的 Ego：Agent 可以直接通过 bash 使用 ego-browser nodejs 和 Ego skill 的全部公开能力；"
             "MMS 只负责把 Bot 身份、任务上下文和结果接回 Web UI。browser CLI 是兼容性薄桥，不是第二套浏览器引擎；"
             "需要协作时先 list 再 dispatch；可以分发多个任务，随后 wait 并结束本轮，"
@@ -117,17 +162,28 @@ class PiBotExecutor:
         session_id = bot.get("sessionId")
         before = 0
         baseline = {}
+        reused = False
         if session_id:
             detail = self.sessions.get_session(session_id)
             if detail["session"]["state"] in {"running", "waiting"}:
                 raise WebError("BOT_SESSION_BUSY", "Bot 的会话仍在执行或等待确认。", 409)
-            before = max((e.get("sequence", 0) for e in detail.get("events", [])), default=0)
-            baseline = {a["id"]: a.get("sha256") for a in detail.get("artifacts", [])}
-            self._maybe_compact(session_id, bot, task)
-            if hasattr(self.sessions, "_get") and task.get("token"):
-                self.sessions._get(session_id).secrets.append(task["token"])
-            detail = self.sessions.send(session_id, {"requestId": task["launchRequestId"], "text": prompt})
-        else:
+            if str(detail["session"].get("presetId") or "") != selected["presetId"]:
+                # A conversation grew on the model it was launched with. Sending
+                # this task to it anyway would run the session's model while the
+                # caller asked for another one — the guardrails' first
+                # counterexample (“界面里选中了某个模型，但实际启动时用了另一个”).
+                # Never drop the selected preset silently: start a fresh session
+                # on it instead of continuing the mismatched one.
+                session_id = None
+            else:
+                before = max((e.get("sequence", 0) for e in detail.get("events", [])), default=0)
+                baseline = {a["id"]: a.get("sha256") for a in detail.get("artifacts", [])}
+                self._maybe_compact(session_id, bot, task)
+                if hasattr(self.sessions, "_get") and task.get("token"):
+                    self.sessions._get(session_id).secrets.append(task["token"])
+                detail = self.sessions.send(session_id, {"requestId": task["launchRequestId"], "text": prompt})
+                reused = True
+        if not session_id:
             detail = self._launch_bot_session({
                 "requestId": task["launchRequestId"], "workspaceId": bot.get("workspaceId") or "default",
                 "presetId": selected["presetId"], "title": bot["name"], "prompt": prompt,
@@ -139,7 +195,7 @@ class PiBotExecutor:
         # process was created. Retain its session ID; never turn it into done.
         pid = self.sessions.diagnostics(session_id).get("pid") if hasattr(self.sessions, "diagnostics") else None
         return {"sessionId": session_id, "processId": pid, "baseline": before, "artifactBaseline": baseline,
-                "model": detail["session"].get("modelName", "")}
+                "reusedSession": reused, "model": detail["session"].get("modelName", "")}
 
     def plan(self, prompt, bot, timeout=PLAN_TIMEOUT_SECONDS):
         """One short throwaway planning call on the task Bot's own preset.
@@ -173,15 +229,15 @@ class PiBotExecutor:
                 time.sleep(0.4)
             return None
         finally:
-            for payload in ({"requestId": request_id + "-stop"},
-                            {"requestId": request_id + "-archive", "archived": True}):
-                try:
-                    if "archived" in payload:
-                        self.sessions.manage(session_id, payload)
-                    else:
-                        self.sessions.stop(session_id, payload)
-                except Exception:
-                    pass
+            self._retire_session(session_id, request_id)
+
+    def _retire_session(self, session_id, request_id):
+        """Close the owned process and retain its transcript/artifact metadata."""
+        self.sessions.retire_bot_session(session_id)
+
+    def release_session(self, session_id, request_id):
+        """Public seam for a task-owned one-off session (see BotRuntime._finish)."""
+        self._retire_session(session_id, request_id)
 
     def _maybe_compact(self, session_id, bot, task):
         """Compact only at the idle boundary, using Pi's native RPC."""

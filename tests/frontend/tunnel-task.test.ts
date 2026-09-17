@@ -63,3 +63,23 @@ test("the port is interpolated, not hardcoded", () => {
   assert.ok(tunnelTask(9999).includes("127.0.0.1:9999"));
   assert.ok(!tunnelTask(9999).includes("127.0.0.1:8815"));
 });
+
+test("remembered names sit in the background, not in the questions", () => {
+  const withFacts = tunnelTask(8815, {
+    hostnames: ["pilot.example.com"],
+    listening: ["100.64.1.2"],
+  });
+  const separator = withFacts.indexOf("以下是背景");
+  const head = withFacts.slice(0, separator);
+  const tail = withFacts.slice(separator);
+  assert.ok(!head.includes("pilot.example.com"));
+  assert.ok(!head.includes("100.64.1.2"));
+  assert.match(tail, /pilot\.example\.com/);
+  assert.match(tail, /100\.64\.1\.2/);
+  assert.match(tail, /不要当第一次/);
+});
+
+test("without facts it still says the settings page has no remembered name", () => {
+  const separator = text.indexOf("以下是背景");
+  assert.match(text.slice(separator), /还没有记住任何隧道域名/);
+});

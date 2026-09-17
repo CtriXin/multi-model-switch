@@ -232,6 +232,7 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
         "codex",
         "opencode",
         "pi",
+        "grok",
         "agy",
     ]
     assert "preference_snippet" in snapshot["session_assets"]
@@ -681,6 +682,7 @@ def test_config_web_bundle_runtime_ignores_remote_probe_cache(monkeypatch):
     assert rows[0]["source"] == "approved"
 
 
+@pytest.mark.usefixtures("approved_preview_bundle")
 def test_config_web_model_capability_defaults_are_profile_backed_not_hardcoded():
     cfg = {
         "providers": [
@@ -2051,6 +2053,10 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
 
 def test_config_web_allows_pi_in_supported_clis():
     assert "pi" in mms_config_web._ALLOWED_CLIS
+
+
+def test_config_web_allows_grok_in_supported_clis():
+    assert "grok" in mms_config_web._ALLOWED_CLIS
 
 
 def test_config_web_fetch_models_does_not_persist_to_fallback_models():
@@ -4525,6 +4531,7 @@ def test_config_web_model_smoke_shows_openrouter_claude_403_error(monkeypatch):
     assert "sk-or-v1-secretvalue123456" not in encoded
 
 
+@pytest.mark.usefixtures("approved_preview_bundle")
 def test_config_web_provider_model_fetch_returns_policy_capabilities(monkeypatch, tmp_path):
     (tmp_path / "model-policy.json").write_text(
         json.dumps(

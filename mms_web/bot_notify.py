@@ -85,6 +85,7 @@ class Notifier:
             "botId": str(event.get("botId") or ""),
             "botName": one_line(event.get("botName"), 80),
             "taskId": str(event.get("taskId") or ""),
+            "scheduleId": str(event.get("scheduleId") or ""),
             "title": one_line(event.get("title"), 120),
             "summary": one_line(event.get("summary"), 200),
             "waitReason": event.get("waitReason") or None,
@@ -112,6 +113,7 @@ class Notifier:
         return self.emit({
             "type": event_type, "botId": bot_id, "botName": (bot or {}).get("name") or "",
             "taskId": task_id, "title": task.get("prompt"), "summary": summary,
+            "scheduleId": task.get("scheduleId") or "",
             "waitReason": wait_reason, "link": f"#page=bots&bot={bot_id}&task={task_id}",
         })
 

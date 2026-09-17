@@ -79,7 +79,7 @@ export function SettingsPage({
   enterToSend: boolean;
   setEnterToSend: (on: boolean) => void;
 }) {
-  const [tab, setTab] = useState("models");
+  const [tab, setTab] = useState<"models" | "appearance" | "usage" | "runtime">("models");
   return (
     <Dialog guide="settings" title="设置" size="sheet" close={() => requestNavigation(back)}>
     <div className="settings-shell">

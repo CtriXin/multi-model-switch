@@ -50,6 +50,8 @@ def test_legacy_gemini_account_is_preserved_but_not_visible():
 
 def test_agy_visible_when_binary_exists_or_account_exists(monkeypatch):
     import mms_core
+    # This tests availability, independent of any previously saved preferences.
+    monkeypatch.setattr(mms_core, "load_user_preferences", lambda: {})
 
     provider = {
         "id": "default",
@@ -381,7 +383,7 @@ def test_agy_session_assets_overlay_common_skills_mcp_and_hooks(monkeypatch, tmp
     plugin_dir = account_home / ".gemini" / "antigravity-cli" / "plugins" / "mms-session"
     assert (plugin_dir / "plugin.json").is_file()
     assert os.path.islink(plugin_dir / "skills")
-    assert (plugin_dir / "skills" / "web-access" / "SKILL.md").read_text(encoding="utf-8") == "# skill\n"
+    assert not (plugin_dir / "skills" / "web-access").exists()
     assert (plugin_dir / "skills" / "toon" / "SKILL.md").read_text(encoding="utf-8") == "# skill\n"
     assert json.loads((plugin_dir / "mcp_config.json").read_text(encoding="utf-8"))["mcpServers"]["pilot"]["command"] == "python3"
     hooks_path = plugin_dir / "hooks" / "hooks.json"

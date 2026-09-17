@@ -77,9 +77,17 @@ Bot 设置里的自动记忆、单轮记忆预算和“整理阈值”可调整�
 
 ## 定时与自动唤醒
 
-任务可以带有带时区的 `runAt`。当时间到达且目标 Bot 的 `wakeEnabled` 为 `true`，Pilot 调度器会把任务从 `scheduled` 转为可执行状态。关闭自动唤醒后，计划任务不会被后台自动启动，可以手动唤醒。
+定时是独立的 `schedule` 实体，不是 task 上的一次性字段：它带 `rule`（`once` / `interval` / `daily` / `weekly`）、必填的 IANA `timezone`、单条 `enabled` 开关和 `overlapPolicy`（`skip` / `queue`）。到点时调度器**新建一个 task**（`status=queued`），所以每次运行都有独立的 transcript、成果和结果。修改或删除 schedule 不会删除已经跑出来的 task；`once` 触发过一次后 `nextRunAt=null`，记录保留到用户删除。
 
-自动唤醒只发生在 MMS 服务进程和当前电脑都保持运行时。它不会开机、唤醒睡眠中的电脑，也不保证无人值守网页登录、验证码或账号会话始终有效。
+`wakeEnabled` 是这个 Bot 所有 schedule 的总开关：关闭后不触发，但 `nextRunAt` 仍按规则推进（不攒起来以后补，也不写“已跳过”提示）。单条 schedule 的 `enabled` 与它是两层，任一为 false 就不触发。
+
+周期任务不补课：停机（Pilot 没开、进程重启）期间错过超过一个周期就只把 `nextRunAt` 推到下一个未来时刻，并在 schedule 的 `lastSkip` 和（若已有上一轮任务）system 消息里记下跳过次数，不会把积压的触发全部补跑；恰好错过一次才立即补上。`interval` 的下一次永远从本该触发的时刻算起（`previous + everySeconds`），不会被每次触发的微小延迟带偏；“每天 9 点”在夏令时切换日仍然是本地 9:00。
+
+**`once` 只有一次机会，没跑就不消耗它。** 到点但当时不能触发时（Bot 级 `wakeEnabled=false` 或单条 `enabled=false`、`overlapPolicy=skip` 且上一轮仍在跑、创建 task 失败），这条 schedule 会被**停在一旁（parked）**：`nextRunAt` 保留那个已经过去的时间，`lastSkip` 写上与原因对应的 `reason`（`paused` / `busy` / `error`），`lastRunAt` 仍为 `null`。重新可用后的下一个 `tick` 会补触发一次，并在新建 task 上写一条 system 消息说明本次是延后补触发（时间按 schedule 自己的 `timezone` 渲染）。
+
+因此 **`nextRunAt` 已是过去时间、而 `lastRunAt=null` 不是“卡住”**：它表示这条一次性的定时正在等下一次机会，UI 不要把它显示成逾期，也不要和“已执行完”（`nextRunAt=null` 且 `lastRunAt` 有值）混淆。同样的原因重复出现时不会每个 tick 重写记录（不反复落盘）。
+
+**边界：Pilot 是本机进程，它不运行就不触发。** 不做 launchd / systemd / 开机自启；它也不会唤醒睡眠中的电脑，不保证无人值守网页登录、验证码或账号会话始终有效。
 
 默认最多同时运行 3 个任务。调度器会让不同 workspace 的任务并行，并让同一 Bot 或同一 workspace 的任务串行。这是协调规则，不是操作系统级沙箱：Bot 使用当前用户权限，workspace 之间不能被当作安全隔离边界。
 
@@ -87,7 +95,7 @@ Bot 设置里的自动记忆、单轮记忆预算和“整理阈值”可调整�
 
 Pi Bot 在 worker 中执行 `screenshot` 后，截图会保存为 task-private artifact。列表只返回成果元数据和受保护的内容 URL；裸本地路径不会通过 HTTP 读取，路径越界、文件改变或大小超过限制都会失败。图片内容通过 `/api/v1/tasks/:taskId/artifacts/:artifactId/content` 读取，服务端会按 artifact 的 hash 和目录边界复核。
 
-重启时，原来处于 `starting` 或 `running` 的任务会标为 `interrupted`，不会自动重放可能已经提交的副作用；`scheduled` 任务保留计划时间，服务恢复后按 `wakeEnabled` 再调度。继续 interrupted 任务必须由用户显式唤醒，继续提示会要求先检查已有记录和成果。如果记录中的原进程仍存在，会保留工作目录占用并阻止重复启动；不会按不明 PID 杀进程。外部副作用仍需按成果核验，不能保证任意外部系统 exactly-once。
+重启时，原来处于 `starting` 或 `running` 的任务会标为 `interrupted`，不会自动重放可能已经提交的副作用；schedule 表和 `nextRunAt` 原样保留，服务恢复后第一次 `tick` 按上面的“不补课”规则处理。旧记录里仍是 `scheduled` 状态、带 `runAt` 的 task 会在加载时迁移成一条 `once` schedule，那个 task 本身转成 `waiting / waitReason=manual`（不再卡在无法唤醒的状态）。继续 interrupted 任务必须由用户显式唤醒，继续提示会要求先检查已有记录和成果。如果记录中的原进程仍存在，会保留工作目录占用并阻止重复启动；不会按不明 PID 杀进程。外部副作用仍需按成果核验，不能保证任意外部系统 exactly-once。
 
 ## HTTP 简表
 
@@ -105,7 +113,12 @@ Pi Bot 在 worker 中执行 `screenshot` 后，截图会保存为 task-private a
 | POST | `/bots/:botId/delete` | 删除 Bot 身份、该 Bot 的聊天任务、记忆、协作消息和截图成果；执行中或协作中的任务会拒绝删除 |
 | POST | `/bots/:botId/memory` | `remember`/`forget` 一条记忆；正文为 `{ "action": "remember", "content": "..." }` |
 | POST | `/bots/:botId/communications/:messageId/wake` | 手动继续投递处于等待状态的协作消息 |
-| POST | `/bots/:botId/tasks` | 给指定 Bot 创建任务 |
+| POST | `/bots/:botId/tasks` | 给指定 Bot 创建任务；带 `runAt` 时不再建 task，而是建一条 `once` schedule（响应带 `kind: "task" \| "schedule"` 区分） |
+| GET | `/bots/:botId/schedules` | 该 Bot 的全部定时 |
+| POST | `/bots/:botId/schedules` | 新建定时：`prompt`、`rule`、可选 `timezone`（缺省写回本机时区）、`overlapPolicy` 与 `requestId` |
+| POST | `/bots/:botId/schedules/:scheduleId` | 修改 `prompt` / `rule` / `timezone` / `overlapPolicy`；改 rule 或 timezone 会从当前时间重算 `nextRunAt` |
+| POST | `/bots/:botId/schedules/:scheduleId/enable` \| `/disable` | 启停单条定时 |
+| POST | `/bots/:botId/schedules/:scheduleId/delete` | 删除定时；已产生的 task 保留 |
 | GET | `/bots/notifications?since=<iso>` | 拉取任务事件（完成/失败/等待/重试），`since` 之后的事件 |
 | GET / POST | `/bots/notifications/config` | 读取或写入 webhook 列表（`state_root/bots/notify.json`） |
 | GET | `/tasks`、`/tasks/:id` | 查询任务 |
@@ -227,3 +240,85 @@ Webhook 配置保存在 `state_root/bots/notify.json`，形状为 `{"webhooks": 
 `GET /api/v1/bots` 的每个 Bot 带派生字段 `pendingQuestion`：`{taskId, question, options, since} | null`，取该 Bot 最新一条带问题的 `waiting/user` 任务；`waitQuestion` 为空的旧记录不点亮它，因此历史脏数据不再让侧栏显示“等待你补充信息”却点不出问题。回复走 `POST /api/v1/tasks/:id/wait`，`{"action": "answer", "text": "..."}` 复用普通消息路径恢复任务（等价于在聊天里发一句话），`{"action": "dismiss"}` 直接把任务按 `completed` 收尾并记 `waitDismissed=true`；`waiting/user` 超过 7 天未回复会在 `tick` 中自动结束，结果文本为“等待超时，已结束”。启动加载时会把旧 `waiting/user` 记录补上 `waitSince`，并从进度文本回填 `waitQuestion`（套不出问题的置空）。
 
 记忆摘要只在任务有长期价值时写入：`outcome` 有结构化结论（`# 结论`）或 `changes`、任务有 artifacts、或结果文本 ≥ 120 字且不是“收到/明白/已发送/沟通完毕/无待办/先候着”这类确认。纯 peer 消息任务（有 mailbox 消息、无 artifacts、无结构化结论）一律不写，避免问候和收尾确认占满记忆。
+
+## v2.6 定时实体（schedule）
+
+定时从 task 上的 `runAt` 字段改成独立实体，作用是真正的周期调度，而不是“定时发送一次”。
+
+### 数据模型与规则
+
+```
+schedule: {
+  id, botId, prompt, timezone,
+  rule: {kind: "once", at}                                  # 带时区的 ISO8601
+      | {kind: "interval", everySeconds}                    # 整数秒，最小 300
+      | {kind: "daily", atLocalTime}                        # "HH:MM"，24 小时制
+      | {kind: "weekly", weekday, atLocalTime},             # weekday 0=周一 … 6=周日
+  enabled, overlapPolicy: "skip" | "queue",
+  nextRunAt, lastRunAt, lastTaskId, recentTaskIds,          # recentTaskIds 上限 10
+  lastSkip: {at, reason, skipped} | null,
+  createdBy: "user" | "bot", createdAt, updatedAt
+}
+```
+
+- `timezone` 必填且总是显式保存。REST 缺省时后端取服务器本机时区（`zoneinfo`，不新增依赖）并写回 schedule；未识别的名字返回 `INVALID_TIMEZONE`（400），不是 500。
+- `rule.kind` 只支持上面四种；未知 kind 返回 `INVALID_SCHEDULE_RULE`（400），不会被静默当成 `once`。本次不做 cron。
+- 限额：`interval.everySeconds` 最小 300（`SCHEDULE_INTERVAL_TOO_SHORT`，400，“定时间隔最短 5 分钟。”），单个 Bot 最多 20 条（`SCHEDULE_LIMIT`，409，“一个 Bot 最多 20 条定时。”）。找不到/不属于该 Bot 的 id 返回 `SCHEDULE_NOT_FOUND`（404）。这条限额是为了防止“每 10 秒”把模型额度烧干。
+- `nextRunAt` 的值只从规则推进：`interval` 用 `previous + everySeconds`，`daily`/`weekly` 把本地时刻投到下一个未来日期。触发的微小延迟不会累积成漂移；`daily 09:00` 在夏令时切换日仍是本地 09:00（被跳过的本地时刻取切换后的第一个有效时刻，重复的本地时刻取第一次出现）。
+- 关闭单条 `enabled` 或 Bot 级 `wakeEnabled` 时都不触发，但 `nextRunAt` 照规则推进；总闸关闭不写“已跳过”提示。
+
+### 重叠与错过
+
+- 默认 `overlapPolicy = "skip"`：到点时上一轮还在跑就跳过这一轮，把 `nextRunAt` 推到下一次，并在 schedule 的 `lastSkip` 里记录；如果已有上一轮 task，同时在该 task 上写一条 system 消息。判定复用调度器已有的 busy 语义（有 `starting`/`running` task，或 `waiting` 且 `waitReason` 不在 `{children, manual, user, plan-approval}`，或 `orphanAlive`）。`"queue"` 是显式选项，照常新建 task，由现有队列逻辑排队。
+- `once` 的 `skip` 是例外：它不消耗这一次机会，而是 parked（保留过期 `nextRunAt` + `lastSkip.reason="busy"`），等这一轮结束后补触发一次。
+- 错过：只补“还在一个周期内”的那一次；超过一个周期就不补，只把 `nextRunAt` 推到下一个未来时刻并记录跳过次数。`once` 错过就直接触发一次，触发后 `nextRunAt=null`，记录不自动删除（UI 可以显示“已执行完”并允许删除）。
+- 到点后 `create_task` 失败（例如 `BOT_EXECUTOR_UNAVAILABLE` / `BOT_MODEL_REQUIRED` / `BOT_GLOBAL_WORKSPACE_REQUIRED` / `TASK_LIMIT`）：`once` 把 `nextRunAt` 放回并 parked（`lastSkip.reason="error"`，不重复落盘），Pi 恢复后补触发；周期规则则记 `lastSkip.reason="error"` 并按下一次正常推进。
+
+### 结果送达与 CLI
+
+- schedule 触发产生的 task 带 `scheduleId`，走正常 `_finish` 路径，因此完成/失败事件照常进入 `notifications.json`，payload 里多一个 `scheduleId` 字段；不新增 `EVENT_TYPES`，“跳过”用 system 消息而不是通知。
+- Bot 自己的子命令（`bot_client.py`）：`schedule create <prompt...> --every 3h|180m|10800s | --daily HH:MM | --weekly mon..sun HH:MM | --once ISO8601 [--overlap skip|queue] [--timezone IANA]`、`schedule list`、`schedule pause|resume|delete <schedule_id>`。Bot 只能操作自己（当前 task 的 `botId`）名下的 schedule，越界返回 `BOT_SCOPE`（403）。
+- Bot 提示词里的命令清单由 `bot_client.py` 的 argparse 注册信息生成（`command_catalog_text()`），不再手写，避免“能力存在但 Bot 不知道”。行为性指示（先 list 再 dispatch、不要循环轮询、`complete` 不是用户验收等）仍手写。
+
+## v2.7 对话里换模型（下一轮生效）
+
+用户在对话里就能换 Bot 的模型：Bot 自己知道有这个能力、拿得到当前通道里真实可用的模型列表、换不了会如实说，界面上看得见当前模型与下一轮待生效模型。
+
+### 语义：记录，下一轮生效
+
+- `model switch` 只写 Bot 的 `pendingPresetId`，不动 `presetId`。当前这一轮继续用原模型；下一次 `_launch` 取模型时消费 `pendingPresetId`：正式落成 `presetId`、清空 `pendingPresetId`、在该 task 上写一条 system 消息（“本轮起使用模型 X。”），并同步刷新 Bot 的 `model` / `channel` 展示字段。两个特例：匹配到的就是当前模型时直接返回“已经在用”不写 pending；`pendingPresetId == presetId` 时消费只清 pending、不动会话。
+- 消费时仍走 `executor.validate()`：模型在记录与生效之间变得不可用，则**取消这次切换**——清空 `pendingPresetId`、本轮退回用户自己正在用的 `presetId` 照常启动（不重置 `sessionId`，不白扔会话历史）、写一条指名不可用模型的 system 消息。不清 pending 会把 Bot 永久卡在失败循环里。
+- 生效时会新建会话：preset 变了 `sessionId` 重置为 None（同 `update_bot` 换 preset 的既有语义），否则持久 session 仍跑旧模型，“下一轮生效”就是空话。
+- `update_bot` 收到非空 `pendingPresetId` 时校验它在可用列表里，不在就拒绝（`BOT_MODEL_UNAVAILABLE`，409），无效值进不了状态。
+- Bot 执行中的会话级切换（`POST /sessions/:id/model`，`model_switch.py`）与这条路无关，Bot 的 Pi 会话不走它。
+- `update_bot` 的 `BOT_BUSY`（preset 作用域）保持原样：对话路径走 `pendingPresetId`，不触发它。
+
+### 模型来源优先级（高 → 低）
+
+1. `task["presetIdOverride"]` —— 计划为这一步明确指定的模型，最高（跑在它自己的一次性会话里，见 v2.8）。
+2. `bot["pendingPresetId"]` —— 对话里刚换的，下一轮生效。
+3. `bot["presetId"]` —— Bot 的默认模型。
+
+带 `presetIdOverride` 的任务里仍可调用 `model switch`，但它改的是第 2 档，返回语会明说“这一轮是计划指定的 X，你的切换从下一个没有被计划指定模型的任务开始生效”；`pendingPresetId` 不会被带 override 的任务消费。
+
+### CLI 与匹配
+
+- 子命令：`model list`（列出 `harness == "pi"` 且 `available` 的 preset，标注当前与待生效）、`model switch <query...>`。可用列表永远来自 `catalog.snapshot()` 的真值，筛选逻辑是 `bot_executor.available_presets()`，`validate()` 与 worker 共用同一份。
+- 名称匹配只在可用列表上做，字段范围 `id` / `name` / `modelId` / `channel`，归一化规则（去首尾空白、去尾部“吧。！!”、小写、去 `[\s._:/-]`）与前端捷径 `apps/mms-web/src/bot-model-switch.ts` 相同，两端钉同一份样例 `apps/mms-web/tests/fixtures/model-match-cases.json`（后端测试也读它）。已知差异：Python 与 JS 的 `\s` / strip / trim 字符集不同，BOM / NEL / FS 这类不可见控制符两端剥法不一致，见 fixture 的 `knownDivergent`。
+- 恰好 1 条才切换；多条返回 `BOT_MODEL_AMBIGUOUS`（409，消息带候选，Bot 用 `wait` 的选项把候选给用户挑）；0 条返回 `BOT_MODEL_NOT_FOUND`（404，消息带可用列表）；显式指定存在但不可用的 preset id 返回 `BOT_MODEL_UNAVAILABLE`（409）。能力/价格等语义匹配不在范围内——“换个便宜的”走“匹配不到 → 列出可选项”。
+- 切换成功的返回值带中文结果句，同时写一条 system 消息到当前 task，即使模型没有转述，界面上也有记录。
+
+### 前端
+
+- 对话输入框的既有捷径（`parseBotSettingCommand` 拦住“把模型改成 X”）改写为同样的语义：写 `pendingPresetId`、复用 `bot-model-switch.ts` 的同一套匹配，匹配不到时列出可用模型而不是只说“说得更具体一点”；命中当前模型时不发 patch。两条入口同一语义，不留并行路径。
+
+## v2.8 计划步骤指定的模型真的生效（2026-09-17，T5d）
+
+计划里的一个 step 可以带 `presetId`，落成子任务的 `presetIdOverride`。这个覆盖此前对任何跑过一次任务的 Bot 都静默失效：`_launch` 只换 `bot["presetId"]`、不重置 `sessionId`，而 `PiBotExecutor.start()` 只在新建会话时才用算好的 preset —— 于是那一步用 Bot 的旧模型跑完，`task.model` 显示的还是旧模型名，界面上没有任何线索。修法分两层：
+
+- **运行时决定归属（`bots.py` 的 `_launch`）。** 带 `presetIdOverride` 的任务用**它自己的一次性会话**：传给 executor 的 bot 副本 `sessionId` 强制为 None，launch 成功后只把结果写进 `task["sessionId"]`（`task["ephemeralSession"] = True`），**不回写 `bot["sessionId"]`**。理由：会话历史是在某个模型上长出来的，不同模型本就不该共享会话（与 `update_bot` 换 preset 时清 `sessionId`、T5c 消费 `pendingPresetId` 时重置会话同一语义）；Bot 的主对话是用户和它的连续主线，不该被计划的子步骤切碎、占用或换掉。代价是这一步拿不到主会话的历史，但它本来就有自己的 `prompt` / `memoryContext` / `mailboxContext` / `resumeText`，而且被指定了另一个模型，说明计划作者就是把它当成一件独立的活。override 值与 Bot 当前 preset 不同时，任务里会多一条 system 消息“本轮由计划指定使用模型 X。”。
+- **执行器不许静默丢 preset（`bot_executor.py` 的 `start()`）。** 复用会话前，先读该会话自己的 `presetId`（`sessions.get_session(id)["session"]["presetId"]`，会话 meta 在 launch 时写入，`model_switch` 切会话模型时同步更新）并与 `selected["presetId"]` 比对：不一致（或会话没记录 preset）就**不用这个会话，按选中 preset 新起一个**，并在返回值里带 `reusedSession: false`。真值来源选会话而不是“在 Bot 上再记一个当前会话的 preset”，是因为会话才是实际跑模型的那个东西，Bot 侧再记一份就是第二个真相源（这个 bug 本身就是两份记录对不上产生的）。这条是兜底：将来任何“临时换模型跑一个任务”的路径即使忘了自己解析会话，也不会再静默跑错模型。
+- **一次性会话跑完就收。** `tick()` 开头把已终态、带 `ephemeralSession` 的任务收集起来，在锁外调 `executor.release_session()`（沿用 planner 一次性会话同一套 stop + archive，见 `plan()`），所以它不会在 Pilot 的会话列表里变成孤儿；顺带能清掉“服务重启时被打断”的那条残留。Bot 主会话不受影响。
+- `_maybe_compact` 不变：它只在复用持久会话的分支里调，一次性会话没有历史可压。
+
+- `BotDefinition.modelName`（从未有值的声明）对齐为后端的 `model`，派发表单的 Bot 选项现在能显示当前模型。用户实际可见的“当前 X · 下一轮 Y”在 **Bot 对话页头部**（`Bot.tsx` 的 `bot-chat-model-line`）。BotStudio 的 `BotEditor` 里同样接了一行，但该编辑器目前在 UI 上没有打开入口（`setEditor` 全文件只有 `onClose` 一处调用），那几行是预留接线；`BotStudio.tsx` 里 `onUpdateBot` 白名单上的 `pendingPresetId` 是活的且必需——对话捷径的 patch 靠它才不被丢掉。

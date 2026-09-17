@@ -26,6 +26,7 @@ INSTALL_COMMANDS = {
     "claude": "curl -fsSL https://claude.ai/install.sh | sh",
     "codex": "npm install -g @openai/codex@latest",
     "opencode": "curl -fsSL https://opencode.ai/install | bash",
+    "grok": "curl -fsSL https://x.ai/cli/install.sh | bash",
 }
 
 CLI_DESCRIPTIONS = {
@@ -33,6 +34,7 @@ CLI_DESCRIPTIONS = {
     "claude": "Claude Code (Anthropic)",
     "codex": "Codex CLI (OpenAI)",
     "opencode": "OpenCode CLI",
+    "grok": "Grok Build TUI (xAI)",
     "agy": "Antigravity CLI (Google)",
 }
 

@@ -13,7 +13,10 @@ source is a git worktree, and replacing its files would destroy work.
 """
 from __future__ import annotations
 
+import json
+import re
 import shutil
+from datetime import datetime, timezone
 import tempfile
 from pathlib import Path
 
@@ -143,8 +146,9 @@ def install(candidate: Path, source: Path, backup: Path) -> list[str]:
                 saved = backup / name
                 saved.parent.mkdir(parents=True, exist_ok=True)
                 target.rename(saved)
-            staged.rename(target)
+            # Journal the old file before promotion: rename can fail too.
             replaced.append((name, existed))
+            staged.rename(target)
     except Exception:
         for name, existed in reversed(replaced):
             target = source / name
@@ -157,3 +161,46 @@ def install(candidate: Path, source: Path, backup: Path) -> list[str]:
                     target.unlink()
         raise
     return names
+
+
+def record_committed_install(config_root: Path, state_root: Path, operation: dict, version: str) -> str:
+    """Record the verified installed copy, including upgrades run by old guardians.
+
+    Called by the NEW candidate at commit. A checkout/staged-only update has
+    no successful installation receipt and must not relabel the user's CLI.
+    Metadata failure is visible but never rolls back verified source files.
+    """
+    from .runtime import private_json
+    from .updates import fetch_tag_release, read_json
+    try:
+        operation_id = str(operation.get("id") or "")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", operation_id):
+            raise ValueError("invalid operation id")
+        receipt = read_json(Path(state_root) / "updates/operations" / operation_id / "installation.json")
+        if receipt.get("installed") is not True:
+            return ""
+        tag = "v" + version
+        if operation.get("target") != tag or receipt.get("version") != tag:
+            raise ValueError("installation version mismatch")
+        prerelease = operation.get("prerelease")
+        if not isinstance(prerelease, bool):
+            # Old updaters did not retain this flag. Query this exact release,
+            # never infer it from a tag or the mutable update-check setting.
+            prerelease = fetch_tag_release(tag)["prerelease"]
+        if not isinstance(prerelease, bool):
+            raise ValueError("unknown release classification")
+        path = Path(config_root) / "version.json"
+        previous = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        if not isinstance(previous, dict):
+            raise ValueError("invalid installation metadata")
+        series = version.split(".", 1)[0] + ".x"
+        private_json(path, {**previous, "installed_ref": tag, "installed_version": tag,
+                           "install_channel": "preview" if prerelease else "stable",
+                           "release_track": "dev" if prerelease else "stable",
+                           "release_track_series": series, "release_track_version": version,
+                           "release_track_label": series + (" Preview" if prerelease else " Stable"),
+                           "installed_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                           "source": "pilot-update"})
+    except Exception:
+        return "安装版本记录未能更新，代码升级已完成；请检查配置目录的写入权限或稍后重新安装。"
+    return ""
