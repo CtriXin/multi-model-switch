@@ -77,6 +77,27 @@ def test_disabled_auto_check_allows_explicit_manual_check(tmp_path, monkeypatch)
     assert not s.preferences({'enabled': True})['enabled']
 
 
+def test_preview_channel_is_opt_in_and_keeps_stable_cache_separate(tmp_path):
+    stable = Mock(return_value={'tag': 'v4.22.1', 'notes': 'stable'})
+    preview = Mock(return_value={'tag': 'v5.0.0', 'notes': 'preview'})
+    s = UpdateService(SimpleNamespace(state_root=tmp_path), fetcher=stable,
+                      preview_fetcher=preview, clock=lambda: 100000)
+
+    assert s.status()['channel'] == 'stable'
+    s.preferences({'channel': 'preview'})
+    assert s.status()['channel'] == 'preview'
+    assert not s.status()['updateAvailable']
+    result = s.check(manual=True)
+    assert result['latest']['tag'] == 'v5.0.0'
+    assert preview.call_count == 1
+    assert stable.call_count == 0
+
+    s.preferences({'channel': 'stable'})
+    assert s.status()['latest'] == {}
+    s.check(manual=True)
+    assert stable.call_count == 1
+
+
 def test_failure_keeps_last_release_and_does_not_expose_exception(tmp_path):
     s = service(tmp_path)
     s.check()
@@ -167,6 +188,58 @@ def test_ui_preferences_remember_which_notes_were_read(tmp_path):
 
     prefs.update({'whatsNewSeenVersion': 'x' * 200})
     assert len(UiPreferences(tmp_path).read()['whatsNewSeenVersion']) == 64
+
+
+class _FakeResponse:
+    """Matches what ``build_opener(...).open(...)`` hands back: a context
+    manager whose ``read`` returns raw bytes."""
+
+    def __init__(self, payload):
+        self.payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+    def read(self, *_):
+        return self.payload
+
+
+def _release_list(*entries):
+    response = _FakeResponse(json.dumps(list(entries)).encode())
+    opener = SimpleNamespace(open=lambda *a, **k: response)
+    return patch('urllib.request.build_opener', return_value=opener)
+
+
+def test_preview_fetch_only_ever_returns_a_published_prerelease():
+    """The stable line must never be offered as a preview update.
+
+    ``fetch_preview_release`` is the one place that decides what counts as a
+    preview, and the channel test above injects a fake fetcher, so without
+    this the filter itself is unverified: drop the prerelease condition and
+    every other test still passes while the 4.x stable tag starts showing up
+    as a 5.x preview.
+    """
+    from mms_web.updates import fetch_preview_release
+    with _release_list(
+        {'tag_name': 'v4.22.2', 'prerelease': False, 'draft': False, 'body': 'stable'},
+        {'tag_name': 'v5.1.0', 'prerelease': True, 'draft': True, 'body': 'unpublished'},
+        {'tag_name': 'v5.0.0', 'prerelease': True, 'draft': False, 'body': 'older preview'},
+        {'tag_name': 'v5.0.2', 'prerelease': True, 'draft': False, 'body': 'newest preview'},
+    ):
+        assert fetch_preview_release()['tag'] == 'v5.0.2'
+
+
+def test_preview_fetch_refuses_a_list_with_no_published_prerelease():
+    from mms_web.updates import fetch_preview_release
+    with _release_list({'tag_name': 'v4.22.2', 'prerelease': False, 'draft': False, 'body': 'stable'}):
+        try:
+            fetch_preview_release()
+        except ValueError:
+            return
+        raise AssertionError('a stable-only list must not yield a preview release')
 
 
 def test_release_history_lists_shipped_notes_newest_first(tmp_path):
