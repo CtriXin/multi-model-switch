@@ -1003,6 +1003,13 @@ export function App() {
       );
     }
   }
+  function beginSessionRename(session: { id: string; title: string; owner?: string }) {
+    if (session.owner === "cli") {
+      setWorkspaceNotice("终端会话不能在这里改名");
+      return;
+    }
+    setRenameSession({ id: session.id, title: session.title });
+  }
   async function submitSessionRename() {
     if (!renameSession) return;
     const title = renameSession.title.trim();
@@ -1466,7 +1473,12 @@ export function App() {
                         data-unread={unread ? "true" : "false"}
                         aria-current={selectedId === s.id ? "page" : undefined}
                         key={s.id}
+                        title={s.owner === "cli" ? undefined : "打开会话，双击重命名"}
                         onClick={() => openSession(s.id)}
+                        onDoubleClick={(event) => {
+                          event.preventDefault();
+                          beginSessionRename(s);
+                        }}
                       >
                         <Status
                           session={s}
@@ -1532,7 +1544,7 @@ export function App() {
                               type="button"
                               className="filter-option"
                               onClick={() => {
-                                setRenameSession({ id: s.id, title: s.title });
+                                beginSessionRename(s);
                                 close();
                               }}
                             >
