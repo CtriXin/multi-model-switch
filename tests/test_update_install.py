@@ -369,3 +369,17 @@ def test_preview_metadata_displays_the_actual_installed_series(monkeypatch):
     result = _release_track_for_channel({'installed_ref': 'v5.1.0', 'install_channel': 'preview'})
     assert result == {'release_track': 'dev', 'release_track_series': '5.x',
                       'release_track_version': '5.1.0', 'release_track_label': '5.x Preview'}
+
+
+def test_flat_candidate_is_rejected_before_touching_the_installation(tmp_path):
+    installed = _release(tmp_path / "installed", version="4.23.8")
+    candidate = _release(tmp_path / "candidate", version="5.1.10")
+    for module in (candidate / "lib").iterdir():
+        module.rename(candidate / module.name)
+    (candidate / "lib").rmdir()
+    before = {p.relative_to(installed): p.read_bytes() for p in installed.rglob("*") if p.is_file()}
+    backup = tmp_path / "backup"
+    with pytest.raises(ValueError, match="lib/"):
+        install(candidate, installed, backup)
+    assert {p.relative_to(installed): p.read_bytes() for p in installed.rglob("*") if p.is_file()} == before
+    assert not backup.exists()

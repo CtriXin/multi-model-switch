@@ -11,6 +11,7 @@ import tempfile
 import urllib.request
 from pathlib import Path, PurePosixPath
 from .updates import NoRedirect, REPO, TAG, read_json
+from .update_install import require_runtime_layout
 
 MAX_DOWNLOAD = 128 * 1024 * 1024
 MAX_UNPACKED = 512 * 1024 * 1024
@@ -62,6 +63,7 @@ def unpack_release(archive: Path, destination: Path):
 
 
 def validate_bundle(source: Path, tag: str):
+    require_runtime_layout(source)
     public = source / 'mms_web_static'
     manifest = read_json(public / 'build.json')
     files = manifest.get('files')
