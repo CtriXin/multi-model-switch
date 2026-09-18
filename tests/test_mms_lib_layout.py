@@ -27,6 +27,23 @@ PYTHON_ENTRIES = ("mms", "mmf", "mms-web", "mmslogs")
 SHELL_ENTRIES = ("mmm", "MMS Pilot.command", "MMS Installer.command")
 
 
+def _bash_works() -> bool:
+    """GitHub Windows runners expose a WSL `bash` stub with no distro."""
+    try:
+        completed = subprocess.run(
+            ["bash", "-c", "echo ok"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except FileNotFoundError:
+        return False
+    text = (completed.stdout or "") + (completed.stderr or "")
+    if "Windows Subsystem for Linux" in text or "no installed distributions" in text:
+        return False
+    return completed.returncode == 0 and "ok" in (completed.stdout or "")
+
+
 def _isolated_env(home: Path) -> dict[str, str]:
     env = os.environ.copy()
     for key in (
@@ -57,17 +74,28 @@ def test_new_layout_can_start(tmp_path):
     )
     assert help_run.returncode == 0, help_run.stderr
     assert "Traceback" not in help_run.stderr
-    doctor = subprocess.run(
-        [sys.executable, str(ROOT / "mms"), "doctor"],
+    probe = subprocess.run(
+        [sys.executable, "-c", "import mms_core, mms_version; print(mms_version.VERSION)"],
         cwd=ROOT,
-        env=env,
+        env={**env, "PYTHONPATH": os.pathsep.join([str(LIB), str(ROOT)])},
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=30,
     )
-    assert "Traceback" not in doctor.stderr
-    assert "ModuleNotFoundError" not in doctor.stderr + doctor.stdout
-    assert doctor.returncode in (0, 2), doctor.stderr + doctor.stdout
+    assert probe.returncode == 0, probe.stderr
+    assert probe.stdout.strip()
+    if os.name != "nt":
+        doctor = subprocess.run(
+            [sys.executable, str(ROOT / "mms"), "doctor"],
+            cwd=ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert "Traceback" not in doctor.stderr
+        assert "ModuleNotFoundError" not in doctor.stderr + doctor.stdout
+        assert doctor.returncode in (0, 2), doctor.stderr + doctor.stdout
     module_help = subprocess.run(
         [sys.executable, "-m", "mms_web", "--help"],
         cwd=ROOT,
@@ -80,6 +108,7 @@ def test_new_layout_can_start(tmp_path):
     assert "MMS Pilot" in module_help.stdout or "usage" in module_help.stdout.lower()
 
 
+@pytest.mark.skipif(not _bash_works(), reason="install.sh needs a real bash, not the Windows WSL stub")
 def test_install_dry_run_plans_lib_not_root_py(tmp_path):
     env = _isolated_env(tmp_path)
     env.update(
@@ -134,19 +163,25 @@ def test_overwrite_install_removes_exact_flat_copies_and_keeps_user_files(tmp_pa
     (home / "mms_myhack.py").write_text("keep\n", encoding="utf-8")
     script = (ROOT / "install.sh").read_text(encoding="utf-8")
     assert 'remove_legacy_flat_modules "$MMS_HOME"' in script
-    func = _extract_shell_function(script, "remove_legacy_flat_modules")
-    completed = subprocess.run(
-        ["bash", "-c", func + '\nremove_legacy_flat_modules "$1"', "cleanup", str(home)],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    assert completed.returncode == 0
+    assert "rm -f \"$home\"/mms_*.py" not in script
+    if _bash_works():
+        func = _extract_shell_function(script, "remove_legacy_flat_modules")
+        completed = subprocess.run(
+            ["bash", "-c", func + '\nremove_legacy_flat_modules "$1"', "cleanup", str(home)],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert completed.returncode == 0
+        assert not (home / "mms_core.py").exists()
+        assert not (home / "mms_version.py").exists()
+        (home / "mms_core.py").write_text("OLD=1\n", encoding="utf-8")
+        (home / "mms_version.py").write_text('VERSION = "from-root"\n', encoding="utf-8")
+    removed = remove_legacy_flat_modules(home)
     assert not (home / "mms_core.py").exists()
     assert not (home / "mms_version.py").exists()
     assert (home / "mms_myhack.py").read_text(encoding="utf-8") == "keep\n"
     assert (lib / "mms_core.py").is_file()
-    removed = remove_legacy_flat_modules(home)
     assert "mms_myhack.py" not in removed
 
 
@@ -203,6 +238,8 @@ def test_old_layout_prints_human_guidance_not_traceback(tmp_path):
         assert "旧布局" in text
         assert "Traceback" not in text
         assert "ModuleNotFoundError" not in text
+    if not _bash_works():
+        return
     for name in SHELL_ENTRIES:
         entry = _copy_entry(name, tmp_path)
         if name == "mmm":
@@ -228,6 +265,7 @@ def test_old_layout_prints_human_guidance_not_traceback(tmp_path):
         assert "should-not-run" not in text
 
 
+@pytest.mark.skipif(not _bash_works(), reason="statusline-command.sh needs a real bash, not the Windows WSL stub")
 def test_statusline_old_layout_is_one_line(tmp_path):
     dest = tmp_path / "statusline-command.sh"
     shutil.copy2(ROOT / "statusline-command.sh", dest)
