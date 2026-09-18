@@ -83,3 +83,25 @@ test("entering confirm really scrolls to top and moves focus", () => {
   assert.equal(resting.scrollTo.length, 0);
   assert.equal(resting.focus, 0);
 });
+
+import { mountModule, text } from './helpers/component-hook-harness.mjs';
+async function updateProbe() {
+  const requests = [];
+  const fixture = { currentVersion: '1.0.0', channel: 'stable', latest: { tag: 'v2.0.0', notes: 'notes' },
+    updateAvailable: true, enabled: true, checking: false, checkedAt: 1, error: '', canUpgrade: true, operation: { phase: 'idle' } };
+  const mounted = mountModule('UpdateCenter.tsx', async (url,payload) => {
+    requests.push([url,payload]); assert.equal(url, '/update'); return fixture;
+  });
+  await mounted.mount('UpdateCenter', { ready: true, open: true, setOpen() {} });
+  assert.ok(mounted.calls.some(c => c[0] === 'showModal'), 'actual mount effect registered');
+  assert.equal(mounted.calls.filter(c => c[0] === 'confirmFocus').length, 0);
+  const button = mounted.one(n => n.type === 'button' && text(n).startsWith('更新到 '));
+  assert.equal(Boolean(button.props.disabled), false);
+  button.props.onClick(); await mounted.settle();
+  assert.equal(mounted.calls.filter(c => c[0] === 'scrollTo' && c[1].top === 0).length, 1);
+  assert.equal(mounted.calls.filter(c => c[0] === 'confirmFocus' && c[1] === -1).length, 1);
+  assert.equal(requests.length, 1, 'confirmation entry must not execute upgrade');
+}
+
+
+test('real update button registers confirm effect and focuses its rendered heading', updateProbe);

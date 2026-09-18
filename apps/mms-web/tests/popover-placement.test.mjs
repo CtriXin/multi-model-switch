@@ -58,14 +58,15 @@ function loadPopover() {
   ).code;
   const mod = { exports: {} };
   const setters = [];
+  let cursor = 0;
   const reactMock = {
     ...React,
     useId: () => "p1",
     useRef: () => ({ current: null }),
     useState: (initial) => {
-      const slot = { value: initial };
-      setters.push(slot);
-      return [initial, (next) => { slot.value = next; }];
+      const index = cursor++;
+      const slot = setters[index] ??= { value: initial };
+      return [slot.value, (next) => { slot.value = next; }];
     },
   };
   const sandbox = {
@@ -81,7 +82,7 @@ function loadPopover() {
   };
   vm.createContext(sandbox);
   vm.runInContext(code, sandbox);
-  return { Popover: mod.exports.Popover, setters };
+  return { Popover: (props) => { cursor = 0; return mod.exports.Popover(props); }, setters };
 }
 
 test("Popover places its panel through popoverPlacement on click", () => {
@@ -95,7 +96,10 @@ test("Popover places its panel through popoverPlacement on click", () => {
     trigger.props.onClick({
       currentTarget: { getBoundingClientRect: () => ({ top: 500, bottom: 540, right: 80 }) },
     });
-    const style = setters[0].value;
+    const rendered = Popover({ label: "打开", title: "面板", children: "内容" });
+    const panel = rendered.props.children[1];
+    const style = panel.props.style;
+    assert.equal(panel.props.popover, "auto");
     // On a 390px phone the panel must dock as a bottom sheet: this is the
     // style popoverPlacement computes, not the old right-aligned one.
     assert.equal(style.left, 12);

@@ -213,3 +213,39 @@ test("a dismissed task or a task with a question card shows no legacy wait row",
   assert.ok(plain);
   assert.equal(plain.props.className, "bot-chat-notice");
 });
+
+import { mountModule, elements, text } from './helpers/component-hook-harness.mjs';
+async function botProbe(entry) {
+  const requests = [], dispatched = [];
+  const mounted = mountModule('Bot.tsx', async (url,payload) => { requests.push([url,payload]); return {}; });
+  const bot = { id: 'bot-probe', name: 'Review bot', description: '', systemPrompt: 'test fixture', presetId: null,
+    workspaceId: null, status: 'idle', wakeEnabled: false,
+    pendingQuestion: { taskId: 'task/probe', question: 'Continue?', options: ['继续', '稍后'] } };
+  await mounted.mount('BotChat', { bot, bots: [bot], tasks: [], events: [], artifacts: [],
+    onDispatch: payload => dispatched.push(payload) });
+  const byClass = name => mounted.one(n => n.props.className === name);
+  if (entry === 'reply' || entry === 'composer') {
+    const textarea = mounted.one(n => n.type === 'textarea' && n.props['aria-label'] === '发送给 Bot 的消息');
+    textarea.props.onChange({ target: { value: '  已确认  ' } });
+    await mounted.settle();
+  }
+  if (entry === 'reply') {
+    const button = byClass('bot-question-card-reply-btn');
+    assert.equal(Boolean(button.props.disabled), false); button.props.onClick();
+  } else if (entry === 'dismiss') byClass('bot-question-card-dismiss').props.onClick();
+  else if (entry === 'option') mounted.one(n => n.props.className === 'bot-question-card-option' && text(n) === '继续').props.onClick();
+  else await byClass('bot-chat-composer').props.onSubmit({ preventDefault() {} });
+  await mounted.settle();
+  assert.equal(requests.length, 1, `${entry} must reach wait API`);
+  assert.equal(requests[0][0], '/tasks/task%2Fprobe/wait');
+  assert.equal(requests[0][1].action, entry === 'dismiss' ? 'dismiss' : 'answer');
+  if (entry !== 'dismiss') assert.equal(requests[0][1].text, entry === 'option' ? '继续' : '已确认');
+  assert.equal(dispatched.length, 0, 'wait response must not dispatch a new task');
+  assert.equal(elements(mounted.tree).filter(n => n.props.className === 'bot-question-card-dismiss').length, 0,
+    'actual successful handler state must remove question card');
+}
+
+
+for (const entry of ['reply','option','composer','dismiss']) {
+  test(`real Bot ${entry} control reaches the wait API and removes the question`, () => botProbe(entry));
+}
