@@ -117,6 +117,8 @@
 
 ## 3. 5 分钟上手
 
+> **T9a 布局迁移例外（4.23.8）**：从旧平铺安装迁入 `lib/` 时，必须先结束任务、退出 Pilot，再重跑安装器；旧版 Pilot 内更新不能完成这次迁移。安装旧 tag 应使用该 tag 自带的安装器。
+
 ### 3.1 安装（一行命令）
 
 **macOS / Linux**:
@@ -137,7 +139,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel dev
 
 # 固定到某个 release（CI、家里工作机同步）
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref v4.21.14
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref v4.23.8
 
 # CI / 脚本: 不打开 Web 端, 不改 shell 配置
 curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --no-launch-web --no-shell-rc
@@ -155,7 +157,7 @@ bash install.sh --install-cli claude,codex
 
 - 安装到 `~/.mms`, 并把 `mms`、`mmf`、`mmslogs` 链接到 `~/.local/bin`。
 - 创建 `~/.mms/.venv`; 系统 Python 不够新时用 MMS-managed Python 兜底。
-- 发现 PATH、Homebrew、NVM 下的 `claude` / `codex` / `opencode` / `agy`; 缺失的自动补, 已装的保持不动。**`pi` 是必装项**（Pilot 依赖它）。
+- 发现 PATH、Homebrew、NVM 下的 `claude` / `codex` / `opencode`; 缺失的自动补, 已装的保持不动。`agy` 需自行安装。**`pi` 是必装项**（Pilot 依赖它）。
 - 安装内建 session assets, **不**静默改写真实 provider/account 配置。
 - 写入 `~/.config/mms-next/version.json`, 记录安装 ref、channel 和界面语言。
 
@@ -211,9 +213,9 @@ Pilot 保存通道和模型之后, 终端读到的就是同一份, 不需要再�
 应用内逐级浏览目录、文本 / Markdown / 图片预览、Git 文本 diff、`@` 引用文件。引用本地文件是直接用原路径, 不复制不上传, 没有大小门槛。`@` 引用文件夹里的内容, 折叠卡跟消息一起送进 Pi。
 
 <details>
-<summary><b>v4.18.0 起: 文件夹拖入定位</b></summary>
+<summary><b>文件夹引用与 workspace 选择</b></summary>
 
-直接把文件夹拖到侧栏, 自动定位到对应 workspace 并展开。之前的版本只能从文件系统选择器一层层点, 拖入会落到错的目录。
+在消息输入框拖入文件夹，可以作为本地路径引用；创建会话时通过工作文件夹选择器定位 workspace。侧栏不提供拖入即切换 workspace 的操作。
 
 </details>
 
@@ -274,7 +276,7 @@ mms web --open         # 前台启动并打开浏览器
 
 ## 5. Bot 工作台（仅 5.x）
 
-> **TL;DR**: Bot 工作台是 5.x 相对 4.x 的**唯一**增量。你交代目标, Bot 去做完回报你, 而不是你自己在 Pilot 里点点点。8 个对象: **Bot / Task / Plan / Fleet / Memory / Schedule / Mailbox / 浏览器能力**。详尽语义在 [`docs/mms-web/BOTS.md`](https://github.com/CtriXin/multi-model-switch/blob/dev/docs/mms-web/BOTS.md)（只在 `dev` 分支上）。
+> **TL;DR**: Bot 工作台是 5.x 相对 4.x 的主要增量，另有预览交互等变化。你交代目标, Bot 去做完回报你, 而不是你自己在 Pilot 里点点点。8 个对象: **Bot / Task / Plan / Fleet / Memory / Schedule / Mailbox / 浏览器能力**。详尽语义在 [`docs/mms-web/BOTS.md`](https://github.com/CtriXin/multi-model-switch/blob/dev/docs/mms-web/BOTS.md)（只在 `dev` 分支上）。
 
 <details>
 <summary><b>Bot 工作台 8 个对象（点开看完整说明）</b></summary>
@@ -338,7 +340,7 @@ mms opencode --profile agent            # OpenCode 走 Agent 预置
 mms --provider <id> codex   # 指定通道
 mms --account <id> claude   # 指定账号
 mms --export codex          # 只导出环境变量，不启动
-mms --export claude --apply # 导出并应用到当前 shell
+mms --export claude --apply # 写入 config root 下 env/claude.sh；需要时自行 source
 mms --export opencode
 mms pi                      # 启动 Pi
 mms agy                     # 启动 agy
@@ -378,7 +380,7 @@ mms web status --json # JSON 输出状态
 ```bash
 bash install.sh                           # 升级（stable）
 bash install.sh --channel dev             # 升级到 dev
-bash install.sh --ref v4.21.14            # pin 到指定版本
+bash install.sh --ref v4.23.8            # pin 到指定版本
 bash install.sh --no-launch-web           # 不打开 Web
 bash install.sh --no-shell-rc             # 不改 shell 配置
 bash install.sh --install-cli claude,codex   # 精确控制安装哪些 CLI
@@ -508,7 +510,7 @@ Caveman（压缩沟通模式）已全局下线, 不再随 MMS 安装、显示或
 <details>
 <summary><b>Q: Pi 是必装吗?</b></summary>
 
-对, **Pi 是必装的**（Pilot 依赖它）。安装器如果检测不到会拒绝继续, 而不是装一个残废版本。其它 CLI（claude / codex / opencode / agy）缺失会自动补装, 已装的保持不动。
+对, **Pi 是必装的**（Pilot 依赖它）。安装器如果检测不到会拒绝继续, 而不是装一个残废版本。其它 CLI（claude / codex / opencode）缺失会自动补装，已装的保持不动；agy 需自行安装。
 
 Windows 上 Pi 要单独装: `npm.cmd install --global @earendil-works/pi-coding-agent`, 然后 `pi.cmd --version` 验证。
 
@@ -559,7 +561,7 @@ Skills 是按当前 workspace 搜索多选, `/skill:name` 补全, 内容随消�
 <details>
 <summary><b>Q: 我跑了几次, Pilot 里的会话文件越来越大, 怎么清理?</b></summary>
 
-归档 / 删除在会话菜单里; 归档的会话可以从归档列表恢复。`.pilot/attachments` 30 天无引用的导入副本会自动清理（v4.12.0 起）。Pilot 的 state root 在 `~/.local/share/mms-web`, 想完全清空可以停 Pilot 后删这个目录, 但**配置和 Bot 数据都在这里**, 不要只删一半。
+归档 / 删除在会话菜单里; 归档的会话可以从归档列表恢复。`.pilot/attachments` 30 天无引用的导入副本会自动清理（v4.12.0 起）。Pilot 的默认 state root 是 `~/.local/share/mms-web`，包含会话与 Bot 等运行数据；模型和通道配置在 `~/.config/mms-next`。优先在界面管理会话；如需清理磁盘目录，先停止 Pilot、核对实际 state root 并备份，删除 state root 并不会重置模型配置。
 
 </details>
 
@@ -622,7 +624,7 @@ MMS Pilot（本地 Web 客户端）的第一个大版本。从 v3 时代的"纯 
 <details>
 <summary><b>v5.0.0（2026-09-16）: Bot 工作台</b></summary>
 
-5.x 的**唯一**增量是 Bot 工作台。其它 4.x 的所有能力 5.x 都有。从 5.0.0 起到 5.1.7 的小版本:
+5.x 的主要增量是 Bot 工作台，另有预览交互等变化。两条线是否包含同一修复，应核对 Git 历史和 Release。从 5.0.0 起到 5.1.7 的小版本:
 
 | 版本 | 日期 | 关键能力 |
 |---|---|---|

@@ -117,6 +117,8 @@ Historical background: in the v3.x era there were three channels (Stable 3.4.z /
 
 ## 3. 5-minute quickstart
 
+> **T9a layout migration (4.23.8):** To move a flat installation into `lib/`, finish running tasks, exit Pilot, and rerun the installer. An old Pilot updater cannot perform this migration. Use an old tag's own installer when installing that tag.
+
 ### 3.1 Install (one command)
 
 **macOS / Linux**:
@@ -137,7 +139,7 @@ When done it asks whether to open Pilot. Press Enter; the browser opens, the ser
 curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel dev
 
 # Pin to a specific release (CI, multi-machine sync)
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref v4.21.14
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref v4.23.8
 
 # CI / scripts: don't open Web, don't touch shell config
 curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --no-launch-web --no-shell-rc
@@ -155,7 +157,7 @@ bash install.sh --install-cli claude,codex
 
 - Installs to `~/.mms`, symlinks `mms`, `mmf`, `mmslogs` into `~/.local/bin`.
 - Creates `~/.mms/.venv`; falls back to an MMS-managed Python if the system Python is too old.
-- Discovers `claude` / `codex` / `opencode` / `agy` in PATH, Homebrew, and NVM; auto-installs missing ones, leaves existing ones alone. **`pi` is mandatory** (Pilot depends on it).
+- Discovers `claude` / `codex` / `opencode` in PATH, Homebrew, and NVM; auto-installs missing ones, leaves existing ones alone. Install `agy` separately. **`pi` is mandatory** (Pilot depends on it).
 - Installs built-in session assets; does **not** silently overwrite your real provider/account config.
 - Writes `~/.config/mms-next/version.json` recording install ref, channel, and UI language.
 
@@ -211,9 +213,9 @@ Set per-model default effort, context length, and image-reading capability. Each
 Browse directories level-by-level in-app; preview text / Markdown / images; view Git text diffs; reference files with `@`. Local file references use the original path — no copy, no upload, no size cap. Folder references fold cards that are sent to Pi alongside the message.
 
 <details>
-<summary><b>From v4.18.0: drag-folder-to-locate</b></summary>
+<summary><b>Folder references and workspace selection</b></summary>
 
-Drag a folder onto the sidebar and Pilot locates the right workspace and expands it. Earlier versions forced you to navigate the system file picker level-by-level; dragged folders landed in the wrong directory.
+Drop a folder into the message composer to reference its local path. Use the workspace picker when creating a session. Dropping a folder onto the sidebar does not switch workspaces.
 
 </details>
 
@@ -274,7 +276,7 @@ Explicitly turning on "let phone / another computer access" exposes a URL and QR
 
 ## 5. Bot workbench (5.x only)
 
-> **TL;DR**: The Bot workbench is the **only** thing 5.x adds over 4.x. You give a goal, the Bot does it and reports back, instead of you clicking around in Pilot yourself. Eight objects: **Bot / Task / Plan / Fleet / Memory / Schedule / Mailbox / Browser capability**. Full semantics in [`docs/mms-web/BOTS.md`](https://github.com/CtriXin/multi-model-switch/blob/dev/docs/mms-web/BOTS.md) (only on the `dev` branch).
+> **TL;DR**: The Bot workbench is a main addition in 5.x, alongside other preview interactions and changes. You give a goal, the Bot does it and reports back, instead of you clicking around in Pilot yourself. Eight objects: **Bot / Task / Plan / Fleet / Memory / Schedule / Mailbox / Browser capability**. Full semantics in [`docs/mms-web/BOTS.md`](https://github.com/CtriXin/multi-model-switch/blob/dev/docs/mms-web/BOTS.md) (only on the `dev` branch).
 
 <details>
 <summary><b>Eight Bot-workbench objects (click for full semantics)</b></summary>
@@ -338,7 +340,7 @@ mms opencode --profile agent            # OpenCode with Agent preset
 mms --provider <id> codex   # specify channel
 mms --account <id> claude   # specify account
 mms --export codex          # export env vars only, don't launch
-mms --export claude --apply # export and apply to current shell
+mms --export claude --apply # write env/claude.sh under the config root; source it separately
 mms --export opencode
 mms pi                      # launch Pi
 mms agy                     # launch agy
@@ -378,7 +380,7 @@ mms web status --json # JSON status
 ```bash
 bash install.sh                           # upgrade (stable)
 bash install.sh --channel dev             # upgrade to dev
-bash install.sh --ref v4.21.14            # pin to a specific version
+bash install.sh --ref v4.23.8            # pin to a specific version
 bash install.sh --no-launch-web           # don't open Web
 bash install.sh --no-shell-rc             # don't touch shell config
 bash install.sh --install-cli claude,codex   # control which CLIs get installed
@@ -508,7 +510,7 @@ To sync your home machine with your work machine: prepare worktrees and run `scr
 <details>
 <summary><b>Q: Is Pi mandatory?</b></summary>
 
-Yes — **Pi is mandatory** (Pilot depends on it). The installer refuses to continue if it can't detect Pi, rather than installing a crippled version. Other CLIs (claude / codex / opencode / agy) auto-install when missing; existing ones stay untouched.
+Yes — **Pi is mandatory** (Pilot depends on it). The installer refuses to continue if it can't detect Pi, rather than installing a crippled version. Other CLIs (claude / codex / opencode) auto-install when missing; existing ones stay untouched. Install agy separately.
 
 On Windows, install Pi separately: `npm.cmd install --global @earendil-works/pi-coding-agent`, then `pi.cmd --version` to verify.
 
@@ -559,7 +561,7 @@ Skills are multi-selected by searching the current workspace, `/skill:name` comp
 <details>
 <summary><b>Q: Pilot session files keep growing — how do I clean up?</b></summary>
 
-Archive / delete in the session menu; archived sessions can be restored from the archive list. `.pilot/attachments` import copies unused for 30 days are auto-cleaned (since v4.12.0). Pilot's state root is `~/.local/share/mms-web`; you can stop Pilot and delete this directory to fully clean, but **config and Bot data both live here**, so don't delete half of it.
+Archive / delete in the session menu; archived sessions can be restored from the archive list. `.pilot/attachments` import copies unused for 30 days are auto-cleaned (since v4.12.0). Pilot's default state root is `~/.local/share/mms-web`, containing session and Bot runtime data; model and channel configuration lives in `~/.config/mms-next`. Prefer session management in the UI. Before disk cleanup, stop Pilot, confirm the actual state root, and back it up. Removing the state root does not reset model configuration.
 
 </details>
 
@@ -622,7 +624,7 @@ Full changes at [`docs/mms-web/CHANGELOG.md`](docs/mms-web/CHANGELOG.md) and per
 <details>
 <summary><b>v5.0.0 (2026-09-16): Bot workbench</b></summary>
 
-The **only** thing 5.x adds over 4.x is the Bot workbench. Everything in 4.x is in 5.x. From v5.0.0 through v5.1.7:
+The Bot workbench is a main addition in 5.x, alongside other preview changes. Check Git history and Releases to confirm shared fixes. From v5.0.0 through v5.1.7:
 
 | Version | Date | Key capability |
 |---|---|---|
