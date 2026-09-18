@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Bootstrap, SessionDetail } from "./types";
 import { request } from "./api";
 import { copyText } from "./clipboard";
@@ -46,6 +46,7 @@ export function RecoveryDialog({ detail, data, favorites, toggleFavorite, busy, 
   busy: boolean; action: (path: string, payload: Record<string, unknown>) => Promise<boolean>;
   prepare: (draft: Omit<RecoveryDraft, "key">) => void; close: () => void;
 }) {
+  const preview = useRef<HTMLTextAreaElement>(null);
   const [packet, setPacket] = useState<RecoveryPacket | null>(null);
   const [text, setText] = useState("");
   const [error, setError] = useState("");
@@ -66,6 +67,14 @@ export function RecoveryDialog({ detail, data, favorites, toggleFavorite, busy, 
       .catch(cause => { if (current) setError(cause instanceof Error ? cause.message : "接续资料暂时无法读取。"); });
     return () => { current = false; };
   }, [detail.session.id, reload]);
+  useEffect(() => {
+    if (!packet) return;
+    const active = document.activeElement;
+    const dialog = preview.current?.closest?.("dialog");
+    // The packet mounts after Dialog's initial focus pass. Do not steal focus
+    // if the user has already started choosing a folder or model while loading.
+    if (!active || active === document.body || active === dialog?.querySelector('header button[aria-label="关闭窗口"]')) preview.current?.focus();
+  }, [packet]);
   return <Dialog title="接续工作" close={close} dismissible={!pending} size="wide">
     <div className="session-recovery-body">
       <p>保留原会话。换模型可继续使用旧上下文；新会话只带入你确认的接续资料。</p>
@@ -73,7 +82,7 @@ export function RecoveryDialog({ detail, data, favorites, toggleFavorite, busy, 
       {error && <p className="inline-alert" role="alert">{error}</p>}
       {!packet ? <div aria-live="polite">{error ? <button type="button" onClick={() => setReload(n => n + 1)}>重新读取资料</button> : "正在读取本地记录…"}</div> : <>
         <label className="recovery-preview">接续资料（可编辑）
-          <textarea data-autofocus value={text} rows={10} onChange={e => { setText(e.target.value); setCopied(false); }} />
+          <textarea ref={preview} data-autofocus value={text} rows={10} onChange={e => { setText(e.target.value); setCopied(false); }} />
         </label>
         {!packet.nativeHistoryAvailable && <p role="status">原生日志不可用，已保留可读取的历史摘录。</p>}
         <button type="button" onClick={async () => {

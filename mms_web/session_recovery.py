@@ -48,7 +48,7 @@ def recovery_packet(detail, native_file=None, secrets=()):
     answers = [e for e in events if e.get("kind") == "assistant"
                and e.get("modelOutcome") != "error" and e.get("text")]
     uncertain = [e for e in events if (e.get("kind") == "tool" and e.get("status") != "done")
-                 or (e.get("kind") == "user" and e.get("status") in {"queued", "failed", "uncertain"})]
+                 or (e.get("kind") == "user" and e.get("status") in {"queued", "failed", "uncertain", "cancelled", "interrupted"})]
     source = str(native_file) if native_file and Path(native_file).is_file() else ""
     state = recovery_state(events)
     sections = [
@@ -61,7 +61,7 @@ def recovery_packet(detail, native_file=None, secrets=()):
     ]
     if users:
         sections.append("## 已保留的最早要求\n" + clean(users[0].get("text"), 1600))
-        sections.append("## 最近用户要求\n" + "\n\n".join(clean(e.get("text"), 2000) for e in users[-3:]))
+        sections.append("## 最近用户要求\n" + "\n\n".join((f"[消息状态：{clean(e.get('status'), 30)}]\n" if e.get("status") else "") + clean(e.get("text"), 2000) for e in users[-3:]))
     if answers:
         sections.append("## 最近助手记录（尚需核对）\n" + "\n\n".join(clean(e.get("text"), 1200) for e in answers[-3:]))
     artifacts = detail.get("artifacts", [])[-10:]
@@ -69,7 +69,7 @@ def recovery_packet(detail, native_file=None, secrets=()):
         sections.append("## 已记录的文件（不代表任务已完成）\n" + "\n".join(
             clean(a.get("path") or a.get("name"), 500) for a in artifacts))
     if uncertain:
-        sections.append("## 执行结果待确认，先核对再操作\n" + "\n".join(
+        sections.append("## 未执行或执行结果待确认，先核对再操作\n" + "\n".join(
             f"- {clean(e.get('title') or e.get('kind'), 100)} [{clean(e.get('status'), 30)}] "
             + clean(e.get("text") or e.get("arguments"), 500) for e in uncertain[-10:]))
     else:

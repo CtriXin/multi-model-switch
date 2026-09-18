@@ -1339,6 +1339,9 @@ class SessionService(SessionActions, SessionSideQuestions):
                         value = value[:-keep]
                     fields[name] = value
             fields = redact(fields, session.secrets)
+            if isinstance(fields.get("retry"), dict):
+                from .session_recovery import safe_excerpt
+                fields["retry"]["error"] = safe_excerpt(fields["retry"].get("error"), 800)
             if fields.get("kind") == "assistant":
                 fields.setdefault("modelName", session.meta.get("modelName", ""))
                 if session.pending_steers and event_id not in session.event_index:
