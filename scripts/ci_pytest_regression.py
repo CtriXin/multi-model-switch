@@ -66,7 +66,7 @@ def _clean_env() -> dict[str, str]:
 
 
 def run_suite(checkout: Path, target: str, report: Path, *, only: list[str] | None = None):
-    """Run pytest; return ``(failing node ids, tests collected, node ids present, failure details)``."""
+    """Run pytest; return ``(failing node ids, tests collected, node ids present, failure details, node ids passed)``."""
     cmd = [
         sys.executable,
         "-m",
@@ -119,6 +119,7 @@ def parse_report(report: Path, checkout: Path):
     root = ET.parse(report).getroot()
     failures: set[str] = set()
     present: set[str] = set()
+    passed: set[str] = set()
     details: dict[str, str] = {}
     collected = 0
     for case in root.iter("testcase"):
@@ -131,6 +132,8 @@ def parse_report(report: Path, checkout: Path):
         if failure is None:
             failure = case.find("error")
         if failure is None:
+            if case.find("skipped") is None:
+                passed.add(node)
             continue
         failures.add(node)
         message = (failure.get("message") or "").strip()
@@ -138,10 +141,10 @@ def parse_report(report: Path, checkout: Path):
         snippet = "\n".join(part for part in (message, body) if part)
         if snippet:
             details[node] = snippet[:1200]
-    return failures, collected, present, details
+    return failures, collected, present, details, passed
 
 
-def classify_repairs(base_failures: set[str], head_failures: set[str], head_present: set[str]):
+def classify_repairs(base_failures: set[str], head_failures: set[str], head_present: set[str], head_passed: set[str]):
     """Split base failures that are no longer failing into repaired vs gone.
 
     A red test that was deleted stops appearing in ``head_failures`` exactly
@@ -151,9 +154,10 @@ def classify_repairs(base_failures: set[str], head_failures: set[str], head_pres
     behaviour that then had no coverage at all.
     """
     cleared = base_failures - head_failures
-    fixed = sorted(item for item in cleared if item in head_present)
+    fixed = sorted(item for item in cleared if item in head_passed)
     gone = sorted(item for item in cleared if item not in head_present)
-    return fixed, gone
+    unverified = sorted(cleared & (head_present - head_passed))
+    return fixed, gone, unverified
 
 
 def base_worktree(base_ref: str) -> Path:
@@ -204,11 +208,11 @@ def main() -> int:
         print(f"== base {args.base} ==", flush=True)
         base_checkout = base_worktree(args.base)
         created.append(base_checkout)
-        base_failures, base_collected, _base_present, _base_details = run_suite(base_checkout, args.target, workdir / "base.xml")
+        base_failures, base_collected, _base_present, _base_details, _base_passed = run_suite(base_checkout, args.target, workdir / "base.xml")
         print(f"base: {len(base_failures)} failing of {base_collected}", flush=True)
 
         print(f"== head {args.head or 'working tree'} ==", flush=True)
-        head_failures, head_collected, head_present, head_details = run_suite(head_checkout, args.target, workdir / "head.xml")
+        head_failures, head_collected, head_present, head_details, head_passed = run_suite(head_checkout, args.target, workdir / "head.xml")
         print(f"head: {len(head_failures)} failing of {head_collected}", flush=True)
 
         candidates = sorted(head_failures - base_failures)
@@ -218,7 +222,7 @@ def main() -> int:
             for attempt in range(FLAKE_RERUNS):
                 if not candidates:
                     break
-                still, rerun_collected, _rerun_present, rerun_details = run_suite(
+                still, rerun_collected, _rerun_present, rerun_details, _rerun_passed = run_suite(
                     head_checkout,
                     args.target,
                     workdir / f"rerun{attempt}.xml",
@@ -234,9 +238,9 @@ def main() -> int:
                         flush=True,
                     )
                     break
-                candidates = [item for item in candidates if item in still]
+                candidates = [item for item in candidates if item not in _rerun_passed]
 
-        fixed, gone = classify_repairs(base_failures, head_failures, head_present)
+        fixed, gone, unverified = classify_repairs(base_failures, head_failures, head_present, head_passed)
         if fixed:
             print(f"\nRepaired by this PR ({len(fixed)}):")
             for item in fixed:
@@ -254,6 +258,14 @@ def main() -> int:
             if os.environ.get("GITHUB_ACTIONS") == "true":
                 names = ", ".join(gone[:10]) + (" ..." if len(gone) > 10 else "")
                 print(f"::warning title=Red tests disappeared rather than passing::{len(gone)}: {names}")
+
+        if unverified:
+            print(f"\nRed at the base and NOT VERIFIED AS PASS here ({len(unverified)}):")
+            for item in unverified:
+                print(f"  ? {item}")
+            if os.environ.get("GITHUB_ACTIONS") == "true":
+                names = ", ".join(unverified[:10])
+                print(f"::warning title=Red tests skipped rather than passing::{len(unverified)}: {names}")
 
         if candidates:
             print(f"\nBroken by this PR ({len(candidates)}):")
