@@ -584,7 +584,7 @@ class PiRpcDriver:
         elif etype in {"auto_retry_start", "auto_retry_end", "summarization_retry_scheduled", "summarization_retry_finished"}:
             self._activity("retrying" if etype in {"auto_retry_start", "summarization_retry_scheduled"} else "running" if self._streaming else "idle")
             retry = {key: message[key] for key in ("attempt", "maxAttempts", "success") if key in message}
-            retry["error"] = _clip(str(message.get("finalError") or message.get("errorMessage") or ""), 800)
+            retry["error"] = str(message.get("finalError") or message.get("errorMessage") or "")
             self._upsert({"kind": "notice", "title": "retry", "text": f"自动重试事件: {etype}", "retry": retry})
         elif etype == "queue_update":
             steering = [str(text) for text in (message.get("steering") or [])]

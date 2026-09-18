@@ -87,3 +87,29 @@ test('production entry distinguishes model retry exhaustion and remains availabl
   assert.ok(healthy.button('接续工作'));
   assert.equal(healthy.reads.length,0);
 });
+
+test('asynchronous packet focuses the actual rendered preview after it mounts',async()=>{
+  const h=await setup();
+  assert.ok(h.view.calls.some(([kind,element])=>kind==='focus' && element==='textarea'));
+});
+
+test('production App navigation preserves the active recovery draft when returning home',async()=>{
+  const {readFileSync}=await import('node:fs');
+  const {runInNewContext}=await import('node:vm');
+  const source=readFileSync(new URL('../src/App.tsx',import.meta.url),'utf8');
+  const start=source.indexOf('  function navigate(');
+  const end=source.indexOf('  function beginGuideStep(',start);
+  assert.ok(start>0 && end>start);
+  const {createRequire}=await import('node:module');
+  const require=createRequire(new URL('../package.json',import.meta.url));
+  const compiled=require('esbuild').transformSync(source.slice(start,end),{loader:'ts'}).code;
+  let draft={key:'recovery:source:original',prompt:'我的编辑'},page='session';
+  runInNewContext(compiled+'\nnavigate("new");',{
+    requestNavigation:fn=>fn(),setGuideStep(){},setSettingsOpen(){},setNavOpen(){},
+    setPage:value=>page=value,setSelectedId(){},setDetail(){},currentSelection:{current:'source'},
+    setRecoveryDraft:value=>draft=value,history:{replaceState(){}},location:{pathname:'/',search:''},
+  });
+  assert.equal(page,'new');
+  assert.equal(draft.key,'recovery:source:original');
+  assert.equal(draft.prompt,'我的编辑');
+});

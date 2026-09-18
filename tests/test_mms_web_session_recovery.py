@@ -195,3 +195,29 @@ def test_native_fresh_session_only_sends_reviewed_packet_and_preserves_source(na
     assert "我已核对" in json.dumps(sent, ensure_ascii=False)
     assert native_path.read_bytes() == before
     assert app.sessions._get(new).meta["runtimeRoot"] != live.meta["runtimeRoot"]
+
+@pytest.mark.parametrize('status', ['cancelled', 'interrupted', 'queued', 'failed', 'uncertain'])
+def test_undelivered_requests_keep_status_in_recovery(status):
+    packet = recovery_packet({'session': {'id': 's'}, 'events': [
+        {'kind': 'user', 'text': '这条没有确认执行的消息', 'status': status}]})
+    assert f'[消息状态：{status}]' in packet['prompt']
+    assert '未执行或执行结果待确认' in packet['prompt']
+
+
+def test_retry_error_is_redacted_before_truncation_and_persistence(tmp_path, seeded_seam):
+    service, drivers = make_service(tmp_path)
+    try:
+        sid = launch_ok(service)['session']['id']
+        live = service._get(sid)
+        secret = 'synthetic-private-' + 'a1b2c3' * 18
+        live.secrets = [secret]
+        driver = protocol_driver(drivers[0]._sink)
+        for prefix in (380, 780):
+            driver._handle_event({'type': 'auto_retry_end', 'success': False,
+                'finalError': 'x' * prefix + secret + 'y' * 1000})
+        packet = application(tmp_path / 'config', service).get(['sessions', sid, 'recovery'])
+        assert secret[:20] not in json.dumps(packet)
+        assert secret[:20] not in json.dumps(live.events)
+        assert secret[:20] not in (service._state_dir / f'{sid}.json').read_text()
+    finally:
+        service.close()

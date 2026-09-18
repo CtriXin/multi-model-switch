@@ -745,7 +745,6 @@ export function App() {
     setSettingsOpen(next === "models");
     if (next === "models") { setNavOpen(false); after?.(); return; }
     setPage(next);
-    if (next === "new") setRecoveryDraft(null);
     if (next !== "session")
       history.replaceState(null, "", location.pathname + location.search + (next === "bots" ? "#page=bots" : ""));
     setNavOpen(false);
