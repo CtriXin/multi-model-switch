@@ -85,7 +85,7 @@ def _real_home(mms_core: Any | None) -> str:
 
 
 def _repo_root() -> str:
-    return os.path.abspath(os.path.dirname(__file__))
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 
 
 def _abbrev_path(path: str, *, home: str) -> str:

@@ -388,7 +388,7 @@ def test_mmf_review_dispatch_entrypoint_uses_preview_bundle(tmp_path, monkeypatc
         **os.environ,
         "MMS_CONFIG_ROOT": str(config_root),
         "MMS_SKIP_VENV_REEXEC": "1",
-        "PYTHONPATH": str(REPO_ROOT),
+        "PYTHONPATH": os.pathsep.join([str(REPO_ROOT / "lib"), str(REPO_ROOT)]),
     }
     completed = subprocess.run(
         [

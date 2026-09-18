@@ -18,7 +18,7 @@ OPENCODE_HEALTH_STATUS_RANK = {
 
 
 def opencode_health_repo_root(repo_root=None):
-    root = str(repo_root or os.environ.get("MMS_TARGET_REPO") or os.path.dirname(os.path.abspath(__file__))).strip()
+    root = str(repo_root or os.environ.get("MMS_TARGET_REPO") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))).strip()
     return os.path.abspath(os.path.expanduser(root))
 
 

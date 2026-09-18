@@ -63,7 +63,7 @@ def test_cli_dry_run_cas_apply_mode_backup(tmp_path):
     original = json.dumps(payload()).encode()
     path.write_bytes(original)
     path.chmod(0o600)
-    cmd = [sys.executable, '-B', str(ROOT/'mms_hook_retirement.py'), '--file', str(path)]
+    cmd = [sys.executable, '-B', str(ROOT/'lib'/'mms_hook_retirement.py'), '--file', str(path)]
     plan = subprocess.run(cmd, capture_output=True, text=True, check=True)
     assert 'must-not-print' not in plan.stdout
     assert path.read_bytes() == original

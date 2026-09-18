@@ -46,10 +46,10 @@ def _review_hub_prompt(request_root: Path) -> str:
 
 
 def _load_opencode_smoke_helper():
-    helper = Path(__file__).resolve().parent / "scripts" / "smoke_opencode_profile.py"
+    helper = Path(__file__).resolve().parent.parent / "scripts" / "smoke_opencode_profile.py"
     if not helper.exists():
         raise FileNotFoundError(f"missing OpenCode profile helper: {helper}")
-    root = Path(__file__).resolve().parent
+    root = Path(__file__).resolve().parent.parent
     for path in (root, root / "scripts"):
         path_text = str(path)
         if path_text not in sys.path:

@@ -14,7 +14,7 @@ def test_fresh_opencode_bootstrap_exports_verified_bundle_and_fails_closed(tmp_p
     env = {key: os.environ[key] for key in ("PATH", "SYSTEMROOT", "WINDIR") if key in os.environ}
     env.update({"HOME": str(home), "USERPROFILE": str(home), "MMS_REAL_HOME": str(home),
                 "REAL_HOME": str(home), "ORIGINAL_HOME": str(home), "MMS_CONFIG_ROOT": str(config),
-                "PYTHONPATH": str(root), "MMS_TEST_ALLOW_REAL_CONFIG": "0"})
+                "PYTHONPATH": os.pathsep.join([str(root / "lib"), str(root)]), "MMS_TEST_ALLOW_REAL_CONFIG": "0"})
     run = subprocess.run([sys.executable, str(root / "tests/fixtures/opencode_first_run.py")],
                          cwd=root, env=env, text=True, capture_output=True, check=True, timeout=30)
     result = json.loads(run.stdout)

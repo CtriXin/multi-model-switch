@@ -29,8 +29,8 @@ from pathlib import Path
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
+sys.path.insert(0, str(ROOT_DIR))
+sys.path.insert(0, str(ROOT_DIR / "lib"))
 
 _SCRUB_ENV_KEYS = {
     "MMS_CONFIG_ROOT",
@@ -216,7 +216,7 @@ def _base_env() -> dict[str, str]:
     for key in _SCRUB_ENV_KEYS:
         env.pop(key, None)
     env["MMS_TEST_ALLOW_REAL_CONFIG"] = "0"
-    env["PYTHONPATH"] = str(ROOT_DIR)
+    env["PYTHONPATH"] = os.pathsep.join([str(ROOT_DIR / "lib"), str(ROOT_DIR)])
     return env
 
 
@@ -565,7 +565,8 @@ _CHANNEL_SWITCH_WRITE_PROBE = """
 import json, sys
 from pathlib import Path
 
-sys.path.insert(0, sys.argv[1])  # the newer line's tree; cwd would win otherwise
+sys.path.insert(0, sys.argv[1])
+sys.path.insert(0, __import__("os").path.join(sys.argv[1], "lib"))
 state_root = Path(sys.argv[2])
 from mms_version import VERSION
 from mms_web.bots import BotRuntime
@@ -598,7 +599,8 @@ _CHANNEL_SWITCH_VERIFY_PROBE = """
 import json, sys
 from pathlib import Path
 
-sys.path.insert(0, sys.argv[1])  # the newer line's tree; cwd would win otherwise
+sys.path.insert(0, sys.argv[1])
+sys.path.insert(0, __import__("os").path.join(sys.argv[1], "lib"))
 state_root = Path(sys.argv[2])
 expected = json.loads(sys.argv[3])
 from mms_web.bots import BotRuntime
@@ -733,7 +735,7 @@ def _smoke_channel_switch_round_trip() -> None:
             stable_tree, newer_tree, newer_version = peer_tree, ROOT_DIR, current_version
         print(f"[gate] channel switch: stable line {_version_of(stable_tree)}, newer line {newer_version}", flush=True)
         newer_env = _env_for_home(home)
-        newer_env["PYTHONPATH"] = str(newer_tree)
+        newer_env["PYTHONPATH"] = os.pathsep.join([str(Path(newer_tree) / "lib"), str(newer_tree)])
 
         state_root = base / "state"
         config_root = base / "config"
@@ -772,7 +774,7 @@ def _smoke_channel_switch_round_trip() -> None:
         # Downgrade: the 4.x line boots a real server on that state root.
         port = _free_port()
         server_env = _env_for_home(home)
-        server_env["PYTHONPATH"] = str(stable_tree)
+        server_env["PYTHONPATH"] = os.pathsep.join([str(Path(stable_tree) / "lib"), str(stable_tree)])
         # Keep the background release check off the network so the cached tag
         # stays exactly what the newer line left behind.
         server_env["MMS_WEB_UPDATE_CHECK"] = "0"

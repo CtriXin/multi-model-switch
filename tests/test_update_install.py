@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from mms_web.update_install import DIRECTORIES, FILES, GLOBS, describe, install, manifest
+from mms_web.update_install import DIRECTORIES, FILES, GLOBS, STAGING_SUFFIX, describe, install, manifest
 from mms_web.updates import upgrade_notice
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,8 +17,10 @@ def _release(root: Path, *, version: str) -> Path:
     root.mkdir(parents=True, exist_ok=True)
     (root / "mms").write_text(f"#!/usr/bin/env python3\n# {version}\n")
     (root / "mmf").write_text(f"#!/bin/sh\n# {version}\n")
-    (root / "mms_core.py").write_text(f'VERSION_MARK = "{version}"\n')
-    (root / "mms_version.py").write_text(f'VERSION = "{version}"\n')
+    lib = root / "lib"
+    lib.mkdir()
+    (lib / "mms_core.py").write_text(f'VERSION_MARK = "{version}"\n')
+    (lib / "mms_version.py").write_text(f'VERSION = "{version}"\n')
     (root / "mms_web").mkdir()
     (root / "mms_web" / "__main__.py").write_text(f"# {version}\n")
     (root / "config").mkdir()
@@ -50,7 +52,7 @@ def test_the_manifest_covers_everything_install_sh_copies():
 
 def test_manifest_lists_only_what_the_release_actually_has(tmp_path):
     names = manifest(_release(tmp_path / "candidate", version="9.9.9"))
-    assert names == ["config", "mmf", "mms", "mms_core.py", "mms_version.py", "mms_web"]
+    assert names == ["config", "lib", "mmf", "mms", "mms_web"]
     assert "vendor" not in names and "MMS Pilot.command" not in names
 
 
@@ -84,13 +86,13 @@ def test_install_replaces_the_installation_and_keeps_local_state(tmp_path):
     names = install(candidate, installed, tmp_path / "backup")
 
     assert "mmslogs" in names
-    assert 'VERSION = "2.0.0"' in (installed / "mms_version.py").read_text()
+    assert 'VERSION = "2.0.0"' in (installed / "lib" / "mms_version.py").read_text()
     assert "# 2.0.0" in (installed / "mms_web" / "__main__.py").read_text()
     assert (installed / "mmslogs").is_file()
     assert (installed / ".venv" / "pyvenv.cfg").read_text() == "home = /usr\n"
     assert (installed / "logs" / "mms-web.log").read_text() == "old log\n"
     assert not list(installed.glob("*.mms-update-new"))
-    assert 'VERSION = "1.0.0"' in (tmp_path / "backup" / "mms_version.py").read_text()
+    assert 'VERSION = "1.0.0"' in (tmp_path / "backup" / "lib" / "mms_version.py").read_text()
 
 
 def test_a_failed_install_puts_the_previous_version_back(tmp_path, monkeypatch):
@@ -111,7 +113,7 @@ def test_a_failed_install_puts_the_previous_version_back(tmp_path, monkeypatch):
         install(candidate, installed, tmp_path / "backup")
 
     # Every replaced path is back at the version that was serving.
-    assert 'VERSION = "1.0.0"' in (installed / "mms_version.py").read_text()
+    assert 'VERSION = "1.0.0"' in (installed / "lib" / "mms_version.py").read_text()
     assert "# 1.0.0" in (installed / "mms_web" / "__main__.py").read_text()
     assert (installed / "mms").read_text().endswith("# 1.0.0\n")
     assert not list(installed.glob("*.mms-update-new"))
@@ -124,7 +126,7 @@ def test_an_added_path_is_removed_again_when_the_install_fails(tmp_path, monkeyp
     real_copy = shutil.copy2
 
     def explode(source, target, **kwargs):
-        if Path(source).name == "mms_version.py":
+        if Path(source).name == "mmslogs":
             raise OSError("disk full")
         return real_copy(source, target, **kwargs)
 
@@ -180,7 +182,7 @@ def test_a_verified_update_replaces_the_installation_and_drops_the_pointer(tmp_p
     spec = _spec(tmp_path, old_source=installed, staged=staged)
 
     assert install_alongside(spec) is True
-    assert 'VERSION = "2.0.0"' in (installed / "mms_version.py").read_text()
+    assert 'VERSION = "2.0.0"' in (installed / "lib" / "mms_version.py").read_text()
     report = json.loads((Path(spec["armed"]).parent / "installation.json").read_text())
     assert report["installed"] is True and report["root"] == str(installed)
 
@@ -195,7 +197,7 @@ def test_a_checkout_keeps_serving_from_the_staged_copy(tmp_path):
     spec = _spec(tmp_path, old_source=checkout, staged=staged)
 
     assert install_alongside(spec) is False
-    assert 'VERSION = "1.0.0"' in (checkout / "mms_version.py").read_text()
+    assert 'VERSION = "1.0.0"' in (checkout / "lib" / "mms_version.py").read_text()
     report = json.loads((Path(spec["armed"]).parent / "installation.json").read_text())
     assert report["installed"] is False and "源码检出" in report["reason"]
 
@@ -236,7 +238,7 @@ def test_a_staged_copy_keeps_the_pointer_instead_of_being_overwritten(tmp_path):
     spec = _spec(tmp_path, old_source=staged_old, staged=staged_new)
 
     assert install_alongside(spec) is False
-    assert 'VERSION = "1.0.0"' in (staged_old / "mms_version.py").read_text()
+    assert 'VERSION = "1.0.0"' in (staged_old / "lib" / "mms_version.py").read_text()
 
 
 def test_promotion_failure_restores_the_file_already_moved_to_backup(tmp_path, monkeypatch):
@@ -245,14 +247,14 @@ def test_promotion_failure_restores_the_file_already_moved_to_backup(tmp_path, m
     rename = Path.rename
 
     def fail_promotion(path, target):
-        if path.name == 'mms_version.py.mms-update-new':
+        if path.name == 'lib' + STAGING_SUFFIX:
             raise OSError('promotion failed')
         return rename(path, target)
 
     monkeypatch.setattr(Path, 'rename', fail_promotion)
     with pytest.raises(OSError, match='promotion failed'):
         install(candidate, installed, tmp_path / 'backup')
-    assert 'VERSION = "1.0.0"' in (installed / 'mms_version.py').read_text()
+    assert 'VERSION = "1.0.0"' in (installed / 'lib' / 'mms_version.py').read_text()
     assert (installed / 'mms').read_text().endswith('# 1.0.0\n')
 
 
@@ -303,7 +305,7 @@ def test_old_guardian_new_candidate_records_actual_release_and_preserves_prefere
     assert metadata['preferred_language'] == 'en' and metadata['custom'] == {'preserve': [1, 2]}
     assert metadata['source'] == 'pilot-update'
     assert re.fullmatch(r'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ', metadata['installed_at'])
-    assert f'VERSION = "{VERSION}"' in (installed / 'mms_version.py').read_text()
+    assert f'VERSION = "{VERSION}"' in (installed / 'lib' / 'mms_version.py').read_text()
     operation = updates.read_json(app.state_root / 'updates/operation.json')
     assert operation['phase'] == 'complete' and not operation['metadataWarning']
     assert not app.maintenance and not app.probation_token
@@ -340,7 +342,7 @@ def test_metadata_failure_warns_but_commits_verified_source(tmp_path, monkeypatc
     assert operation['phase'] == 'complete'
     assert operation['metadataWarning'] and operation['metadataWarning'] in operation['message']
     assert meta.read_bytes() == original
-    assert f'VERSION = "{VERSION}"' in (installed / 'mms_version.py').read_text()
+    assert f'VERSION = "{VERSION}"' in (installed / 'lib' / 'mms_version.py').read_text()
     assert not app.maintenance
 
 

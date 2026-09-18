@@ -88,7 +88,7 @@ def rewrite_models_payload(payload, endpoint):
 
 
 def _proxy_script_path():
-    path = Path(__file__).resolve().parent / "scripts" / "pi_capture_proxy.py"
+    path = Path(__file__).resolve().parent.parent / "scripts" / "pi_capture_proxy.py"
     return str(path) if path.is_file() else ""
 
 

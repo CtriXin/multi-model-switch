@@ -209,7 +209,7 @@ OVERRIDE_PATHS = [
 PREFERENCES_PATHS = [
     os.path.join(PRIMARY_CONFIG_DIR, "preferences.toml"),
 ]
-PREFERENCES_DOC_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs", "MMS_USER_PREFERENCES.md")
+PREFERENCES_DOC_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "MMS_USER_PREFERENCES.md")
 PREFERENCES_EXAMPLE_TOML = """# ~/.config/mms-next/preferences.toml
 # User-owned preference overlay. Install/update never overwrites this file.
 
@@ -802,7 +802,7 @@ def display_title():
 def _git_output(args):
     try:
         result = subprocess.run(
-            ["git", "-C", os.path.dirname(os.path.abspath(__file__)), *args],
+            ["git", "-C", os.path.dirname(os.path.dirname(os.path.abspath(__file__))), *args],
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -16868,7 +16868,7 @@ def handle_logs_command(argv):
 
 
 def _run_script_subcommand(script_name, argv, subcommand_name):
-    script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", script_name)
+    script_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts", script_name)
     if not os.path.exists(script_path):
         console.print(f"[red]找不到脚本: {script_path}[/red]")
         return 1

@@ -1159,7 +1159,7 @@ def _read_json_mapping(path: Path) -> dict[str, Any]:
 
 def _build_effective_provider_profiles_payload(config_root: Path) -> dict[str, Any]:
     """Build the non-secret consumer-facing profile export from builtin + overlays."""
-    repo_root = Path(__file__).resolve().parent
+    repo_root = Path(__file__).resolve().parent.parent
     payload: dict[str, Any] = _read_json_mapping(repo_root / "config" / "provider-profiles.json")
     if not payload:
         payload = {"schema_version": 1, "profiles": {}}

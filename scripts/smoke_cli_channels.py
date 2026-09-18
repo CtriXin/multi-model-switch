@@ -13,8 +13,8 @@ from typing import Any
 import httpx
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if ROOT_DIR not in sys.path:
-    sys.path.insert(0, ROOT_DIR)
+sys.path.insert(0, ROOT_DIR)
+sys.path.insert(0, os.path.join(ROOT_DIR, "lib"))
 
 from mms_bridge import codex_chatcompletions_bridge, codex_responses_bridge, gateway_claude_bridge
 from mms_core import _probe_models, _provider_map, apply_local_overrides, load_runtime_config as load_config, resolve_provider_context

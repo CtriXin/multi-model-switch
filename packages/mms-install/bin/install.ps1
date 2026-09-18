@@ -154,6 +154,9 @@ try {
   if (-not $source -or -not (Test-Path (Join-Path $source.FullName "mms_web\__main__.py"))) {
     throw "下载的压缩包里没有 MMS Pilot（$archiveRef）。该版本可能早于 Windows Preview。"
   }
+  if (-not (Test-Path (Join-Path $source.FullName "lib\mms_core.py"))) {
+    throw "这份安装包是旧布局（模块不在 lib/）。旧布局不再被支持，请重新运行安装命令更新。"
+  }
 
   New-Item -ItemType Directory -Force -Path (Split-Path $versionRoot) | Out-Null
   $staged = "$versionRoot.new-$stamp"
@@ -235,7 +238,7 @@ try {
 
   $resolvedConfig = ""
   try {
-    $resolvedConfig = (& $launchPython -c "import sys; sys.path.insert(0, sys.argv[1]); from mms_state_io import resolve_mms_config_dir; print(resolve_mms_config_dir())" $versionRoot) -join ""
+    $resolvedConfig = (& $launchPython -c "import os, sys; sys.path.insert(0, sys.argv[1]); sys.path.insert(0, os.path.join(sys.argv[1], 'lib')); from mms_state_io import resolve_mms_config_dir; print(resolve_mms_config_dir())" $versionRoot) -join ""
   } catch { $resolvedConfig = "" }
 
   if (-not $NoPath) {

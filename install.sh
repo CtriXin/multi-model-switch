@@ -119,7 +119,23 @@ normalize_install_ref() {
 }
 
 is_local_source_install() {
-    [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/install.sh" ] && [ -f "$SCRIPT_DIR/mms_core.py" ]
+    [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/install.sh" ] && [ -f "$SCRIPT_DIR/lib/mms_core.py" ]
+}
+
+remove_legacy_flat_modules() {
+    # Delete leftover pre-lib copies by exact names from lib/, never `rm mms_*.py`
+    # at the install root (that would take user files such as mms_myhack.py).
+    local home="$1"
+    local lib="$home/lib"
+    local f base
+    [ -d "$lib" ] || return 0
+    for f in "$lib"/mms_*.py "$lib"/mmc_*.py; do
+        [ -f "$f" ] || continue
+        base="${f##*/}"
+        if [ -f "$home/$base" ] || [ -L "$home/$base" ]; then
+            rm -f "$home/$base"
+        fi
+    done
 }
 
 resolve_local_source_ref() {
@@ -508,7 +524,7 @@ download_remote_source() {
     fi
 
     SOURCE_DIR="$(find "$SOURCE_TMP_DIR" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
-    if [ -z "$SOURCE_DIR" ] || [ ! -f "$SOURCE_DIR/mms_core.py" ]; then
+    if [ -z "$SOURCE_DIR" ] || [ ! -f "$SOURCE_DIR/lib/mms_core.py" ]; then
         echo "❌ $(t "远程源码解压失败" "Failed to extract downloaded source archive")"
         return 1
     fi
@@ -1423,7 +1439,7 @@ repair_managed_claude_settings() {
 
 cleanup_legacy_global_session_hooks() {
     # Read-only plan. Global registration changes require explicit review/CAS.
-    "$(_python_bin)" "$SOURCE_DIR/mms_hook_retirement.py" \
+    "$(_python_bin)" "$SOURCE_DIR/lib/mms_hook_retirement.py" \
         --file "$REAL_HOME/.claude/settings.json" \
         --file "$REAL_HOME/.codex/hooks.json" || {
         echo "Optional retired-hook cleanup plan unavailable; settings left unchanged." >&2
@@ -1962,6 +1978,9 @@ print_dry_run_plan() {
     esac
     echo "• $(t "会清理旧版本装过的可选包，以及写进各 agent 目录的 offduty/onduty/nsr" "would clean up the optional packs older versions installed, plus the offduty/onduty/nsr entries written into each agent home")"
     echo "  $(t "仅备份移走有 MMS 来源凭据的条目，同名自定义内容和全局配置保留" "Only verified MMS entries are archived; same-name custom content and global settings are preserved")"
+    echo "• $(t "运行时模块目录" "runtime module dir"): $MMS_HOME/lib"
+    echo "• $(t "不会把 mms_*.py / mmc_*.py 平铺到安装根" "would not copy mms_*.py / mmc_*.py onto the install root")"
+    echo "• $(t "会按 lib 内精确文件名删除安装根上的旧平铺模块副本" "would delete leftover flat modules at the install root using exact names from lib/")"
     if [ "$INSTALL_CODING_FONTS" = "1" ]; then
         echo "• $(t "会把 Fira Code 与 JetBrains Mono 安装到 $(user_font_dir)（已装则跳过，--no-coding-fonts 关闭）" "would install Fira Code and JetBrains Mono into $(user_font_dir); already-installed families are skipped, --no-coding-fonts turns this off")"
     fi
@@ -2159,7 +2178,7 @@ import sys
 start = int(sys.argv[1])
 limit = int(sys.argv[2])
 root, config = (Path(p).resolve() for p in sys.argv[3:5])
-version_file = root / "mms_version.py"
+version_file = root / "lib" / "mms_version.py"
 match = re.search(r'VERSION = "([^"]+)"', version_file.read_text()) if version_file.exists() else None
 version = match.group(1) if match else ""
 identity = hashlib.sha256(f"{root}|{config}|{version}".encode()).hexdigest()
@@ -2690,7 +2709,7 @@ echo ""
 
 prepare_source_dir
 
-if [ -z "$SOURCE_DIR" ] || [ ! -f "$SOURCE_DIR/mms_core.py" ]; then
+if [ -z "$SOURCE_DIR" ] || [ ! -f "$SOURCE_DIR/lib/mms_core.py" ]; then
     echo "❌ $(t "找不到 MMS 源文件" "Cannot find MMS source files")"
     exit 1
 fi
@@ -2710,10 +2729,7 @@ fi
 copy_dir_safely "$SOURCE_DIR/docs/mms-web" "$MMS_HOME/docs/mms-web" "MMS Pilot 使用文档" "MMS Pilot documentation"
 [ -f "$SOURCE_DIR/mmf" ] && cp "$SOURCE_DIR"/mmf "$MMS_HOME/"
 [ -f "$SOURCE_DIR/mmslogs" ] && cp "$SOURCE_DIR"/mmslogs "$MMS_HOME/"
-cp "$SOURCE_DIR"/mms_core.py "$MMS_HOME/"
-cp "$SOURCE_DIR"/mms_tui.py "$MMS_HOME/"
-cp "$SOURCE_DIR"/mms_launchers.py "$MMS_HOME/"
-cp "$SOURCE_DIR"/mms_installer.py "$MMS_HOME/"
+copy_dir_safely "$SOURCE_DIR/lib" "$MMS_HOME/lib" "运行时模块" "runtime modules"
 [ -f "$SOURCE_DIR/statusline-command.sh" ] && cp "$SOURCE_DIR"/statusline-command.sh "$MMS_HOME/"
 copy_hooks_dir_safely "$SOURCE_DIR/hooks" "$MMS_HOME/hooks"
 copy_dir_safely "$SOURCE_DIR/assets" "$MMS_HOME/assets" "assets 目录" "assets directory"
@@ -2725,11 +2741,8 @@ if [ -f "$SOURCE_DIR/docs/LLM_OPERATION_GUIDE.md" ]; then
     mkdir -p "$MMS_HOME/docs"
     cp "$SOURCE_DIR/docs/LLM_OPERATION_GUIDE.md" "$MMS_HOME/docs/"
 fi
-# 复制所有 mms_*.py 确保完整
-for f in "$SOURCE_DIR"/mms_*.py; do
-    [ -f "$f" ] && cp "$f" "$MMS_HOME/"
-done
 [ -f "$SOURCE_DIR/config.example.toml" ] && cp "$SOURCE_DIR/config.example.toml" "$MMS_HOME/"
+remove_legacy_flat_modules "$MMS_HOME"
 echo "✓ $(t "文件已复制到" "Files copied to") $MMS_HOME"
 # An earlier in-page update leaves a pointer to a staged copy under the Web
 # state directory, and startup follows it. Left in place, this install would

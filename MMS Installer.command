@@ -3,6 +3,25 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 INSTALL_SCRIPT="$SCRIPT_DIR/install.sh"
 
+if [ ! -f "$SCRIPT_DIR/lib/mms_core.py" ]; then
+    echo "这份 MMS 安装是旧布局(模块在安装根,当前入口需要 lib/)。"
+    echo "旧布局不再被支持,请重新执行安装命令更新:"
+    echo ""
+    echo "  curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash"
+    echo ""
+    echo "如果 Pilot 正在运行,先执行 mms web stop 再装。"
+    echo ""
+    echo "This MMS install uses the old layout (modules at the install root; this entry needs lib/)."
+    echo "The old layout is no longer supported. Re-run the install command to update:"
+    echo ""
+    echo "  curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash"
+    echo ""
+    echo "If Pilot is running, run mms web stop first, then install."
+    read -r -p "按回车关闭窗口..." _
+    exit 1
+fi
+
+
 if [ ! -f "$INSTALL_SCRIPT" ]; then
     echo "未找到 install.sh"
     read -r -p "按回车关闭窗口..." _

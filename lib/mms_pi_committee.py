@@ -934,7 +934,7 @@ def _run_attempt(
     cancellation: mms_pi_watchdog.CancellationController,
 ) -> dict[str, Any]:
     started = time.monotonic()
-    root = Path(__file__).resolve().parent
+    root = Path(__file__).resolve().parent.parent
     wrapper = root / "scripts" / "pi-cli-wrapper.sh"
     if not wrapper.is_file():
         raise CommitteeError(f"repo-local Pi wrapper is missing: {wrapper}")

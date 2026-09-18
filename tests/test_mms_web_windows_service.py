@@ -162,7 +162,7 @@ def test_a_live_pilot_publishes_the_fingerprint_the_cli_compares(tmp_path):
                    if key not in ("MMS_CONFIG_ROOT", "MMS_CONFIG_DIR", "XDG_CONFIG_HOME",
                                   "XDG_DATA_HOME", "MMS_REAL_HOME", "REAL_HOME",
                                   "ORIGINAL_HOME", "MMS_WEB_PORT_BASE", "MMS_COMMAND_NAME")}
-    environment.update({"HOME": str(tmp_path), "MMS_REAL_HOME": str(tmp_path), "PYTHONPATH": str(root)})
+    environment.update({"HOME": str(tmp_path), "MMS_REAL_HOME": str(tmp_path), "PYTHONPATH": os.pathsep.join([str(root / "lib"), str(root)])})
 
     def run(*args):
         return subprocess.run([sys.executable, "-P", "-m", "mms_web", *args], cwd=root,

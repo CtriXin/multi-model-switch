@@ -10,7 +10,7 @@
   "scripts": {
     "dev:api": "cd apps/runtime-api && python3 -m uvicorn main:app --reload --port 8000",
     "dev": "npm run dev:api",
-    "build": "python3 -m py_compile mms*.py mmc*.py scripts/*.py",
+    "build": "python3 -m py_compile lib/mms*.py lib/mmc*.py scripts/*.py",
     "type-check": "npm run build"
   }
 }
