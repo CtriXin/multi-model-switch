@@ -583,7 +583,9 @@ class PiRpcDriver:
             self._notice("上下文压缩已结束", title="compaction")
         elif etype in {"auto_retry_start", "auto_retry_end", "summarization_retry_scheduled", "summarization_retry_finished"}:
             self._activity("retrying" if etype in {"auto_retry_start", "summarization_retry_scheduled"} else "running" if self._streaming else "idle")
-            self._notice(f"自动重试事件: {etype}", title="retry")
+            retry = {key: message[key] for key in ("attempt", "maxAttempts", "success") if key in message}
+            retry["error"] = _clip(str(message.get("finalError") or message.get("errorMessage") or ""), 800)
+            self._upsert({"kind": "notice", "title": "retry", "text": f"自动重试事件: {etype}", "retry": retry})
         elif etype == "queue_update":
             steering = [str(text) for text in (message.get("steering") or [])]
             follow_up = [str(text) for text in (message.get("followUp") or [])]
@@ -630,7 +632,8 @@ class PiRpcDriver:
         self._turn_outcome = "stopped" if msg.get("stopReason") == "aborted" else "error" if msg.get("errorMessage") or msg.get("stopReason") == "error" else "idle"
         self._activity("running")
         thinking = "\n".join(b.get("thinking", "") for b in msg.get("content", []) if isinstance(b, dict) and b.get("type") == "thinking")
-        self._upsert({"id": event_id, "kind": "assistant", "text": text, "thinking": thinking, "nativeTimestamp": msg.get("timestamp"), "usage": msg.get("usage", {})})
+        self._upsert({"id": event_id, "kind": "assistant", "text": text, "thinking": thinking, "nativeTimestamp": msg.get("timestamp"), "usage": msg.get("usage", {}),
+                      "modelOutcome": "error" if self._turn_outcome == "error" else "aborted" if self._turn_outcome == "stopped" else "success"})
 
     def _handle_tool_execution(self, message: dict) -> None:
         etype = message.get("type")

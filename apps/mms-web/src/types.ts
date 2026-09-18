@@ -173,6 +173,7 @@ export interface FileSelection {
   region?: ImageRegion;
 }
 export interface SessionDetail {
+  recovery?: { consecutiveFailures: number; retryExhausted: boolean; suggested: boolean; lastError: string };
   session: Session;
   events: SessionEvent[];
   artifacts: Artifact[];
