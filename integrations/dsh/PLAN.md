@@ -13,11 +13,13 @@ Rollback: stop only task-owned runtime and remove dedicated profile/entrypoint w
 Tracker: original Stride task above. Source and evidence in its worktree, private runtime under ~/.local/share/mms-dsh. Dependencies initially staged task-local. Public release and whole Bot migration are outside this configuration task.
 
 ## Urgent + Important
-- [ ] Implement verified MMS provider adapter and dedicated DSH startup (source: @user, created: 2026-09-18)
-- [ ] Verify a real request, model/effort selection, auth failure and restart (source: @user, created: 2026-09-18)
+- [x] Implement verified MMS provider adapter and dedicated DSH startup (source: @user, created: 2026-09-18, completed: 2026-09-18)
+- [x] Verify a real request, model/effort selection, auth failure and restart (source: @user, created: 2026-09-18, completed: 2026-09-18)
 ## Important + Not Urgent
-- [ ] Add minimal Recipe requirement integration (source: @user, created: 2026-09-18)
+- [x] Add minimal Recipe requirement integration (source: @user, created: 2026-09-18, completed: 2026-09-18)
 ## Urgent + Not Important
 None.
 ## Neither
 Whole-monorepo fork deferred until an essential extension boundary is proven insufficient.
+
+Delivered local installation: `~/Applications/MMS DSH.command`; 29 logical models / 68 routes configured. Live checks: DeepSeek Anthropic Low, GPT Responses Medium/High, Recipe success/fail-closed, restart continuity. Local evidence: `.ai/regression-reports/2026-09-18-dsh-mms.md`.
