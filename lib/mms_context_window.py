@@ -37,6 +37,11 @@ from __future__ import annotations
 
 import json
 import os
+def _mms_install_root(module_path=None):
+    module_dir = os.path.dirname(os.path.abspath(module_path or __file__))
+    if os.path.basename(module_dir) == "lib":
+        return os.path.dirname(module_dir)
+    return module_dir
 from typing import Any
 
 ONE_M_SELECTOR_SUFFIX = "[1m]"
@@ -66,7 +71,7 @@ _APPROVED_CAPABILITY_SOURCES = ("approved_facts",)
 _PROFILE_CAPABILITY_SOURCES = ("provider_profile",)
 
 _DATA_FILE_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "model-context-windows.json"
+    _mms_install_root(), "config", "model-context-windows.json"
 )
 
 _OVERRIDES_CACHE: dict[str, Any] = {"path": None, "mtime": None, "data": None}

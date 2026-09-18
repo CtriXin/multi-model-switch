@@ -4,6 +4,11 @@ from __future__ import annotations
 
 import json
 import os
+def _mms_install_root(module_path=None):
+    module_dir = os.path.dirname(os.path.abspath(module_path or __file__))
+    if os.path.basename(module_dir) == "lib":
+        return os.path.dirname(module_dir)
+    return module_dir
 from datetime import datetime, timezone
 
 OPENCODE_HEALTH_REL_PATH = os.path.join(".ai", "opencode-health", "latest.json")
@@ -18,7 +23,7 @@ OPENCODE_HEALTH_STATUS_RANK = {
 
 
 def opencode_health_repo_root(repo_root=None):
-    root = str(repo_root or os.environ.get("MMS_TARGET_REPO") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))).strip()
+    root = str(repo_root or os.environ.get("MMS_TARGET_REPO") or _mms_install_root()).strip()
     return os.path.abspath(os.path.expanduser(root))
 
 

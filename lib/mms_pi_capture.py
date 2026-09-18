@@ -19,6 +19,9 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+def _mms_install_root():
+    here = Path(__file__).resolve().parent
+    return here.parent if here.name == "lib" else here
 from urllib.parse import urlsplit
 
 from mms_state_io import atomic_write_text
@@ -88,7 +91,7 @@ def rewrite_models_payload(payload, endpoint):
 
 
 def _proxy_script_path():
-    path = Path(__file__).resolve().parent.parent / "scripts" / "pi_capture_proxy.py"
+    path = _mms_install_root() / "scripts" / "pi_capture_proxy.py"
     return str(path) if path.is_file() else ""
 
 

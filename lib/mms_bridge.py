@@ -3,6 +3,11 @@ import json
 import logging
 import copy
 import os
+def _mms_install_root(module_path=None):
+    module_dir = os.path.dirname(os.path.abspath(module_path or __file__))
+    if os.path.basename(module_dir) == "lib":
+        return os.path.dirname(module_dir)
+    return module_dir
 import re
 import socket
 import subprocess
@@ -2134,7 +2139,7 @@ def _chatcompletions_error_requests_messages(body_text):
     )
 
 
-ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT_DIR = _mms_install_root()
 GEMINI_BRIDGE_SCRIPT = os.path.join(ROOT_DIR, "scripts", "gemini_codeassist_bridge.mjs")
 
 def _incident_log_path(server=None):

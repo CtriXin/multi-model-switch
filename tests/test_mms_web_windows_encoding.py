@@ -9,6 +9,7 @@ import base64
 import io
 import json
 import locale
+import os
 import subprocess
 import sys
 from pathlib import Path

@@ -6,6 +6,11 @@ import copy
 import hashlib
 import json
 import os
+def _mms_install_root(module_path=None):
+    module_dir = os.path.dirname(os.path.abspath(module_path or __file__))
+    if os.path.basename(module_dir) == "lib":
+        return os.path.dirname(module_dir)
+    return module_dir
 import shutil
 import subprocess
 from pathlib import Path
@@ -157,7 +162,7 @@ def _exec_or_run(cmd, env, once):
 
 def _pi_wrapper_path():
     wrapper_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        _mms_install_root(),
         "scripts",
         "pi-cli-wrapper.sh",
     )
@@ -168,7 +173,7 @@ def _pi_wrapper_path():
 
 def _pi_retry_extension_path():
     extension_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        _mms_install_root(),
         "scripts",
         "pi-retry-extension.mjs",
     )
@@ -183,7 +188,7 @@ def _pi_vision_extension_path():
     pattern as pi-retry-extension; discovered dynamically from the models.json
     that mms materializes per session."""
     extension_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        _mms_install_root(),
         "scripts",
         "pi-vision-extension.ts",
     )
@@ -214,7 +219,7 @@ def _glint_pi_bridge_path(env):
 
 
 def _pi_npx_cache_dir():
-    return str(Path(__file__).resolve().parent.parent / ".ai" / "cache" / "pi-npx")
+    return str(Path(_mms_install_root()) / ".ai" / "cache" / "pi-npx")
 
 
 # --- bundled /btw side-question extension (pi-btw fork) ----------------------
@@ -236,7 +241,7 @@ _PI_BTW_VERIFIED: set[tuple[str, int, int]] = set()
 
 def _pi_btw_vendor_dir():
     return os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        _mms_install_root(),
         "assets",
         "pi-extensions",
         "pi-btw",
@@ -678,7 +683,7 @@ _PI_OPENAI_PROFILE_COMPAT = {
 }
 
 _PI_CAPABILITY_REFERENCE_PATH = (
-    Path(__file__).resolve().parent.parent
+    Path(_mms_install_root())
     / "docs/reference/model-capability-calibration/2026-05-21-mms-model-capability-calibration.json"
 )
 

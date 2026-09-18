@@ -17,6 +17,11 @@
 import hashlib
 import json
 import os
+def _mms_install_root(module_path=None):
+    module_dir = os.path.dirname(os.path.abspath(module_path or __file__))
+    if os.path.basename(module_dir) == "lib":
+        return os.path.dirname(module_dir)
+    return module_dir
 import re
 import time
 from collections import defaultdict
@@ -639,7 +644,7 @@ MODEL_CONFIG_AUDIT_PATH = os.path.join(_CONFIG_DIR, "model-config.audit.ndjson")
 MODEL_ROUTES_SNAPSHOTS_DIR = os.path.join(_CONFIG_DIR, "model-routes.snapshots")
 MODEL_ROUTES_LINEUP_SNAPSHOTS_DIR = os.path.join(_CONFIG_DIR, "model-routes.lineup.snapshots")
 _BUILTIN_PROVIDER_PROFILE_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    _mms_install_root(),
     "config",
     "provider-profiles.json",
 )
