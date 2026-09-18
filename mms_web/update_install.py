@@ -49,6 +49,20 @@ DIRECTORIES = (
 STAGING_SUFFIX = ".mms-update-new"
 
 
+class UnsupportedRuntimeLayout(ValueError):
+    """A known layout mismatch with safe, actionable user guidance."""
+
+
+def require_runtime_layout(source: Path) -> None:
+    """Never install old flat entrypoints over a lib-based runtime."""
+    if not all((Path(source) / "lib" / name).is_file()
+               for name in ("mms_core.py", "mms_version.py")):
+        raise UnsupportedRuntimeLayout(
+            "更新包缺少 lib/ 运行模块，不能在 Pilot 内更新。"
+            "当前安装与会话已保留；请使用目标版本的安装器重新安装。"
+        )
+
+
 def manifest(source: Path) -> list[str]:
     """Release-owned paths, relative to `source`, that actually exist in it."""
     source = Path(source)
@@ -160,6 +174,7 @@ def install(candidate: Path, source: Path, backup: Path) -> list[str]:
     the installation intact and only a pair of renames replaces it.
     """
     candidate, source, backup = Path(candidate), Path(source), Path(backup)
+    require_runtime_layout(candidate)
     names = manifest(candidate)
     if not names:
         raise ValueError("staged release carries no installable files")

@@ -9,6 +9,7 @@ import uuid
 from pathlib import Path
 from mms_version import VERSION
 from .errors import WebError
+from .update_install import UnsupportedRuntimeLayout
 from .runtime import private_json
 from .updates import read_json
 from .update_stage import stage_release, candidate_environment
@@ -103,7 +104,9 @@ class UpdateCoordinator:
                 private_json(self.root/"last-error.json", {"type":type(exc).__name__, "phase":self._operation.get("phase"), "message":str(exc)[:1000]})
             except OSError:
                 pass
-            self._status('error', '新版准备或安全检查未完成，当前服务继续运行；会话未清理。可以稍后重试。')
+            message = (str(exc) if isinstance(exc, UnsupportedRuntimeLayout) else
+                       '新版准备或安全检查未完成，当前服务继续运行；会话未清理。可以稍后重试。')
+            self._status('error', message)
 
     def port(self):
         """The port the update keeps: the handoff re-launches on this one.
