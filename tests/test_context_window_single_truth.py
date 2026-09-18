@@ -33,7 +33,8 @@ import mms_opencode_config
 import mms_pi_support
 import mms_provider_profiles
 
-REPO_ROOT = Path(mms_launchers.__file__).resolve().parent
+LIB_DIR = Path(mms_launchers.__file__).resolve().parent
+REPO_ROOT = LIB_DIR.parent
 PROFILE_PATH = REPO_ROOT / "config" / "provider-profiles.json"
 
 
@@ -362,7 +363,7 @@ def test_no_module_maps_a_model_name_to_a_context_window():
     """A model's window is data. A dict of them in code is how #230 happened."""
     offenders = []
     for filename in SCANNED_MODULES:
-        path = REPO_ROOT / filename
+        path = LIB_DIR / filename
         if not path.exists():
             continue
         for name, lineno in _context_tables(path.read_text(encoding="utf-8"), filename):
@@ -388,7 +389,7 @@ def test_the_removed_tables_stay_removed():
         "_is_kimi_k3_claude_env_model",
     )
     for filename in SCANNED_MODULES:
-        source = (REPO_ROOT / filename).read_text(encoding="utf-8")
+        source = (LIB_DIR / filename).read_text(encoding="utf-8")
         for name in gone:
             assert name not in source, f"{name} is back in {filename}"
 

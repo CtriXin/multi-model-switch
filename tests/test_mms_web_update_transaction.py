@@ -55,7 +55,7 @@ def test_actual_handoff_or_rollback_preserves_custom_state_cwd_and_history(tmp_p
     home=tmp_path/'home';home.mkdir()
     for key in ('HOME','MMS_REAL_HOME','REAL_HOME','ORIGINAL_HOME'):env[key]=str(home)
     for key in ('MMS_CONFIG_ROOT','MMS_PREVIEW_MODE','XDG_DATA_HOME','XDG_CONFIG_HOME','MMS_WEB_PROBATION'):env.pop(key,None)
-    env.update(PYTHONPATH=str(ROOT),MMS_WEB_UPDATE_CHECK='0',MMS_WEB_SKIP_ACTIVE='1',MMS_UPDATE_FIXTURE_SOURCE=str(candidate))
+    env.update(PYTHONPATH=os.pathsep.join([str(ROOT / "lib"), str(ROOT)]),MMS_WEB_UPDATE_CHECK='0',MMS_WEB_SKIP_ACTIVE='1',MMS_UPDATE_FIXTURE_SOURCE=str(candidate))
     def request(path,body=None,csrf=''):
         req=urllib.request.Request(f'http://127.0.0.1:{port}/api/v1/{path}',data=json.dumps(body).encode() if body is not None else None,headers={'Content-Type':'application/json','X-MMS-CSRF':csrf})
         with urllib.request.urlopen(req,timeout=3) as response:return json.load(response)

@@ -30,7 +30,7 @@ def _pi_support():
 
 
 def relay_server_path() -> str:
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", _SERVER_SCRIPT)
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts", _SERVER_SCRIPT)
 
 
 def relay_plan(runtime, model_name) -> dict:

@@ -621,8 +621,11 @@ def _build_worker_plan_args(request_root: Path, models: list[str], runner: str, 
 
 def _mms_script_path(command_name: str = "mms") -> Path:
     name = str(command_name or "mms").strip() or "mms"
-    candidate = Path(__file__).resolve().with_name(Path(name).name)
-    return candidate if candidate.exists() else Path(__file__).resolve().with_name("mms")
+    here = Path(__file__).resolve()
+    candidate = here.with_name(Path(name).name)
+    if candidate.exists():
+        return candidate
+    return here.parent.parent / Path(name).name
 
 
 def _opencode_launch_command(

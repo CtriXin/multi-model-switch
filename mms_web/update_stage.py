@@ -80,7 +80,7 @@ def validate_bundle(source: Path, tag: str):
 
 def candidate_environment(source: Path):
     env = os.environ.copy()
-    env['PYTHONPATH'] = str(source)
+    env['PYTHONPATH'] = os.pathsep.join([str(source / 'lib'), str(source)])
     env['MMS_WEB_UPDATE_CHECK'] = '0'
     env['MMS_WEB_SKIP_ACTIVE'] = '1'
     return env

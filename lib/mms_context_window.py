@@ -66,7 +66,7 @@ _APPROVED_CAPABILITY_SOURCES = ("approved_facts",)
 _PROFILE_CAPABILITY_SOURCES = ("provider_profile",)
 
 _DATA_FILE_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "config", "model-context-windows.json"
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "model-context-windows.json"
 )
 
 _OVERRIDES_CACHE: dict[str, Any] = {"path": None, "mtime": None, "data": None}

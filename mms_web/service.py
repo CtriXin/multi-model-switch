@@ -579,7 +579,7 @@ def start(*, state_root: Path, port_base: int, limit: int, open_browser: bool,
     command = [sys.executable, "-P", "-m", "mms_web", "--state-root", str(state_root), "--port", str(port),
                *(extra_args or [])]
     env = dict(os.environ)
-    env.setdefault("PYTHONPATH", str(source_root()))
+    env.setdefault("PYTHONPATH", os.pathsep.join([str(source_root() / "lib"), str(source_root())]))
     creationflags = 0
     if _is_windows():
         # subprocess ignores start_new_session on Windows, so without these

@@ -321,7 +321,7 @@ def _ensure_not_nested_session(action: str) -> None:
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parent
+    return Path(__file__).resolve().parent.parent
 
 
 def _repo_hook_path(file_name: str) -> Path:

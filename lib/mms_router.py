@@ -639,7 +639,7 @@ MODEL_CONFIG_AUDIT_PATH = os.path.join(_CONFIG_DIR, "model-config.audit.ndjson")
 MODEL_ROUTES_SNAPSHOTS_DIR = os.path.join(_CONFIG_DIR, "model-routes.snapshots")
 MODEL_ROUTES_LINEUP_SNAPSHOTS_DIR = os.path.join(_CONFIG_DIR, "model-routes.lineup.snapshots")
 _BUILTIN_PROVIDER_PROFILE_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "config",
     "provider-profiles.json",
 )
