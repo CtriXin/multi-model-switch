@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import shlex
 import stat
 import subprocess
 import sys
@@ -54,6 +55,13 @@ def _isolated_env(home: Path) -> dict[str, str]:
         "MMS_REAL_HOME",
         "XDG_CONFIG_HOME",
         "PYTHONPATH",
+        "MMS_PI_EXECUTABLE",
+        "MMS_SESSION_HOME",
+        "MMS_SOFT_HOME",
+        "MMS_HOME_ISOLATION_MODE",
+        "CLAUDE_CONFIG_DIR",
+        "XDG_DATA_HOME",
+        "XDG_CACHE_HOME",
     ):
         env.pop(key, None)
     env["HOME"] = str(home)
@@ -134,55 +142,66 @@ def test_install_dry_run_plans_lib_not_root_py(tmp_path):
     assert 'cp "$SOURCE_DIR"/mms_core.py "$MMS_HOME/"' not in completed.stdout
 
 
-def _extract_shell_function(script: str, name: str) -> str:
-    marker = f"{name}() {{"
-    start = script.find(marker)
-    assert start != -1, name
-    body_start = start + len(marker)
-    depth = 1
-    i = body_start
-    while i < len(script):
-        if script[i] == "{":
-            depth += 1
-        elif script[i] == "}":
-            depth -= 1
-            if depth == 0:
-                return script[start : i + 1]
-        i += 1
-    raise AssertionError(name)
-
-
-def test_overwrite_install_removes_exact_flat_copies_and_keeps_user_files(tmp_path):
-    home = tmp_path / ".mms"
-    lib = home / "lib"
-    lib.mkdir(parents=True)
-    (lib / "mms_core.py").write_text("NEW=1\n", encoding="utf-8")
-    (lib / "mms_version.py").write_text('VERSION = "from-lib"\n', encoding="utf-8")
-    (home / "mms_core.py").write_text("OLD=1\n", encoding="utf-8")
-    (home / "mms_version.py").write_text('VERSION = "from-root"\n', encoding="utf-8")
-    (home / "mms_myhack.py").write_text("keep\n", encoding="utf-8")
-    script = (ROOT / "install.sh").read_text(encoding="utf-8")
-    assert 'remove_legacy_flat_modules "$MMS_HOME"' in script
-    assert "rm -f \"$home\"/mms_*.py" not in script
-    if _bash_works():
-        func = _extract_shell_function(script, "remove_legacy_flat_modules")
-        completed = subprocess.run(
-            ["bash", "-c", func + '\nremove_legacy_flat_modules "$1"', "cleanup", str(home)],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        assert completed.returncode == 0
-        assert not (home / "mms_core.py").exists()
-        assert not (home / "mms_version.py").exists()
-        (home / "mms_core.py").write_text("OLD=1\n", encoding="utf-8")
-        (home / "mms_version.py").write_text('VERSION = "from-root"\n', encoding="utf-8")
-    removed = remove_legacy_flat_modules(home)
-    assert not (home / "mms_core.py").exists()
-    assert not (home / "mms_version.py").exists()
-    assert (home / "mms_myhack.py").read_text(encoding="utf-8") == "keep\n"
-    assert (lib / "mms_core.py").is_file()
-    assert "mms_myhack.py" not in removed
+@pytest.mark.skipif(not _bash_works(), reason="install.sh needs a real bash")
+def test_overwrite_install_removes_exact_flat_copies_and_keeps_user_files(tmp_path_factory):
+    # Execute the actual installer entry, including its copy and cleanup calls.
+    # Only dependency acquisition/CLIs are doubles; filesystem operations are real.
+    # Keep the installed shebang below macOS's interpreter-path limit.
+    tmp_path = tmp_path_factory.mktemp("t9")
+    home = tmp_path / "home"
+    install_root = home / ".mms"
+    venv_bin = install_root / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    wrapper = venv_bin / "python"
+    wrapper.write_text(
+        '#!/bin/bash\nif [[ "$1" == "-m" && "$2" == "pip" ]]; then exit 0; fi\n'
+        + "exec " + shlex.quote(sys.executable) + ' "$@"\n', encoding="utf-8",
+    )
+    wrapper.chmod(0o755)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name in ("pi", "claude", "codex", "opencode", "node", "npx"):
+        stub = bin_dir / name
+        stub.write_text("#!/bin/sh\necho 22.19.0\nexit 0\n", encoding="utf-8")
+        stub.chmod(0o755)
+    for name in ("curl", "wget", "git", "npm", "uv"):
+        stub = bin_dir / name
+        stub.write_text("#!/bin/sh\necho 'external acquisition blocked' >&2\nexit 91\n", encoding="utf-8")
+        stub.chmod(0o755)
+    (install_root / "mms_core.py").write_text("OLD=1\n", encoding="utf-8")
+    (install_root / "mms_version.py").write_text('VERSION = "from-root"\n', encoding="utf-8")
+    user_file = install_root / "mms_myhack.py"
+    user_file.write_bytes(b"user-owned file\n")
+    env = _isolated_env(home)
+    env.update(
+        PATH=str(bin_dir) + os.pathsep + env.get("PATH", ""),
+        MMS_INSTALL_PYTHON=sys.executable,
+        MMS_PI_EXECUTABLE=str(bin_dir / "pi"),
+        MMS_PI_NPX_CACHE=str(tmp_path / "pi-cache"),
+        XDG_DATA_HOME=str(home / ".local" / "share"),
+        MMS_INSTALL_LATEST_RELEASE_OVERRIDE="v4.23.8",
+        MMS_INSTALL_LATEST_TAG_OVERRIDE="v4.23.8",
+    )
+    run = subprocess.run(
+        ["bash", str(ROOT / "install.sh"), "--ref", "v4.23.8", "--no-shell-rc",
+         "--no-launch-web", "--no-coding-fonts"],
+        cwd=ROOT, env=env, input="", capture_output=True, text=True, timeout=90,
+    )
+    assert run.returncode == 0, run.stdout + run.stderr
+    for name in ("mms_core.py", "mms_version.py"):
+        assert (install_root / "lib" / name).read_bytes() == (LIB / name).read_bytes()
+        assert not (install_root / name).exists()
+    assert user_file.read_bytes() == b"user-owned file\n"
+    # macOS does not allow a shell script as another script's interpreter.
+    # Dependency installation is finished; expose a real Python as a venv does.
+    wrapper.unlink()
+    wrapper.symlink_to(sys.executable)
+    installed = subprocess.run(
+        [str(install_root / "mms"), "--help"], cwd=home, env=env,
+        capture_output=True, text=True, timeout=30,
+    )
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    assert "Traceback" not in installed.stderr
 
 
 def test_lib_wins_over_a_flat_shadow(tmp_path):
