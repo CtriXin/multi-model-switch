@@ -1283,3 +1283,35 @@ def test_select_provider_template_always_defaults_to_generic(monkeypatch):
 
     assert mms_core._select_provider_template() == "generic"
     assert mms_core._select_provider_template("qwen") == "generic"
+
+
+def test_refresh_routes_export_for_hive_forwards_startup_safe_to_the_export(monkeypatch):
+    """`startup_safe` must reach `export_model_routes`, not just gate the probe.
+
+    This test existed, went red because it never stubbed
+    `_usage_routes_export_should_run` (which early-returns before the export),
+    and was deleted rather than repaired. Nothing else covers the positive
+    path: dropping the `startup_safe=startup_safe` argument in
+    `mms_core._refresh_routes_export_for_hive` left 400 tests green.
+    """
+    import mms_core
+    import mms_router
+
+    calls = []
+    monkeypatch.setattr(mms_core, "_usage_routes_export_should_run", lambda: True)
+    monkeypatch.setattr(mms_core, "load_config", lambda: {"provider": {"default": "demo"}, "providers": []})
+    monkeypatch.setattr(
+        mms_core,
+        "apply_local_overrides",
+        lambda cfg: {**cfg, "local_override_applied": True},
+    )
+    monkeypatch.setattr(
+        mms_router,
+        "export_model_routes",
+        lambda cfg, force=False, startup_safe=False: calls.append((cfg, force, startup_safe)) or {},
+    )
+
+    assert mms_core._refresh_routes_export_for_hive(force=True, quiet=True, startup_safe=True) is True
+    assert calls == [
+        ({"provider": {"default": "demo"}, "providers": [], "local_override_applied": True}, True, True)
+    ]
