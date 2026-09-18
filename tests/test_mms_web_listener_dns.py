@@ -69,3 +69,26 @@ def test_removing_and_closing_listeners_releases_the_actual_socket():
         assert listeners.active == []
         with socket.socket() as probe:
             probe.bind(('127.0.0.1', listeners._port))
+
+
+def test_the_setup_web_ui_also_binds_without_reverse_dns(monkeypatch):
+    """The config WebUI is a second server in this repo. T8e converted the two
+    Pilot listeners and left this one on the stock bind, which still blocks for
+    30s when `mms config web --host <LAN address>` is used."""
+    from mms_config_web import ConfigWebApp
+    from mms_config_web_server import create_setup_server
+
+    # Go through the real factory, not the class: a test that instantiates
+    # SetupHTTPServer itself stays green when the call site is reverted to the
+    # stock server, which is exactly the bug this guards.
+    calls = _slow_dns(monkeypatch)
+    started = time.monotonic()
+    server = create_setup_server(ConfigWebApp({}, command_name='mms'), host='127.0.0.1', port=_port())
+    try:
+        assert calls == [], 'the setup WebUI must use the same no-DNS bind'
+        assert time.monotonic() - started < .25
+        assert server.server_name == '127.0.0.1'
+        assert server.server_port == server.server_address[1]
+    finally:
+        server.server_close()
+    assert server.socket.fileno() == -1
