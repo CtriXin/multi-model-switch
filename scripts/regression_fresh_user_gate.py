@@ -56,11 +56,11 @@ _SCRUB_ENV_KEYS = {
 _PY_COMPILE_TARGETS = [
     "mms",
     "mmf",
-    "mms_core.py",
-    "mms_launchers.py",
-    "mms_session_index.py",
-    "mms_state_io.py",
-    "mms_config_web.py",
+    "lib/mms_core.py",
+    "lib/mms_launchers.py",
+    "lib/mms_session_index.py",
+    "lib/mms_state_io.py",
+    "lib/mms_config_web.py",
 ]
 
 _PYTEST_TARGETS = [
