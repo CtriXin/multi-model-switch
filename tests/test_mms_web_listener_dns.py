@@ -92,3 +92,30 @@ def test_the_setup_web_ui_also_binds_without_reverse_dns(monkeypatch):
     finally:
         server.server_close()
     assert server.socket.fileno() == -1
+
+
+def test_actual_config_web_entry_uses_and_closes_the_no_dns_server(monkeypatch):
+    import mms_config_web_server as module
+    from mms_config_web import ConfigWebApp
+
+    calls = _slow_dns(monkeypatch)
+    bound = []
+    factory = module.create_setup_server
+    def bind(*args, **kwargs):
+        server = factory(*args, **kwargs)
+        bound.append(server)
+        return server
+    monkeypatch.setattr(module, "create_setup_server", bind)
+    class NoLoopThread:
+        def __init__(self, *args, **kwargs): pass
+        def start(self): pass
+        def join(self, *args, **kwargs): pass
+    # Keep the real entry point and bind; omit its perpetual serving loop.
+    monkeypatch.setattr(module.threading, "Thread", NoLoopThread)
+    app = ConfigWebApp({}, command_name="mms")
+    url = module.serve_config_web(app, host="127.0.0.1", port=_port(), open_browser=False)
+    assert calls == []
+    assert len(bound) == 1
+    assert bound[0].RequestHandlerClass.app is app
+    assert url == f"http://127.0.0.1:{bound[0].server_port}/"
+    assert bound[0].socket.fileno() == -1

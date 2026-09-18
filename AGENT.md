@@ -137,8 +137,19 @@ run, so the machine-dependent failures that exist on every branch stay quiet
 while a real regression does not.
 
 - Run it locally the same way: `python3 scripts/ci_pytest_regression.py --base origin/dev`.
-- A candidate regression is rerun twice before the job fails, so one flaky test
-  does not block an unrelated PR.
+- A candidate regression is rerun at most twice before the job fails. Only an
+  executed pass clears it; skip/xfail or disappearance is not a successful rerun.
 - Changing a test expectation is still allowed. Say in the PR why the old
   expectation was wrong; the job reports the test as broken either way.
 - This job runs for fork PRs as well. `digger` and `redline` do not.
+
+### Test the production caller
+
+Frontend CI runs the actual Web test glob and TypeScript compiler, and requires
+source changes to ship a rebuilt static bundle. Report absolute results as well
+as the comparison verdict; deleted or skipped baseline failures are not repairs.
+
+For interaction regressions, execute the production component/event/effect path
+through its visible result or API call. A source regex or a pure helper test alone
+does not protect an untested caller. Verify a focused mutation that disconnects
+the caller while leaving the helper and text intact; restore it before committing.
