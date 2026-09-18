@@ -10,4 +10,4 @@
 curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash
 ```
 
-缺少 lib/ 或新旧布局混用时，入口会显示重新安装引导并退出。安装不要求迁移模型、通道或 API Key，不以全局账号作为回退。
+缺少 lib/ 时，入口会显示重新安装引导并退出；新旧布局混用时，Pilot 更新中心会要求重新安装。安装不要求迁移模型、通道或 API Key，不以全局账号作为回退。
