@@ -51,7 +51,7 @@ def test_gateway_session_under_the_legacy_directory_resolves_to_the_single_root(
 
 
 def test_core_never_imports_the_legacy_root():
-    text = (ROOT / "mms_core.py").read_text(encoding="utf-8")
+    text = (ROOT / "lib" / "mms_core.py").read_text(encoding="utf-8")
     assert "_import_legacy_root_into_v2" not in text
     assert "_legacy_root_import_candidate" not in text
     assert "preview prepare --from ~/.config/mms" not in text
@@ -65,13 +65,13 @@ def test_config_root_fallbacks_do_not_point_at_the_legacy_root():
         "mms_context_window.py": ("model_context_overrides_path",),
     }
     for filename, names in sources.items():
-        text = (ROOT / filename).read_text(encoding="utf-8")
+        text = (ROOT / "lib" / filename).read_text(encoding="utf-8")
         for name in names:
             start = text.index(f"def {name}(")
             body = text[start: text.index("\ndef ", start + 1)]
             assert '_real_user_path(".config", "mms")' not in body, name
             assert '".config", "mms")' not in body, name
-    bridge = (ROOT / "mms_bridge.py").read_text(encoding="utf-8")
+    bridge = (ROOT / "lib" / "mms_bridge.py").read_text(encoding="utf-8")
     start = bridge.index("def _incident_log_path(")
     body = bridge[start: bridge.index("\ndef ", start + 1)]
     assert '".config", "mms")' not in body
@@ -136,17 +136,17 @@ def test_retired_legacy_directory_is_still_refused_as_a_v2_root(tmp_path):
 # Adding an entry is a deliberate act: say why the retired root belongs there.
 _LEGACY_ROOT_ALLOWED = {
     # Detects a dirty legacy install so it can be cleaned up.
-    ("mmc_core.py", '"/.config/mms/",'),
-    ("mms_launchers.py", 'forbidden_parts = ("/.mms/", "/.config/mms/", "/ccswitch", "/hive")'),
+    ("lib/mmc_core.py", '"/.config/mms/",'),
+    ("lib/mms_launchers.py", 'forbidden_parts = ("/.mms/", "/.config/mms/", "/ccswitch", "/hive")'),
     # Prose describing the retirement.
-    ("mms_consumer_bundle.py", "``~/.config/mms`` is opt-in so preview consumers do not silently cross root"),
-    ("mms_core.py", "Collects one channel interactively. The legacy ~/.config/mms root is never"),
-    ("mms_state_io.py", '"""True for the retired ~/.config/mms directory (or any root named like it).'),
-    ("mms_state_io.py", "The legacy stable root (~/.config/mms) is retired as a config source; the"),
+    ("lib/mms_consumer_bundle.py", "``~/.config/mms`` is opt-in so preview consumers do not silently cross root"),
+    ("lib/mms_core.py", "Collects one channel interactively. The legacy ~/.config/mms root is never"),
+    ("lib/mms_state_io.py", '"""True for the retired ~/.config/mms directory (or any root named like it).'),
+    ("lib/mms_state_io.py", "The legacy stable root (~/.config/mms) is retired as a config source; the"),
     ("mms_web/catalog.py", "real ``~/.config/mms*`` roots stay untouched."),
     ("scripts/local_channel_update.py", "real MMS config tree under ~/.config/mms."),
     # The descriptor that names the retired root so callers can report on it.
-    ("mms_state_io.py", '"stable_root": os.path.join(real_home, ".config", "mms"),'),
+    ("lib/mms_state_io.py", '"stable_root": os.path.join(real_home, ".config", "mms"),'),
     # Refuses to write either root, so it has to know both names.
     ("mms_web/catalog.py", '_PROTECTED_ROOT_NAMES = (".config/mms", ".config/mms-next")'),
     ("mms_web/catalog_worker.py", '_PROTECTED_ROOT_NAMES = (".config/mms", ".config/mms-next")'),
@@ -154,16 +154,16 @@ _LEGACY_ROOT_ALLOWED = {
     # A version.json an install from before the move left behind.
     ("scripts/local_channel_update.py", 'legacy = real_home() / ".config" / "mms" / "version.json"'),
     # One-time manual import of an old config into the DB. Human-run, never automatic.
-    ("mms_registry_cli.py", '"It does not write the retired ~/.config/mms tree, config roots, DB, generated bundles, secret backends, or Claude config.",'),
-    ("mms_registry_cli.py", '"command": "./mmf preview import-legacy --from ~/.config/mms --apply --include-secrets --json && ./mmf preview publish --json",'),
-    ("mms_registry_cli.py", '"human must approve any stable ~/.config/mms write",'),
-    ("mms_registry_cli.py", '"legacy `~/.config/mms`",'),
-    ("mms_registry_cli.py", 'command = "./mmf preview prepare --from ~/.config/mms --include-secrets --json"'),
-    ("mms_registry_cli.py", 'command = "./mmf preview prepare --from ~/.config/mms --include-secrets --json" if missing_keys > 0 else "./mmf preview prepare --from ~/.config/mms --json"'),
-    ("mms_registry_cli.py", 'command = "./mmf preview prepare --from ~/.config/mms --json"'),
-    ("mms_registry_cli.py", 'next_action = {"label": "Import legacy config into preview DB", "command": "./mmf preview import-legacy --from ~/.config/mms --apply --json"}'),
-    ("mms_registry_cli.py", 'next_actions.append({"label": "Import legacy config into preview DB", "command": "./mmf preview import-legacy --from ~/.config/mms --apply --json"})'),
-    ("mms_registry_cli.py", 'next_actions.append({"label": "Optional: import keys into preview secret backend", "command": "./mmf preview import-legacy --from ~/.config/mms --apply --include-secrets --json && ./mmf preview publish --json"})'),
+    ("lib/mms_registry_cli.py", '"It does not write the retired ~/.config/mms tree, config roots, DB, generated bundles, secret backends, or Claude config.",'),
+    ("lib/mms_registry_cli.py", '"command": "./mmf preview import-legacy --from ~/.config/mms --apply --include-secrets --json && ./mmf preview publish --json",'),
+    ("lib/mms_registry_cli.py", '"human must approve any stable ~/.config/mms write",'),
+    ("lib/mms_registry_cli.py", '"legacy `~/.config/mms`",'),
+    ("lib/mms_registry_cli.py", 'command = "./mmf preview prepare --from ~/.config/mms --include-secrets --json"'),
+    ("lib/mms_registry_cli.py", 'command = "./mmf preview prepare --from ~/.config/mms --include-secrets --json" if missing_keys > 0 else "./mmf preview prepare --from ~/.config/mms --json"'),
+    ("lib/mms_registry_cli.py", 'command = "./mmf preview prepare --from ~/.config/mms --json"'),
+    ("lib/mms_registry_cli.py", 'next_action = {"label": "Import legacy config into preview DB", "command": "./mmf preview import-legacy --from ~/.config/mms --apply --json"}'),
+    ("lib/mms_registry_cli.py", 'next_actions.append({"label": "Import legacy config into preview DB", "command": "./mmf preview import-legacy --from ~/.config/mms --apply --json"})'),
+    ("lib/mms_registry_cli.py", 'next_actions.append({"label": "Optional: import keys into preview secret backend", "command": "./mmf preview import-legacy --from ~/.config/mms --apply --include-secrets --json && ./mmf preview publish --json"})'),
 }
 
 
@@ -175,10 +175,10 @@ def _legacy_root_mentions():
     literal = re.compile(r"\.config/mms(?![\w-])")
     targets = sorted(
         set(
-            list(ROOT.glob("mms_*.py"))
+            list((ROOT / "lib").glob("mms_*.py"))
             + list(ROOT.glob("mms_web/**/*.py"))
             + [
-                ROOT / "mmc_core.py",
+                ROOT / "lib" / "mmc_core.py",
                 ROOT / "statusline-command.sh",
                 ROOT / "scripts/mms_health_watchdog.py",
                 ROOT / "scripts/local_channel_update.py",

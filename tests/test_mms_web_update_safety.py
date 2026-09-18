@@ -71,6 +71,9 @@ def test_archive_skips_only_the_optional_agent_rules_link(tmp_path):
 
 def test_bundle_integrity_and_matching_version_are_required(tmp_path):
     import hashlib,json
+    (tmp_path/'lib').mkdir()
+    (tmp_path/'lib/mms_core.py').write_text('# runtime')
+    (tmp_path/'lib/mms_version.py').write_text('VERSION = "9.0.0"')
     public=tmp_path/'mms_web_static';public.mkdir();(public/'index.html').write_text('fixture')
     (tmp_path/'mms_web').mkdir();(tmp_path/'mms_web/update_handoff.py').write_text('PROTOCOL = 1')
     manifest={'version':'9.0.0','files':{'index.html':hashlib.sha256(b'fixture').hexdigest()}}

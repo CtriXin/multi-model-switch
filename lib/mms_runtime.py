@@ -3,6 +3,11 @@
 from __future__ import annotations
 
 import os
+def _mms_install_root(module_path=None):
+    module_dir = os.path.dirname(os.path.abspath(module_path or __file__))
+    if os.path.basename(module_dir) == "lib":
+        return os.path.dirname(module_dir)
+    return module_dir
 import shutil
 import subprocess
 import sys
@@ -17,7 +22,7 @@ def _repo_cli_wrapper(command_name):
     if name != "pi":
         return ""
     wrapper_path = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)),
+        _mms_install_root(),
         "scripts",
         "pi-cli-wrapper.sh",
     )

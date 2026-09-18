@@ -1964,9 +1964,18 @@ OAUTH_CAPABLE_CLIS = {"claude", "codex", "gemini", "agy"}
 # agent-im daemon 路径（仅在显式配置时启用，避免公开仓库绑定个人目录）
 _AGENT_IM_DIR = os.path.realpath(str(os.environ.get("MMS_AGENT_IM_DIR") or "").strip()) if str(os.environ.get("MMS_AGENT_IM_DIR") or "").strip() else ""
 _AGENT_IM_SOCK = _real_user_path(".agent-im", "agent-im.sock")
-_LOCAL_STATUSLINE_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "statusline-command.sh")
+
+def _mms_install_root(module_path=None):
+    """Directory that contains lib/, hooks, vendor, scripts (the old repo root)."""
+    module_dir = os.path.dirname(os.path.abspath(module_path or __file__))
+    if os.path.basename(module_dir) == "lib":
+        return os.path.dirname(module_dir)
+    return module_dir
+
+
+_LOCAL_STATUSLINE_SCRIPT = os.path.join(_mms_install_root(), "statusline-command.sh")
 def _resolve_local_hooks_dir(module_file=None):
-    module_dir = os.path.dirname(os.path.abspath(module_file or __file__))
+    module_dir = _mms_install_root(module_file)
     parts = module_dir.split(os.sep)
     if ".worktrees" in parts:
         idx = parts.index(".worktrees")
@@ -2337,7 +2346,7 @@ def _load_claude_settings_from_dir(claude_dir):
 def _load_claude_settings_template(filename):
     import json as _json
 
-    template_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
+    template_path = os.path.join(_mms_install_root(), filename)
     if not os.path.exists(template_path):
         return {}
     try:
@@ -3063,7 +3072,7 @@ def _resolve_nsr_root():
     candidates.extend(_managed_asset_root_candidates("packs", "nsr", "non-stop-run"))
     candidates.extend(_bundled_asset_root_candidates("packs", "nsr", "non-stop-run"))
     candidates.extend([
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "non-stop-run"),
+        os.path.join(_mms_install_root(), "vendor", "non-stop-run"),
         _real_user_path("auto-skills", "shared-skills", "looop.deprecated"),
     ])
 
@@ -3448,7 +3457,7 @@ def _managed_dynamic_skill_entries(*, exclude_names=None):
 
 
 def _bundled_assets_root():
-    root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "session-assets")
+    root = os.path.join(_mms_install_root(), "assets", "session-assets")
     return root if os.path.isdir(root) else ""
 
 
@@ -3523,8 +3532,8 @@ def _resolve_ecc_root():
     candidates.extend(_managed_asset_root_candidates("packs", "ecc", "everything-claude-code"))
     candidates.extend(_bundled_asset_root_candidates("packs", "ecc", "everything-claude-code"))
     candidates.extend([
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent-packs", "everything-claude-code"),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "everything-claude-code"),
+        os.path.join(_mms_install_root(), "agent-packs", "everything-claude-code"),
+        os.path.join(_mms_install_root(), "vendor", "everything-claude-code"),
         _real_user_path("auto-skills", "vendor", "everything-claude-code"),
         _real_user_path("vendor", "everything-claude-code"),
         _real_user_path("everything-claude-code"),
@@ -3554,8 +3563,8 @@ def _resolve_omc_root():
     candidates.extend(_managed_asset_root_candidates("packs", "omc", "oh-my-claudecode"))
     candidates.extend(_bundled_asset_root_candidates("packs", "omc", "oh-my-claudecode"))
     candidates.extend([
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent-packs", "oh-my-claudecode"),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "oh-my-claudecode"),
+        os.path.join(_mms_install_root(), "agent-packs", "oh-my-claudecode"),
+        os.path.join(_mms_install_root(), "vendor", "oh-my-claudecode"),
         _real_user_path("auto-skills", "installed-skills", "oh-my-claudecode"),
         _real_user_path("auto-skills", "vendor", "oh-my-claudecode"),
         _real_user_path("vendor", "oh-my-claudecode"),
@@ -3587,8 +3596,8 @@ def _resolve_web_access_root():
     candidates.extend(_managed_asset_root_candidates("skills", "web-access", "web_access"))
     candidates.extend(_bundled_asset_root_candidates("skills", "weber/backends-web-access", "web_access"))
     candidates.extend([
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "web-access"),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "weber", "backends-web-access"),
+        os.path.join(_mms_install_root(), "vendor", "web-access"),
+        os.path.join(_mms_install_root(), "vendor", "weber", "backends-web-access"),
         _real_user_path("auto-skills", "vendor", "web-access"),
         _real_user_path("vendor", "web-access"),
     ])
@@ -3614,7 +3623,7 @@ def _resolve_weber_root():
     candidates.extend(_managed_asset_root_candidates("skills", "weber"))
     candidates.extend(_bundled_asset_root_candidates("skills", "weber"))
     candidates.extend([
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "weber"),
+        os.path.join(_mms_install_root(), "vendor", "weber"),
         _real_user_path("auto-skills", "shared-skills", "weber"),
         _real_user_path("auto-skills", "vendor", "weber"),
         _real_user_path("vendor", "weber"),
@@ -3641,8 +3650,8 @@ def _resolve_agent_browser_root():
     candidates.extend(_managed_asset_root_candidates("skills", "agent-browser", "agent_browser"))
     candidates.extend(_bundled_asset_root_candidates("skills", "weber/backends-agent-browser", "agent_browser"))
     candidates.extend([
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "agent-browser"),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "weber", "backends-agent-browser"),
+        os.path.join(_mms_install_root(), "vendor", "agent-browser"),
+        os.path.join(_mms_install_root(), "vendor", "weber", "backends-agent-browser"),
         _real_user_path("auto-skills", "installed-skills", "agent-browser"),
         _real_user_path("auto-skills", "vendor", "agent-browser"),
         _real_user_path("vendor", "agent-browser"),
@@ -3669,7 +3678,7 @@ def _resolve_codegraph_root():
     candidates.extend(_managed_asset_root_candidates("skills", "codegraph"))
     candidates.extend(_bundled_asset_root_candidates("skills", "codegraph"))
     candidates.extend([
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "codegraph"),
+        os.path.join(_mms_install_root(), "vendor", "codegraph"),
         _real_user_path("auto-skills", "shared-skills", "codegraph"),
         _real_user_path("auto-skills", "vendor", "codegraph"),
         _real_user_path("vendor", "codegraph"),
@@ -3693,7 +3702,7 @@ def _resolve_grill_me_root():
     candidates.extend(_managed_asset_root_candidates("skills", "grill-me", "grill_me"))
     candidates.extend(_bundled_asset_root_candidates("skills", "grill-me", "grill_me"))
     candidates.extend([
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "grill-me"),
+        os.path.join(_mms_install_root(), "vendor", "grill-me"),
         _real_user_path(".codex", "skills", "grill-me"),
         _real_user_path(".agents", "skills", "grill-me"),
     ])
@@ -3714,7 +3723,7 @@ def _resolve_toon_root():
     candidates.extend(_managed_asset_root_candidates("skills", "toon"))
     candidates.extend(_bundled_asset_root_candidates("skills", "toon"))
     candidates.extend([
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "toon"),
+        os.path.join(_mms_install_root(), "vendor", "toon"),
         _real_user_path("auto-skills", "vendor", "toon"),
         _real_user_path("vendor", "toon"),
     ])
@@ -3760,17 +3769,17 @@ def _resolve_auto_github_contributor_root():
 
 
 def _mms_toon_script_path():
-    script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "mms-toon")
+    script_path = os.path.join(_mms_install_root(), "scripts", "mms-toon")
     return script_path if os.path.isfile(script_path) else ""
 
 
 def _mms_context_script_path():
-    script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "mms-context")
+    script_path = os.path.join(_mms_install_root(), "scripts", "mms-context")
     return script_path if os.path.isfile(script_path) else ""
 
 
 def _mms_gain_script_path():
-    script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "mms-gain")
+    script_path = os.path.join(_mms_install_root(), "scripts", "mms-gain")
     return script_path if os.path.isfile(script_path) else ""
 
 
@@ -3779,7 +3788,7 @@ def _token_saver_script_path():
     return ""
 
 def _token_gain_script_path():
-    script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "token-gain")
+    script_path = os.path.join(_mms_install_root(), "scripts", "token-gain")
     return script_path if os.path.isfile(script_path) else ""
 
 
@@ -5433,7 +5442,7 @@ def _sanitize_account_claude_settings_payload(settings_data):
 
 
 def _default_session_mcp_servers():
-    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    repo_root = os.path.dirname(_mms_install_root())
     servers = {}
     candidates = [
         ("brainkeeper", os.path.join(repo_root, "brainkeeper", "dist", "server.js")),
@@ -5576,7 +5585,7 @@ def _resolve_hive_root(module_path=None):
         candidates.append(os.path.abspath(os.path.expanduser(install_home)))
     candidates.extend(_managed_asset_root_candidates("mcp", "hive"))
 
-    module_dir = os.path.dirname(os.path.abspath(module_path or __file__))
+    module_dir = _mms_install_root(module_path)
     local_candidates = [
         os.path.join(os.path.dirname(module_dir), "hive"),
         _real_user_path("auto-skills", "CtriXin-repo", "hive"),
@@ -5624,7 +5633,7 @@ def _resolve_pilot_root(module_path=None):
         candidates.append(os.path.abspath(os.path.expanduser(explicit)))
     candidates.extend(_managed_asset_root_candidates("mcp", "pilot"))
 
-    module_dir = os.path.dirname(os.path.abspath(module_path or __file__))
+    module_dir = _mms_install_root(module_path)
     auto_skills_root = os.path.dirname(os.path.dirname(module_dir))
     local_candidates = [
         os.path.join(auto_skills_root, "shared-skills", "pilot"),
@@ -8507,7 +8516,7 @@ def _resolve_real_home_command_path(command_name, env=None):
 
 
 def _mmc_entry_path():
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "mmc")
+    return os.path.join(_mms_install_root(), "mmc")
 
 
 def _assert_safe_mmc_delegate_binary(path_value, *, label):

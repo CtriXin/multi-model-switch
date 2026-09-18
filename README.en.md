@@ -402,9 +402,9 @@ Reset targets MMS-owned install/config surfaces. It intentionally avoids shared 
 Run focused checks before publishing launcher/session changes:
 
 ```bash
-python3 -m py_compile mms_core.py mms_launchers.py mms_tui.py
-PYTHONPATH=. python3 -m pytest -q tests/test_codex_history_growth.py
-PYTHONPATH=. python3 -m pytest -q tests/test_claude_hardening_regressions.py -k 'resume or routing or bridge'
+python3 -m py_compile lib/mms_core.py lib/mms_launchers.py lib/mms_tui.py
+PYTHONPATH=lib:. python3 -m pytest -q tests/test_codex_history_growth.py
+PYTHONPATH=lib:. python3 -m pytest -q tests/test_claude_hardening_regressions.py -k 'resume or routing or bridge'
 git diff --check
 ```
 

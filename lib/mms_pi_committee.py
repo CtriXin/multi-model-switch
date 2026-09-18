@@ -19,6 +19,9 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+def _mms_install_root():
+    here = Path(__file__).resolve().parent
+    return here.parent if here.name == "lib" else here
 from typing import Any, Iterable, Mapping, Sequence
 from urllib.parse import urlsplit, urlunsplit
 
@@ -934,7 +937,7 @@ def _run_attempt(
     cancellation: mms_pi_watchdog.CancellationController,
 ) -> dict[str, Any]:
     started = time.monotonic()
-    root = Path(__file__).resolve().parent
+    root = _mms_install_root()
     wrapper = root / "scripts" / "pi-cli-wrapper.sh"
     if not wrapper.is_file():
         raise CommitteeError(f"repo-local Pi wrapper is missing: {wrapper}")

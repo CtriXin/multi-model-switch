@@ -145,7 +145,7 @@ def _without_comments(source: str) -> str:
 def test_no_model_name_selects_the_relay(monkeypatch):
     """Selection must follow configuration, not a maintained name list."""
     extension = (
-        pi_support.Path(pi_support.__file__).resolve().parent
+        pi_support.Path(pi_support.__file__).resolve().parent.parent
         / "scripts/pi-vision-extension.ts"
     ).read_text(encoding="utf-8")
     code = _without_comments(extension)

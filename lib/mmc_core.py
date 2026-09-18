@@ -15,6 +15,9 @@ import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+def _mms_install_root():
+    here = Path(__file__).resolve().parent
+    return here.parent if here.name == "lib" else here
 from typing import Callable
 from urllib.parse import urlsplit
 
@@ -321,7 +324,7 @@ def _ensure_not_nested_session(action: str) -> None:
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parent
+    return _mms_install_root()
 
 
 def _repo_hook_path(file_name: str) -> Path:

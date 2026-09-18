@@ -505,7 +505,7 @@ def test_mmf_registry_legacy_report_does_not_bootstrap_config_migration(tmp_path
     )
 
     env = os.environ.copy()
-    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)])})
     result = subprocess.run(
         [sys.executable, str(ROOT / "mmf"), "registry", "legacy-report", "--config-dir", str(config_dir), "--json"],
         cwd=ROOT,
@@ -543,7 +543,7 @@ def test_mmf_config_root_does_not_bootstrap_config_migration(tmp_path: Path) -> 
     )
 
     env = os.environ.copy()
-    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)])})
     result = subprocess.run(
         [sys.executable, str(ROOT / "mmf"), "config", "root", "--json"],
         cwd=ROOT,
@@ -574,7 +574,7 @@ def test_mmf_preview_help_is_short_and_read_only(tmp_path: Path) -> None:
     """
     (config_dir / "config.toml").write_text(original_config, encoding="utf-8")
     env = os.environ.copy()
-    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)])})
 
     result = subprocess.run(
         [sys.executable, str(ROOT / "mmf"), "preview", "--help"],
@@ -611,7 +611,7 @@ def test_mmf_preview_check_is_single_read_only_strict_check(tmp_path: Path) -> N
     (config_dir / "config.toml").write_text(original_config, encoding="utf-8")
 
     env = os.environ.copy()
-    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)])})
     result = subprocess.run(
         [sys.executable, str(ROOT / "mmf"), "preview", "check", "--json"],
         cwd=ROOT,
@@ -666,7 +666,7 @@ def test_mmf_config_source_status_is_read_only_and_reports_preview_state(tmp_pat
     )
 
     env = os.environ.copy()
-    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)])})
     result = subprocess.run(
         [sys.executable, str(ROOT / "mmf"), "config", "source", "--json"],
         cwd=ROOT,
@@ -711,7 +711,7 @@ def test_mmf_config_doctor_is_read_only_and_reports_next_action(tmp_path: Path) 
     (config_dir / "config.toml").write_text(original_config, encoding="utf-8")
 
     env = os.environ.copy()
-    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)])})
     result = subprocess.run(
         [sys.executable, str(ROOT / "mmf"), "config", "doctor", "--json"],
         cwd=ROOT,
@@ -790,7 +790,7 @@ def test_mmf_config_save_plan_is_read_only_and_reports_no_draft_changes(tmp_path
     (config_dir / "config.toml").write_text(original_config, encoding="utf-8")
 
     env = os.environ.copy()
-    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)])})
     result = subprocess.run(
         [sys.executable, str(ROOT / "mmf"), "config", "save-plan", "--json"],
         cwd=ROOT,
@@ -828,7 +828,7 @@ def test_registry_save_plan_blocks_retired_root_without_writing(tmp_path: Path) 
         {
             "HOME": str(real_home),
             "MMS_REAL_HOME": str(real_home),
-            "PYTHONPATH": str(ROOT),
+            "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)]),
         }
     )
     env["MMS_CONFIG_ROOT"] = str(stable_root)
@@ -1114,7 +1114,7 @@ def test_mmf_registry_v2_save_candidate_cli_accepts_webui_plan_json(tmp_path: Pa
         encoding="utf-8",
     )
     env = os.environ.copy()
-    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)])})
 
     result = subprocess.run(
         [
@@ -1164,7 +1164,7 @@ def test_mmf_config_apply_plan_writes_preview_bundle_without_legacy_files(tmp_pa
         encoding="utf-8",
     )
     env = os.environ.copy()
-    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)])})
 
     result = subprocess.run(
         [
@@ -1255,7 +1255,7 @@ def test_mmf_config_apply_plan_blocks_apply_without_confirmation(tmp_path: Path)
         encoding="utf-8",
     )
     env = os.environ.copy()
-    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)])})
 
     result = subprocess.run(
         [
@@ -1563,7 +1563,7 @@ def test_mmf_preview_init_creates_preview_layout_without_stable_fallback(tmp_pat
             "HOME": str(real_home),
             "MMS_REAL_HOME": str(real_home),
             "MMS_CONFIG_ROOT": str(config_dir),
-            "PYTHONPATH": str(ROOT),
+            "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)]),
         }
     )
     result = subprocess.run(
@@ -1638,7 +1638,7 @@ def test_mmf_registry_legacy_import_dry_run_is_read_only(tmp_path: Path) -> None
         encoding="utf-8",
     )
     env = os.environ.copy()
-    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)])})
     result = subprocess.run(
         [sys.executable, str(ROOT / "mmf"), "registry", "legacy-import", "--config-dir", str(config_dir), "--json"],
         cwd=ROOT,
@@ -1679,7 +1679,7 @@ def test_mmf_registry_legacy_import_can_read_source_root_and_write_preview_targe
         encoding="utf-8",
     )
     env = os.environ.copy()
-    env.update({"MMS_CONFIG_ROOT": str(target_dir), "PYTHONPATH": str(ROOT)})
+    env.update({"MMS_CONFIG_ROOT": str(target_dir), "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)])})
     result = subprocess.run(
         [
             sys.executable,
@@ -1736,7 +1736,7 @@ def test_mmf_preview_import_legacy_wrapper_targets_preview_root(tmp_path: Path) 
             "HOME": str(real_home),
             "MMS_REAL_HOME": str(real_home),
             "MMS_CONFIG_ROOT": str(target_dir),
-            "PYTHONPATH": str(ROOT),
+            "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)]),
         }
     )
     result = subprocess.run(
@@ -1821,7 +1821,7 @@ def test_mmf_registry_legacy_import_apply_writes_preview_db_without_plaintext(tm
         {"version": 1, "routes": {"lineup-only-model": {"context_window": 123}}},
     )
     env = os.environ.copy()
-    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)])})
     result = subprocess.run(
         [sys.executable, str(ROOT / "mmf"), "registry", "legacy-import", "--config-dir", str(config_dir), "--apply", "--json"],
         cwd=ROOT,
@@ -2430,7 +2430,7 @@ def test_mmf_preview_publish_wrapper_fails_closed_without_candidates(tmp_path: P
     config_dir = tmp_path / "mms-next"
     config_dir.mkdir()
     env = os.environ.copy()
-    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)])})
     result = subprocess.run(
         [sys.executable, str(ROOT / "mmf"), "preview", "publish", "--json"],
         cwd=ROOT,
@@ -2464,7 +2464,7 @@ def test_mmf_preview_import_then_publish_wrapper_verifies_bundle(tmp_path: Path)
         encoding="utf-8",
     )
     env = os.environ.copy()
-    env.update({"MMS_CONFIG_ROOT": str(target_dir), "PYTHONPATH": str(ROOT)})
+    env.update({"MMS_CONFIG_ROOT": str(target_dir), "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)])})
     subprocess.run(
         [
             sys.executable,
@@ -2622,7 +2622,7 @@ def test_mmf_preview_doctor_wrapper_reports_ready_with_secret_backend(tmp_path: 
     )
     mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
     env = os.environ.copy()
-    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)])})
     result = subprocess.run(
         [sys.executable, str(ROOT / "mmf"), "preview", "doctor", "--json"],
         cwd=ROOT,
@@ -2658,7 +2658,7 @@ def test_mmf_preview_check_reports_ready_with_strict_success(tmp_path: Path) -> 
     )
     mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
     env = os.environ.copy()
-    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)])})
     result = subprocess.run(
         [sys.executable, str(ROOT / "mmf"), "preview", "check", "--json"],
         cwd=ROOT,
@@ -2693,7 +2693,7 @@ def test_mmf_preview_bundle_reports_verified_consumer_entrypoint(tmp_path: Path)
     )
     mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
     env = os.environ.copy()
-    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)])})
     result = subprocess.run(
         [sys.executable, str(ROOT / "mmf"), "preview", "bundle", "--json"],
         cwd=ROOT,
@@ -2723,7 +2723,7 @@ def test_mmf_config_bundle_fails_closed_when_manifest_missing(tmp_path: Path) ->
     config_dir = tmp_path / "mms-next"
     config_dir.mkdir()
     env = os.environ.copy()
-    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)])})
 
     strict = subprocess.run(
         [sys.executable, str(ROOT / "mmf"), "config", "bundle", "--json"],
@@ -2824,7 +2824,7 @@ def test_mmf_promote_wrapper_is_read_only_and_human_gated(tmp_path: Path) -> Non
     )
     mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
     env = os.environ.copy()
-    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)])})
 
     result = subprocess.run(
         [sys.executable, str(ROOT / "mmf"), "promote", "--stable-config-dir", str(stable_dir), "--json"],
@@ -2863,7 +2863,7 @@ def test_mms_migrate_config_v2_is_read_only_and_human_gated(tmp_path: Path) -> N
     )
     mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
     env = os.environ.copy()
-    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)])})
 
     result = subprocess.run(
         [
@@ -2908,7 +2908,7 @@ def test_mms_migrate_config_v2_missing_preview_does_not_create_roots(tmp_path: P
     config_dir = tmp_path / "mms-next"
     stable_dir = tmp_path / "mms"
     env = os.environ.copy()
-    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)])})
 
     result = subprocess.run(
         [
@@ -2955,7 +2955,7 @@ def test_mms_config_release_readiness_reaches_human_gate_for_ready_preview(tmp_p
     )
     mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
     env = os.environ.copy()
-    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)])})
 
     result = subprocess.run(
         [
@@ -3032,7 +3032,7 @@ def test_mms_config_release_readiness_missing_preview_is_read_only(tmp_path: Pat
     config_dir = tmp_path / "mms-next"
     stable_dir = tmp_path / "mms"
     env = os.environ.copy()
-    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)])})
 
     result = subprocess.run(
         [
@@ -3070,7 +3070,7 @@ def test_mms_config_promote_plan_strict_exit_fails_when_preview_not_ready(tmp_pa
     config_dir = tmp_path / "mms-next"
     config_dir.mkdir()
     env = os.environ.copy()
-    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)])})
 
     result = subprocess.run(
         [sys.executable, str(ROOT / "mms"), "config", "promote-plan", "--strict-exit", "--json"],
@@ -3099,7 +3099,7 @@ def test_mmf_preview_doctor_strict_exit_distinguishes_ready_state(tmp_path: Path
     mms_registry_cli.import_legacy_config(config_dir=config_dir, apply=True, command_name="mmf preview")
     mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
     env = os.environ.copy()
-    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)])})
 
     not_ready = subprocess.run(
         [sys.executable, str(ROOT / "mmf"), "preview", "doctor", "--strict-exit", "--json"],
@@ -3144,7 +3144,7 @@ def test_mmf_config_doctor_strict_exit_matches_preview_doctor(tmp_path: Path) ->
     mms_registry_cli.import_legacy_config(config_dir=config_dir, apply=True, command_name="mmf preview")
     mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
     env = os.environ.copy()
-    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)])})
 
     not_ready = subprocess.run(
         [sys.executable, str(ROOT / "mmf"), "config", "doctor", "--strict-exit", "--json"],
@@ -3190,7 +3190,7 @@ def test_mms_config_doctor_strict_exit_matches_preview_doctor(tmp_path: Path) ->
     mms_registry_cli.import_legacy_config(config_dir=config_dir, apply=True, command_name="mms preview")
     mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
     env = os.environ.copy()
-    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)])})
 
     not_ready = subprocess.run(
         [sys.executable, str(ROOT / "mms"), "config", "doctor", "--strict-exit", "--json"],
@@ -3236,7 +3236,7 @@ def test_mmf_preview_prepare_wrapper_runs_full_preview_flow_without_secrets(tmp_
     _write_preview_doctor_provider(source_dir, provider_id="prepare-local", api_key="sk-prepare-secret")
     target_dir.mkdir()
     env = os.environ.copy()
-    env.update({"MMS_CONFIG_ROOT": str(target_dir), "PYTHONPATH": str(ROOT)})
+    env.update({"MMS_CONFIG_ROOT": str(target_dir), "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)])})
     result = subprocess.run(
         [
             sys.executable,
@@ -3287,7 +3287,7 @@ def test_mmf_preview_prepare_no_route_candidates_points_to_config_web(tmp_path: 
         encoding="utf-8",
     )
     env = os.environ.copy()
-    env.update({"MMS_CONFIG_ROOT": str(target_dir), "PYTHONPATH": str(ROOT)})
+    env.update({"MMS_CONFIG_ROOT": str(target_dir), "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)])})
     result = subprocess.run(
         [
             sys.executable,
@@ -3321,7 +3321,7 @@ def test_mmf_preview_prepare_include_secrets_reports_ready_without_stdout_leak(t
     _write_preview_doctor_provider(source_dir, provider_id="prepare-secret", api_key="sk-prepare-ready-secret")
     target_dir.mkdir()
     env = os.environ.copy()
-    env.update({"MMS_CONFIG_ROOT": str(target_dir), "PYTHONPATH": str(ROOT)})
+    env.update({"MMS_CONFIG_ROOT": str(target_dir), "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)])})
     result = subprocess.run(
         [
             sys.executable,
@@ -3363,7 +3363,7 @@ def test_mmf_preview_prepare_repeated_run_backs_up_existing_preview_db(tmp_path:
     _write_preview_doctor_provider(source_dir, provider_id="prepare-backup", api_key="sk-prepare-backup-secret")
     target_dir.mkdir()
     env = os.environ.copy()
-    env.update({"MMS_CONFIG_ROOT": str(target_dir), "PYTHONPATH": str(ROOT)})
+    env.update({"MMS_CONFIG_ROOT": str(target_dir), "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)])})
 
     first = subprocess.run(
         [
@@ -3418,7 +3418,7 @@ def test_mmf_preview_prepare_strict_exit_requires_runtime_ready(tmp_path: Path) 
     _write_preview_doctor_provider(source_dir, provider_id="prepare-strict", api_key="sk-prepare-strict-secret")
     target_dir.mkdir()
     env = os.environ.copy()
-    env.update({"MMS_CONFIG_ROOT": str(target_dir), "PYTHONPATH": str(ROOT)})
+    env.update({"MMS_CONFIG_ROOT": str(target_dir), "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)])})
     result = subprocess.run(
         [
             sys.executable,

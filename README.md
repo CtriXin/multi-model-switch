@@ -354,7 +354,7 @@ xmem 改为 global-only：MMS / MMF 不再 bundle、安装或注入 xmem skill/h
 
 NSR、Map、CodeGraph 的自动 hook 已退出默认路径。旧 `nsr-*-hook`、`nsr-stop-wrapper.py`、Map/CodeGraph auto-index wrapper 保留为 no-op，不读取或删除现有 marker，不同步索引。显式 `/nsr`、`nsrctl`、Map 与 CodeGraph CLI 仍可使用。MMS 在合并旧 managed hooks 后也过滤自有退休入口；旧 runtime 的 NSR toggle 不会恢复自动 hook。
 
-安装器只提供全局注册的只读清理计划。需要清理已存在注册时，使用 [`mms_hook_retirement.py`](mms_hook_retirement.py) 明确指定 `--file`；默认只输出 locator/hash。`--apply` 另要求审阅时 SHA256 和私有 backup 目录，且只删除精确自有入口。它不处理 MMS generated session/config；旧 session 可通过激活 shared no-op wrapper 停止自动行为。
+安装器只提供全局注册的只读清理计划。需要清理已存在注册时，使用 [`mms_hook_retirement.py`](lib/mms_hook_retirement.py) 明确指定 `--file`；默认只输出 locator/hash。`--apply` 另要求审阅时 SHA256 和私有 backup 目录，且只删除精确自有入口。它不处理 MMS generated session/config；旧 session 可通过激活 shared no-op wrapper 停止自动行为。
 
 全局 Superset terminal 注册可使用 `hooks/owned-superset-notify.sh`：先检查原 app 已使用的 `SUPERSET_TAB_ID`，无 owner 时不读取 stdin、不通知；有 owner 时委托原 `~/.superset/hooks/notify.sh`，保留 app 的直接 Mastra 路径。此 wrapper 不证明 app 上游模板已修改；app 升级若重建全局注册，需要重新检查精确命令。
 

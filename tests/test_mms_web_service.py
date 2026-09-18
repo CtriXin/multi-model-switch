@@ -22,7 +22,7 @@ def _run(args, *, home: Path, timeout=90, extra_env=None):
            if k not in ("MMS_CONFIG_ROOT", "MMS_CONFIG_DIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME",
                         "MMS_REAL_HOME", "REAL_HOME", "ORIGINAL_HOME", "MMS_WEB_PORT_BASE",
                         "MMS_COMMAND_NAME")}
-    env.update({"HOME": str(home), "MMS_REAL_HOME": str(home), "PYTHONPATH": str(ROOT)})
+    env.update({"HOME": str(home), "MMS_REAL_HOME": str(home), "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)])})
     env.update(extra_env or {})
     return subprocess.run([sys.executable, "-P", "-m", "mms_web", *args], cwd=ROOT, env=env,
                           capture_output=True, text=True, timeout=timeout)

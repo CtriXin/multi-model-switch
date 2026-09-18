@@ -16,6 +16,11 @@ from __future__ import annotations
 
 import json
 import os
+def _mms_install_root(module_path=None):
+    module_dir = os.path.dirname(os.path.abspath(module_path or __file__))
+    if os.path.basename(module_dir) == "lib":
+        return os.path.dirname(module_dir)
+    return module_dir
 
 RELAY_CONFIG_ENV = "MMS_VISION_RELAY_CONFIG"
 RELAY_DIR_NAME = "vision-relay"
@@ -30,7 +35,7 @@ def _pi_support():
 
 
 def relay_server_path() -> str:
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", _SERVER_SCRIPT)
+    return os.path.join(_mms_install_root(), "scripts", _SERVER_SCRIPT)
 
 
 def relay_plan(runtime, model_name) -> dict:
