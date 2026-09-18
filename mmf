@@ -5,7 +5,7 @@ import os
 import sys
 import json
 
-_MMS_LAYOUT_CURL = "curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash"
+_MMS_LAYOUT_CURL = "curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/dev/install.sh | bash -s -- --channel dev"
 _MMS_LAYOUT_ERROR = (
     "这份 MMS 安装是旧布局(模块在安装根,当前入口需要 lib/)。\n"
     "旧布局不再被支持,请重新执行安装命令更新:\n"

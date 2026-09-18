@@ -23,7 +23,7 @@ from mms_web.update_install import (
 
 ROOT = Path(__file__).resolve().parents[1]
 LIB = ROOT / "lib"
-CURL = "curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash"
+CURL = "curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/dev/install.sh | bash -s -- --channel dev"
 PYTHON_ENTRIES = ("mms", "mmf", "mms-web", "mmslogs")
 SHELL_ENTRIES = ("mmm", "MMS Pilot.command", "MMS Installer.command")
 
