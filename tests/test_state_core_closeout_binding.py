@@ -678,7 +678,7 @@ class CloseoutBoundaryStaticTests(unittest.TestCase):
     def test_adapter_never_directly_writes_task_state_json(self) -> None:
         """The only state mutation is state-core's own ``closeout`` via subprocess.
         The adapter must not open or write any JSON file itself."""
-        code = _code_without_module_docstring(REPO_ROOT / "mms_state_core_closeout.py")
+        code = _code_without_module_docstring(REPO_ROOT / "lib" / "mms_state_core_closeout.py")
         for prim in ("open(", ".write_text(", ".write_bytes(", "json.dump("):
             self.assertNotIn(prim, code, f"adapter must not use file-write primitive {prim!r}")
         # the only state write is via shelling out to the CLI's own closeout
@@ -686,7 +686,7 @@ class CloseoutBoundaryStaticTests(unittest.TestCase):
         self.assertIn("verify-completion", code)
 
     def test_adapter_never_calls_forbidden_set_commands(self) -> None:
-        code = _code_without_module_docstring(REPO_ROOT / "mms_state_core_closeout.py")
+        code = _code_without_module_docstring(REPO_ROOT / "lib" / "mms_state_core_closeout.py")
         # no subprocess arg list may build a forbidden `set` command
         self.assertNotIn("'set'", code)
         self.assertNotIn('"set"', code)
@@ -715,7 +715,7 @@ class CloseoutBoundaryStaticTests(unittest.TestCase):
         )
 
     def test_binding_is_dispatched_only_on_explicit_closeout_command(self) -> None:
-        core = (REPO_ROOT / "mms_core.py").read_text("utf-8")
+        core = (REPO_ROOT / "lib" / "mms_core.py").read_text("utf-8")
         # exactly one dispatch branch for the explicit command
         self.assertIn('command == "closeout"', core)
         self.assertIn("handle_closeout_command", core)
@@ -742,7 +742,7 @@ class CloseoutBoundaryStaticTests(unittest.TestCase):
 
     def test_resolution_never_uses_chat_text(self) -> None:
         # adapter has no chat/transcript parsing surface at all
-        src = (REPO_ROOT / "mms_state_core_closeout.py").read_text("utf-8")
+        src = (REPO_ROOT / "lib" / "mms_state_core_closeout.py").read_text("utf-8")
         for forbidden in ("transcript", "chat_history", "messages", "prompt"):
             self.assertNotIn(forbidden, src,
                              f"adapter must not parse {forbidden} (no chat-text guessing)")

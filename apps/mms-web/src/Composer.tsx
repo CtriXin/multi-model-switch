@@ -72,6 +72,8 @@ export function Composer({
   onCommand,
   sideQuestion,
   initialText = "",
+  resolveInitialFiles = true,
+  autoFocus = false,
   requiredSkillNames = noRequiredSkills,
   selectionRequest,
   selectionHandled,
@@ -84,6 +86,8 @@ export function Composer({
   enterToSend = true,
 }: {
   initialText?: string;
+  resolveInitialFiles?: boolean;
+  autoFocus?: boolean;
   requiredSkillNames?: string[];
   guideRequest?: { nonce: string; text: string };
   guideHandled?: () => void;
@@ -236,7 +240,7 @@ export function Composer({
   // Resolve those lines once so the composer can show the same removable
   // preview cards as a direct file drop.
   useEffect(() => {
-    if (draft?.attachments?.length || !initialText) return;
+    if (!resolveInitialFiles || draft?.attachments?.length || !initialText) return;
     const paths = initialText.split(/\r?\n/).flatMap((line) => localFilePaths(line));
     if (!paths.length || !workspaceId) return;
     const controller = new AbortController();
@@ -900,6 +904,7 @@ export function Composer({
             </div>
           )}
           <textarea
+            autoFocus={autoFocus}
             ref={input}
             aria-label={btwMode ? "旁问内容" : "任务内容"}
             value={text}

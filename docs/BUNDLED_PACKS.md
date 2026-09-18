@@ -30,7 +30,7 @@ MMS 在合并旧的 managed hooks 之后也会过滤掉自己已退休的入口�
 
 ## 全局注册的清理
 
-安装器只提供**只读**的清理计划。要清理已存在的注册，用 [`mms_hook_retirement.py`](../mms_hook_retirement.py) 明确指定 `--file`；默认只输出 locator 和 hash。`--apply` 另外要求审阅时的 SHA256 和一个私有 backup 目录，而且只删除精确匹配的自有入口。它不处理 MMS 生成的 session / config；旧 session 可以通过激活 shared no-op wrapper 来停止自动行为。
+安装器只提供**只读**的清理计划。要清理已存在的注册，用 [`lib/mms_hook_retirement.py`](../lib/mms_hook_retirement.py) 明确指定 `--file`；默认只输出 locator 和 hash。`--apply` 另外要求审阅时的 SHA256 和一个私有 backup 目录，而且只删除精确匹配的自有入口。它不处理 MMS 生成的 session / config；旧 session 可以通过激活 shared no-op wrapper 来停止自动行为。
 
 全局 Superset terminal 注册可以用 `hooks/owned-superset-notify.sh`：先检查原 app 已使用的 `SUPERSET_TAB_ID`，没有 owner 时不读 stdin、不通知；有 owner 时委托原 `~/.superset/hooks/notify.sh`，保留 app 自己的 Mastra 直连路径。这个 wrapper **不证明** app 上游模板已经改过；app 升级如果重建了全局注册，需要重新检查精确命令。
 

@@ -18,14 +18,16 @@ RUNNER=ROOT/'tests/fixtures/mms_web/update_runner.py'
 def copy_candidate(destination, *, broken=False):
     destination.mkdir(parents=True)
     files=set(subprocess.check_output(['git','ls-files'],cwd=ROOT,text=True).splitlines())
-    files.update(str(p.relative_to(ROOT)) for p in ROOT.glob('*.py'))  # new top-level modules not yet tracked
+    files.update(str(p.relative_to(ROOT)) for p in ROOT.glob('*.py'))
+    files.update(str(p.relative_to(ROOT)) for p in (ROOT/'lib').glob('*.py'))
     files.update(str(p.relative_to(ROOT)) for p in (ROOT/'mms_web').rglob('*.py'))
     files.update(str(p.relative_to(ROOT)) for p in (ROOT/'mms_web_static').rglob('*') if p.is_file())
     for name in files:
         source=ROOT/name
         if source.is_file() and not source.is_symlink():
             target=destination/name;target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(source,target)
-    (destination/'mms_version.py').write_text('VERSION = "99.0.0"\n')
+    (destination/'lib').mkdir(parents=True, exist_ok=True)
+    (destination/'lib'/'mms_version.py').write_text('VERSION = "99.0.0"\n')
     manifest=destination/'mms_web_static/build.json';value=json.loads(manifest.read_text());value['version']='99.0.0';manifest.write_text(json.dumps(value))
     if broken:(destination/'mms_web/__main__.py').write_text('raise RuntimeError("fixture startup failure")\n')
 
@@ -55,7 +57,7 @@ def test_actual_handoff_or_rollback_preserves_custom_state_cwd_and_history(tmp_p
     home=tmp_path/'home';home.mkdir()
     for key in ('HOME','MMS_REAL_HOME','REAL_HOME','ORIGINAL_HOME'):env[key]=str(home)
     for key in ('MMS_CONFIG_ROOT','MMS_PREVIEW_MODE','XDG_DATA_HOME','XDG_CONFIG_HOME','MMS_WEB_PROBATION'):env.pop(key,None)
-    env.update(PYTHONPATH=str(ROOT),MMS_WEB_UPDATE_CHECK='0',MMS_WEB_SKIP_ACTIVE='1',MMS_UPDATE_FIXTURE_SOURCE=str(candidate))
+    env.update(PYTHONPATH=os.pathsep.join([str(ROOT / "lib"), str(ROOT)]),MMS_WEB_UPDATE_CHECK='0',MMS_WEB_SKIP_ACTIVE='1',MMS_UPDATE_FIXTURE_SOURCE=str(candidate))
     def request(path,body=None,csrf=''):
         req=urllib.request.Request(f'http://127.0.0.1:{port}/api/v1/{path}',data=json.dumps(body).encode() if body is not None else None,headers={'Content-Type':'application/json','X-MMS-CSRF':csrf})
         with urllib.request.urlopen(req,timeout=3) as response:return json.load(response)

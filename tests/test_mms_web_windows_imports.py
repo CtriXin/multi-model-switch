@@ -16,9 +16,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 IMPORT_GRAPH = sorted((ROOT / "mms_web").rglob("*.py")) + [
-    ROOT / name
+    ROOT / "mms" if name == "mms" else ROOT / "lib" / name
     for name in ("mms", "mms_runtime.py", "mms_platform.py", "mms_state_io.py", "mms_core.py")
-    if (ROOT / name).is_file()
+    if (ROOT / "mms" if name == "mms" else ROOT / "lib" / name).is_file()
 ]
 
 
@@ -59,7 +59,7 @@ def test_pilot_server_import_chain_loads_in_a_fresh_interpreter():
         "import mms_web.server, mms_web.__main__;"
         "print('IMPORT_CHAIN_OK')"
     )
-    env = {**os.environ, "PYTHONPATH": str(ROOT)}
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)])}
     result = subprocess.run([sys.executable, "-P", "-c", code], cwd=ROOT, env=env,
                             capture_output=True, text=True, timeout=60)
     assert "IMPORT_CHAIN_OK" in result.stdout, result.stderr[-2000:]

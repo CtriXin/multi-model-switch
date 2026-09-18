@@ -4,7 +4,7 @@
 
 读完这份再去读规则文件（`AGENT.md`、`docs/AGENT_GUARDRAILS.md`）。规则告诉你**不能做什么**，这份告诉你**这是什么**。
 
-最后核对：2026-09-18。`main` = 4.23.3，`dev` = 5.1.6。
+最后核对：2026-09-18。T9a 合并后的 `main` 使用 4.23.8；`dev` 当前为 5.1.10。后续状态请以各分支版本文件和 Release 为准。
 
 ---
 
@@ -33,10 +33,10 @@ MMS（Multi-Model Switch）是一个**跑在自己电脑上**的 AI coding 运�
 | 线 | 分支 | 版本 | 安装 | 内容 |
 |---|---|---|---|---|
 | 稳定线 | `main` | 4.23.x | `--channel stable`（默认） | 已经坐稳的功能，只收修复和验证过的能力 |
-| 预览线 | `dev` | 5.1.x | `--channel dev` | 稳定线的**全部内容**，外加 Bot 工作台 |
+| 预览线 | `dev` | 5.1.x | `--channel dev` | 稳定能力、Bot 工作台与其他预览改动 |
 | Canary | `canary` | 停更 | `--channel canary` | 2026-06 起停更的旧实验线，不要用它承载任何东西 |
 
-**流向是单向的，而且是硬规则：`main` 上的每一处改动都默认进入 `dev`；`dev` 上稳定下来的能力再定期回流 `main`。** 所以 `dev` 永远是 `main` 的超集，不存在「装了 5.x 就丢掉 4.x 的某个修复」。
+稳定线的修复应同步到 `dev`；预览线中已验证的能力可以进入 `main`。同步需要实际合并，目前没有自动同步保证。不要把 `dev` 当作 `main` 的实时超集，应逐项核对 Git 历史和 Release。
 
 你动手前必须回答：**这个改动属于哪条线？**
 
@@ -44,7 +44,7 @@ MMS（Multi-Model Switch）是一个**跑在自己电脑上**的 AI coding 运�
 - 只跟 Bot 工作台有关（`mms_web/bot_*.py`、`bots.py`、`browser_provider.py`，以及前端的 Bot 界面）→ base `dev`。
 - 不确定 → 默认 `main`。往 `dev` 补容易，从 `dev` 往 `main` 摘就难。
 
-两条线在同一台机器上**不能共存**。换线要重跑安装器带对应 `--channel`；配置、通道和会话历史都在同一个 config root，换线不清空它们。
+同一个公开安装目录 `~/.mms` 一次只安装一条线。换线要重跑安装器带对应 `--channel`；配置、通道和会话历史仍在同一个 config root。隔离 worktree 可以共存，但需留意共享配置与服务端口。
 
 **5.x 装上以后，光在 Pilot 里把通道选回 stable 不会降回 4.x。** 原因在 `mms_web/updates.py`：`available = remote > current`，`4.23.x < 5.1.x`，所以 4.x 永远不会被当成「可用更新」。降级必须重跑安装器带 `--channel stable`。这是设计，不是 bug——但**任何文案都不许说"随时可逆"**，历史上说过，害人卡住过。
 
@@ -52,40 +52,40 @@ MMS（Multi-Model Switch）是一个**跑在自己电脑上**的 AI coding 运�
 
 **一个合并的 PR = 一个 patch 版本。** 这样看版本号就知道做了什么。纯文档包不 bump。
 
-机制上有个坑：如果每个 PR 作者自己改版本文件，N 个在飞的 PR 就会在 `mms_version.py` 上 N 路冲突。所以**作者不碰版本文件，合并方在合并时盖版本号**，release note 和 bump 放在一个单独的 commit 里（别混进对方的改动，保住对方的 authorship）。
+机制上有个坑：如果每个 PR 作者自己改版本文件，N 个在飞的 PR 就会在 `lib/mms_version.py` 上 N 路冲突。所以**作者不碰版本文件，合并方在合并时盖版本号**，release note 和 bump 放在一个单独的 commit 里（别混进对方的改动，保住对方的 authorship）。
 
-版本一致性由 `tests/test_mms_release_version.py` 守着，它要求这些地方同时对齐：`mms_version.py`、根 `package.json`、`apps/mms-web/package.json`、`apps/mms-web/package-lock.json`（`version` 和 `packages[""].version` 两处）、`mms_web_static/build.json` 的 `version` 与每个文件的 sha256，以及 `docs/mms-web/RELEASE-v<版本>.md` 必须存在。
+版本一致性由 `tests/test_mms_release_version.py` 守着，它要求这些地方同时对齐：`lib/mms_version.py`、根 `package.json`、`apps/mms-web/package.json`、`apps/mms-web/package-lock.json`（`version` 和 `packages[""].version` 两处）、`mms_web_static/build.json` 的 `version` 与每个文件的 sha256，以及 `docs/mms-web/RELEASE-v<版本>.md` 必须存在。
 
-发版没有自动化（CI 只有 `.github/workflows/digger.yml`）。手动流程：合并 PR → bump + release note 的 commit → `git push origin HEAD:<branch>` → `git tag -a` → `git push origin <tag>` → `gh release create <tag> --verify-tag [--latest|--prerelease] --notes-file docs/mms-web/RELEASE-vX.md`。
+发版仍需手动执行；CI 包含 `.github/workflows/digger.yml` 和 Windows acceptance 等验证，不会自动创建 Release。手动流程：合并 PR → bump + release note 的 commit → `git push origin HEAD:<branch>` → `git tag -a` → `git push origin <tag>` → `gh release create <tag> --verify-tag [--latest|--prerelease] --notes-file docs/mms-web/RELEASE-vX.md`。
 
 ---
 
 ## 三、代码地图
 
-### 根目录的 Python 模块（约 80 个 `mms_*.py`）
+### 运行时模块 `lib/`（79 个 Python 模块）
 
-它们都是**平铺的顶层模块**，靠入口脚本把仓库根插进 `sys.path`（见 `mms` 第 7-8 行）来 import。启动链的责任划分：
+T9a 将运行时模块从根目录迁入 `lib/`。入口脚本优先把 `lib/` 加入 `sys.path`；Python import 名称保持不变。缺少 `lib/` 的旧安装需要重新运行安装器，不能靠根目录旧模块兜底。启动链的责任划分：
 
 ```
 mms（入口脚本）
-  └─ mms_tui.py          选择界面：CLI / profile / 模型 / 使用入口
-      └─ mms_core.py     真值中心：模型解析、provider/account 优先级、runtime 决策、auth_mode
-          └─ mms_launchers.py   拼启动参数和环境变量，真正 exec 出去
-              └─ mms_bridge.py  协议转换：claude←codex、codex responses→chat completions
+  └─ lib/mms_tui.py          选择界面：CLI / profile / 模型 / 使用入口
+      └─ lib/mms_core.py     真值中心：模型解析、provider/account 优先级、runtime 决策、auth_mode
+          └─ lib/mms_launchers.py   拼启动参数和环境变量，真正 exec 出去
+              └─ lib/mms_bridge.py  协议转换：claude←codex、codex responses→chat completions
 ```
 
 其它常打交道的：
 
 | 文件 | 管什么 |
 |---|---|
-| `mms_registry*.py` | Registry v2：配置的预览 DB、审阅、发布 |
-| `mms_provider_profiles.py` | provider 侧的 curated 能力数据（vision、上下文、协议） |
-| `mms_capability_resolver.py` | 能力解析：某个模型到底支持什么 |
-| `mms_pi_support.py` | Pi harness 支持，含 `_pi_model_input_types()`（识图能力真值链） |
-| `mms_session*.py` | 会话目录、索引、resume、能力包注入 |
-| `mms_account_state.py` | 账号隔离，HOME/XDG 边界 |
-| `mms_version.py` | 唯一的版本号真值 |
-| `mmc_*.py` | 旧 MMC proxy 相关，基本是维护面 |
+| `lib/mms_registry*.py` | Registry v2：配置的预览 DB、审阅、发布 |
+| `lib/mms_provider_profiles.py` | provider 侧的 curated 能力数据（vision、上下文、协议） |
+| `lib/mms_capability_resolver.py` | 能力解析：某个模型到底支持什么 |
+| `lib/mms_pi_support.py` | Pi harness 支持，含 `_pi_model_input_types()`（识图能力真值链） |
+| `lib/mms_session*.py` | 会话目录、索引、resume、能力包注入 |
+| `lib/mms_account_state.py` | 账号隔离，HOME/XDG 边界 |
+| `lib/mms_version.py` | 唯一的版本号真值 |
+| `lib/mmc_*.py` | 旧 MMC proxy 相关，基本是维护面 |
 
 ### Pilot 后端 `mms_web/`（约 45 个模块，4.x）
 
@@ -204,7 +204,7 @@ Pilot 当前唯一的 harness 是 **Pi**。Claude / Codex / OpenCode / agy 仍�
 
 配置的写入路径只有一条：**写入预览 DB + 发布**。本地修改优先走 Registry v2，TUI / `mms config` / WebUI 先创建 DB candidate，审阅通过后发布成 `generated/model-registry.latest-approved.json`，它引用的 generated Profile 就是 runtime boundary。没有第二条绕开审阅的写入路径。
 
-`~/.config/mms/preferences.toml` 是用户偏好 allowlist 覆盖层，**agent 不能自动写真实文件**。可以读、解释、生成 TOML snippet 给用户，写入走 human gate。
+`~/.config/mms-next/preferences.toml` 是用户偏好 allowlist 覆盖层，**agent 不能自动写真实文件**。可以读、解释、生成 TOML snippet 给用户，写入走 human gate。
 
 ---
 
@@ -295,7 +295,7 @@ assert.match(src, /scrollTo\(\{ top: 0 \}\)/);
 
 ### 7. 识图能力只有一条真值链
 
-`_pi_model_input_types()`（`mms_pi_support.py`）的优先级：用户设置（`manual_override`、`model_policy`）> Pi 实测硬编码 hints > curated 数据（provider profile、approved facts）> 名称匹配兜底。
+`_pi_model_input_types()`（`lib/mms_pi_support.py`）的优先级：用户设置（`manual_override`、`model_policy`）> Pi 实测硬编码 hints > curated 数据（provider profile、approved facts）> 名称匹配兜底。
 
 **不许**在 `_pi_model_input_types` 里绕过 `caps` 直接查表（那会让用户在 Web 里的设置对 Pi 失效），**不许**把 `conservative_fallback` 当成「这个模型不支持图片」（它的含义是「没有任何来源声明过」），**不许**新增第五份硬编码 vision 名单。
 
@@ -315,7 +315,7 @@ assert.match(src, /scrollTo\(\{ top: 0 \}\)/);
 
 ## 九、安全边界（碰之前先说清楚）
 
-**受保护文件。** 改它们之前必须先说明改动边界：`mms_core.py`、`mms_launchers.py`、`mms_tui.py`、`mms_bridge.py`、`mms_account_state.py`、`mms_session.py`、`mms_adapter_registry.py`、`mms`、`ccs`。用户只说"修一下"、"看看问题"时默认先诊断定位，不直接改主启动链路。能用文档、注释、测试、辅助脚本解决的优先走低风险路径。
+**受保护文件。** 改它们之前必须先说明改动边界：`lib/mms_core.py`、`lib/mms_launchers.py`、`lib/mms_tui.py`、`lib/mms_bridge.py`、`lib/mms_account_state.py`、`lib/mms_session.py`、`lib/mms_adapter_registry.py`、`mms`、`ccs`。用户只说"修一下"、"看看问题"时默认先诊断定位，不直接改主启动链路。能用文档、注释、测试、辅助脚本解决的优先走低风险路径。
 
 **端口。** 绝不碰 8767 / 60824 / 8765 / 8766——那是机主在跑的实例。要起验证实例用 61000-62000 的随机端口。**只 kill 自己启动的 PID，按精确 PID。绝不 `pkill`，绝不按端口 grep 完批量 kill。** 有过一次 verifier 用这种方式杀掉机主两个进程。
 
@@ -371,7 +371,7 @@ trailers：`Agent-Model`、`Agent-Family`、`Agent-Session`、`Agent-Step: x.y.z
 - `docs/legacy/` 下的东西只用于追溯。
 - `README.md` 里 3.x 轨道那段是历史记录，不是当前状态。
 
-写代码前请核对：**任何文档里的版本号、分支关系和"当前状态"，都以 `mms_version.py`、`git log` 和最近的 `RELEASE-v*.md` 为准。**
+写代码前请核对：**任何文档里的版本号、分支关系和"当前状态"，都以 `lib/mms_version.py`、`git log` 和最近的 `RELEASE-v*.md` 为准。**
 
 ---
 

@@ -16,9 +16,8 @@ on:
     paths:
       - ".github/workflows/windows-acceptance.yml"
       - "scripts/ci/windows_acceptance.ps1"
-      - "mms_platform.py"
-      - "mms_runtime.py"
-      - "mms_pi_support.py"
+      - "lib/**"
+      - "tests/test_mms_lib_layout.py"
       - "mms_web/**"
       - "packages/mms-install/**"
       - "apps/mms-web/src/local-file-paths.ts"
@@ -159,8 +158,9 @@ jobs:
           MMS_CONFIG_ROOT: ${{ runner.temp }}\mms-ci-config
           MMS_STATE_ROOT: ${{ runner.temp }}\mms-ci-state
         run: |
-          $env:PYTHONPATH = $PWD.Path
+          $env:PYTHONPATH = "$(Join-Path $PWD.Path 'lib')$([IO.Path]::PathSeparator)$($PWD.Path)"
           python -m pytest -q `
+            tests/test_mms_lib_layout.py `
             tests/test_mms_platform.py `
             tests/test_mms_runtime.py `
             tests/test_pi_windows_resolution.py `

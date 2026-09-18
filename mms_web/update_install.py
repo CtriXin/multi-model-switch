@@ -33,8 +33,9 @@ FILES = (
     "docs/LLM_OPERATION_GUIDE.md",
     "docs/reference/model-capability-calibration/2026-05-21-mms-model-capability-calibration.json",
 )
-GLOBS = ("mms_*.py",)
+GLOBS: tuple[str, ...] = ()
 DIRECTORIES = (
+    "lib",
     "mms_web",
     "mms_web_static",
     "docs/mms-web",
@@ -98,7 +99,40 @@ def describe(source: Path | str) -> dict:
     if not _writable(root):
         return {"updatesCli": False, "root": str(root),
                 "reason": "安装目录不可写，更新只换网页服务。"}
+    if _legacy_or_mixed_layout(root):
+        return {"updatesCli": False, "root": str(root), "manualInstallRequired": True,
+                "reason": "需要重新运行安装命令。当前安装是旧布局或新旧文件混用，应用内更新不能当成普通的「有新版本」。"}
     return {"updatesCli": True, "root": str(root), "reason": ""}
+
+
+def _legacy_or_mixed_layout(root: Path) -> bool:
+    """True when leftover flat modules can shadow lib/ or lib/ is missing."""
+    lib_sentinel = (root / "lib" / "mms_core.py").is_file()
+    flat_sentinel = (root / "mms_core.py").is_file()
+    if flat_sentinel:
+        return True
+    if not lib_sentinel:
+        return True
+    lib = root / "lib"
+    for path in (*lib.glob("mms_*.py"), *lib.glob("mmc_*.py")):
+        if (root / path.name).is_file() or (root / path.name).is_symlink():
+            return True
+    return False
+
+
+def remove_legacy_flat_modules(target: Path) -> list[str]:
+    """Delete install-root copies of modules now shipped under lib/, by exact name."""
+    lib = Path(target) / "lib"
+    removed: list[str] = []
+    if not lib.is_dir():
+        return removed
+    names = {path.name for path in lib.glob("mms_*.py")} | {path.name for path in lib.glob("mmc_*.py")}
+    for name in names:
+        flat = Path(target) / name
+        if flat.is_file() or flat.is_symlink():
+            flat.unlink()
+            removed.append(name)
+    return removed
 
 
 def _copy(source: Path, target: Path) -> None:
@@ -160,6 +194,7 @@ def install(candidate: Path, source: Path, backup: Path) -> list[str]:
                 else:
                     target.unlink()
         raise
+    remove_legacy_flat_modules(source)
     return names
 
 

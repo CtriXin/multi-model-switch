@@ -306,9 +306,17 @@ def transcript(path: str | os.PathLike, limit: int = 2000) -> list[dict]:
         elif role == "assistant":
             text = _text_of(message)
             thinking = _blocks_of(message, "thinking")
+            from .session_recovery import safe_excerpt
+            error = safe_excerpt(message.get("errorMessage"), 2000)
+            outcome = "aborted" if message.get("stopReason") == "aborted" else "error" if error or message.get("stopReason") == "error" else "success"
+            if error:
+                text = (text + "\n\n" + error).strip()
+            if outcome == "error" and not text:
+                text = "模型请求失败，未返回错误详情。"
             if text or thinking:
                 events.append({"id": ident or f"a-{len(events)}", "kind": "assistant",
-                               "text": text, "thinking": thinking, "createdAt": at})
+                               "text": text, "thinking": thinking, "createdAt": at,
+                               "modelOutcome": outcome, "status": "error" if outcome == "error" else "done"})
             for block in message.get("content") or []:
                 if not isinstance(block, dict) or block.get("type") != "toolCall":
                     continue
@@ -320,6 +328,8 @@ def transcript(path: str | os.PathLike, limit: int = 2000) -> list[dict]:
                          # No result seen yet. A session that was killed
                          # mid-tool keeps this, which is the truth.
                          "status": "running", "text": "", "createdAt": at}
+                if outcome == "success":
+                    event["modelOutcome"] = "success"
                 events.append(event)
                 if call_id:
                     calls[call_id] = event

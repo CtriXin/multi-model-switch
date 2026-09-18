@@ -1,46 +1,17 @@
 #!/bin/bash
-
 set -euo pipefail
 
+# Package the committed source tree, including lib/ and all installer assets.
+# Untracked files, local config, and work-in-progress edits are not included.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-DIST_DIR="$SCRIPT_DIR/dist"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+DIST_DIR="$REPO_ROOT/dist"
 PKG_NAME="MMS-Package"
-TMP_DIR="$(mktemp -d)"
-PKG_DIR="$TMP_DIR/$PKG_NAME"
 ZIP_PATH="$DIST_DIR/${PKG_NAME}.zip"
+mkdir -p "$DIST_DIR"
+TMP_ZIP="$(mktemp "$DIST_DIR/.mms-package.XXXXXX")"
+trap 'rm -f "$TMP_ZIP"' EXIT
 
-mkdir -p "$PKG_DIR" "$DIST_DIR"
-
-FILES=(
-    "MMS Installer.command"
-    "mms"
-    "README.md"
-    "mms_core.py"
-    "mms_installer.py"
-    "mms_launchers.py"
-    "mms_tui.py"
-    "config.example.toml"
-    "install.sh"
-)
-
-DIRS=(
-    "hooks"
-)
-
-for file in "${FILES[@]}"; do
-    cp "$SCRIPT_DIR/$file" "$PKG_DIR/$file"
-done
-
-for dir in "${DIRS[@]}"; do
-    cp -R "$SCRIPT_DIR/$dir" "$PKG_DIR/$dir"
-done
-
-rm -f "$ZIP_PATH"
-(
-    cd "$TMP_DIR"
-    zip -rq "$ZIP_PATH" "$PKG_NAME"
-)
-
-rm -rf "$TMP_DIR"
-
-echo "已生成：$ZIP_PATH"
+git -C "$REPO_ROOT" archive --format=zip --prefix="${PKG_NAME}/" --output="$TMP_ZIP" HEAD
+mv "$TMP_ZIP" "$ZIP_PATH"
+echo "已生成已提交源码包：$ZIP_PATH"

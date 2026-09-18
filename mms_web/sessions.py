@@ -171,7 +171,7 @@ class _LiveSession:
         # "mode" and "steeredBy" are facts about delivery, set once when the
         # event is created: how the message was sent, and which steers reached
         # this answer.
-        for key in ("title", "status", "approvalId", "decision", "arguments", "method", "options", "placeholder", "prefill", "answer", "thinking", "nativeTimestamp", "modelName", "usage", "attachments", "references", "skills", "fileSelections", "contextUsage", "mode", "steeredBy"):
+        for key in ("title", "status", "approvalId", "decision", "arguments", "method", "options", "placeholder", "prefill", "answer", "thinking", "nativeTimestamp", "modelName", "usage", "attachments", "references", "skills", "fileSelections", "contextUsage", "mode", "steeredBy", "modelOutcome", "retry"):
             if fields.get(key) is not None:
                 event[key] = fields[key]
         self.event_index[event_id] = event
@@ -190,7 +190,7 @@ class _LiveSession:
             existing["text"] = str(existing.get("text") or "") + str(fields.get("textAppend") or "")
         elif fields.get("text") is not None:
             existing["text"] = str(fields.get("text"))
-        for key in ("title", "status", "decision", "arguments", "method", "options", "placeholder", "prefill", "answer", "thinking", "nativeTimestamp", "modelName", "usage", "attachments", "references", "skills"):
+        for key in ("title", "status", "decision", "arguments", "method", "options", "placeholder", "prefill", "answer", "thinking", "nativeTimestamp", "modelName", "usage", "attachments", "references", "skills", "modelOutcome", "retry"):
             if fields.get(key) is not None:
                 existing[key] = fields[key]
         if fields.get("thinkingAppend") is not None:
@@ -264,8 +264,10 @@ class _LiveSession:
 
     def detail_view(self) -> dict:
         from .artifacts import collect_artifacts
+        from .session_recovery import recovery_state
         return {
             "session": self.session_view(),
+            "recovery": recovery_state(self.events),
             "events": [copy.deepcopy(event) for event in self.events],
             "sideQuestions": [public_side_question(row) for row in sorted(
                 self.side_questions.values(), key=lambda row: row.get("createdAt") or ""
@@ -1337,6 +1339,9 @@ class SessionService(SessionActions, SessionSideQuestions):
                         value = value[:-keep]
                     fields[name] = value
             fields = redact(fields, session.secrets)
+            if isinstance(fields.get("retry"), dict):
+                from .session_recovery import safe_excerpt
+                fields["retry"]["error"] = safe_excerpt(fields["retry"].get("error"), 800)
             if fields.get("kind") == "assistant":
                 fields.setdefault("modelName", session.meta.get("modelName", ""))
                 if session.pending_steers and event_id not in session.event_index:

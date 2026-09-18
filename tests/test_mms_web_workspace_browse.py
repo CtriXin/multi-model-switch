@@ -275,3 +275,25 @@ def test_posix_root_is_listable_and_stays_filtered(tmp_path, monkeypatch):
     assert names, "the filesystem root lists its directories"
     assert not any(name.startswith(".") for name in names)
     assert not any(name in EXCLUDED for name in names)
+
+
+def test_walking_up_from_a_workspace_stops_at_home(tmp_path, monkeypatch):
+    """A workspace contributes its ancestors as browsable roots, but the walk-up
+    must stop at home. Without the ceiling, `/Users` (or `/`) joins the root set
+    and the folder tree offers a way up out of the user's own directory.
+
+    This is the only containment `browse_workspaces` has left: the explicit
+    absolute path a user types is a legal starting point on purpose, so the
+    ceiling here is what keeps the tree from climbing on its own.
+    """
+    home = tmp_path / "Users" / "someone"
+    workspace = home / "code" / "project"
+    workspace.mkdir(parents=True)
+    monkeypatch.setattr("mms_web.workspace_browse.real_home", lambda: home)
+    monkeypatch.setattr("mms_web.workspace_browse._mounted_volumes", lambda: [])
+    catalog = _catalog(workspace)
+
+    assert browse_workspaces(catalog, {"path": str(workspace)})["parent"] == str(home / "code")
+    assert browse_workspaces(catalog, {"path": str(home / "code")})["parent"] == str(home)
+    # Home is the ceiling: there is no offered step above it.
+    assert browse_workspaces(catalog, {"path": str(home)})["parent"] == ""

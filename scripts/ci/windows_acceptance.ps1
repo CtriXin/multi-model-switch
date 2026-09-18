@@ -29,7 +29,7 @@ $env:PYTHONIOENCODING = "utf-8"
 $env:MMS_SKIP_VENV_REEXEC = "1"
 if (-not $env:MMS_CONFIG_ROOT) { $env:MMS_CONFIG_ROOT = Join-Path $TempRoot "cfg" }
 if (-not $env:MMS_STATE_ROOT) { $env:MMS_STATE_ROOT = Join-Path $TempRoot "state" }
-$env:PYTHONPATH = $RepoRoot
+$env:PYTHONPATH = "$(Join-Path $RepoRoot 'lib')$([IO.Path]::PathSeparator)$RepoRoot"
 
 function Write-Phase([string]$name) {
   Write-Host ""

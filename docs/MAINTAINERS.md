@@ -50,11 +50,11 @@ scripts/cleanup_merged_worktree.sh <branch-or-pr>
 
 **一个合并的 PR = 一个 patch 版本。** 纯文档包不 bump。
 
-**作者不碰版本文件，合并方在合并时盖版本号。** 否则 N 个在飞的 PR 会在 `mms_version.py` 上 N 路冲突。release note 和 bump 放在一个单独的 commit 里，别混进对方的改动，保住对方的 authorship。
+**作者不碰版本文件，合并方在合并时盖版本号。** 否则 N 个在飞的 PR 会在 `lib/mms_version.py` 上 N 路冲突。release note 和 bump 放在一个单独的 commit 里，别混进对方的改动，保住对方的 authorship。
 
 版本一致性由 `tests/test_mms_release_version.py` 守着，要求同时对齐：
 
-- `mms_version.py`
+- `lib/mms_version.py`
 - 根 `package.json`
 - `apps/mms-web/package.json`
 - `apps/mms-web/package-lock.json` 的 `version` 和 `packages[""].version`
@@ -109,7 +109,7 @@ env -u MMS_CONFIG_ROOT -u REAL_HOME -u ORIGINAL_HOME -u MMS_REAL_HOME -u XDG_CON
 | 前端测试 | `node --test apps/mms-web/tests/*.test.mjs` | glob 是必须的 |
 | 语法 | `python3 -m py_compile <改动的文件>` | 碰高风险文件时必跑 |
 
-改动触及 `mms_core.py`、`mms_launchers.py`、installer、session index、config root、resume、HOME/XDG 隔离、wrapper 或 release channel 时，交付里**必须**写明 fresh-user gate 的实际结果。
+改动触及 `lib/mms_core.py`、`lib/mms_launchers.py`、installer、session index、config root、resume、HOME/XDG 隔离、wrapper 或 release channel 时，交付里**必须**写明 fresh-user gate 的实际结果。
 
 `.github/workflows/digger.yml` 是仓库唯一的 CI。
 

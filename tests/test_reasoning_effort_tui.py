@@ -117,7 +117,7 @@ def test_confirm_profile_capabilities_expose_max_only_for_gpt56(monkeypatch, tmp
 
 
 def test_core_confirm_tui_keeps_ecc_default_off():
-    tree = ast.parse(Path("mms_core.py").read_text(encoding="utf-8"))
+    tree = ast.parse(Path("lib/mms_core.py").read_text(encoding="utf-8"))
 
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):

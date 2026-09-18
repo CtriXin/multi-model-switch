@@ -11,7 +11,9 @@ from pathlib import Path
 import sys
 import tomllib
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_REPO_ROOT))
+sys.path.insert(0, str(_REPO_ROOT / "lib"))
 from mms_web.config_block_reasons import describe_blocked_reasons
 from mms_web.errors import WebError
 

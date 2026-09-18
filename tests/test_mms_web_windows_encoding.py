@@ -9,6 +9,7 @@ import base64
 import io
 import json
 import locale
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -164,7 +165,7 @@ def test_model_settings_worker_reads_stdin_as_utf8_under_gbk_locale(tmp_path, mo
     # same stdin contract through a real subprocess with a GBK text locale.
     env = {
         "PATH": "/usr/bin:/bin",
-        "PYTHONPATH": str(ROOT),
+        "PYTHONPATH": os.pathsep.join([str(ROOT / "lib"), str(ROOT)]),
         "PYTHONIOENCODING": "gbk",  # stdin text layer decodes GBK like a CN Windows host
         "MMS_WEB_WORKER": "1",
     }
