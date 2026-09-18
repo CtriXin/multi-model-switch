@@ -6,6 +6,9 @@ import shlex
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
+def _mms_install_root():
+    here = Path(__file__).resolve().parent
+    return here.parent if here.name == "lib" else here
 from typing import Any, Iterable, Mapping
 from urllib.request import Request, urlopen
 
@@ -14,7 +17,7 @@ from mms_capability_resolver import resolve_model_capabilities
 from mms_state_io import mms_config_root_status, resolve_mms_config_dir
 
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = _mms_install_root()
 DEFAULT_REFERENCE_DIR = ROOT / "docs" / "reference" / "model-capability-calibration"
 DEFAULT_SOURCE_REFRESH_MAX_AGE_HOURS = 24 * 14
 DEFAULT_OPENROUTER_REFRESH_MAX_AGE_HOURS = 24 * 7

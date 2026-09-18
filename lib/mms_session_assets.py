@@ -10,6 +10,11 @@ from __future__ import annotations
 
 import json
 import os
+def _mms_install_root(module_path=None):
+    module_dir = os.path.dirname(os.path.abspath(module_path or __file__))
+    if os.path.basename(module_dir) == "lib":
+        return os.path.dirname(module_dir)
+    return module_dir
 import re
 import shlex
 import tomllib
@@ -84,7 +89,7 @@ def _real_home(mms_core: Any | None) -> str:
 
 
 def _repo_root() -> str:
-    return os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+    return _mms_install_root()
 
 
 def _abbrev_path(path: str, *, home: str) -> str:

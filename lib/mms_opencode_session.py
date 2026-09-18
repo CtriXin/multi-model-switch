@@ -28,7 +28,10 @@ def clear_opencode_config_env(env):
 
 
 def opencode_plugin_path(module_file, plugin_name):
-    plugin_path = os.path.join(os.path.dirname(os.path.abspath(module_file)), "hooks", plugin_name)
+    module_dir = os.path.dirname(os.path.abspath(module_file))
+    if os.path.basename(module_dir) == "lib":
+        module_dir = os.path.dirname(module_dir)
+    plugin_path = os.path.join(module_dir, "hooks", plugin_name)
     return plugin_path if os.path.isfile(plugin_path) else ""
 
 

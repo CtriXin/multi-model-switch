@@ -18,14 +18,16 @@ RUNNER=ROOT/'tests/fixtures/mms_web/update_runner.py'
 def copy_candidate(destination, *, broken=False):
     destination.mkdir(parents=True)
     files=set(subprocess.check_output(['git','ls-files'],cwd=ROOT,text=True).splitlines())
-    files.update(str(p.relative_to(ROOT)) for p in ROOT.glob('*.py'))  # new top-level modules not yet tracked
+    files.update(str(p.relative_to(ROOT)) for p in ROOT.glob('*.py'))
+    files.update(str(p.relative_to(ROOT)) for p in (ROOT/'lib').glob('*.py'))
     files.update(str(p.relative_to(ROOT)) for p in (ROOT/'mms_web').rglob('*.py'))
     files.update(str(p.relative_to(ROOT)) for p in (ROOT/'mms_web_static').rglob('*') if p.is_file())
     for name in files:
         source=ROOT/name
         if source.is_file() and not source.is_symlink():
             target=destination/name;target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(source,target)
-    (destination/'mms_version.py').write_text('VERSION = "99.0.0"\n')
+    (destination/'lib').mkdir(parents=True, exist_ok=True)
+    (destination/'lib'/'mms_version.py').write_text('VERSION = "99.0.0"\n')
     manifest=destination/'mms_web_static/build.json';value=json.loads(manifest.read_text());value['version']='99.0.0';manifest.write_text(json.dumps(value))
     if broken:(destination/'mms_web/__main__.py').write_text('raise RuntimeError("fixture startup failure")\n')
 

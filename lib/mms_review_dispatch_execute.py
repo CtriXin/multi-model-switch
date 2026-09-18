@@ -12,6 +12,9 @@ import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+def _mms_install_root():
+    here = Path(__file__).resolve().parent
+    return here.parent if here.name == "lib" else here
 from typing import Any
 
 
@@ -46,10 +49,10 @@ def _review_hub_prompt(request_root: Path) -> str:
 
 
 def _load_opencode_smoke_helper():
-    helper = Path(__file__).resolve().parent.parent / "scripts" / "smoke_opencode_profile.py"
+    helper = _mms_install_root() / "scripts" / "smoke_opencode_profile.py"
     if not helper.exists():
         raise FileNotFoundError(f"missing OpenCode profile helper: {helper}")
-    root = Path(__file__).resolve().parent.parent
+    root = _mms_install_root()
     for path in (root, root / "scripts"):
         path_text = str(path)
         if path_text not in sys.path:
