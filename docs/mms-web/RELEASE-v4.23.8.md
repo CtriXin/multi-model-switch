@@ -11,3 +11,5 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 ```
 
 缺少 lib/ 时，入口会显示重新安装引导并退出；新旧布局混用时，Pilot 更新中心会要求重新安装。安装不要求迁移模型、通道或 API Key，不以全局账号作为回退。
+
+- 升级准备与落盘阶段都会拒绝缺少 `lib/` 的旧发布包，防止跨线更新或缓存旧 Preview 包形成混合安装；拒绝发生在停止会话与切换安装之前。
