@@ -1,0 +1,33 @@
+{
+  "counts": {
+    "prs": 198,
+    "states": {
+      "MERGED": 176,
+      "CLOSED": 17,
+      "OPEN": 5
+    },
+    "merges": 221,
+    "commits": 702,
+    "unattributed": 51
+  },
+  "categoryCountsNonExclusive": {
+    "P": 85,
+    "D": 79,
+    "R": 57,
+    "C": 65,
+    "T": 108,
+    "H": 70
+  },
+  "coverage": {
+    "allPrsClassified": true,
+    "allMergesIndexed": true,
+    "allUnattributedClassified": true
+  },
+  "limits": [
+    "未安装或运行DSH",
+    "未进行逐行安全审计",
+    "未重演全部merge",
+    "未验证手机/Windows/重启/同事机器迁移",
+    "不是删除或迁移授权"
+  ]
+}
