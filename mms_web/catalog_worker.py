@@ -31,8 +31,11 @@ import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
+_LIB = _REPO_ROOT / "lib"
+if str(_LIB) not in sys.path:
+    sys.path.insert(0, str(_LIB))
 if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
+    sys.path.append(str(_REPO_ROOT))
 
 try:
     from .file_lock import LOCK_EX, LOCK_NB, LOCK_SH, LOCK_UN, flock

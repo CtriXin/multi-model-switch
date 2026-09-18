@@ -30,7 +30,7 @@ KNOWN_BAD_PATTERNS = {
 def test_no_known_bad_stable_root_fallback_patterns() -> None:
     hits: list[str] = []
     for relative_path, patterns in KNOWN_BAD_PATTERNS.items():
-        text = (ROOT / relative_path).read_text(encoding="utf-8")
+        text = (ROOT / "lib" / relative_path).read_text(encoding="utf-8")
         for pattern in patterns:
             if pattern in text:
                 hits.append(f"{relative_path}: {pattern}")

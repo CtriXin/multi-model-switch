@@ -20,6 +20,9 @@ import time
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
+def _mms_install_root():
+    here = Path(__file__).resolve().parent
+    return here.parent if here.name == "lib" else here
 from typing import Any
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -1467,7 +1470,7 @@ def _load_capability_truth_payloads(config_path: str = "", *, refresh_sources: b
             payload["_source_path"] = str(path)
             payloads.append(payload)
 
-    reference_dir = Path(__file__).resolve().parent / "docs" / "reference" / "model-capability-calibration"
+    reference_dir = _mms_install_root() / "docs" / "reference" / "model-capability-calibration"
     for path in sorted(reference_dir.glob("*.json")):
         payload = _load_json_file(str(path))
         if payload:
@@ -1484,7 +1487,7 @@ def _mmf_official_overrides_payload(
 ) -> dict[str, Any]:
     """Build a draft-only capability payload from MMS-maintained provider profiles."""
     checked = _now_iso()
-    source = source_path or str(Path(__file__).resolve().parent / "config" / "provider-profiles.json")
+    source = source_path or str(_mms_install_root() / "config" / "provider-profiles.json")
     rows: list[dict[str, Any]] = []
     try:
         from mms_capability_resolver import resolve_model_capabilities

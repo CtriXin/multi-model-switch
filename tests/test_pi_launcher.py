@@ -2360,10 +2360,10 @@ def _pilot_worker_argv(tmp_path, monkeypatch, runtime):
     }
     env.update(
         {
-            "PYTHONPATH": os.pathsep.join([str(stub_dir), str(ROOT_DIR)]),
+            "PYTHONPATH": os.pathsep.join([str(stub_dir), str(ROOT_DIR / "lib"), str(ROOT_DIR)]),
             "MMS_CONFIG_ROOT": str(root),
             "MMS_REAL_HOME": str(tmp_path / "real-home"),
-            "MMS_PI_BTW_REAL_LAUNCHERS": str(ROOT_DIR / "mms_launchers.py"),
+            "MMS_PI_BTW_REAL_LAUNCHERS": str(ROOT_DIR / "lib" / "mms_launchers.py"),
             "MMS_PI_BTW_CAPTURE": str(capture),
         }
     )

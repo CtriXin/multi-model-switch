@@ -3,7 +3,22 @@
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+LIB_DIR = REPO_ROOT / "lib"
+
+
+def mms_pythonpath(*extra: str | Path) -> str:
+    parts = [str(LIB_DIR), str(REPO_ROOT), *[str(item) for item in extra]]
+    return os.pathsep.join(parts)
+
+
+_lib = str(LIB_DIR)
+if _lib not in sys.path:
+    sys.path.insert(0, _lib)
 
 
 def _truthy(value: str | None) -> bool:

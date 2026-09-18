@@ -9,6 +9,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
+def _mms_install_root(module_path=None):
+    module_dir = os.path.dirname(os.path.abspath(module_path or __file__))
+    if os.path.basename(module_dir) == "lib":
+        return os.path.dirname(module_dir)
+    return module_dir
 import shutil
 import subprocess
 import sys
@@ -22,7 +27,7 @@ from urllib.request import urlopen
 from mms_state_io import resolve_mms_config_dir
 
 
-_ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+_ROOT_DIR = _mms_install_root()
 
 
 def _default_broker_repo() -> str:

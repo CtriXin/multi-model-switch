@@ -409,7 +409,7 @@ def test_dev_channel_defaults_to_dev_branch():
 
 def test_install_script_uses_npm_first_cli_installs():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
-    installer_text = (ROOT_DIR / "mms_installer.py").read_text(encoding="utf-8")
+    installer_text = (ROOT_DIR / "lib" / "mms_installer.py").read_text(encoding="utf-8")
 
     assert "install_named_cli()" in text
     assert "npm_global_install_with_nvm_fallback" in text
@@ -428,7 +428,7 @@ def test_repo_entrypoints_use_env_python():
 
 def test_node22_setup_does_not_override_nvm_default():
     install_text = INSTALL_SCRIPT.read_text(encoding="utf-8")
-    installer_text = (ROOT_DIR / "mms_installer.py").read_text(encoding="utf-8")
+    installer_text = (ROOT_DIR / "lib" / "mms_installer.py").read_text(encoding="utf-8")
 
     assert "nvm alias default" not in install_text
     assert "nvm alias default" not in installer_text

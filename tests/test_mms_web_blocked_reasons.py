@@ -111,7 +111,8 @@ def two_channel_settings(tmp_path, monkeypatch):
     code = ('import json,sys; import mms_config_web as w; p=json.load(sys.stdin); '
             'r=w.apply_registry_v2_preview_plan({},p,config_path=sys.argv[1]); '
             'print(json.dumps({"ok":r.get("ok"),"errors":r.get("errors")}))')
-    env = {"PATH": os.environ["PATH"], "HOME": str(home), "MMS_CONFIG_ROOT": str(root), "MMS_PREVIEW_MODE": "1"}
+    env = {"PATH": os.environ["PATH"], "HOME": str(home), "MMS_CONFIG_ROOT": str(root), "MMS_PREVIEW_MODE": "1",
+           "PYTHONPATH": os.pathsep.join([str(REPO / "lib"), str(REPO)])}
     result = subprocess.run([sys.executable, "-c", code, str(root / "config.toml")],
                             input=json.dumps(payload), capture_output=True, text=True, cwd=REPO, env=env)
     assert json.loads(result.stdout.splitlines()[-1])["ok"], result.stdout[-600:]

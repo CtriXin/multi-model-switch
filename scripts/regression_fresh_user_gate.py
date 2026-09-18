@@ -29,8 +29,8 @@ from pathlib import Path
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
+sys.path.insert(0, str(ROOT_DIR))
+sys.path.insert(0, str(ROOT_DIR / "lib"))
 
 _SCRUB_ENV_KEYS = {
     "MMS_CONFIG_ROOT",
@@ -56,11 +56,11 @@ _SCRUB_ENV_KEYS = {
 _PY_COMPILE_TARGETS = [
     "mms",
     "mmf",
-    "mms_core.py",
-    "mms_launchers.py",
-    "mms_session_index.py",
-    "mms_state_io.py",
-    "mms_config_web.py",
+    "lib/mms_core.py",
+    "lib/mms_launchers.py",
+    "lib/mms_session_index.py",
+    "lib/mms_state_io.py",
+    "lib/mms_config_web.py",
 ]
 
 _PYTEST_TARGETS = [
@@ -215,7 +215,7 @@ def _base_env() -> dict[str, str]:
     for key in _SCRUB_ENV_KEYS:
         env.pop(key, None)
     env["MMS_TEST_ALLOW_REAL_CONFIG"] = "0"
-    env["PYTHONPATH"] = str(ROOT_DIR)
+    env["PYTHONPATH"] = os.pathsep.join([str(ROOT_DIR / "lib"), str(ROOT_DIR)])
     return env
 
 
@@ -564,7 +564,8 @@ _CHANNEL_SWITCH_WRITE_PROBE = """
 import json, sys
 from pathlib import Path
 
-sys.path.insert(0, sys.argv[1])  # the newer line's tree; cwd would win otherwise
+sys.path.insert(0, sys.argv[1])
+sys.path.insert(0, __import__("os").path.join(sys.argv[1], "lib"))
 state_root = Path(sys.argv[2])
 from mms_version import VERSION
 from mms_web.bots import BotRuntime
@@ -597,7 +598,8 @@ _CHANNEL_SWITCH_VERIFY_PROBE = """
 import json, sys
 from pathlib import Path
 
-sys.path.insert(0, sys.argv[1])  # the newer line's tree; cwd would win otherwise
+sys.path.insert(0, sys.argv[1])
+sys.path.insert(0, __import__("os").path.join(sys.argv[1], "lib"))
 state_root = Path(sys.argv[2])
 expected = json.loads(sys.argv[3])
 from mms_web.bots import BotRuntime
@@ -638,10 +640,13 @@ print(json.dumps({"bots": len(bots), "schedules": len(schedules), "schema": raw[
 
 
 def _version_of(tree: Path) -> str:
-    text = (tree / "mms_version.py").read_text(encoding="utf-8")
-    for line in text.splitlines():
-        if line.startswith("VERSION = "):
-            return line.split('"')[1]
+    for candidate in (tree / "lib" / "mms_version.py", tree / "mms_version.py"):
+        if not candidate.is_file():
+            continue
+        text = candidate.read_text(encoding="utf-8")
+        for line in text.splitlines():
+            if line.startswith("VERSION = "):
+                return line.split('"')[1]
     raise SystemExit(f"cannot read VERSION from {tree}")
 
 
@@ -732,7 +737,7 @@ def _smoke_channel_switch_round_trip() -> None:
             stable_tree, newer_tree, newer_version = peer_tree, ROOT_DIR, current_version
         print(f"[gate] channel switch: stable line {_version_of(stable_tree)}, newer line {newer_version}", flush=True)
         newer_env = _env_for_home(home)
-        newer_env["PYTHONPATH"] = str(newer_tree)
+        newer_env["PYTHONPATH"] = os.pathsep.join([str(Path(newer_tree) / "lib"), str(newer_tree)])
 
         state_root = base / "state"
         config_root = base / "config"
@@ -771,7 +776,7 @@ def _smoke_channel_switch_round_trip() -> None:
         # Downgrade: the 4.x line boots a real server on that state root.
         port = _free_port()
         server_env = _env_for_home(home)
-        server_env["PYTHONPATH"] = str(stable_tree)
+        server_env["PYTHONPATH"] = os.pathsep.join([str(Path(stable_tree) / "lib"), str(stable_tree)])
         # Keep the background release check off the network so the cached tag
         # stays exactly what the newer line left behind.
         server_env["MMS_WEB_UPDATE_CHECK"] = "0"

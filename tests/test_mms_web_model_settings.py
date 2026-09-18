@@ -31,7 +31,8 @@ def settings(tmp_path, monkeypatch):
          "fallback_models": ["gpt-5", "gpt-4.1"], "models": [{"id": "gpt-5", "capability_touched": True, "capabilities": {"reasoning_effort": "low", "reasoning": True, "thinking": True}}]}
         for pid in ("channel-a", "channel-b")], "provider_default": "channel-a"}, "confirm_v2_preview": True, "confirm_phrase": "写入预览DB"}
     code = 'import json,sys; import mms_config_web as w; p=json.load(sys.stdin); r=w.apply_registry_v2_preview_plan({},p,config_path=sys.argv[1]); print(json.dumps({"ok":r.get("ok"),"status":r.get("status"),"errors":r.get("errors")}))'
-    env = {"PATH": os.environ["PATH"], "HOME": str(home), "MMS_CONFIG_ROOT": str(root), "MMS_PREVIEW_MODE": "1"}
+    env = {"PATH": os.environ["PATH"], "HOME": str(home), "MMS_CONFIG_ROOT": str(root), "MMS_PREVIEW_MODE": "1",
+           "PYTHONPATH": os.pathsep.join([str(REPO / "lib"), str(REPO)])}
     result = subprocess.run([sys.executable, "-c", code, str(root / "config.toml")], input=json.dumps(payload), capture_output=True, text=True, cwd=REPO, env=env)
     assert json.loads(result.stdout.splitlines()[-1])["ok"], result.stdout[-600:]
     service = ModelSettings(CatalogService(config_root=root, state_root=tmp_path / "state"))

@@ -71,6 +71,9 @@ _FAMILY_RULES = (
 
 
 def _ensure_repo_on_path() -> None:
+    lib = str(_REPO_ROOT / "lib")
+    if lib not in sys.path:
+        sys.path.insert(0, lib)
     if str(_REPO_ROOT) not in sys.path:
         sys.path.append(str(_REPO_ROOT))
 

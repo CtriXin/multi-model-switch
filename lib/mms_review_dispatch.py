@@ -13,6 +13,9 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+def _mms_install_root():
+    here = Path(__file__).resolve().parent
+    return here.parent if here.name == "lib" else here
 from typing import Any
 
 from mms_review_dispatch_execute import (
@@ -621,8 +624,12 @@ def _build_worker_plan_args(request_root: Path, models: list[str], runner: str, 
 
 def _mms_script_path(command_name: str = "mms") -> Path:
     name = str(command_name or "mms").strip() or "mms"
-    candidate = Path(__file__).resolve().with_name(Path(name).name)
-    return candidate if candidate.exists() else Path(__file__).resolve().with_name("mms")
+    here = Path(__file__).resolve()
+    candidate = here.with_name(Path(name).name)
+    if candidate.exists():
+        return candidate
+    install_root = here.parent.parent if here.parent.name == "lib" else here.parent
+    return install_root / Path(name).name
 
 
 def _opencode_launch_command(

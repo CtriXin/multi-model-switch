@@ -148,3 +148,51 @@ def test_selected_release_classification_is_frozen_before_background_work(tmp_pa
     coordinator.start({'target': 'v99.0.0'})
     coordinator._thread.join(2)
     assert coordinator.status()['prerelease'] is True
+
+
+def test_real_stage_rejects_flat_preview_before_probe_or_cutover(tmp_path):
+    import hashlib
+    import io
+    import json
+    import tarfile
+    from functools import partial
+    from mms_web.update_stage import stage_release
+
+    archive = tmp_path / "flat-preview.tar.gz"
+    files = {
+        "mms_core.py": b"# old flat runtime",
+        "mms_version.py": b'VERSION = "99.0.0"',
+        "mms_web/update_handoff.py": b"PROTOCOL = 1",
+        "mms_web_static/index.html": b"valid old bundle",
+    }
+    files["mms_web_static/build.json"] = json.dumps({
+        "version": "99.0.0",
+        "files": {"index.html": hashlib.sha256(files["mms_web_static/index.html"]).hexdigest()},
+    }).encode()
+    with tarfile.open(archive, "w:gz") as tar:
+        for name, data in files.items():
+            item = tarfile.TarInfo("release/" + name)
+            item.size = len(data)
+            tar.addfile(item, io.BytesIO(data))
+    def downloader(tag, destination):
+        destination.write_bytes(archive.read_bytes())
+    probe = Mock(side_effect=AssertionError("flat candidate must never execute"))
+    stager = partial(stage_release, downloader=downloader, probe=probe)
+    app, coordinator = setup(tmp_path, stager)
+    coordinator._cutover = Mock()
+    sentinel = app.state_root / "session-sentinel"
+    sentinel.write_text("keep original session")
+    with patch("mms_web.update_coordinator.backup_state") as backup, patch("mms_web.update_coordinator.close_idle_sessions") as close:
+        coordinator.start({"target": "v99.0.0"})
+        coordinator._thread.join(5)
+        assert not coordinator._thread.is_alive()
+        assert coordinator.status()["phase"] == "error"
+        assert "lib/" in coordinator.status()["message"]
+        assert "安装器" in coordinator.status()["message"]
+        probe.assert_not_called()
+        backup.assert_not_called()
+        close.assert_not_called()
+    coordinator._cutover.assert_not_called()
+    coordinator.server.shutdown.assert_not_called()
+    assert not app.maintenance
+    assert sentinel.read_text() == "keep original session"

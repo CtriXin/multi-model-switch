@@ -1,4 +1,9 @@
 #!/bin/bash
+_MMS_ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+if [ ! -f "$_MMS_ROOT/lib/mms_core.py" ]; then
+  echo "MMS: 需要重新安装"
+  exit 1
+fi
 input=$(cat)
 
 _jq() { echo "$input" | jq -r "$1" 2>/dev/null; }

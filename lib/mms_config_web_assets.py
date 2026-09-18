@@ -8,9 +8,12 @@ logic. This module only resolves those files for the Python HTTP server.
 from __future__ import annotations
 
 from pathlib import Path
+def _mms_install_root():
+    here = Path(__file__).resolve().parent
+    return here.parent if here.name == "lib" else here
 
 
-_STATIC_DIR = Path(__file__).resolve().with_name("mms_config_web_static")
+_STATIC_DIR = _mms_install_root() / "mms_config_web_static"
 _ASSET_TYPES = {
     "index.html": "text/html; charset=utf-8",
     "config-web.css": "text/css; charset=utf-8",

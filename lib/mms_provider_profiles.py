@@ -9,12 +9,17 @@ from __future__ import annotations
 import copy
 import json
 import os
+def _mms_install_root(module_path=None):
+    module_dir = os.path.dirname(os.path.abspath(module_path or __file__))
+    if os.path.basename(module_dir) == "lib":
+        return os.path.dirname(module_dir)
+    return module_dir
 from functools import lru_cache
 from typing import Any
 
 from mms_state_io import mms_config_root_mode, resolve_mms_config_dir
 
-_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+_REPO_ROOT = _mms_install_root()
 _BUILTIN_PROFILE_PATH = os.path.join(_REPO_ROOT, "config", "provider-profiles.json")
 _USER_PROFILE_BASENAMES = (
     "provider-profiles.json",
