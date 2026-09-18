@@ -2,6 +2,8 @@
 
 This file is the shared rule source for Codex, Claude, and other coding agents in this repository. Tool-specific entry files should import this file instead of duplicating the same rules.
 
+**First time in this repository? Read [`docs/AI-ONBOARDING.md`](docs/AI-ONBOARDING.md) before this file.** It covers what the product is, the two release lines and which one your change belongs to, the code map, how to run the gates, and the mistakes this project has already made. This file tells you what you may not do; that one tells you what this is.
+
 ## Default Language
 
 - Always respond in Simplified Chinese.

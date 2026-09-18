@@ -1,421 +1,164 @@
 # Multi-Model Switch (MMS)
 
-> **MMS Pilot is the local Web client for MMS, bundled with the release since v4.** Run `mms web --open` after installing. Sessions still run through the original MMS launch chain into Pi on your own machine; the browser is only the interaction surface. [Install and use](docs/mms-web/GETTING-STARTED.md) · [Features and limits](docs/mms-web/FEATURES.md) · [First release](docs/mms-web/RELEASE-v4.0.0.md) · [Product direction](docs/mms-web/NEXT-PHASE.md). Every existing CLI launcher remains available.
+[简体中文](./README.md) · [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
+**MMS runs AI coding tools on your own machine, against your own model services.**
 
-[简体中文 README](./README.md)
+It handles the annoying part that happens before anything starts. You have several providers, a pile of API keys, dozens of model names, separate config for `claude` and `codex` and `opencode`, and a nagging worry that one failure will quietly fall back to your real global account. MMS puts all of that in one place so you can see, before launching, which model you are using, which route it takes, and whose quota it spends.
 
-[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-
-> A launcher-first runtime manager for local AI coding CLIs. Use one entrypoint to choose models, providers, session packs, and isolated Claude/Codex homes without turning your real global account state into a fallback pool.
+After installing you get two entry points: **MMS Pilot** (a workbench in your browser, where day-to-day work happens) and the **`mms` command line** (launching the native CLIs). Both read the same configuration.
 
 ![MMS launcher tree](docs/images/mms-launcher-tree-en.svg)
 
-## What MMS Does
+---
 
-MMS is not another chat client. It is the local control plane in front of tools such as `claude`, `codex`, `opencode`, and `agy`; Qwen/Kimi/Gemini remain provider models, not standalone CLI launchers.
+## Install
 
-Scope note: MMS is intentionally launcher-first. MMS Pilot is its visual entry point. Legacy or helper surfaces such as `chat`, `discuss`, and high-context review helpers are maintenance-only unless they directly support launcher/session validation. Long-running planning, execution, compaction policy, and run authority should live in Moebius, Pilot, Ant, or addons instead of expanding MMS.
-
-It helps you:
-
-- start the right CLI from one TUI or command line
-- choose providers and OAuth/account profiles explicitly
-- keep Claude/Codex session state isolated and resumable
-- bridge compatible model providers while preserving protocol semantics
-- inject session-scoped skills and hooks without editing global config
-- diagnose provider, route, cache, and exposed runtime state before blaming a model
-
-## MMS Pilot
-
-**The Web client is named MMS Pilot.** The commands are unchanged: `mms web`, the standalone `mms-web`, and on macOS `~/.mms/MMS Pilot.command`. The older `MMS Web.command` is removed on upgrade so `~/.mms` does not end up with two identical launchers.
-
-MMS Pilot and `mmf config web` are different pages:
-
-| | How to open | What it is for |
-|---|---|---|
-| MMS Pilot | `mms web --open` | Daily work: sessions, model and channel selection, working folders, execution and output |
-| Config Web UI | `mmf config web` | Configuration: add channels, fetch model lists, hide noisy models, preview and publish a save plan |
-
-Pilot's harness is Pi. Claude, Codex, OpenCode and agy still launch from the MMS CLI and are not yet Pilot sessions.
-
-What 4.x has accumulated:
-
-- **Sessions**: continuous conversation, resume, stop, fork, archive, export, and model/channel switching that keeps context.
-- **Model capabilities**: per-model default effort, context length and image support, each labelled with where the current value came from, with a one-click fill-back to the MMF catalogue value when the two disagree.
-- **Workspaces**: reorder, rename and remove working folders from the sidebar; per-session copy id, rename, fork, export and archive.
-- **Artifacts and materials**: preview and compare recorded output, manage project materials, and record the context sources actually submitted each turn.
-- **Appearance**: settings as a dialog; theme can follow the system; accent, interface/mono/CJK fonts and font size apply live, and only fonts actually installed on the machine are offered.
-
-Limits: it listens on the loopback address only, there is no remote multi-user authentication, and config isolation is not a filesystem sandbox. To give someone else access, have them install on their own machine with their own model services.
-
-## Two Release Lines
-
-Since 2026-09-16, `main` and `dev` are **two long-lived release lines** that no
-longer chase each other:
-
-| Line | Branch | Version | Install | Who it is for | What is in it |
-|---|---|---|---|---|---|
-| Stable | `main` | 4.22.x | `--channel stable` (default) | Anyone using this as a daily tool | Settled features only: fixes and capabilities that have been verified |
-| Preview | `dev` | 5.x | `--channel dev` | People who want new things and can take some churn | Everything in stable, plus the Bot workbench that is still being shaped |
-| Canary | `canary` | follows `canary` | `--channel canary` | Verifying one specific fix | Small, frequent commits; allowed to break briefly |
-
-Changes flow one way: **every change on `main` goes into `dev` by default, and
-capabilities that settle on `dev` are periodically back-ported to `main`.** The
-preview line is therefore always a superset of the stable line.
-
-The two lines **cannot coexist on one machine**. To switch, re-run the installer
-with the other `--channel`; config, channels and session history all live in the
-same config root (`~/.config/mms-next`) and are not cleared by switching.
-
-> **How to switch**: Pilot's "Version and updates" dialog selects `4.x stable`
-> or `5.x preview` and checks for versions newer than the installed version.
-> Each channel caches its checks separately. Selecting stable while running
-> 5.x does not downgrade to 4.x; rerun the installer with `--channel stable`
-> to switch back, preserving config and history.
-
-Patch `z` is channel-local. A single-commit release increments `z` once; a composite release covering multiple validated commits also increments `z` once.
-
-See [Release channels](docs/RELEASE_CHANNELS.md) for the channel contract.
-
-Daily development branch: `dev`.
-
-## Maintainer Development Entry
-
-Maintainers should enter MMS from the repository root, and that root checkout should be on `dev`, clean, and current. `.worktrees/*` is reserved for isolated issue/PR work; `.worktrees/dev` must not be used as the shared default development entry.
-
-Standard loop:
-
-1. Enter the repository root and confirm the branch is `dev`.
-2. Run `git pull --ff-only` so `dev` is current and clean.
-3. Open an issue first, and record the plan in the issue or a linked plan document.
-4. Create an isolated worktree/branch from current `dev`, for example `.worktrees/issue-14-redline-gate`.
-5. Develop, validate, commit, and push inside that isolated worktree.
-6. Open a PR targeting `dev` for committee review.
-7. Merge only after committee/human approval, then fast-forward the root `dev` checkout before the next task.
-
-Unless the human explicitly asks for direct edits in the shared `dev` entry, agents must not stack substantive work or leave untracked files there. Docs-only plan/report changes may be committed by default when the user asks to record, submit, or produce the document, but the commit must stage only the target document and no unrelated dirty files.
-
-Key changes in this generation:
-
-- Codex primary/rescue fallback now retries prompt-cache-sensitive GLM/DeepSeek/Qwen-compatible routes over Anthropic `/v1/messages` when a gateway rejects `/v1/chat/completions`
-- provider profiles for OpenAI, Qwen/DashScope, MiMo, MiniMax, DeepSeek, Kimi Code, and GLM/Z.ai
-- profile-driven auth/body/thinking/effort patching across bridge and dispatch paths
-- Claude resume persistence through `.claude/projects`
-- Claude-on-MMS vision sidecar: text-only domestic models fail closed or delegate screenshots/images to a configured Kimi/MiMo/Qwen-compatible sidecar instead of stalling
-- Codex resume write-back across isolated MMS-managed launches
-- OpenCode modes: `Agent`, `Review`, `OMO`, and `Raw` with repo-local health feedback
-- OpenCode Agent contract lane: `mobius-spec-writer` writes an OpenSpec/SpecBridge-style task contract, and `mobius-spec-compliance-reviewer` checks diff + validation against it before release-gate review
-- OpenCode Agent work split: GPT handles coordination, specs, implementation/fix work, and final review; DeepSeek/MiMo/Qwen/GLM/Kimi default to lightweight read-only exploration, bug-hunt, vision, and context checks
-- OpenCode Agent mixed routes: GPT via OpenAI-compatible Responses/Chat, direct MiMo via OpenAI-compatible `/v1`, other domestic models via Anthropic `/v1/messages`
-- OpenCode bypass is enabled by default through permission `allow`; subagent `ask` permissions are auto-approved while explicit `deny` boundaries stay intact, and optional `opencode run` preflight uses `--dangerously-skip-permissions`
-- model fallback order: same-model second channel, same-role peer, then stable GPT fallback
-- runtime discovery across PATH, Homebrew, and all NVM Node versions without changing default Node
-- real-home compatibility wrappers for Keychain/Chrome/global CLIs inside isolated sessions
-- installer-managed Python virtualenv plus MMS-managed Python fallback when system Python is missing or too old
-- bundled session assets include `TOON`, `grill-me`, and the Web automation bundle (`weber` router with `web-access` and `agent-browser` backends); Claude/Codex/OpenCode/Antigravity injection stays session-local
-- quiet hook policy: MMS-managed Claude/Codex sessions avoid default SessionStart/UserPrompt probes; remaining hooks are guard, closeout, or explicitly enabled pack hooks
-- session MCP hardening resolves inherited Claude MCP commands to real-HOME absolute CLIs or drops missing ones, and also surfaces URL-based MCP servers from installed Claude plugins (for example Figma); for Codex, app-backed integrations already enabled in real `~/.codex/config.toml` win over duplicate inherited URL MCP entries so MMS does not create a second broken OAuth path
-- optional BrainKeeper context pack installs MCP, Claude commands/hooks, and `bk` / `brainkeeper` wrappers without requiring Xcode/git
-- optional MMS-managed ECC/OMC Claude agent-pack installer flow
-
-xmem is global-only: MMS / MMF no longer bundles, installs, or injects xmem skills, hooks, or OpenCode plugins. If a global agent skill or hook provides xmem, that global version wins so dev-channel copies cannot shadow it with an older bundled copy.
-
-## Install Or Upgrade
-
-The main README is Chinese-first. English users can still install with the same three explicit channels. The channel contract is frozen unless a human explicitly changes the release/channel policy:
-
-- `Stable == main` — the 4.22.x line
-- `Dev == dev branch == MMF/mmf` — the 5.x preview line
-- `Canary == canary branch == MMG/mmg`
-
-### Stable: recommended for normal users
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel stable --write-shell-rc
-```
-
-### Dev: recommended for the maintainer's own work machines
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel dev --write-shell-rc
-```
-
-### Canary: only for test machines or experimental sessions
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel canary --write-shell-rc
-```
-
-Exact pin when needed:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref v4.22.2
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref main
-```
-
-Channel behavior:
-
-- `stable` is the default channel and tracks `main`, the 4.22.x line.
-- `dev` follows the `dev` branch for daily work and should remain development-stable.
-- `canary` follows the `canary` branch for daily experiments; use frequent small commits so rollback stays easy.
-- Maintainer-local commands are generated by `scripts/link_local_channel_commands.sh`: `mms` is the public installed copy, `mmf` points to the dev worktree, and `mmg` points to the canary worktree. All three use the single `~/.config/mms-next` config root. Update reminders are notify-first, and manual updates only allow clean fast-forward worktrees.
-
-Fresh-machine install with optional CLI bootstrap:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel dev --install-cli claude,codex,opencode --write-shell-rc --lang en
-```
-
-After install:
-
-```bash
-mms doctor
-mms models
-mmf config web
-```
-
-Note: `mmf config web` is retained as a maintenance entrypoint. For daily work, use `mms web --open` (Pilot).
-
-See also: [MMS Pilot getting started](docs/mms-web/GETTING-STARTED.md), [Release channels](docs/RELEASE_CHANNELS.md) and [Config Web UI quickstart](docs/WEB_UI_QUICKSTART.md).
-
-## Config root
-
-MMS, MMF and Pilot share one configuration root: `~/.config/mms-next`. The
-approved model bundle, channels, policies and session indexes are read from this
-root, while credentials and runtime state remain isolated inside its dedicated
-subdirectories. The retired `~/.config/mms` tree is not used as a fallback.
-
-Inspect the active root and validate the bundle with:
-
-```bash
-mmf config root --json
-mmf config check --json
-mmf config bundle --json
-```
-
-## Quick Start
-
-Open MMS Pilot:
-
-```bash
-mms web --open
-```
-
-Interactive launch:
-
-```bash
-mms
-```
-
-Direct CLI launch:
-
-```bash
-mms claude
-mms codex
-mms opencode
-mms opencode --profile agent
-mms opencode --profile review
-mms opencode --profile omo
-mms opencode --profile raw
-mms --provider <provider-id> codex
-mms --provider <provider-id> opencode
-mms --account <account-id> claude
-```
-
-For OpenCode Review, prefer the `mms` TUI: choose `OpenCode` -> `Review`, Space-select reviewer models, then Enter to launch and remember the selection under `[opencode.review].models`. `--review-models` remains available for scripts and advanced users.
-
-Export environment variables instead of launching:
-
-```bash
-mms --export codex
-mms --export opencode
-mms --export claude --apply
-```
-
-Inspect routes and health:
-
-```bash
-mms models
-mms routes
-mms doctor
-mms test --provider <id> --cli claude
-mms exposure
-mms logs
-```
-
-## Mental Model
-
-```text
-MMS
-├── Entry
-│   ├── mms TUI
-│   ├── mms claude / mms codex / mms opencode / mms agy
-│   └── export / presets
-├── Decision
-│   ├── provider profiles
-│   ├── role + priority routing
-│   └── doctor / test / trace diagnostics
-├── Runtime Isolation
-│   ├── Claude: session HOME + .claude/projects resume
-│   ├── Codex: bounded .codex seed + write-back
-│   ├── OpenCode: real HOME + session-local XDG/config
-│   └── bridge: local protocol adapters when needed
-└── Session Packs
-    ├── TOON / grill-me
-    ├── Web automation bundle
-    └── OMC / ECC / Pilot
-```
-
-The diagram source lives in:
-
-- `docs/images/mms-launcher-tree.mmd`
-- `docs/images/mms-launcher-tree-outline.md`
-- `docs/images/mms-launcher-tree.html`
-
-## Runtime Safety Rules
-
-MMS tries to fail closed inside the selected runtime.
-
-- Real `HOME` and global OAuth state are protected surfaces, not fallback pools.
-- A failed provider/account should not silently become another global account.
-- Claude semantics prefer `Anthropic /v1/messages` when a route supports it.
-- `OpenAI /v1/chat/completions` is fallback transport, not an invisible equivalent.
-- GUI/Keychain/browser launches from isolated sessions go through real-home wrappers; OpenCode keeps config/state session-local with real `HOME`.
-- Background helpers do not read macOS Keychain unless `MMS_STATUSLINE_KEYCHAIN_USAGE=1`, `MMS_ALLOW_KEYCHAIN_READ=1`, or `mms usage --keychain` is explicitly used.
-- Session packs are injected into the isolated session; they are not global default hooks.
-- Resume data is bounded and scoped so startup stays usable and account state stays isolated.
-
-Operational details:
-
-- [Provider profiles](./docs/PROVIDER_PROFILES.md)
-- [User preferences](./docs/MMS_USER_PREFERENCES.md)
-- [Claude cache / protocol runbook](./docs/SERVER_CLAUDE_CACHE_RUNBOOK.md)
-- [Agent guardrails](./docs/AGENT_GUARDRAILS.md)
-- [CLI/provider compatibility QA](./docs/CLI_PROVIDER_COMPAT_QA.md)
-
-## Provider Profiles
-
-Provider-specific behavior belongs in data, not in one-off launcher branches.
-
-`config/provider-profiles.json` records:
-
-- OpenAI-compatible and Anthropic-compatible endpoints
-- auth header expectations
-- Thinking / Effort request fields
-- provider-specific body patches
-- provider-specific parameter aliases
-- context window metadata
-- reference URLs for future verification
-
-Registry v2 is the preferred path for local changes: TUI / `mms config` / WebUI
-creates DB candidates, then publishes a verified
-`generated/model-registry.latest-approved.json` bundle. When that manifest is
-present, the generated Profile it references is the runtime boundary.
-
-Legacy user overlays can still live in the MMS config directory as manual
-import/export compatibility inputs. MMS should not mutate your real
-`config.toml` just because a model was probed.
-
-## User Preferences
-
-Use `~/.config/mms-next/preferences.toml` for install-safe daily launch preferences:
-
-- `thinking_mode` / `reasoning_effort`
-- `bypass`, `nsr_mode`, `agent_pack`
-- disabled session `skills` / `mcp` / `hooks`
-- custom bundled asset roots such as `web_access`, `nsr`, `ecc`, `omc`
-
-LLMs can discover the safe schema with `mms config preferences.help` or `mms config preferences.example`. Agents may inspect and propose edits, but must not auto-write this real config without human confirmation.
-
-## Session Packs
-
-MMS can expose capabilities per session without writing global hooks/config.
-
-| Pack | Install state | Purpose |
-| --- | --- | --- |
-| `TOON` / `grill-me` | bundled session assets | structured handoffs and guided questioning |
-| Web automation bundle | bundled session assets | `weber` routes the task, with `web-access` for logged-in Chrome and `agent-browser` for headless flows |
-| `NSR` | built-in channel payload, default hook injection | session-local Stop hook for Claude/Codex; installer also adds `/nsr` commands; `/nsr` enables the loop |
-| `ECC` | MMS-managed pack, no longer installed by the installer | Claude engineering workflow / rules / quality hooks |
-| `OMC` | MMS-managed pack, no longer installed by the installer | Claude orchestration runtime / team / verify loop |
-| `Pilot` / `Figma` / `auto-github-contributor` | detected when installed | optional MCP/contribution surfaces; Pilot and Figma MCP stay disabled unless explicitly enabled with `MMS_ENABLE_MCP_PILOT=1` or `MMS_ENABLE_MCP_FIGMA=1` |
-
-These surfaces are previewed before launch and can be disabled per session when supported by the confirmation UI. Figma and Pilot MCP servers are default-off even when detected; opt in with `MMS_ENABLE_MCP_FIGMA=1`, `MMS_ENABLE_FIGMA_MCP=1`, `MMS_ENABLE_MCP_PILOT=1`, or `MMS_ENABLE_PILOT_MCP=1`. Passive skills (`TOON`, `grill-me`, `web-access`, `weber`, `agent-browser`) are available naturally in MMS-launched sessions. `NSR` is copied with the selected install channel into `~/.mms/hooks/`; MMS injects its lightweight Stop-hook wrapper by default, and `/nsr` opts the current repo into the rewritten loop. It can be disabled from the launch confirmation screen or with `nsr_mode = "disable"` in `preferences.toml`. Heavier active behavior packs (`ECC`, `OMC`) still require explicit selection. OpenCode receives the same session-local passive assets plus the manual `/nsr` command, and RTK is added through the session-local plugin directory when `rtk` exists.
-
-## Installer Scope
-
-Open a terminal on a new machine and paste one line:
+macOS / Linux, one command:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash
 ```
 
-No question in the install changes what gets installed: no UI language prompt, no optional packs. It defaults to the stable channel and adds `~/.local/bin` to your shell PATH. The one question comes at the very end and only offers to open MMS Web. Accept it and the browser opens, the server keeps running in the background, and the installer exits. Add a provider and an API key on that page and you can start a conversation.
+It asks once whether to open Pilot. Press Enter; the browser opens, the service keeps running in the background, and the installer exits.
 
-If Pilot is already running during an upgrade, the installer pauses and refuses to continue. Use Pilot's Update entry, or run `mms web stop` (add `--all` for multiple instances), then run the installer again; the installer does not close Pilot or reopen it for you.
+**Windows** is a Native Preview with a different procedure. The full from-scratch walkthrough is in [`docs/install/WINDOWS.md`](docs/install/WINDOWS.md).
 
-Use `--launch-web` to open it without asking, `--no-launch-web` to skip it, and `--no-shell-rc` to leave your shell config alone.
+The installer asks nothing that changes what gets installed: stable channel by default, Chinese UI (add `--lang en` for English), and `~/.local/bin` written into your shell PATH. `pi` is mandatory because Pilot depends on it; missing `claude` / `codex` / `opencode` are installed for you, and anything already present is left alone.
 
-`pi` is mandatory because the pilot web app depends on it. It is installed globally from a pinned npm spec, and its runtime cache under `~/.mms/.ai/cache/pi-npx` is warmed during the install so the first pilot launch does not wait on a download. Missing `claude` / `codex` / `opencode` are installed automatically; already-installed CLIs are left untouched. Pass `--install-cli claude,codex` to control that list explicitly, and add `--dry-run` to preview the plan without writing files.
+**Upgrading is the same command again.** But if Pilot is running, the installer stops and refuses rather than closing it for you: update from inside Pilot, or run `mms web stop` (`--all` if you have several instances), then re-run the install command.
 
-The optional global packs are gone. RTK, BrainKeeper, Map, CodeGraph, global token-saver, global TOON, ops-env-safe, ECC, and OMC no longer have installer paths. Their `--install-*` and `--*-ref` flags print a notice and are ignored, so older scripts keep working.
+Other install modes (preview line, pinned versions, silent install for CI) are in [`docs/RELEASE_CHANNELS.md`](docs/RELEASE_CHANNELS.md).
 
-Upgrades archive only wrappers/commands with MMS-specific markers, Skill links pointing into this MMS install, and its retired agent packs under `~/.mms/retired-backup.*`. Originals remain recoverable. Same-name custom Skills, global hook/MCP settings and real config files are preserved; third-party programs are not uninstalled. Review global registrations separately using the read-only retirement plan above. To archive MMS entries without reinstalling:
+## The first five minutes
 
-```bash
-bash install.sh --cleanup-retired-packs
-```
+1. Pilot walks you through your first channel: service URL and API key.
+2. Fetch the model list. Anything the endpoint does not return but you know works, add by hand.
+3. Select the models you will actually use. You get a redacted preview before saving.
+4. Back on the main screen, pick a folder, pick a model, start talking.
 
-`TOON`, `grill-me`, `web-access`, `weber`, `agent-browser`, and the NSR payload ship as bundled session assets and remain available in MMS-launched sessions without any global installation. Caveman and token-saver are retired.
+Two things worth doing right after: check each model's **context length** and **whether it can read images** on the model page (the UI labels where each value came from, and offers a one-click fill-back when it disagrees with the catalog), and pick a theme and font in settings.
 
-## Cleanup And Reset
+## What it manages for you
 
-Dry-run dirty-install cleanup:
+**One entry point for several CLIs.** `mms` opens the TUI, or go direct with `mms claude` / `mms codex` / `mms opencode`.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/scripts/cleanup_dirty_install.sh | bash
-```
+**Model sources are visible before launch.** Provider, account, route, fallback, thinking, vision, and cache-sensitive transport are all on the selection screen, not a surprise after startup.
 
-Apply only after checking the printed paths:
+**Isolated but resumable.** Claude and Codex sessions run in a MMS-managed HOME and config seed, which keeps your real global config cleaner while resume keeps working. On failure it fails closed inside the current runtime; it does **not** quietly fall back to your global OAuth account.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/scripts/cleanup_dirty_install.sh | bash -s -- --apply
-```
+**Capability packs are per-session.** CodeGraph, TOON, grill-me, and Weber (web automation) are session-local by default and do not touch your global hooks.
 
-Full MMS-owned reset, dry-run first:
+**Diagnose before blaming the model.** When something errors, look at the route, protocol, request path, key, and runtime exposure first. `mms doctor`, `mms exposure`, and `mms logs` exist for exactly that.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/scripts/reset_mms_install.sh | bash
-```
+## Three entry points, and when to use which
 
-Then apply:
+| | How to open | What for |
+|---|---|---|
+| **MMS Pilot** | `mms web --open` | Daily work, and nearly all configuration: sessions, channels, model lists, capability switches, work folders, updates |
+| **`mms` CLI** | `mms` or `mms claude` | Launching the native CLIs: Claude, Codex, OpenCode, Pi, agy |
+| **Config Web UI** (demoted) | `mmf config web` | Only what Pilot has not covered yet: accounts, preferences, Skill / MCP, migrations, human-gated actions. Walkthrough: [`docs/WEB_UI_QUICKSTART.md`](docs/WEB_UI_QUICKSTART.md) |
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/scripts/reset_mms_install.sh | bash -s -- --apply
-```
+Once Pilot saves a channel or model, the terminal reads the same thing. You do not need to confirm it again in the config page.
 
-Reset targets MMS-owned install/config surfaces. It intentionally avoids shared `~/.claude`, shared `~/.codex`, and global OAuth state unless an explicit flag says otherwise.
+Pilot's session harness is currently **Pi**. Claude, Codex, OpenCode, and agy still launch from the command line only; they are not in Pilot's unified session view yet.
 
-## Developer Notes
-
-Run focused checks before publishing launcher/session changes:
+Common commands:
 
 ```bash
-python3 -m py_compile mms_core.py mms_launchers.py mms_tui.py
-PYTHONPATH=. python3 -m pytest -q tests/test_codex_history_growth.py
-PYTHONPATH=. python3 -m pytest -q tests/test_claude_hardening_regressions.py -k 'resume or routing or bridge'
-git diff --check
+mms web --open              # open Pilot
+mms                         # interactive launcher
+mms claude                  # launch Claude
+mms codex                   # launch Codex
+mms opencode --profile review
+mms --provider <id> codex   # pick a channel
+mms --account <id> claude   # pick an account
+mms --export codex          # export env vars only, do not launch
+mms doctor full
+mms logs
 ```
 
-Release checklist:
+## What Pilot can do today
 
-1. keep the working tree clean
-2. choose the next semver tag
-3. create an annotated tag
-4. push branch and tag
-5. create a GitHub Release with install/upgrade notes
+Sessions: continuous conversation, resume, stop, fork, archive, export, switching model and channel mid-session while keeping context, a follow-up queue for messages sent while it is working, and the same context after a browser refresh or a process restart.
 
-## License
+Visible process: streaming replies, the Thinking the provider actually returned, tool arguments and results, tool images, and native confirm / select / input interactions. Context share, tokens, and cache all live in one place.
 
-Apache-2.0
+Files: an in-app directory browser, text / Markdown / image preview, Git text diffs, and `@` references. Referencing a local file uses the original path directly, with no copying, no upload, and no size gate.
+
+Model capabilities: per-model default effort, context length, and image reading. Every value is labelled with where it came from, and can be filled back from the catalog in one click. **The image switch is global truth**: turn it on for a model and it reads images itself in any harness; turn it off and another model relays for it.
+
+Access from a phone or another computer: explicitly enabled, then you get an address and a QR code with a token. Local-only by default.
+
+The complete inventory and its limits are in [`docs/mms-web/FEATURES.md`](docs/mms-web/FEATURES.md).
+
+**Limits worth knowing up front**: it listens on local addresses only and has no remote multi-user authentication; config isolation is not a filesystem sandbox; read-only planning intercepts at the tool-call layer, not at the OS level; file browsing and diffs are read-only, with no edit, commit, or publish buttons. To give it to someone else, have them install it on their own machine with their own model services.
+
+## Two release lines
+
+Since 2026-09-16, `main` and `dev` are two **long-lived parallel** lines, not "a stable branch and a development branch".
+
+| Line | Version | Install flag | Who for | What is in it |
+|---|---|---|---|---|
+| Stable | 4.23.x | `--channel stable` (default) | Anyone using this as a daily tool | Settled features; only fixes and verified capabilities |
+| Preview | 5.1.x | `--channel dev` | People who want new things and can take some turbulence | **Everything** in stable, plus the Bot workbench still being polished |
+
+Every change on `main` flows into `dev` by default, so the preview line is always a superset of stable. "I moved to 5.x and lost a 4.x fix" cannot happen.
+
+**What 5.x adds is the Bot workbench**: you hand over a goal and an executor with a name, a memory, scheduled wake-ups, the ability to delegate, and the option to ask a few other models for a second opinion goes and finishes it. A normal Pilot session is "I am doing this now"; a Bot is "here is the goal, report back". See [`docs/mms-web/BOTS.md`](https://github.com/CtriXin/multi-model-switch/blob/dev/docs/mms-web/BOTS.md) (that document lives on the `dev` branch only).
+
+The two lines **cannot coexist** on one machine. To switch, re-run the installer with the matching `--channel`; config, channels, and session history all live in the same config root and are not cleared.
+
+> **One asymmetry to note.** Pilot's version-and-updates panel lets you pick the 4.x stable or 5.x preview channel. Going 4.x → 5.x completes inside Pilot. But **once 5.x is installed, selecting the stable channel alone will not take you back to 4.x** — Pilot only ever offers versions higher than the current one. Returning to stable requires re-running the installer with `--channel stable`; config and history are preserved.
+
+## Where configuration lives
+
+The single config root is `~/.config/mms-next`. `mms`, `mmf`, `mmg`, and the Pilot web page all land on it, so one change takes effect in both the terminal and the browser. The legacy `~/.config/mms` has left the config sources and is no longer read by any entry point; all that remains there are runtime session directories such as `*-gateway/`.
+
+There is exactly one write path for configuration: **write a preview DB, then publish**. Local edits go through Registry v2: the TUI, `mms config`, or the WebUI first creates a DB candidate; once reviewed it is published as `generated/model-registry.latest-approved.json`, and the generated Profile it references is the runtime boundary. The terminal and Pilot read the same published result, so both see the same channels, models, and capabilities. There is no second write path that bypasses review.
+
+Other locations: the install directory is `~/.mms` (with its own `.venv`); Pilot's sessions, update cache, and artifacts are under `~/.local/share/mms-web`; install metadata (version, channel, UI language) is recorded in `~/.config/mms-next/version.json`.
+
+## When something breaks
+
+```bash
+mms doctor            # Python, CLI discovery, config root, channels
+mms models            # which models are currently visible
+mms routes            # route resolution
+mms exposure          # runtime exposure surface
+mms logs
+mms test --provider <provider-id> --cli claude    # real smoke test
+```
+
+A few common symptoms:
+
+**"The model list will not fetch, but I know this model works."** Add it by hand to the current channel. A `/models` endpoint that omits a model does not prove the model is unusable; hiding, capability flags, and fallback are local policy and should not be deleted because one fetch came back short.
+
+**"Which checkbox is Thinking?"** The `reason` / reasoning column in the model table is **capability metadata**, not a launch switch. Whether Thinking is actually on at launch depends on the provider/model compatibility profile (`thinking.supported` / `default_enabled`), the effort configuration, and the runtime's `thinking_mode`.
+
+**"This model 403s on one path and works on another."** Expected. `Anthropic /v1/messages` and `OpenAI /v1/chat/completions` are not equivalent transports, and some providers only expose certain models on the Claude-compatible path. MMS prefers `/v1/messages` when the route supports it.
+
+**"I clicked check-for-updates and nothing happened."** Look for `~/.local/share/mms-web/updates/check.json`.
+
+**A Windows-specific problem on your own machine**: you can ask the local AI inside Pilot to diagnose it first, then follow [`docs/mms-web/WINDOWS-CONTRIBUTING.md`](docs/mms-web/WINDOWS-CONTRIBUTING.md) to file a report or a PR. **Do not** send API keys, `credentials.sh`, your whole config directory, or un-redacted sessions.
+
+## Security lines that do not move
+
+- Your real `HOME` and global OAuth state are a protected surface, not a fallback pool. When a provider or account fails, MMS fails closed inside the current runtime rather than quietly switching to another global account.
+- Claude semantics prefer `Anthropic /v1/messages` when the route supports it. `chat/completions` is a fallback, not an equivalent default.
+- Writing configuration produces a preview, a diff, a backup, and an audit record first.
+- The legacy `~/.config/mms/**`, especially Claude-related fields, stays human-gated. Pilot does not write it.
+
+## Documentation
+
+- [`docs/AI-ONBOARDING.md`](docs/AI-ONBOARDING.md) — **for AI agents and new maintainers**: the whole picture, code map, gates, and mistakes already made
+- [`docs/mms-web/GETTING-STARTED.md`](docs/mms-web/GETTING-STARTED.md) — installing and using Pilot
+- [`docs/mms-web/FEATURES.md`](docs/mms-web/FEATURES.md) — Pilot features and limits
+- [`docs/mms-web/CHANGELOG.md`](docs/mms-web/CHANGELOG.md) — what each version actually changed
+- [`docs/mms-web/API.md`](docs/mms-web/API.md) — Pilot local API v1
+- [`docs/install/WINDOWS.md`](docs/install/WINDOWS.md) — Windows Native Preview walkthrough
+- [`docs/RELEASE_CHANNELS.md`](docs/RELEASE_CHANNELS.md) — channel contract and install flags
+- [`docs/BUNDLED_PACKS.md`](docs/BUNDLED_PACKS.md) — bundled capability packs and retired install paths
+- [`docs/MMS_USER_PREFERENCES.md`](docs/MMS_USER_PREFERENCES.md) — what `preferences.toml` accepts
+- [`docs/MODEL_CONFIG_CONTRACT.md`](docs/MODEL_CONFIG_CONTRACT.md) · [`docs/AGENT_GUARDRAILS.md`](docs/AGENT_GUARDRAILS.md) — config contract and high-risk surfaces
+- [`docs/MAINTAINERS.md`](docs/MAINTAINERS.md) — maintainer entry point, worktree flow, release checklist
