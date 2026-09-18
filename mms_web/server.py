@@ -222,13 +222,34 @@ class WebApplication:
                     if s["piSessionId"] == wanted), None)
         if row is None:
             raise WebError("NOT_FOUND", "找不到这个会话。", 404)
+        from .session_recovery import recovery_state
+        events = transcript(row["path"])
         return {"session": {k: v for k, v in row.items() if k != "path"},
+                "recovery": recovery_state(events),
                 # The transcript path is server-only and never crosses the API.
-                "events": transcript(row["path"]),
+                "events": events,
                 # Present and empty, not absent: the view reads these without
                 # checking, and an absent array is what blanked the page.
                 "artifacts": [], "artifactNotice": "", "approvals": [], "runtime": {},
                 "note": "这个会话是在命令行里开始的，这里只读。"}
+
+    def session_recovery(self, session_id: str) -> dict:
+        from .session_recovery import recovery_packet
+        if session_id.startswith("cli:"):
+            from .cli_sessions import index, session_dir_for
+            detail = self.cli_session_detail(session_id)
+            row = next((s for s in index(session_dir_for(self.config_root), limit=2000)
+                        if s["id"] == session_id), None)
+            return recovery_packet(detail, row["path"] if row else None)
+        service = self._sessions()
+        session = service._get(session_id)
+        with session.lock:
+            root = session.meta.get("runtimeRoot")
+            native = Path(root) / "conversation.jsonl" if root else None
+            # Only a session-owned path may be exposed, never a caller path.
+            if native and not native.resolve().is_relative_to((service._state_root / "runtimes").resolve()):
+                native = None
+            return recovery_packet(session.detail_view(), native, session.secrets)
 
     def remote_access_state(self) -> dict:
         """The switch, the ways in, and which of them are actually listening."""
@@ -369,6 +390,8 @@ class WebApplication:
         if len(parts) == 2 and parts[0] == "attachments":
             return self._sessions().files.preview_attachment(parts[1])
         if len(parts) == 3 and parts[0] == "sessions":
+            if parts[2] == "recovery":
+                return self.session_recovery(parts[1])
             if parts[2] == "diagnostics":
                 return self._sessions().diagnostics(parts[1])
             if parts[2] == "runtime":

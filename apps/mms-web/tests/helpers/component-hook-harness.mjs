@@ -21,7 +21,7 @@ export const text = tree => Array.isArray(tree) ? tree.map(text).join('') :
   tree == null || typeof tree === 'boolean' ? '' : String(tree);
 const sameDeps = (a,b) => a && b && a.length === b.length && a.every((x,i) => Object.is(x,b[i]));
 
-export function mountModule(filename, request) {
+export function mountModule(filename, request, overrides = {}) {
   let cursor = 0, dirty = false, tree, Component, props;
   const slots = [], effects = [], calls = [];
   const react = {
@@ -94,6 +94,7 @@ export function mountModule(filename, request) {
     './BotModelPicker': { BotModelPicker: 'BotModelPicker' },
     './BotPresetPanel': { BotPresetPanel: 'BotPresetPanel' },
     './BotSchedulePanel': { BotSchedulePanel: 'BotSchedulePanel' },
+    ...overrides,
   };
   const globals = {
     console, URL, setTimeout: () => 1, clearTimeout() {},
@@ -113,7 +114,7 @@ export function mountModule(filename, request) {
     const base = path.basename(name).replace(/\.tsx?$/, '');
     if (!pure.has(base) && name !== filename) throw new Error(`Unapproved import ${name}`);
     if (cache.has(base)) return cache.get(base);
-    const target = path.join(web, 'src', base + (['Bot','UpdateCenter'].includes(base) ? '.tsx' : '.ts'));
+    const target = path.join(web, 'src', base + (fs.existsSync(path.join(web, 'src', base + '.tsx')) ? '.tsx' : '.ts'));
     const source = fs.readFileSync(target, 'utf8');
     const code = esbuild.transformSync(source, { loader: 'tsx', format: 'cjs', jsx: 'automatic' }).code;
     const module = { exports: {} };
