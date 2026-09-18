@@ -1810,5 +1810,13 @@ button.app-version.has-update::after { content: ""; display: inline-block; width
 }
 @media (max-width: 390px) {
   .workspace-matches { max-height: min(48dvh, 280px); }
+  /* Full absolute paths would wrap into ~4 lines each; keep one line and show the tail. */
+  .workspace-folder-label small {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    direction: rtl;
+    text-align: left;
+  }
 }
 .preference-row > div { min-width: 0; }

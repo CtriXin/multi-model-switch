@@ -298,9 +298,16 @@ def browse_workspaces(catalog, payload: dict) -> dict:
     target = extra[0] if extra else _expand_user_path(raw)
     if _hidden_or_excluded(target):
         _reject()
+    # A typed absolute path is a legal starting point on purpose, so `extra`
+    # above always puts the target into `roots` and a containment check here
+    # could never reject anything. It read as enforcement while enforcing
+    # nothing, so it is gone; `test_explicit_path_outside_home_is_listable_for_this_request`
+    # is the contract. The real limits are above and below: hidden/excluded
+    # names, symlinks, and the walk-up ceiling in `_parent_payload`. Listing a
+    # folder is strictly weaker than what a token holder can already do -- run a
+    # CLI in any working directory -- so the token, not this call, is the
+    # boundary. See docs/mms-web/API.md.
     roots = _known_roots(catalog, extra)
-    if not _may_list(target, roots):
-        _reject()
     try:
         if target.is_symlink() or not target.is_dir():
             _reject()

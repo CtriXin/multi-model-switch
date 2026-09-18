@@ -344,3 +344,50 @@ jobs:
           name: pytest-results
           path: ${{ runner.temp }}/pytest-reports
           retention-days: 14
+
+  frontend:
+    # The Pilot web client had no CI at all: 240 node tests and the typecheck
+    # were manual-only, which is why "a whole UI block can be deleted with the
+    # suite green" kept being found by hand instead of by a machine.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install the web client
+        # Per-workspace, from apps/mms-web/package-lock.json. A workspace-root
+        # install resolves transitive deps outside that lockfile and produces a
+        # different bundle, and it hoists tsc somewhere this job does not look.
+        run: npm ci --workspaces=false --ignore-scripts
+        working-directory: apps/mms-web
+
+      - name: Typecheck
+        # Not `npx tsc`: from the repo root that resolves to an unrelated
+        # package of the same name and reports failures that are not real.
+        run: apps/mms-web/node_modules/.bin/tsc --noEmit -p apps/mms-web
+
+      - name: Web tests
+        # The glob is required; without it node --test finds nothing here.
+        run: node --test apps/mms-web/tests/*.test.mjs
+
+      - name: The shipped bundle must be rebuilt in the same PR
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          changed="$(git diff --name-only "$PR_BASE_SHA"...HEAD)"
+          if printf '%s\n' "$changed" | grep -q '^apps/mms-web/src/'; then
+            if ! printf '%s\n' "$changed" | grep -q '^mms_web_static/'; then
+              echo "::error::apps/mms-web/src changed but mms_web_static/ was not rebuilt. Run: (cd apps/mms-web && npm ci --workspaces=false --ignore-scripts) && python3 scripts/build_mms_web_release.py --skip-install"
+              exit 1
+            fi
+          fi

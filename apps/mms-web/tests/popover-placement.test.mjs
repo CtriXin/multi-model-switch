@@ -1,5 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import vm from "node:vm";
+import { fileURLToPath } from "node:url";
+import React from "react";
+import esbuild from "esbuild";
+import * as placement from "../src/popover-placement.ts";
 import { popoverPlacement } from "../src/popover-placement.ts";
 import { keyboardInset } from "../src/viewport.ts";
 
@@ -38,4 +45,70 @@ test("keyboard inset is the layout viewport minus the visible viewport", () => {
   assert.equal(keyboardInset(800, { height: 500, offsetTop: 0 }), 300);
   assert.equal(keyboardInset(800, { height: 500, offsetTop: 40 }), 260);
   assert.equal(keyboardInset(800, { height: 800, offsetTop: 0 }), 0);
+});
+
+// Wiring test: run the real Popover component and its click handler, so a
+// call site that stops using popoverPlacement (e.g. back to fixed right
+// alignment) fails even though the pure function itself is fine.
+function loadPopover() {
+  const srcDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../src");
+  const code = esbuild.transformSync(
+    fs.readFileSync(path.join(srcDir, "Popover.tsx"), "utf-8"),
+    { loader: "tsx", format: "cjs" },
+  ).code;
+  const mod = { exports: {} };
+  const setters = [];
+  let cursor = 0;
+  const reactMock = {
+    ...React,
+    useId: () => "p1",
+    useRef: () => ({ current: null }),
+    useState: (initial) => {
+      const index = cursor++;
+      const slot = setters[index] ??= { value: initial };
+      return [slot.value, (next) => { slot.value = next; }];
+    },
+  };
+  const sandbox = {
+    module: mod,
+    exports: mod.exports,
+    React: reactMock,
+    require: (req) => {
+      if (req === "react") return reactMock;
+      if (req === "./popover-placement") return placement;
+      throw new Error(`unexpected require: ${req}`);
+    },
+    console,
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(code, sandbox);
+  return { Popover: (props) => { cursor = 0; return mod.exports.Popover(props); }, setters };
+}
+
+test("Popover places its panel through popoverPlacement on click", () => {
+  const { Popover, setters } = loadPopover();
+  const previousWindow = globalThis.window;
+  globalThis.window = { innerWidth: 390, innerHeight: 700 };
+  try {
+    const tree = Popover({ label: "打开", title: "面板", children: "内容" });
+    const [trigger] = tree.props.children;
+    assert.equal(setters.length, 2, "Popover keeps its style and open state slots");
+    trigger.props.onClick({
+      currentTarget: { getBoundingClientRect: () => ({ top: 500, bottom: 540, right: 80 }) },
+    });
+    const rendered = Popover({ label: "打开", title: "面板", children: "内容" });
+    const panel = rendered.props.children[1];
+    const style = panel.props.style;
+    assert.equal(panel.props.popover, "auto");
+    // On a 390px phone the panel must dock as a bottom sheet: this is the
+    // style popoverPlacement computes, not the old right-aligned one.
+    assert.equal(style.left, 12);
+    assert.equal(style.width, 366);
+    assert.equal(style.bottom, 12);
+    assert.equal(style.top, "auto");
+    assert.equal(style.right, undefined, "the panel must not fall back to right alignment");
+  } finally {
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+  }
 });
