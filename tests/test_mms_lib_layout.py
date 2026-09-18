@@ -133,6 +133,7 @@ def test_overwrite_install_removes_exact_flat_copies_and_keeps_user_files(tmp_pa
     (home / "mms_version.py").write_text('VERSION = "from-root"\n', encoding="utf-8")
     (home / "mms_myhack.py").write_text("keep\n", encoding="utf-8")
     script = (ROOT / "install.sh").read_text(encoding="utf-8")
+    assert 'remove_legacy_flat_modules "$MMS_HOME"' in script
     func = _extract_shell_function(script, "remove_legacy_flat_modules")
     completed = subprocess.run(
         ["bash", "-c", func + '\nremove_legacy_flat_modules "$1"', "cleanup", str(home)],
