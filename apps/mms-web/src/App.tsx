@@ -83,6 +83,7 @@ import { TaskSettings, SessionSettings } from "./TaskSettings";
 import { Popover } from "./Popover";
 import { useLaunchFacts, readRoutePreferences } from "./ModelExplorer";
 import { ModelPicker, WorkspaceDialog } from "./LaunchOptions";
+import { SessionRecovery, type RecoveryDraft } from "./SessionRecovery";
 
 const empty: Bootstrap = {
   version: "1",
@@ -243,6 +244,8 @@ export function App() {
     readSetting("mms-web-workspace", ""),
   );
   const [recipe, setRecipe] = useState<RecipeDraft | null>(readRecipeDraft);
+  const [recoveryDraft, setRecoveryDraft] = useState<RecoveryDraft | null>(() => readSetting("mms-web-recovery-draft", null));
+  useEffect(() => { saveSetting("mms-web-recovery-draft", recoveryDraft); }, [recoveryDraft]);
   const [recipeConfirmed, setRecipeConfirmed] = useState("");
   const recipeContext = useRef({ key: "", revision: 0 });
   useEffect(() => { saveRecipeDraft(recipe); }, [recipe]);
@@ -1733,19 +1736,20 @@ export function App() {
                   }
                   allowAdd={!isPreview}
                 />
-                <h1>从一个想法开始</h1>
-                <p>写下想法，或引用电脑上的文件。</p>
+                <h1>{recoveryDraft ? "接续之前的工作" : "从一个想法开始"}</h1>
+                <p>{recoveryDraft ? "检查接续资料和当前模型，发送后才会开始。" : "写下想法，或引用电脑上的文件。"}</p>
               </div>
               <div className="recipe-access">
                 {!isPreview && workspaceId && <ProjectMaterials key={workspaceId} workspaceId={workspaceId} />}
                 <RecipeImport
                   workspaceId={workspaceId}
                   loaded={(item) => {
-                    setRecipe(item); setRecipeConfirmed("");
+                    setRecoveryDraft(null); setRecipe(item); setRecipeConfirmed("");
                     setPlanMode(item.recipe.planning);
                   }}
                 />
               </div>
+              {recoveryDraft && <section className="recovery-draft-notice"><strong>来自「{recoveryDraft.title}」的接续草稿</strong><p>原会话和之前的普通草稿都保留。请核对未完成的操作，避免重复执行。</p><button type="button" className="button" onClick={() => setRecoveryDraft(null)}>返回普通草稿</button></section>}
               {recipe && <section className="recipe-loaded">
                 <strong>已载入「{recipe.recipe.title}」</strong>
                 <p>模板模型偏好：{recipe.recipe.preferredModel || "未指定"}。当前使用 {preset?.name || "尚未选择"} · {preset?.channel || ""}；确认后再发送。</p>
@@ -1756,9 +1760,11 @@ export function App() {
               </section>}
               <Composer
                 enterToSend={enterToSend}
-                key={`new:${workspaceId}:${recipe?.key || ""}`}
-                draftKey={`new:${workspaceId}:${recipe?.key || ""}`}
-                initialText={recipe?.draftPrompt}
+                key={recoveryDraft?.key || `new:${workspaceId}:${recipe?.key || ""}`}
+                draftKey={recoveryDraft?.key || `new:${workspaceId}:${recipe?.key || ""}`}
+                initialText={recoveryDraft?.prompt || recipe?.draftPrompt}
+                resolveInitialFiles={!recoveryDraft}
+                autoFocus={!!recoveryDraft}
                 requiredSkillNames={recipe?.recipe.requiredSkills}
                 guideRequest={guideRequest}
                 guideHandled={() => setGuideRequest(undefined)}
@@ -1796,6 +1802,7 @@ export function App() {
                     ...(recipe ? { recipeRequirements: { ...recipe.recipe.modelRequirements, skills: recipe.recipe.requiredSkills } } : {}),
                   }, true);
                   if (ok && recipe) { setRecipe(null); setRecipeConfirmed(""); }
+                  if (ok && recoveryDraft) setRecoveryDraft(null);
                   return ok;
                 }}
               >
@@ -2137,6 +2144,13 @@ export function App() {
                       busy={busy}
                     />
                   </div>
+                  {!isPreview && <SessionRecovery key={detail.session.id} detail={detail} data={data} favorites={favorites} toggleFavorite={favorite} busy={busy} action={runAction}
+                    prepare={draft => navigate("new", () => {
+                      setRecipe(null); setRecipeConfirmed(""); setGuideRequest(undefined);
+                      setWorkspaceId(draft.workspaceId); selectTaskPreset(draft.presetId); setPlanMode(false);
+                      setRecoveryDraft({ ...draft, key: `recovery:${draft.sourceSessionId}:${newRequestId()}` });
+                      setPanel(false);
+                    })} />}
                   {detail.session.owner === "cli" ? (
                     // Nothing in the composer can be used until this session is
                     // adopted, so none of it is shown; the one action that does
