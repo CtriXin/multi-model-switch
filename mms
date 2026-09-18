@@ -4,8 +4,40 @@
 import os
 import sys
 
-ROOT = os.path.dirname(os.path.realpath(__file__))
-sys.path.insert(0, ROOT)
+_MMS_LAYOUT_CURL = "curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash"
+_MMS_LAYOUT_ERROR = (
+    "这份 MMS 安装是旧布局(模块在安装根,当前入口需要 lib/)。\n"
+    "旧布局不再被支持,请重新执行安装命令更新:\n"
+    "\n"
+    f"  {_MMS_LAYOUT_CURL}\n"
+    "\n"
+    "如果 Pilot 正在运行,先执行 mms web stop 再装。\n"
+    "\n"
+    "This MMS install uses the old layout (modules at the install root; this entry needs lib/).\n"
+    "The old layout is no longer supported. Re-run the install command to update:\n"
+    "\n"
+    f"  {_MMS_LAYOUT_CURL}\n"
+    "\n"
+    "If Pilot is running, run mms web stop first, then install.\n"
+)
+
+
+def _mms_use_lib():
+    root = os.path.dirname(os.path.realpath(__file__))
+    lib = os.path.join(root, "lib")
+    if not os.path.isfile(os.path.join(lib, "mms_core.py")):
+        sys.stderr.write(_MMS_LAYOUT_ERROR)
+        raise SystemExit(1)
+    sys.path.insert(0, lib)
+
+
+_mms_use_lib()
+
+
+if len(sys.argv) > 1 and sys.argv[1] == "review-dispatch":
+    from mms_review_dispatch import handle_review_dispatch_command
+
+    sys.exit(handle_review_dispatch_command(sys.argv[2:], command_name="mms"))
 
 
 def _resolve_real_home_for_venv():

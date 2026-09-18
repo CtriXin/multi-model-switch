@@ -29,6 +29,45 @@ def test_default_mms_keeps_openrouter_claude_visible():
     ]
 
 
+def test_provider_model_patch_keeps_current_and_future_claude_selectors():
+    import mms_core
+
+    provider = {
+        "id": "maxcc",
+        "fallback_models": [
+            "claude-opus-4-6",
+            "claude-opus-4-7",
+            "claude-opus-4-8",
+            "claude-sonnet-4-6",
+            "claude-opus-5-0",
+            "claude-fable-5",
+            "claude-qwen3-coder",
+            "claude-legacy-2-1",
+            "claude-haiku-3-5",
+        ],
+        "extra_models": [],
+        "hidden_models": [],
+    }
+
+    patched = mms_core._apply_provider_model_patch(
+        provider,
+        {
+            "raw_models": provider["fallback_models"],
+            "models": provider["fallback_models"],
+            "base_source": "approved",
+        },
+    )
+
+    assert patched["models"] == [
+        "claude-opus-4-6",
+        "claude-opus-4-7",
+        "claude-opus-4-8",
+        "claude-sonnet-4-6",
+        "claude-opus-5-0",
+        "claude-fable-5",
+    ]
+
+
 def test_builtin_scene_catalog_is_removed_from_launcher_surface():
     import mms_core
 
@@ -120,6 +159,15 @@ def test_infer_model_family_recognizes_deepseek():
     assert category == "国产系"
 
 
+def test_infer_model_family_recognizes_stepfun():
+    import mms_core
+
+    family, category = mms_core._infer_model_family("step-3.7-flash")
+
+    assert family == "StepFun"
+    assert category == "国产系"
+
+
 def test_build_model_families_for_cli_keeps_deepseek_out_of_other(monkeypatch):
     import mms_core
 
@@ -145,6 +193,34 @@ def test_build_model_families_for_cli_keeps_deepseek_out_of_other(monkeypatch):
 
     family_names = [entry["family"] for entry in families]
     assert "DeepSeek" in family_names
+    assert "其他" not in family_names
+
+
+def test_build_model_families_for_cli_keeps_stepfun_out_of_other(monkeypatch):
+    import mms_core
+
+    provider = {
+        "id": "stepfun-provider",
+        "enabled": True,
+        "api_key": "sk-demo",
+        "role": "auto",
+        "supported_clis": ["opencode"],
+    }
+    monkeypatch.setattr(mms_core, "_provider_candidates", lambda *_args, **_kwargs: [(provider, None)])
+    monkeypatch.setattr(mms_core, "_provider_has_configured_base_url", lambda _provider: True)
+    monkeypatch.setattr(
+        mms_core,
+        "_provider_effective_models",
+        lambda _provider, _cached, _cfg=None: ["step-3.7-flash", "step-router-v1"],
+    )
+    monkeypatch.setattr(mms_core, "_provider_supports_model_for_cli", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(mms_core, "_provider_label", lambda _provider: "StepFun")
+    monkeypatch.setattr(mms_core, "_load_usage_stats", lambda: {"sources": {}})
+
+    families = mms_core._build_model_families_for_cli({}, "opencode", {}, [])
+
+    family_names = [entry["family"] for entry in families]
+    assert "StepFun" in family_names
     assert "其他" not in family_names
 
 
@@ -215,6 +291,7 @@ def test_model_capability_summary_marks_known_vision_models():
 
     assert "vision" in mms_core._model_capability_tags("K2.6-code-preview")
     assert "vision" in mms_core._model_capability_tags("mimo-v2.5")
+    assert "vision" in mms_core._model_capability_tags("MiniMax-M3")
     assert "vision" in mms_core._model_capability_tags("qwen3.6-plus")
     assert "vision" in mms_core._model_capability_tags("qwen3.6-flash")
     assert "vision" not in mms_core._model_capability_tags("qwen3.7-max")
@@ -357,22 +434,107 @@ def test_runtime_with_vision_sidecar_auto_uses_direct_kimi(monkeypatch):
     assert runtime["vision_sidecar"]["anthropic_base_url"] == "https://api.kimi.com/coding"
 
 
-def test_runtime_with_vision_sidecar_prefers_direct_mimo_before_kimi(monkeypatch):
+def test_runtime_with_vision_sidecar_skips_ui_vision_capable_model():
+    import mms_core
+
+    runtime = mms_core._runtime_with_vision_sidecar(
+        {"providers": []},
+        {
+            "id": "minimax",
+            "auth_mode": "api_key",
+            "model_capabilities": {"MiniMax-M3": {"vision": True}},
+        },
+        "MiniMax-M3",
+    )
+
+    assert "vision_sidecar" not in runtime
+
+
+def test_runtime_with_vision_sidecar_skips_policy_vision_capable_model(monkeypatch):
+    import mms_capability_resolver
+    import mms_core
+
+    monkeypatch.setattr(
+        mms_capability_resolver,
+        "resolve_model_capabilities",
+        lambda *_args, **_kwargs: {
+            "supports_vision": True,
+            "sources": {"supports_vision": "model_policy"},
+        },
+    )
+
+    runtime = mms_core._runtime_with_vision_sidecar(
+        {
+            "providers": [
+                {
+                    "id": "direct-kimi",
+                    "enabled": True,
+                    "api_key": "sk-kimi",
+                    "anthropic_base_url": "https://api.kimi.com/coding/",
+                    "fallback_models": ["K2.6"],
+                }
+            ]
+        },
+        {"id": "minimax", "auth_mode": "api_key"},
+        "MiniMax-M3",
+    )
+
+    assert "vision_sidecar" not in runtime
+
+
+def test_runtime_with_vision_sidecar_policy_beats_stale_runtime_capability(monkeypatch):
+    import mms_capability_resolver
+    import mms_core
+
+    monkeypatch.setattr(
+        mms_capability_resolver,
+        "resolve_model_capabilities",
+        lambda *_args, **_kwargs: {
+            "supports_vision": True,
+            "sources": {"supports_vision": "model_policy"},
+        },
+    )
+
+    runtime = mms_core._runtime_with_vision_sidecar(
+        {
+            "providers": [
+                {
+                    "id": "direct-kimi",
+                    "enabled": True,
+                    "api_key": "sk-kimi",
+                    "anthropic_base_url": "https://api.kimi.com/coding/",
+                    "fallback_models": ["K2.6"],
+                }
+            ]
+        },
+        {
+            "id": "minimax",
+            "auth_mode": "api_key",
+            "model_capabilities": {"minimax-m3": {"vision": False}},
+        },
+        "MiniMax-M3",
+    )
+
+    assert "vision_sidecar" not in runtime
+
+
+def test_runtime_with_vision_sidecar_prefers_qwen_for_text_only_glm(monkeypatch):
     import mms_core
 
     cfg = {
         "providers": [
-            {"id": "mimo-direct-anthropic", "enabled": True},
+            {"id": "direct-qwen", "enabled": True},
             {"id": "direct-kimi", "enabled": True},
         ]
     }
     providers = {
-        "mimo-direct-anthropic": {
-            "id": "mimo-direct-anthropic",
+        "direct-qwen": {
+            "id": "direct-qwen",
             "enabled": True,
-            "api_key": "sk-mimo",
-            "anthropic_base_url": "https://token-plan-cn.xiaomimimo.com/anthropic/",
+            "api_key": "sk-qwen",
+            "anthropic_base_url": "https://coding.dashscope.aliyuncs.com/apps/anthropic/",
             "supported_clis": ["claude"],
+            "fallback_models": ["qwen3.6-plus"],
         },
         "direct-kimi": {
             "id": "direct-kimi",
@@ -387,9 +549,30 @@ def test_runtime_with_vision_sidecar_prefers_direct_mimo_before_kimi(monkeypatch
 
     runtime = mms_core._runtime_with_vision_sidecar(cfg, {"id": "glm", "auth_mode": "api_key"})
 
-    assert runtime["vision_sidecar"]["provider_id"] == "mimo-direct-anthropic"
-    assert runtime["vision_sidecar"]["model"] == "mimo-v2.5"
-    assert runtime["vision_sidecar"]["anthropic_base_url"] == "https://token-plan-cn.xiaomimimo.com/anthropic"
+    assert runtime["vision_sidecar"]["provider_id"] == "direct-qwen"
+    assert runtime["vision_sidecar"]["model"] == "qwen3.6-plus"
+    assert runtime["vision_sidecar"]["anthropic_base_url"] == "https://coding.dashscope.aliyuncs.com/apps/anthropic"
+
+
+def test_runtime_with_vision_sidecar_uses_minimax_m3_only_when_route_lists_it(monkeypatch):
+    import mms_core
+
+    cfg = {"providers": [{"id": "minimax-codingplan", "enabled": True}]}
+    minimax = {
+        "id": "minimax-codingplan",
+        "enabled": True,
+        "api_key": "sk-minimax",
+        "anthropic_base_url": "https://api.minimaxi.com/anthropic/",
+        "supported_clis": ["claude"],
+        "fallback_models": ["MiniMax-M3"],
+    }
+    monkeypatch.setattr(mms_core, "resolve_provider_context", lambda _cfg, _pid: minimax)
+    monkeypatch.setattr(mms_core, "_load_probe_file_cache", lambda *_args, **_kwargs: None)
+
+    runtime = mms_core._runtime_with_vision_sidecar(cfg, {"id": "glm", "auth_mode": "api_key"})
+
+    assert runtime["vision_sidecar"]["provider_id"] == "minimax-codingplan"
+    assert runtime["vision_sidecar"]["model"] == "MiniMax-M3"
 
 
 def test_runtime_with_vision_sidecar_skips_missing_mimo_and_uses_available_kimi(monkeypatch):

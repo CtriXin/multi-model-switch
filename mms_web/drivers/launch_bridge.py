@@ -1,0 +1,211 @@
+"""Launch the original MMS launcher in a dedicated process per Web session."""
+from __future__ import annotations
+import os
+import shutil
+import subprocess
+import sys
+import uuid
+from dataclasses import dataclass, field
+from pathlib import Path
+from ..runtime import private_json, real_home, require_private_root
+from .base import LaunchSeamUnavailable
+
+_WORKER = Path(__file__).resolve().parents[1] / "launch_worker.py"
+
+
+@dataclass
+class LaunchPlan:
+    cmd: list[str]
+    env: dict
+    cwd: str
+    harness: str
+    session_home: str | None = None
+    notes: list[str] = field(default_factory=list)
+
+
+def cached_pi() -> str:
+    """The Pi the launcher would use when no global one is installed.
+
+    `scripts/pi-cli-wrapper.sh` resolves a global pi, then this warmed npx
+    cache, then warms it. A session launch goes through that wrapper, so the
+    gate in front of it has to accept the same installs; looking only at PATH
+    reported "cannot run sessions" on machines whose terminal runs Pi fine.
+    """
+    for cache in _npx_caches():
+        candidates = list(cache.glob("_npx/*/node_modules/.bin/pi"))
+        candidates.extend(cache.glob("_npx/*/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"))
+        for candidate in sorted(candidates):
+            if candidate.name == "pi":
+                manifest = candidate.parent.parent / "@earendil-works" / "pi-coding-agent" / "package.json"
+            else:
+                manifest = candidate.parents[1] / "package.json"
+            if os.access(candidate, os.X_OK) and manifest.is_file():
+                if os.name == "nt":
+                    if candidate.name != "pi":
+                        # A bare cli.js is not CreateProcess-startable either.
+                        continue
+                    # The npx cache .bin holds the same extensionless POSIX
+                    # shim; only the .cmd/.exe sibling is Popen-startable.
+                    from mms_runtime import windows_executable_candidate
+
+                    resolved = windows_executable_candidate(str(candidate))
+                    if not resolved:
+                        continue
+                    return resolved
+                return str(candidate)
+    return ""
+
+
+def _npx_caches() -> list[Path]:
+    """Where an npx-installed Pi can be, most specific first.
+
+    The wrapper points npx at the installation's own cache, but a Pi installed
+    by a plain `npx` call — or by a run that never saw MMS_PI_NPX_CACHE — lands
+    in npm's default cache instead, and that machine can still run Pi.
+    """
+    caches = []
+    try:
+        from mms_pi_support import _pi_npx_cache_dir
+
+        caches.append(Path(_pi_npx_cache_dir()))
+    except Exception:
+        pass
+    npm_cache = str(os.environ.get("NPM_CONFIG_CACHE") or os.environ.get("npm_config_cache") or "").strip()
+    caches.append(Path(npm_cache).expanduser() if npm_cache else Path.home() / ".npm")
+    return [cache for cache in caches if cache.is_dir()]
+
+
+def installed_pi() -> str:
+    """The same Pi the launcher resolves, including one off this PATH."""
+    try:
+        from mms_pi_support import _pi_global_executable
+    except Exception:
+        return shutil.which("pi") or ""
+    try:
+        return _pi_global_executable() or ""
+    except Exception:
+        return shutil.which("pi") or ""
+
+
+def pi_runtime() -> tuple[str, str]:
+    executable = installed_pi() or cached_pi()
+    if not executable:
+        return "", ""
+    # npm/fnm installations have a matching Node beside their global bin.
+    # A GUI-launched shell may otherwise select a different Homebrew Node.
+    candidates = []
+    resolved = Path(executable).resolve()
+    for parent in resolved.parents:
+        if parent.name == "node_modules" and parent.parent.name == "lib":
+            candidates.append(parent.parent.parent / "bin" / "node")
+            break
+    current = shutil.which("node")
+    if current:
+        candidates.append(Path(current))
+    for node in candidates:
+        if not node.is_file():
+            continue
+        try:
+            result = subprocess.run([str(node), "-e", "process.exit(typeof require('node:zlib').createZstdDecompress === 'function' ? 0 : 1)"], capture_output=True, timeout=5)
+            if result.returncode == 0:
+                return executable, str(node)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+    return executable, ""
+
+
+def _windows_shell_tool_args() -> list[str]:
+    """Select a shell tool that exists on native Windows.
+
+    Pi's built-in ``bash`` tool requires Git Bash (or another bash provider).
+    Native Windows installations may only have PowerShell; allowing Pi to
+    start with a missing bash tool can terminate the RPC turn when the model
+    invokes it.  Keep the default tool set unchanged everywhere else.
+    """
+    if sys.platform != "win32":
+        return []
+    bash_candidates = []
+    for key in ("ProgramFiles", "ProgramFiles(x86)"):
+        root = os.environ.get(key)
+        if root:
+            bash_candidates.append(Path(root) / "Git" / "bin" / "bash.exe")
+    if any(path.is_file() for path in bash_candidates):
+        return []
+    try:
+        if shutil.which("bash.exe"):
+            return []
+    except OSError:
+        pass
+
+    powershell = shutil.which("pwsh.exe") or shutil.which("powershell.exe")
+    tools = ["read", "edit", "write"]
+    if powershell:
+        tools.insert(1, "powershell")
+    return ["--tools", ",".join(tools)]
+
+
+def probe_mms_pi_seam() -> dict:
+    """Whether this machine can run a Pi session, and what is missing if not.
+
+    The reason reaches the page, so it has to name the thing to install rather
+    than restate that something is wrong.
+    """
+    executable, node = pi_runtime()
+    if not executable:
+        reason = "找不到 Pi：PATH 上没有，安装目录的缓存里也没有。重新运行安装脚本即可补上。"
+    elif not node:
+        # pi_runtime accepts a Node only when node:zlib has zstd, which
+        # arrived in 22.15. An older Node is the usual cause on a machine
+        # where pi itself installed fine.
+        reason = "没有找到符合要求的 Node.js：需要 22.15 以上的版本。升级 Node 后重启 Pilot。"
+    elif not _WORKER.is_file():
+        reason = "这份安装缺少会话执行组件，请重新运行安装脚本。"
+    else:
+        reason = ""
+    return {"available": not reason, "driver": "pi-rpc",
+            "launcher": "mms_launchers.launch_cli", "reason": reason}
+
+
+def build_pi_launch_plan(model_info, runtime, cwd, *, config_root=None, extra_args=None):
+    if not isinstance(runtime, dict) or runtime.get("auth_mode", "api_key") != "api_key":
+        raise LaunchSeamUnavailable("仅支持所选模型服务的 API Key 通道")
+    root = runtime.get("_webConfigRoot")
+    if not root:
+        raise LaunchSeamUnavailable("缺少独立 MMS 运行目录")
+    root = require_private_root(Path(root))
+    # Registry v2 snapshots are the source of truth for new Pilot installs.
+    # They intentionally may omit the legacy config.toml; catalog_worker has
+    # already resolved the runtime from latest-approved before reaching this
+    # seam. Keep rejecting a genuinely empty snapshot so a broken install does
+    # not turn into a misleading Pi failure.
+    has_registry = (root / "generated" / "model-registry.latest-approved.json").is_file()
+    if not has_registry and not (root / "config.toml").is_file():
+        raise LaunchSeamUnavailable("独立 MMS 运行配置或已批准模型目录不存在")
+    executable, node = pi_runtime()
+    if not executable or not node:
+        raise LaunchSeamUnavailable("需要安装 Pi 和兼容的 Node.js 运行环境")
+    env = os.environ.copy()
+    env["PATH"] = str(Path(node).parent) + os.pathsep + env.get("PATH", "")
+    env.update(MMS_CONFIG_ROOT=str(root), MMS_REAL_HOME=str(real_home()), MMS_WEB_WORKER="1")
+    env["PYTHONUNBUFFERED"] = "1"
+    payload = root / ("launch-" + uuid.uuid4().hex + ".json")
+    tool_args = _windows_shell_tool_args()
+    private_json(payload, {
+        "modelInfo": model_info,
+        "runtime": {k: v for k, v in runtime.items() if not k.startswith("_web")},
+        "extraArgs": ["--mode", "rpc", "--session", str(root / "conversation.jsonl"), *tool_args, *(extra_args or [])],
+    })
+    return LaunchPlan([sys.executable, str(_WORKER), str(payload)], env, str(cwd), "pi",
+                     notes=["original MMS launcher in a dedicated worker process"])
+
+
+def mms_pi_launch_plan_builder(config_root=None):
+    def build(harness, model_info, runtime, cwd):
+        return build_pi_launch_plan(model_info, runtime, cwd) if harness == "pi" else None
+    return build
+
+
+def fixed_command_plan_builder(cmd, *, env=None):
+    def build(harness, model_info, runtime, cwd):
+        return LaunchPlan(list(cmd), dict(env or os.environ), str(cwd), str(harness))
+    return build

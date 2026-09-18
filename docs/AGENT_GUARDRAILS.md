@@ -137,6 +137,16 @@
 - 为了实现新功能，直接覆盖已有选择流程、确认流程或 bridge 路由
 - 把一次性的实验逻辑直接变成默认行为，且没有显式开关或任务上下文说明
 
+## Single Config Root（2026-09-10，#177）
+
+配置只有一个来源：`~/.config/mms-next`。这条高于任何"兼容旧目录"的实现倾向：
+
+- `mms` / `mmf` / `mmg` / Pilot 都读写同一个根；Pilot 保存通道后 terminal 读到的是同一份 approved bundle。
+- legacy `~/.config/mms` 已退出配置来源：不做自动导入，不做回退，`MMS_CONFIG_ROOT_MODE=stable` 被忽略；`mmd` / `mmm` 包装器已退休。
+- 同一个根下的 `~/.config/mms-next/*-gateway/`、`accounts/`、`fake-upstream/` 是运行时 / 会话状态目录，不是配置；gateway 根由 `mms_launchers._selected_mms_config_root()` 解析，Codex gateway `CODEX_HOME` 契约不变。
+- 检测到 Pilot 在运行时，安装脚本暂停安装并退出，不关闭进程、不清理会话（#199）；用户从 Pilot 页面的「更新」入口升级，或先 `mms web stop`（多实例用 `--all`）再重跑安装器；`--keep-running-pilot` 仅为兼容保留，不改变这个结果，脚本也不再有“装完重开 Pilot”的流程。
+- 新增一处读取 `~/.config/mms` 作为配置来源属于回归；`tests/test_single_config_root.py` 与 fresh-user gate 覆盖这条契约。
+
 ## Global OAuth Hard Cut
 
 这条规则高于一般“方便复用”的实现倾向：
@@ -157,7 +167,7 @@
 
 MMS-managed Codex launch must not repeatedly stop on `Hooks need review` in isolated sessions.
 
-- Gateway Codex `CODEX_HOME` must stay stable at `~/.config/mms/codex-gateway/.codex`; per-PID `MMS_SESSION_HOME` is allowed only for wrappers/tmp/session packet state.
+- Gateway Codex `CODEX_HOME` must stay stable at `<selected config root>/codex-gateway/.codex`, which is `~/.config/mms-next/codex-gateway/.codex` (`mms_launchers._codex_gateway_root()`); per-PID `MMS_SESSION_HOME` is allowed only for wrappers/tmp/session packet state, and the session `.codex` is a symlink to that stable directory.
 - Do not revert Codex gateway back to `CODEX_HOME=$MMS_SESSION_HOME/.codex`.
 - Runtime `bypass` mode must pass both `--dangerously-bypass-approvals-and-sandbox` and `--dangerously-bypass-hook-trust`.
 - Real `~/.codex/hooks.json` trust wins over stale sibling sessions. Sibling `codex-gateway/s/<pid>/.codex/config.toml` trust can backfill missing entries, but cannot overwrite matching real-home trust.
@@ -168,15 +178,91 @@ MMS-managed Codex launch must not repeatedly stop on `Hooks need review` in isol
 - Expected healthy state after any repair: gateway `hooks/list` has `0` `untrusted`/`modified` hooks; real `~/.codex` may only be auto-refreshed for MMS-managed hook hashes.
 - Any change to Codex hook generation, hook order, `CODEX_HOME`, or hook trust copy/write-back must run `tests/test_codex_hook_trust_contract.py` plus the targeted Codex hook trust tests.
 
+## Vision Capability Single Truth
+
+模型能不能自己读图，只有一条真值链。改动任何一环之前先读这段。
+
+`_pi_model_input_types()`（`mms_pi_support.py`）的优先级，从高到低：
+
+1. 用户自己设的：`manual_override`、`model_policy`。Web 通道模型页写的就是这一层，必须在所有 harness 生效。
+2. `_PI_MODEL_INPUT_HINTS`。只放 Pi 实测得出的结论，例如某模型经本 runner 走图片实际失败。加条目要写明依据。
+3. curated 数据：`provider_profile`、`approved_facts`。provider profiles 里的 `supports_vision` / `input_modalities` 是常规录入位置。
+4. 名称匹配兜底：`claude-` / `gpt-5` / `gemini-` 前缀、calibration reference、`mms_core._VISION_CAPABLE_MODEL_NAMES`。
+
+不允许的做法：
+
+- 在 `_pi_model_input_types` 里绕过 `caps` 直接查表，那会让用户在 Web 里的设置对 Pi 失效。
+- 把 `conservative_fallback` 当成「这个模型不支持图片」。它的含义是没有任何来源声明过。
+- 新增第五份硬编码 vision 名单。要补数据就写 provider profile。
+
+## Context Window Single Truth
+
+一个模型在某个 provider 下的 context window 只有一条链，四个 harness 都调同一个 resolver。改这条链之前先读这段。
+
+`mms_context_window.resolve_context_window(model, provider_id=..., runtime=...)` 的优先级，从高到低：
+
+1. `~/.config/mms-next/model-context-overrides.json`：用户自己写的文件，最高。
+2. `manual_override` / `model_policy`：Pilot 模型页写的那层。
+3. `approved_facts`：已发布的 capability bundle。
+4. `provider_profile`：`config/provider-profiles.json` 的 `context_windows`。
+5. provider 自己 `/models` 上报并被缓存的窗口（`<config root>/cache/models_<provider>.json` 的 `model_details`）。
+6. `config/model-context-windows.json`：没有任何 profile 覆盖时的兜底数据，每行写明来源。
+7. Claude 家族规则：Anthropic 自家模型 opus/sonnet 记 1M、haiku 记 200K。查不到就返回 `None`，由调用方套自己的默认值（launcher 是 200K）。
+
+用户在 Pilot 模型页给某个模型设了 context，就当他确认过（2026-09-12 owner 决定）：不校准、不封顶、不给 wire 名加 `[1m]`，四个 harness 原样带过去；Pilot 的自动刷新（`ModelSettings.auto_refresh`）跳过 `userSet` 字段。以后不要再为 `[1m]` 开讨论：非 Claude 模型它只是输入归一化。
+
+不允许的做法：
+
+- 在代码里新增按模型名映射 context 的 dict 或特判（Claude 家族规则和默认常量除外）。要补数据就写 provider profile；profile 覆盖不到再写 `config/model-context-windows.json`，并填上 `source`。
+- 让某个 harness 绕过 resolver 自己算窗口。Claude Code 的 `_effective_context_window` / `_apply_claude_context_env_overrides`、Codex 的 `_codex_gateway_context_window`、Pi 的 `_pi_model_capabilities`、OpenCode 的 `limit.context` 都必须落到同一个数。
+- 为 `[1m]` 维护重复条目。非 Claude 模型的 `[1m]` 只是输入归一化：`k3[1m]` 等价 `k3`，除非某个来源显式声明了带后缀的名字（先按原名查，查不到再剥后缀）。Claude 家族的 `[1m]` 语义不变，`_with_1m_suffix` / `_apply_claude_shell_context_slots` 不要动。
+- 改 `_runtime_supports_claude_1m` 或让敏感 Claude provider 默认开 1M。
+
+改这条链路要跑 `tests/test_context_window_single_truth.py`（含一条禁止代码内 context 表的扫描断言）和 `tests/test_provider_profiles.py`。
+
+## Vision Relay Contract
+
+Pi 用 `--model` 启动，扩展看不到这个参数，所以主模型能力由 mmf 在启动前算好注入：
+
+- `MMS_PI_MAIN_MODEL_VISION`：`1` 表示主模型自己能读图，扩展直接不注册 `describe_image`。`0` 表示需要中转。
+- `MMS_PI_VISION_POOL`：JSON 数组，本通道能读图的 models.json wire id。空数组表示算过了，本通道没有能读图的模型，不是「没算」。
+
+候选池就是「当前通道里能力判定为能读图的模型」，跟着用户实际配置走。不允许引入内置模型名单、优先级常量或按名字排序。池子里的模型地位相同，扩展在每次识图时随机排序，失败再依次降级。原生 pi 直接启动时没有注入变量，扩展改为扫描 models.json 里 `input` 含 `image` 的模型，同样不含写死的名字。
+
+唯一的开关是 `config.toml` 的 `[vision_sidecar] enabled`。池子只从当前通道已暴露的模型里取，不往 Pi 的模型列表里加条目。池子为空时 launcher 必须打印可见提示，不允许静默降级。
+
+### Claude Code 和 OpenCode 走 MCP
+
+这两个 harness 没有扩展位，但都说 MCP，所以同一个池子通过 `scripts/mms-vision-mcp.mjs` 这个 stdio server 暴露成同名的 `describe_image` 工具。
+
+- 池子规则和 Pi 完全一致：来自 `mms_vision_relay.relay_plan()`，它直接复用 `_pi_vision_plan`。不允许在这里另起一套判定。
+- mmf 把 Pi 同款 models.json 写进当前 session 目录的 `vision-relay/models.json`，`0600`，通过 `MMS_VISION_RELAY_CONFIG` 传给 server。凭据只出现在请求头，不进工具返回、不进日志。
+- 主模型自己能读图、或本通道没有能读图的模型时，不注册这个 server；切到能读图的模型时要把已有条目**删掉**，不能留着过期的。
+- `session_surfaces.disabled` 里的 `mcp:vision` 可以关掉它。
+- Codex 不接入：按 owner 2026-09-11 的决定，Codex 不做 vision 特殊处理。
+
+改这条链路要跑 `tests/test_pi_vision_relay.py` 和 `tests/test_vision_relay_harnesses.py`。前者含一条禁止硬编码模型名的断言，后者含一条断言 MCP server 与 Pi 扩展的 endpoint 规则没有各改各的。
+
 ## User Preferences And Human Gate
 
-`~/.config/mms/preferences.toml` 是用户偏好 allowlist 覆盖层，不是 agent 可随手写的配置文件。
+`~/.config/mms-next/preferences.toml` 是用户偏好 allowlist 覆盖层，不是 agent 可随手写的配置文件。
 
 - 日常偏好优先建议写 `preferences.toml`，例如 `thinking_mode`、`reasoning_effort`、`bypass`、`caveman_mode`、`nsr_mode`、`agent_pack`、`session_surfaces.disabled`、`assets.roots`
 - LLM / agent 需要先看 `docs/MMS_USER_PREFERENCES.md`，或让用户执行 `mms config preferences.help`
-- agents 可以读取、解释、生成 TOML snippet / manual diff，但不能自动写入真实 `~/.config/mms/**`
+- agents 可以读取、解释、生成 TOML snippet / manual diff，但不能自动写入真实 `~/.config/mms-next/**`
 - `preferences.toml` 会忽略 credentials、provider routes、account identity、proxy、OAuth、real HOME/XDG、Claude config 等非 allowlist 字段
 - 如必须写真实配置，仍走 human gate：`plan -> backup -> human double check -> audited write -> post-write human double check`
+- Pilot 模型设置的 apply 步骤自 #199 起用 `confirmed: true` 加浏览器 confirm 弹窗完成人工确认，不再要求用户手打确认短语；后端 `mms_web/model_settings.py` 与 `mms_web/model_settings_worker.py` 仍同时接受 `confirmed: true` 和旧的 `confirmPhrase`。
+
+## Hook / Skill Priority
+
+MMS dev channel 的动态 session assets 不应 shadow 用户全局 hook / skill。
+
+- 如果同名 global hook / skill 已存在，默认优先使用 global 版本；MMF 动态版本只能作为缺失时的 fallback。
+- xmem 是 global-only：不要在 MMS / MMF 中重新 bundle、安装、注入 xmem skill / hook / OpenCode plugin。
+- scmp / work / Feishu 防护 hook 已迁移到 mommy / state-core 约束域；不要作为 MMS session hook 单独注入。
+- NSR 暂时要求和 global 行为保持一致；修改 dev 分支 NSR 或 hook 注入逻辑时，必须检查本地 bundled payload 与 global hook/skill 的优先级和兼容性。
+- Figma / Pilot MCP 默认关闭；即使检测到已安装，也只能在显式 opt-in（例如 `MMS_ENABLE_MCP_FIGMA=1` 或 `MMS_ENABLE_MCP_PILOT=1`）时注入。
 
 ## 必须先停下来确认的情况
 
@@ -220,10 +306,42 @@ MMS-managed Codex launch must not repeatedly stop on `Hooks need review` in isol
 - 如果涉及配置或账号隔离：确认不会误写真实用户全局目录或破坏现有登录态
 - 如果涉及 fallback / resume / auth 恢复：确认失败路径不会静默切到 global OAuth，也不会把 global auth-bearing state 当作自动补救输入
 
+## Push 前 Fresh User Gate
+
+每个功能迭代准备 push 前，必须跑一次安装版/新用户视角的回归 gate，不能只依赖当前开发者机器的真实状态。
+
+- 默认命令：`python3 scripts/regression_fresh_user_gate.py`
+- 紧急小修可先跑：`python3 scripts/regression_fresh_user_gate.py --quick`，但 push 前仍要补全默认 gate，或在交付里明确说明未补全原因。
+- 查看当前完整用户路径矩阵：`python3 scripts/regression_fresh_user_gate.py --list-scenarios`
+- 每次新增能力、修复 bug、改变默认行为或改变安装/session/config/hook/resume/bridge 路径时，都必须新增或扩展回归覆盖；不能只说“手工测过”。
+- 回归覆盖必须尽量模拟完整用户路径，而不是只测 helper 函数。至少要明确覆盖哪些用户状态：fresh install、已有安装覆盖、重新安装、legacy `ccs` / dirty gateway session、旧配置残留、真实 HOME 隔离、session hook 注入、explicit resume、默认新启动。
+- 已经修过的问题必须能一一复现：如果一个 bug 来自旧状态组合（例如 `ccs` 残留、覆盖安装、hook trust、NSR `PostToolUse` 噪音、隐式 resume），修复时要把该状态组合写进 `scripts/regression_fresh_user_gate.py` 的 scenario matrix，或加入该 gate 会执行的 pytest target。
+- gate 必须清掉当前 session 注入的 `MMS_CONFIG_ROOT` / `REAL_HOME` / `ORIGINAL_HOME` / `MMS_REAL_HOME` / `XDG_CONFIG_HOME` 等环境变量，用临时 `HOME` 模拟 fresh installed user。
+- gate 至少覆盖：
+  - `mmf` fresh preview root 是否落到临时 `~/.config/mms-next`
+  - legacy dirty install / gateway session 泄漏 / retired `ccs`、`mmc` 清理
+  - 重置后可重新安装，且 `install.sh --dry-run` 重复执行不写文件
+  - NSR 只挂低频 continuation hooks，不再挂 `PermissionRequest` / `PreToolUse` / `PostToolUse`
+  - Claude 新启动不会消费项目旧 `lastSessionId`
+  - 显式 `mms resume <id>` 仍传递原生 resume 参数
+  - Codex hook trust 不重复弹确认，bounded resume/history 能安全回填
+  - installer/path smoke 不依赖开发者 worktree 私有状态
+- 若改动触及 `mms_core.py`、`mms_launchers.py`、installer、session index、config root、resume、HOME/XDG 隔离、wrapper 或 release channel，最终 handoff 必须写明 fresh-user gate 的实际结果。
+
 ## 迭代与提交隔离
 
 为了降低多 agent 共用工作树时的污染风险：
 
+- 仓库根目录是维护者的 `dev` 调度入口，必须保持 clean、最新；不要把 `.worktrees/dev` 当作多人共享的默认开发入口。
+- 根目录只用于 `git pull --ff-only`、查看状态、开 issue、记录计划、创建独立 worktree/branch。
+- 非 trivial 改动必须先有 issue，再从最新 `dev` 创建独立 worktree/branch，例如 `.worktrees/issue-14-redline-gate`；开发、验证、commit、push 都在该隔离 worktree 完成。
+- 共享 `dev` 入口不得叠加实质性改动或留下未跟踪文件；如果发现无关脏文件，不要 stage，不要清理，必须在交付中说明。
+- 每次开始开发或审查前，先对当前分支执行 `git pull --ff-only`；如果本地改动导致无法安全 pull，停止并报告阻塞原因，不要猜测本地已经最新。
+- MMF/MMS 后续问题必须先通过 issue 记录，改动通过 PR 提交，并在合并前经过 committee review。
+- agent 不得自行 merge PR，也不得绕过 committee review gate。
+- 如果 human/committee 授权 agent 执行 merge，且该 merge 对应本地 task worktree，merge 成功后必须清理关联 worktree，除非 human 明确要求保留。默认先运行 `scripts/cleanup_merged_worktree.sh <branch-or-pr>`；脚本因 dirty/unmerged/untracked/unpushed 状态拒绝时，必须保留现场并报告 blocker。
+- agent 不得自行创建 commit；只有 human 明确同意本次 commit 后才允许提交。
+- 例外：docs-only 计划/报告/committee baseline 文档，在用户要求“记录/提交/产出文档”时可默认 commit；但必须只 stage 目标文档，不能带入任何无关脏文件。
 - 一个迭代完成后，agent 必须先询问用户是否提交当前改动
 - 在用户没有明确回复前，不应默认进入下一轮实质性改动
 - 如果用户选择暂不提交，agent 在继续前应把“当前仍未提交”视为显式风险写明

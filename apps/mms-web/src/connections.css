@@ -1,0 +1,261 @@
+/* Focused connection flow; shares the conversation's palette and controls. */
+.connection-flow {
+  width: min(480px, 100%);
+}
+.connection-steps {
+  display: flex;
+  gap: 20px;
+  list-style: none;
+  padding: 0;
+  margin: 4px 0 26px;
+  font-size: max(11px, 0.8571rem);
+  color: var(--muted);
+}
+.connection-steps li {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+.connection-steps li > span {
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  width: 21px;
+  height: 21px;
+  border-radius: 50%;
+  font-size: max(11px, 0.7857rem);
+}
+.connection-steps li[aria-current] {
+  color: var(--ink);
+  font-weight: 600;
+}
+.connection-steps li[aria-current] > span,
+.connection-steps li.done > span {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--inverse);
+}
+.connection-heading {
+  font-size: max(11px, 1.4286rem);
+  letter-spacing: -0.4px;
+  margin: 0 0 18px;
+}
+.connection-heading:focus {
+  outline: none;
+}
+.connection-fields {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.connection-flow .field {
+  margin-bottom: 18px;
+}
+.connection-flow .field small,
+.connection-note {
+  font-size: max(11px, 0.8571rem);
+  font-weight: 400;
+  color: var(--muted);
+  line-height: 1.7;
+}
+.connection-note {
+  margin: 10px 0 18px;
+}
+.connection-flow .field small {
+  margin-top: 1px;
+}
+.connection-endpoint {
+  font-size: max(11px, 0.7857rem);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+  margin: 2px 0 16px;
+}
+.connection-endpoint code {
+  font: inherit;
+}
+.connection-text-button {
+  border: 0;
+  background: none;
+  color: var(--muted);
+  padding: 12px 0;
+  font-size: max(11px, 0.8571rem);
+  cursor: pointer;
+}
+.connection-text-button:hover {
+  color: var(--accent);
+}
+.connection-text-button.full {
+  display: block;
+  text-align: center;
+  width: 100%;
+}
+.connection-route {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: max(11px, 0.9286rem);
+  margin: 0 0 16px;
+}
+.connection-route span {
+  color: var(--muted);
+  font-size: max(11px, 0.8571rem);
+  overflow-wrap: anywhere;
+}
+.connection-search {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 12px;
+}
+.connection-search input {
+  min-width: 0;
+}
+.connection-selection {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: max(11px, 0.8571rem);
+  padding: 12px 0 8px;
+}
+.connection-selection > div {
+  display: flex;
+  gap: 14px;
+}
+.connection-selection button {
+  border: 0;
+  background: none;
+  color: var(--accent);
+  padding: 4px 0;
+  font-size: inherit;
+  cursor: pointer;
+}
+.connection-flow button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.connection-models {
+  max-height: 252px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.connection-models label {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 13px 14px;
+  cursor: pointer;
+  font-size: max(11px, 0.9286rem);
+  border-bottom: 1px solid var(--line);
+}
+.connection-models label:last-child {
+  border-bottom: 0;
+}
+.connection-models label:hover {
+  background: var(--soft);
+}
+.connection-models label:has(input:checked) {
+  background: var(--selected);
+}
+.connection-models input {
+  accent-color: var(--accent);
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+}
+.connection-models label span {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.connection-models .connection-note {
+  padding: 0 14px;
+}
+.connection-methods,
+.connection-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.connection-footer {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+.connection-flow .config-changes {
+  max-height: 300px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.connection-flow .config-changes p {
+  overflow-wrap: anywhere;
+}
+.connection-effort {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: max(11px, 0.9286rem);
+}
+.connection-spinner {
+  animation: connection-spin 1s linear infinite;
+}
+@keyframes connection-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .connection-spinner {
+    animation: none;
+  }
+}
+@media (max-width: 540px) {
+  .connection-steps {
+    gap: 12px;
+    font-size: max(11px, 0.7857rem);
+  }
+  .connection-steps li {
+    gap: 5px;
+  }
+  .connection-effort {
+    align-items: start;
+    flex-direction: column;
+  }
+  .connection-footer .button {
+    padding: 10px;
+    font-size: max(11px, 0.8571rem);
+  }
+}
+
+.model-library-empty {
+  padding: 40px 0;
+  border-top: 1px solid var(--line);
+}
+.model-library-empty h3 {
+  font-size: max(11px, 1.2143rem);
+  font-weight: 550;
+  margin: 0 0 10px;
+}
+.model-library-empty p {
+  font-size: max(11px, 0.9286rem);
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+/* First-use setup keeps one required decision in view. */
+.connection-steps { gap: 12px; flex-wrap: wrap; }
+.connection-advanced { margin: 0 0 20px; }
+.connection-advanced summary { cursor: pointer; color: var(--muted); font-size: max(11px, .9286rem); padding: 10px 0; }
+.connection-advanced[open] summary { margin-bottom: 10px; }
+.connection-preset-ready { display: flex; gap: 8px; align-items: center; font-weight: 600; }
+.connection-preset-ready svg { color: var(--accent); flex-shrink: 0; }
+.connection-footer { flex-wrap: wrap; }
+.connection-flow .form-error button { display: block; }
+@media (max-width: 540px) {
+  .connection-steps { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; }
+  .connection-heading { font-size: 1.2857rem; }
+}

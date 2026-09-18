@@ -1,0 +1,315 @@
+import pytest
+"""Offline checks: scheduling, failure isolation, concurrency and API security."""
+import json
+import threading
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
+
+from mms_web.runtime import private_json
+from mms_web.updates import CHECK_INTERVAL, UpdateService, version_tuple
+from mms_web.update_guidance import upgrade_guidance, release_policy, INSTALL_COMMAND
+from mms_web.server import WebApplication
+
+
+def service(tmp_path, fetcher=None):
+    return UpdateService(SimpleNamespace(state_root=tmp_path), fetcher=fetcher or Mock(return_value={'tag': 'v99.0.0', 'notes': 'new'}), clock=lambda: 100000)
+
+
+def test_numeric_versions_and_stable_only():
+    assert version_tuple('4.10.0') > version_tuple('v4.9.9')
+    assert version_tuple('v4.9.0-rc1') is None
+    assert version_tuple('../9.0.0') is None
+
+
+def test_upgrade_policy_is_explicit_and_never_accepts_a_command(tmp_path):
+    notes = '<!-- mms-upgrade-policy: {"manualBelow":"4.20.0","reason":"先运行安装器"} -->'
+    assert release_policy(notes) == {'manualBelow': '4.20.0', 'reason': '先运行安装器'}
+    guidance = upgrade_guidance('4.19.1', {'tag': 'v4.20.0', 'upgradePolicy': release_policy(notes)})
+    assert guidance['required'] is True
+    assert guidance['command'] == INSTALL_COMMAND
+    assert upgrade_guidance('4.20.0', {'tag': 'v4.21.0', 'upgradePolicy': release_policy(notes)}) is None
+
+
+def test_upgrade_guidance_uses_actual_legacy_root_and_staged_install(tmp_path, monkeypatch):
+    home = tmp_path / 'home'
+    monkeypatch.setenv('MMS_REAL_HOME', str(home))
+    legacy = home / '.config' / 'mms'
+    next_root = home / '.config' / 'mms-next'
+    latest = {'tag': 'v4.19.2'}
+    assert upgrade_guidance('4.19.1', latest, config_root=legacy)['required'] is True
+    assert upgrade_guidance('4.19.1', latest, config_root=next_root) is None
+    assert upgrade_guidance('4.19.1', latest, config_root=tmp_path / 'custom' / 'mms') is None
+    staged = {'manualInstallRequired': True, 'reason': '当前服务跑的是暂存副本。'}
+    assert upgrade_guidance('4.19.1', latest, installation=staged)['required'] is True
+
+
+def test_status_exposes_manual_policy_and_disables_one_click_update(tmp_path):
+    s = service(tmp_path, Mock(return_value={'tag': 'v99.0.0', 'notes': 'new',
+                                              'upgradePolicy': {'manualBelow': '4.20.0', 'reason': '迁移'}}))
+    with patch('mms_web.updates.VERSION', '4.19.1'):
+        result = s.check()
+    assert result['upgradeGuidance']['required'] is True
+    assert result['canUpgrade'] is False
+
+
+def test_a_five_x_install_on_the_stable_channel_is_told_the_installer_is_the_way_back():
+    """The updater only installs higher versions, so 5.x cannot leave via the dropdown."""
+    guidance = upgrade_guidance('5.1.0', {}, channel='stable')
+    assert guidance['required'] is True
+    assert guidance['command'] == INSTALL_COMMAND
+    assert '4.x' in guidance['title']
+    assert any('mms-web' in step for step in guidance['steps'])
+    assert upgrade_guidance('4.23.0', {'tag': 'v4.24.0'}, channel='stable') is None
+    assert upgrade_guidance('5.1.0', {}, channel='preview') is None
+    # Callers that do not know the channel keep the old behaviour.
+    assert upgrade_guidance('5.1.0', {'tag': 'v4.23.0'}) is None
+
+
+def test_the_back_to_stable_notice_is_the_payload_the_ui_renders():
+    fixture = json.loads((Path(__file__).resolve().parents[1] / 'apps/mms-web/tests/fixtures'
+                          / 'cross-line-guidance.json').read_text(encoding='utf-8'))
+    assert upgrade_guidance('5.1.0', {}, channel='stable') == fixture
+
+
+def test_status_never_calls_a_five_x_install_current_on_the_stable_line(tmp_path):
+    s = service(tmp_path, Mock(return_value={'tag': 'v4.23.0', 'notes': 'stable'}))
+    s.preferences({'channel': 'stable'})
+    with patch('mms_web.updates.VERSION', '5.1.0'):
+        result = s.check(manual=True)
+    assert result['latest']['tag'] == 'v4.23.0'
+    assert result['updateAvailable'] is False
+    assert result['canUpgrade'] is False
+    assert result['upgradeGuidance']['required'] is True
+
+
+def test_due_manual_and_auto_checks_share_a_persistent_cache(tmp_path):
+    s = service(tmp_path)
+    assert not tmp_path.joinpath('updates').exists()
+    assert s.check()['updateAvailable']
+    s.check(); s.check(manual=True)
+    assert s.fetcher.call_count == 1
+    s.clock = lambda: 100060
+    s.check(manual=True)
+    assert s.fetcher.call_count == 2
+    s.clock = lambda: 100060 + CHECK_INTERVAL
+    s.check()
+    assert s.fetcher.call_count == 3
+    assert service(tmp_path).status()['latest']['tag'] == 'v99.0.0'
+
+
+def test_disabled_auto_check_allows_explicit_manual_check(tmp_path, monkeypatch):
+    s = service(tmp_path)
+    s.preferences({'enabled': False})
+    s.check()
+    assert s.fetcher.call_count == 0
+    s.check(manual=True)
+    assert s.fetcher.call_count == 1
+    monkeypatch.setenv('MMS_WEB_UPDATE_CHECK', '0')
+    assert not s.preferences({'enabled': True})['enabled']
+
+
+def test_preview_channel_is_opt_in_and_keeps_stable_cache_separate(tmp_path):
+    stable = Mock(return_value={'tag': 'v4.22.1', 'notes': 'stable'})
+    preview = Mock(return_value={'tag': 'v5.0.0', 'notes': 'preview'})
+    s = UpdateService(SimpleNamespace(state_root=tmp_path), fetcher=stable,
+                      preview_fetcher=preview, clock=lambda: 100000)
+
+    assert s.status()['channel'] == 'stable'
+    s.preferences({'channel': 'preview'})
+    assert s.status()['channel'] == 'preview'
+    assert not s.status()['updateAvailable']
+    result = s.check(manual=True)
+    assert result['latest']['tag'] == 'v5.0.0'
+    assert preview.call_count == 1
+    assert stable.call_count == 0
+
+    s.preferences({'channel': 'stable'})
+    assert s.status()['latest'] == {}
+    s.check(manual=True)
+    assert stable.call_count == 1
+
+
+def test_failure_keeps_last_release_and_does_not_expose_exception(tmp_path):
+    s = service(tmp_path)
+    s.check()
+    s.clock = lambda: 200000
+    s.fetcher.side_effect = RuntimeError('secret-token')
+    result = s.check()
+    assert result['latest']['tag'] == 'v99.0.0'
+    assert result['error'] and 'secret-token' not in json.dumps(result)
+    s.check()
+    assert s.fetcher.call_count == 2
+
+
+def test_corrupt_timestamp_and_future_clock_do_not_disable_checks(tmp_path):
+    s = service(tmp_path)
+    for timestamp in ('bad', 1000000000000000, 200000):
+        private_json(s.root / 'check.json', {'checkedAt': timestamp})
+        s.check()
+    assert s.fetcher.call_count == 3
+
+
+def test_concurrent_check_issues_only_one_request(tmp_path):
+    entered, release = threading.Event(), threading.Event()
+    def fetch():
+        entered.set()
+        assert release.wait(2)
+        return {'tag': 'v99.0.0'}
+    s = service(tmp_path, Mock(side_effect=fetch))
+    worker = threading.Thread(target=s.check)
+    worker.start()
+    assert entered.wait(2)
+    assert s.check()['checking']
+    release.set(); worker.join(2)
+    assert s.fetcher.call_count == 1
+
+
+def test_application_creation_and_read_never_call_network(tmp_path):
+    with patch('mms_web.server._adapter', return_value=None):
+        app = WebApplication(state_root=tmp_path / 'state')
+    assert app.get(['update'])['operation']['phase'] == 'idle'
+    assert not (tmp_path / 'state').exists()
+    app.close()
+
+
+def test_whats_new_reads_the_notes_shipped_with_this_version(tmp_path):
+    """After an update the page reloads owing the user what changed.
+
+    Read from the install rather than the release API: the answer must not
+    depend on the network, and must not drift to a newer release that this
+    machine is not running.
+    """
+    from mms_version import VERSION
+    from mms_web.updates import release_notes
+
+    notes = release_notes(VERSION)
+    assert notes.startswith(f"# v{VERSION}"), notes[:80]
+
+    whats_new = service(tmp_path).status()['whatsNew']
+    assert whats_new['version'] == VERSION
+    assert whats_new['notes'] == notes
+    # The costs of the upgrade are pulled out of the notes, as the confirm step
+    # already does, so the panel can lead with them.
+    assert whats_new['upgradeNotice']
+    assert whats_new['upgradeNotice'] in notes
+    assert '## 升级须知' not in whats_new['upgradeNotice']
+
+
+def test_whats_new_will_not_read_outside_the_release_notes_directory():
+    from mms_web.updates import release_notes
+
+    for value in ('../../etc/passwd', 'v4.16.0', '4.16', '', None, '4.16.0/../../x'):
+        assert release_notes(value) == '', value
+
+
+def test_ui_preferences_remember_which_notes_were_read(tmp_path):
+    from mms_web.ui_preferences import UiPreferences
+
+    prefs = UiPreferences(tmp_path)
+    assert prefs.read()['whatsNewSeenVersion'] == ''
+
+    prefs.update({'whatsNewSeenVersion': '4.16.0'})
+    assert UiPreferences(tmp_path).read()['whatsNewSeenVersion'] == '4.16.0'
+
+    # Still a flag store for the tour; the two must not overwrite each other.
+    prefs.update({'tourSeen': True})
+    reread = UiPreferences(tmp_path).read()
+    assert reread['tourSeen'] is True
+    assert reread['whatsNewSeenVersion'] == '4.16.0'
+
+    prefs.update({'whatsNewSeenVersion': 'x' * 200})
+    assert len(UiPreferences(tmp_path).read()['whatsNewSeenVersion']) == 64
+
+
+class _FakeResponse:
+    """Matches what ``build_opener(...).open(...)`` hands back: a context
+    manager whose ``read`` returns raw bytes."""
+
+    def __init__(self, payload):
+        self.payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+    def read(self, *_):
+        return self.payload
+
+
+def _release_list(*entries):
+    response = _FakeResponse(json.dumps(list(entries)).encode())
+    opener = SimpleNamespace(open=lambda *a, **k: response)
+    return patch('urllib.request.build_opener', return_value=opener)
+
+
+def test_preview_fetch_only_ever_returns_a_published_prerelease():
+    """The stable line must never be offered as a preview update.
+
+    ``fetch_preview_release`` is the one place that decides what counts as a
+    preview, and the channel test above injects a fake fetcher, so without
+    this the filter itself is unverified: drop the prerelease condition and
+    every other test still passes while the 4.x stable tag starts showing up
+    as a 5.x preview.
+    """
+    from mms_web.updates import fetch_preview_release
+    with _release_list(
+        {'tag_name': 'v4.22.2', 'prerelease': False, 'draft': False, 'body': 'stable'},
+        {'tag_name': 'v5.1.0', 'prerelease': True, 'draft': True, 'body': 'unpublished'},
+        {'tag_name': 'v5.0.0', 'prerelease': True, 'draft': False, 'body': 'older preview'},
+        {'tag_name': 'v5.0.2', 'prerelease': True, 'draft': False, 'body': 'newest preview'},
+    ):
+        assert fetch_preview_release()['tag'] == 'v5.0.2'
+
+
+def test_preview_fetch_refuses_a_list_with_no_published_prerelease():
+    from mms_web.updates import fetch_preview_release
+    with _release_list({'tag_name': 'v4.22.2', 'prerelease': False, 'draft': False, 'body': 'stable'}):
+        try:
+            fetch_preview_release()
+        except ValueError:
+            return
+        raise AssertionError('a stable-only list must not yield a preview release')
+
+
+def test_update_channel_rejects_non_string_and_recovers_corrupt_settings(tmp_path):
+    import pytest
+    from mms_web.errors import WebError
+    s = service(tmp_path)
+    for value in ([], {}, 7, None):
+        with pytest.raises(WebError) as caught:
+            s.preferences({"channel": value})
+        assert caught.value.status == 400
+        private_json(s.root / "settings.json", {"channel": value})
+        assert s.channel() == "stable"
+        assert s.status()["channel"] == "stable"
+
+
+def test_release_payload_retains_the_real_prerelease_flag():
+    from mms_web.updates import _release_payload
+    assert _release_payload({'tag_name': 'v5.1.0', 'prerelease': True})['prerelease'] is True
+    assert _release_payload({'tag_name': 'v4.23.0', 'prerelease': False})['prerelease'] is False
+
+
+@pytest.mark.parametrize('payload,accepted', [
+    ({'tag_name': 'v5.1.0', 'draft': False, 'prerelease': True}, True),
+    ({'tag_name': 'v5.1.0', 'draft': False, 'prerelease': False}, True),
+    ({'tag_name': 'v5.1.1', 'draft': False, 'prerelease': True}, False),
+    ({'tag_name': 'v5.1.0', 'draft': True, 'prerelease': True}, False),
+    ({'tag_name': 'v5.1.0', 'draft': False}, False),
+])
+def test_exact_installed_release_lookup_is_bounded_and_validated(monkeypatch, payload, accepted):
+    import io, json
+    from mms_web import updates
+    class Opener:
+        def open(self, request, timeout):
+            assert request.full_url.endswith('/releases/tags/v5.1.0') and timeout == 5
+            return io.BytesIO(json.dumps(payload).encode())
+    monkeypatch.setattr(updates.urllib.request, 'build_opener', lambda *args: Opener())
+    if accepted:
+        assert updates.fetch_tag_release('v5.1.0')['prerelease'] is payload['prerelease']
+    else:
+        with pytest.raises(ValueError):
+            updates.fetch_tag_release('v5.1.0')

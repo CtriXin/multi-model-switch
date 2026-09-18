@@ -1,0 +1,299 @@
+/** `/btw` side questions: the shapes the server returns, and the pure rules the
+ *  UI applies to them.
+ *
+ *  A side question is not a turn. It is stored beside the transcript, carries
+ *  its own id and lifecycle, and never enters the main context. Everything in
+ *  this file is data and decisions only, so it can be read and tested without
+ *  a browser; the HTTP calls live in `api.ts` and the views in
+ *  `SideQuestions.tsx`.
+ */
+
+export type SideQuestionStatus =
+  | "prepared"
+  | "accepted"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "uncertain";
+
+/** Where the answer came from. `state` is the session snapshot the server can
+ *  always read; `completion` is the read-only sidecar model. */
+export type SideQuestionSource = "state" | "completion";
+
+/** Who actually answered. `pi-extension` is the fork's /btw extension inside
+ *  the Pi process (native context, one /btw prompt); `host` is the Pilot
+ *  sidecar: either no extension was detected, or the native attempt fell
+ *  back. Server rows created before T2b may lack the field. */
+export type SideQuestionRunner = "host" | "pi-extension";
+
+/** What the answer was allowed to see. The extension reports its branch
+ *  scope (mode/entries/chars/truncated/leafId); the host sidecar reports its
+ *  recent-turn excerpt (recentTurns/totalTurns/truncated). */
+export interface SideQuestionContextScope {
+  mode?: string;
+  entries?: number;
+  chars?: number;
+  truncated?: boolean;
+  leafId?: string;
+  recentTurns?: number;
+  totalTurns?: number;
+}
+
+export interface SideQuestionRoute {
+  modelName?: string;
+  providerName?: string;
+  channel?: string;
+  thinking?: string;
+}
+
+export interface SideQuestion {
+  btwId: string;
+  mainSessionId: string;
+  owner?: string;
+  question: string;
+  status: SideQuestionStatus;
+  answer: string | null;
+  source: SideQuestionSource;
+  runner?: SideQuestionRunner;
+  contextScope?: SideQuestionContextScope | null;
+  fallbackReason?: string | null;
+  contextRevision?: string;
+  routeSnapshot?: SideQuestionRoute;
+  usage?: Record<string, unknown> | null;
+  redactionSummary?: { secretsMasked?: number };
+  error: string | null;
+  createdAt: string;
+  acceptedAt?: string | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
+}
+
+export interface AskSideQuestion {
+  question: string;
+  idempotencyKey?: string;
+  sourceHint?: SideQuestionSource;
+}
+
+/** Statuses the server will never move away from. */
+export const SIDE_QUESTION_SETTLED: readonly SideQuestionStatus[] = [
+  "completed",
+  "failed",
+  "cancelled",
+  "uncertain",
+];
+
+export function isSettled(row: SideQuestion): boolean {
+  return SIDE_QUESTION_SETTLED.includes(row.status);
+}
+
+export function isInFlight(row: SideQuestion): boolean {
+  return !isSettled(row);
+}
+
+/** How far along the lifecycle a row is, used to pick between two copies of
+ *  the same question. A settled row is never replaced by an in-flight one. */
+function progress(status: SideQuestionStatus): number {
+  if (SIDE_QUESTION_SETTLED.includes(status)) return 3;
+  if (status === "running") return 2;
+  if (status === "accepted") return 1;
+  return 0;
+}
+
+/** Merge the rows the session detail carries with the rows this page has seen
+ *  directly.
+ *
+ *  The two disagree for a second at a time in both directions: a question just
+ *  posted is not in the session detail yet, and a locally cached row goes stale
+ *  while the sidecar keeps working. Whichever copy is further along wins, and
+ *  the server breaks a tie, so neither poll can walk a finished answer back to
+ *  "generating".
+ */
+export function mergeSideQuestions(
+  server: SideQuestion[],
+  local: SideQuestion[],
+): SideQuestion[] {
+  const byId = new Map<string, SideQuestion>();
+  for (const row of local) if (row?.btwId) byId.set(row.btwId, row);
+  for (const row of server) {
+    if (!row?.btwId) continue;
+    const seen = byId.get(row.btwId);
+    if (!seen || progress(row.status) >= progress(seen.status))
+      byId.set(row.btwId, row);
+  }
+  return [...byId.values()].sort(
+    (a, b) =>
+      (a.createdAt || "").localeCompare(b.createdAt || "") ||
+      a.btwId.localeCompare(b.btwId),
+  );
+}
+
+/** Replace one row in a list, or append it when it is new. */
+export function upsertSideQuestion(
+  rows: SideQuestion[],
+  row: SideQuestion,
+): SideQuestion[] {
+  if (!rows.some((old) => old.btwId === row.btwId)) return [...rows, row];
+  return rows.map((old) =>
+    old.btwId !== row.btwId || progress(row.status) < progress(old.status)
+      ? old
+      : row,
+  );
+}
+
+/** Open while the answer is arriving, and open once until seen / handled.
+ *
+ *  In-flight questions always expand so progress is visible. Settled questions
+ *  expand once until the user has seen or folded them, after which they stay
+ *  in the user's chosen fold state.
+ */
+export function defaultExpanded(row: SideQuestion, seen = false): boolean {
+  return isInFlight(row) || !seen;
+}
+
+export function sourceLabel(row: SideQuestion): string {
+  if (row.source === "state") return "Pilot 状态";
+  return row.runner === "pi-extension" ? "Pi 扩展" : "只读旁问模型";
+}
+
+/** One readable line for what the answer was allowed to see. Empty when the
+ *  runner did not report a scope; never guesses. */
+export function contextScopeLine(row: SideQuestion): string {
+  const scope = row.contextScope;
+  if (!scope) return "";
+  if (typeof scope.entries === "number" && typeof scope.recentTurns !== "number") {
+    const parts = [`主会话分支 ${scope.entries} 条`];
+    if (scope.truncated) parts.push("已截断");
+    return parts.join(" · ");
+  }
+  if (typeof scope.recentTurns === "number") {
+    const parts = [`最近 ${scope.recentTurns} 轮`];
+    if (typeof scope.totalTurns === "number" && scope.totalTurns > scope.recentTurns)
+      parts.push(`共 ${scope.totalTurns} 轮`);
+    if (scope.truncated) parts.push("已截断");
+    return parts.join(" · ");
+  }
+  return "";
+}
+
+export type SideQuestionTone =
+  | "running"
+  | "done"
+  | "error"
+  | "cancelled"
+  | "unknown";
+
+/** The short status word on the folded row, and the tone that colours it. */
+export function statusLabel(row: SideQuestion): {
+  text: string;
+  tone: SideQuestionTone;
+} {
+  if (row.status === "completed") return { text: "已回答", tone: "done" };
+  if (row.status === "failed") return { text: "未回答", tone: "error" };
+  if (row.status === "cancelled") return { text: "已取消", tone: "cancelled" };
+  if (row.status === "uncertain") return { text: "结果未知", tone: "unknown" };
+  if (row.status === "running") return { text: "生成中", tone: "running" };
+  return { text: "已受理", tone: "running" };
+}
+
+/** One line of the answer for the folded row: never the error text alone,
+ *  because the status word already says something went wrong. */
+export function summaryLine(row: SideQuestion, limit = 120): string {
+  const text = (row.answer || row.error || "").trim().replace(/\s+/g, " ");
+  if (!text) return isInFlight(row) ? "正在旁路回答，主任务继续运行…" : "";
+  return text.length > limit ? text.slice(0, limit) + "…" : text;
+}
+
+/** What typing `/btw` should do with whatever followed it. Bare `/btw` opens
+ *  the side-question input rather than sending anything. */
+export function readBtwCommand(
+  args: string,
+): { kind: "ask"; question: string } | { kind: "compose" } {
+  const question = (args || "").trim();
+  return question ? { kind: "ask", question } : { kind: "compose" };
+}
+
+/** The route the answer was produced against, as one readable line.
+ *
+ *  Empty when nothing was sent. A question answered from the session snapshot
+ *  never reached a model, and one that failed closed never reached the
+ *  network, so printing a model name beside either would read as a claim that
+ *  it answered.
+ */
+export function routeLine(row: SideQuestion): string {
+  if (row.source !== "completion" || !row.startedAt || row.answer === null)
+    return "";
+  const route = row.routeSnapshot || {};
+  return [route.modelName, route.providerName, route.channel]
+    .map((part) => (part || "").trim())
+    .filter(Boolean)
+    .join(" · ");
+}
+
+export const btwSeenStorageKey = "mms-web-btw-seen-v1";
+
+export function makeBtwChoiceKey(
+  sessionId: string | undefined,
+  btwId: string,
+): string {
+  return sessionId ? `${sessionId}|${btwId}` : btwId;
+}
+
+/** Resolve whether a card should be expanded based on user choices and default semantics. */
+export function resolveCardExpanded(
+  row: SideQuestion,
+  choices: Record<string, boolean>,
+  sessionId?: string,
+): boolean {
+  const key = makeBtwChoiceKey(sessionId, row.btwId);
+  const choice = choices[key];
+  if (typeof choice === "boolean") return choice;
+  // If never chosen/folded by user, it expands automatically (seen = false)
+  return defaultExpanded(row, false);
+}
+
+/** Read persisted card choices. Key format: `${sessionId}|${btwId}`.
+ *  Value is boolean: true = user explicitly opened; false = user folded/seen. */
+export function readBtwSeen(
+  storage?: Pick<Storage, "getItem">,
+): Record<string, boolean> {
+  try {
+    const s = storage ?? (typeof window !== "undefined" ? window.localStorage : undefined);
+    if (!s) return {};
+    const raw = JSON.parse(s.getItem(btwSeenStorageKey) || "{}");
+    const clean: Record<string, boolean> = {};
+    if (raw && typeof raw === "object") {
+      for (const [key, val] of Object.entries(raw)) {
+        if (
+          typeof key === "string" &&
+          key.length < 200 &&
+          typeof val === "boolean"
+        ) {
+          clean[key] = val;
+        }
+      }
+    }
+    return clean;
+  } catch {
+    return {};
+  }
+}
+
+/** Persist card choices, keeping at most the newest 1000 entries. */
+export function saveBtwSeen(
+  map: Record<string, boolean>,
+  storage?: Pick<Storage, "setItem">,
+): void {
+  try {
+    const s = storage ?? (typeof window !== "undefined" ? window.localStorage : undefined);
+    if (!s) return;
+    const entries = Object.entries(map).slice(-1000);
+    s.setItem(
+      btwSeenStorageKey,
+      JSON.stringify(Object.fromEntries(entries)),
+    );
+  } catch {
+    /* best effort: private browsing or quota exceeded */
+  }
+}
+

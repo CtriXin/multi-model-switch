@@ -874,6 +874,53 @@ def test_export_model_routes_keeps_antigravity_bridge_models(monkeypatch, tmp_pa
     assert routes["claude-sonnet-4-6"]["primary"]["provider_id"] == "us-cpa-local-antigravity"
 
 
+def test_export_model_routes_keeps_future_claude_models(monkeypatch, tmp_path):
+    import mms_router
+
+    models = [
+        "claude-opus-4-6",
+        "claude-opus-4-8",
+        "claude-opus-4-9",
+        "claude-qwen-proxy",
+        "claude-sonnet-4-6",
+    ]
+    _patch_export_dependencies(
+        monkeypatch,
+        contexts={
+            "maxcc": {
+                "id": "maxcc",
+                "provider_name": "maxcc",
+                "anthropic_base_url": "https://api.bestmax.cc/v1",
+                "openai_base_url": "https://api.bestmax.cc/v1",
+                "api_key": "sk-maxcc",
+                "models": models,
+            }
+        },
+    )
+    _patch_export_paths(monkeypatch, tmp_path)
+
+    cfg = {
+        "provider": {"default": "maxcc"},
+        "providers": [
+            {
+                "id": "maxcc",
+                "role": "auto",
+                "priority": 100,
+                "enabled": True,
+                "protocols": ["anthropic_messages", "openai_chat_completions"],
+                "supported_clis": ["claude", "codex", "opencode"],
+                "models": models,
+            }
+        ],
+    }
+
+    routes = mms_router.export_model_routes(cfg, force=True)
+
+    assert routes["claude-opus-4-8"]["primary"]["provider_id"] == "maxcc"
+    assert routes["claude-opus-4-9"]["primary"]["provider_id"] == "maxcc"
+    assert "claude-qwen-proxy" not in routes
+
+
 def test_export_model_routes_uses_startup_safe_probe_when_requested(monkeypatch, tmp_path):
     import mms_core
     import mms_router
@@ -1036,29 +1083,6 @@ def test_refresh_routes_export_for_hive_loads_current_config(monkeypatch):
     assert mms_core._refresh_routes_export_for_hive(force=True, quiet=True) is True
     assert calls == [
         ({"provider": {"default": "demo"}, "providers": [], "local_override_applied": True}, True, False)
-    ]
-
-
-def test_refresh_routes_export_for_hive_supports_startup_safe_probe(monkeypatch):
-    import mms_core
-    import mms_router
-
-    calls = []
-    monkeypatch.setattr(mms_core, "load_config", lambda: {"provider": {"default": "demo"}, "providers": []})
-    monkeypatch.setattr(
-        mms_core,
-        "apply_local_overrides",
-        lambda cfg: {**cfg, "local_override_applied": True},
-    )
-    monkeypatch.setattr(
-        mms_router,
-        "export_model_routes",
-        lambda cfg, force=False, startup_safe=False: calls.append((cfg, force, startup_safe)) or {},
-    )
-
-    assert mms_core._refresh_routes_export_for_hive(force=True, quiet=True, startup_safe=True) is True
-    assert calls == [
-        ({"provider": {"default": "demo"}, "providers": [], "local_override_applied": True}, True, True)
     ]
 
 
@@ -1251,11 +1275,43 @@ def test_main_help_bypasses_snapshot_guard_and_routes_refresh(monkeypatch):
 def test_select_provider_template_always_defaults_to_generic(monkeypatch):
     import mms_core
 
-    monkeypatch.setattr(
-        mms_core.Prompt,
-        "ask",
-        staticmethod(lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("Prompt.ask should not be called"))),
-    )
+    from types import SimpleNamespace
+    # Rich is lazily loaded; this no-prompt path must also work before it loads.
+    monkeypatch.setattr(mms_core, "Prompt", SimpleNamespace(
+        ask=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("Prompt.ask should not be called")),
+    ))
 
     assert mms_core._select_provider_template() == "generic"
     assert mms_core._select_provider_template("qwen") == "generic"
+
+
+def test_refresh_routes_export_for_hive_forwards_startup_safe_to_the_export(monkeypatch):
+    """`startup_safe` must reach `export_model_routes`, not just gate the probe.
+
+    This test existed, went red because it never stubbed
+    `_usage_routes_export_should_run` (which early-returns before the export),
+    and was deleted rather than repaired. Nothing else covers the positive
+    path: dropping the `startup_safe=startup_safe` argument in
+    `mms_core._refresh_routes_export_for_hive` left 400 tests green.
+    """
+    import mms_core
+    import mms_router
+
+    calls = []
+    monkeypatch.setattr(mms_core, "_usage_routes_export_should_run", lambda: True)
+    monkeypatch.setattr(mms_core, "load_config", lambda: {"provider": {"default": "demo"}, "providers": []})
+    monkeypatch.setattr(
+        mms_core,
+        "apply_local_overrides",
+        lambda cfg: {**cfg, "local_override_applied": True},
+    )
+    monkeypatch.setattr(
+        mms_router,
+        "export_model_routes",
+        lambda cfg, force=False, startup_safe=False: calls.append((cfg, force, startup_safe)) or {},
+    )
+
+    assert mms_core._refresh_routes_export_for_hive(force=True, quiet=True, startup_safe=True) is True
+    assert calls == [
+        ({"provider": {"default": "demo"}, "providers": [], "local_override_applied": True}, True, True)
+    ]

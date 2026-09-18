@@ -1,0 +1,445 @@
+import { type ReactNode, useState } from "react";
+import { Sun, Moon, Monitor, Minus, Plus, SlidersHorizontal, Palette, Settings2, Cpu } from "lucide-react";
+import type { Bootstrap } from "./types";
+import { RemoteAccessSection } from "./RemoteAccess";
+import { Models } from "./Models";
+import { FONT_FAMILIES } from "./App";
+import { AppVersion, Dialog } from "./components";
+import { SkillSourcesSetting } from "./SkillSources";
+
+export function SettingsPage({
+  openUpdates,
+  updateAvailable,
+  showCliSessions,
+  setShowCliSessions,
+  connectionCompleted,
+  tour,
+  data,
+  favorites,
+  toggleFavorite,
+  refresh,
+  themeChoice,
+  setThemeChoice,
+  accent,
+  setAccent,
+  back,
+  presetId,
+  selectPreset,
+  workspaceId,
+  effortChanged,
+  autoCollapseProcess, setAutoCollapseProcess,
+  fontFamily, setFontFamily,
+  monoFont, setMonoFont,
+  cjkFont, setCjkFont,
+  installedFonts,
+  fontSize, setFontSize,
+  boldText, setBoldText,
+  selectToCopy, setSelectToCopy,
+  enterToSend, setEnterToSend,
+  requestNavigation, editStateChanged, startTask,
+}: {
+  openUpdates: () => void;
+  updateAvailable: boolean;
+  showCliSessions: boolean;
+  setShowCliSessions: (on: boolean) => void;
+  connectionCompleted: () => void;
+  tour?: ReactNode;
+  data: Bootstrap;
+  favorites: string[];
+  toggleFavorite: (id: string) => void;
+  refresh: () => void;
+  themeChoice: "light" | "dark" | "system";
+  setThemeChoice: (value: "light" | "dark" | "system") => void;
+  accent: string;
+  setAccent: (value: string) => void;
+  back: () => void;
+  presetId: string;
+  selectPreset: (id: string) => void;
+  workspaceId: string;
+  effortChanged: (id: string) => void;
+  requestNavigation: (action: () => void) => void;
+  startTask: (text: string) => void;
+  editStateChanged: (state: {dirty: boolean; busy: boolean}) => void;
+  autoCollapseProcess: boolean;
+  setAutoCollapseProcess: (on: boolean) => void;
+  fontFamily: string;
+  setFontFamily: (value: string) => void;
+  monoFont: string;
+  setMonoFont: (value: string) => void;
+  cjkFont: string;
+  setCjkFont: (value: string) => void;
+  installedFonts: Record<string, boolean>;
+  fontSize: number;
+  setFontSize: (value: number) => void;
+  boldText: boolean;
+  setBoldText: (on: boolean) => void;
+  selectToCopy: boolean;
+  setSelectToCopy: (on: boolean) => void;
+  enterToSend: boolean;
+  setEnterToSend: (on: boolean) => void;
+}) {
+  const [tab, setTab] = useState<"models" | "appearance" | "usage" | "runtime">("models");
+  return (
+    <Dialog guide="settings" title="设置" size="sheet" close={() => requestNavigation(back)}>
+    <div className="settings-shell">
+      <nav className="settings-tabs" aria-label="设置分类">
+        <button
+          className={tab === "models" ? "active" : ""}
+          onClick={() => requestNavigation(() => setTab("models"))}
+        >
+          <SlidersHorizontal size={16} />
+          模型与通道
+        </button>
+        <button
+          className={tab === "appearance" ? "active" : ""}
+          onClick={() => requestNavigation(() => setTab("appearance"))}
+        >
+          <Palette size={16} />
+          外观
+        </button>
+        <button
+          className={tab === "usage" ? "active" : ""}
+          onClick={() => requestNavigation(() => setTab("usage"))}
+        >
+          <Settings2 size={16} />
+          使用
+        </button>
+        <button
+          className={tab === "runtime" ? "active" : ""}
+          onClick={() => requestNavigation(() => setTab("runtime"))}
+        >
+          <Cpu size={16} />
+          运行环境
+        </button>
+        <AppVersion version={data.appVersion} onClick={openUpdates} updateAvailable={updateAvailable} />
+      </nav>
+      {tab === "models" ? (
+        <Models
+          connectionCompleted={connectionCompleted}
+          data={data}
+          favorites={favorites}
+          toggleFavorite={toggleFavorite}
+          refresh={refresh}
+          value={presetId}
+          change={selectPreset}
+          workspaceId={workspaceId}
+          effortChanged={effortChanged}
+          editStateChanged={editStateChanged}
+        />
+      ) : tab === "appearance" ? (
+        <section className="general-settings">
+          <div className="preference-row">
+            <div>
+              <h2>主题</h2>
+              <p>保存在当前浏览器，随时可以更换。</p>
+            </div>
+            <div className="appearance-options">
+              {(
+                [
+                  ["system", "跟随系统", Monitor],
+                  ["light", "浅色", Sun],
+                  ["dark", "深色", Moon],
+                ] as const
+              ).map(([id, label, Icon]) => (
+                <button
+                  key={id}
+                  aria-pressed={themeChoice === id}
+                  onClick={() => setThemeChoice(id)}
+                >
+                  <Icon size={15} />
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="preference-row">
+            <div>
+              <h2>强调色</h2>
+              <p>用于选中、按钮和运行提示，页面底色保持安静。</p>
+            </div>
+            <div className="accent-options" role="group" aria-label="强调色">
+              {[
+                ["indigo", "靛蓝"],
+                ["cyan", "青蓝"],
+                ["pink", "品红"],
+                ["orange", "琥珀"],
+                ["green", "翠绿"],
+              ].map(([id, name]) => (
+                <button
+                  key={id}
+                  data-accent={id}
+                  aria-pressed={accent === id}
+                  onClick={() => setAccent(id)}
+                >
+                  <i aria-hidden="true" />
+                  {name}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="preference-row">
+            <div>
+              <h2>界面字体</h2>
+              <p>影响整个页面。只列出这台电脑装了的字体。</p>
+            </div>
+            <select
+              aria-label="界面字体"
+              value={fontFamily}
+              onChange={(e) => setFontFamily(e.target.value)}
+            >
+              <option value="system">跟随系统</option>
+              <option value="system_ui">System UI</option>
+              {Object.entries(FONT_FAMILIES)
+                .filter(([key, f]) => !f.cjk && installedFonts[key])
+                .map(([key, f]) => (
+                  <option key={key} value={key}>
+                    {f.label}
+                  </option>
+                ))}
+            </select>
+          </div>
+          <div className="preference-row">
+            <div>
+              <h2>等宽字体</h2>
+              <p>代码块与运行详情使用。</p>
+            </div>
+            <select
+              aria-label="等宽字体"
+              value={monoFont}
+              onChange={(e) => setMonoFont(e.target.value)}
+            >
+              <option value="system">SF Mono</option>
+              {Object.entries(FONT_FAMILIES)
+                .filter(([key, f]) => f.mono && installedFonts[key])
+                .map(([key, f]) => (
+                  <option key={key} value={key}>
+                    {f.label}
+                  </option>
+                ))}
+            </select>
+          </div>
+          <div className="preference-row">
+            <div>
+              <h2>中文字体兜底</h2>
+              <p>主字体缺中日韩字形时使用。</p>
+            </div>
+            <select
+              aria-label="中文字体兜底"
+              value={cjkFont}
+              onChange={(e) => setCjkFont(e.target.value)}
+            >
+              <option value="system">跟随系统</option>
+              {Object.entries(FONT_FAMILIES)
+                .filter(([key, f]) => f.cjk && installedFonts[key])
+                .map(([key, f]) => (
+                  <option key={key} value={key}>
+                    {f.label}
+                  </option>
+                ))}
+            </select>
+          </div>
+          <div className="preference-row font-size-row">
+            <div>
+              <h2>字号</h2>
+              <p>{fontSize} px，改动立即生效。</p>
+            </div>
+            <span className="stepper">
+              <button
+                type="button"
+                aria-label="减小字号"
+                disabled={fontSize <= 12}
+                onClick={() => setFontSize(fontSize - 1)}
+              >
+                <Minus size={13} />
+              </button>
+              <output aria-live="polite">{fontSize}</output>
+              <button
+                type="button"
+                aria-label="增大字号"
+                disabled={fontSize >= 20}
+                onClick={() => setFontSize(fontSize + 1)}
+              >
+                <Plus size={13} />
+              </button>
+            </span>
+          </div>
+          <label className="preference-row">
+            <div>
+              <h2>加粗正文</h2>
+              <p>所有正文用字体的加粗切片渲染。</p>
+            </div>
+            <input
+              type="checkbox"
+              role="switch"
+              aria-label="加粗正文"
+              checked={boldText}
+              onChange={(e) => setBoldText(e.target.checked)}
+            />
+          </label>
+        </section>
+      ) : tab === "usage" ? (
+        <section className="general-settings">
+          <label className="preference-row">
+            <div>
+              <h2>按 Enter 发送</h2>
+              <p>
+                {enterToSend
+                  ? "Enter 发送，Shift + Enter 换行。习惯先写几行再发送的话，关掉它。"
+                  : "Enter 换行，⌘/Ctrl + Enter 发送。"}
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              role="switch"
+              aria-label="按 Enter 发送"
+              checked={enterToSend}
+              onChange={(e) => setEnterToSend(e.target.checked)}
+            />
+          </label>
+          <label className="preference-row">
+            <div><h2>完成后自动收起过程</h2><p>保留最终回答，收起 thinking、工具记录与中间说明。每轮都可以手动展开。</p></div>
+            <input type="checkbox" role="switch" aria-label="完成后自动收起过程" checked={autoCollapseProcess} onChange={e => setAutoCollapseProcess(e.target.checked)} />
+          </label>
+          <label className="preference-row">
+            <div><h2>显示命令行会话</h2><p>把用 <code>mms</code> / <code>mmf</code> 在终端里开始的会话一起列出来。它们默认只读；要在这里继续，打开会话后选「接入并继续」。关掉后立即从列表消失。</p></div>
+            <input type="checkbox" role="switch" aria-label="显示命令行会话" checked={showCliSessions} onChange={e => setShowCliSessions(e.target.checked)} />
+          </label>
+          <label className="preference-row">
+            <div>
+              <h2>选择即复制</h2>
+              <p>选中对话里的文字后自动复制。会覆盖剪贴板里原有的内容；输入框中的选择不受影响。默认关闭。</p>
+            </div>
+            <input
+              type="checkbox"
+              role="switch"
+              aria-label="选择即复制"
+              checked={selectToCopy}
+              onChange={(e) => setSelectToCopy(e.target.checked)}
+            />
+          </label>
+          <RemoteAccessSection startTask={startTask} />
+          <SkillSourcesSetting />
+          {/* State, not documentation: it says which config the running Pilot
+              reads. The shortcut and workspace explanations that used to sit
+              here are in the guide and under the input box already. */}
+          <p className="settings-footnote">
+            {data.capabilities.configure
+              ? "当前使用 Web 独立配置，可在模型与通道中连接服务。"
+              : "当前读取已有 MMF 配置。收藏、通道备注与 Web 默认值保存于此浏览器。"}
+          </p>
+        </section>
+      ) : (
+        <section className="general-settings runtime-settings" aria-label="运行环境设置">
+          <div className="platform-capability" aria-label="运行环境能力">
+            <div className="platform-capability-header">
+              <div>
+                <strong>
+                  {data.platform?.os === "win32"
+                    ? "Windows Native Preview"
+                    : data.platform?.os === "darwin"
+                    ? "macOS 运行环境"
+                    : data.platform?.os === "linux"
+                    ? "Linux 运行环境"
+                    : "当前运行环境"}
+                </strong>
+                <span>
+                  {data.platform?.pathStyle || "unknown"} · {data.platform?.processControl || "能力未知"}
+                </span>
+              </div>
+              {data.platform?.shell && (
+                <div className="platform-meta">
+                  <span>Shell: <code>{data.platform.shell}</code></span>
+                </div>
+              )}
+            </div>
+            {data.browser && data.browser.length > 0 ? (
+              <div className="platform-browser-capabilities">
+                {data.browser.map((capability) => (
+                  <span
+                    className={capability.supported ? "capability-chip" : "capability-chip unavailable"}
+                    key={capability.backend}
+                    title={capability.reason || undefined}
+                  >
+                    <span className="chip-indicator" />
+                    <strong>{capability.backend}</strong>:{" "}
+                    {capability.loggedIn === "unknown"
+                      ? "登录态未知"
+                      : capability.loggedIn
+                      ? "已登录"
+                      : "独立环境"}
+                    {capability.reason ? ` · ${capability.reason}` : ""}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <div className="platform-browser-capabilities">
+                <span className="capability-chip unavailable">
+                  <span className="chip-indicator" />
+                  浏览器能力: 独立环境
+                </span>
+              </div>
+            )}
+          </div>
+          <div className="preference-row">
+            <div>
+              <h2>会话启动链路</h2>
+              <p>{data.capabilities.launch ? "本地执行链路正常，可正常创建与执行会话。" : "会话启动受限或不可用。"}</p>
+            </div>
+            <span className={`status-pill ${data.capabilities.launch ? "active" : "muted"}`}>
+              {data.capabilities.launch ? "就绪" : "受限"}
+            </span>
+          </div>
+          <div className="preference-row">
+            <div>
+              <h2>配置模式</h2>
+              <p>
+                {data.capabilities.configure
+                  ? "当前使用 Web 独立配置，可在模型与通道中直接管理服务。"
+                  : "当前读取外部只读配置，配置修改受保护。"}
+              </p>
+            </div>
+            <span className={`status-pill ${data.capabilities.configure ? "active" : "muted"}`}>
+              {data.capabilities.configure ? "独立可写" : "只读"}
+            </span>
+          </div>
+          <div className="preference-row">
+            <div>
+              <h2>模型自动发现</h2>
+              <p>
+                {data.capabilities.discoverModels
+                  ? "支持通过连接服务自动拉取与探活模型列表。"
+                  : "使用静态预设模型列表。"}
+              </p>
+            </div>
+            <span className={`status-pill ${data.capabilities.discoverModels ? "active" : "muted"}`}>
+              {data.capabilities.discoverModels ? "支持" : "静态"}
+            </span>
+          </div>
+          {data.platform?.configRoot && (
+            <div className="preference-row">
+              <div>
+                <h2>配置目录</h2>
+                <p><code>{data.platform.configRoot}</code></p>
+              </div>
+            </div>
+          )}
+          {data.platform?.stateRoot && (
+            <div className="preference-row">
+              <div>
+                <h2>状态目录</h2>
+                <p><code>{data.platform.stateRoot}</code></p>
+              </div>
+            </div>
+          )}
+          <p className="settings-footnote">
+            {data.capabilities.configure
+              ? "当前使用 Web 独立配置，可在模型与通道中连接服务。"
+              : "当前读取已有 MMF 配置。收藏、通道备注与 Web 默认值保存于此浏览器。"}
+          </p>
+        </section>
+      )}
+    </div>
+    {tour}
+    </Dialog>
+  );
+}

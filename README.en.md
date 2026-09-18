@@ -96,12 +96,12 @@ Since 2026-09-16, `main` and `dev` are **two long-running parallel release lines
 | Line | Branch | Version | Install flag | What's in it |
 |---|---|---|---|---|
 | Stable | `main` | 4.23.x | `--channel stable` (default) | Battle-tested features; only fixes and validated capabilities |
-| Preview | `dev` | 5.1.x | `--channel dev` | **Everything in stable**, plus the Bot workbench |
+| Preview | `dev` | 5.1.x | `--channel dev` | Stable capabilities, Bot workbench, and other preview changes |
 | Canary | `canary` | deprecated | `--channel canary` | Old experimental line, deprecated since 2026-06; do not use |
 
-Every change on `main` defaults into `dev`, so the preview line is always a superset of stable. There is no "install 5.x, lose a 4.x fix" scenario.
+Stable fixes should be ported to `dev`, but synchronization requires an actual merge and is not automatic. Check each branch's Git history and Releases to confirm whether a fix is included.
 
-**The two lines cannot coexist on the same machine.** Switching lines requires re-running the installer with the matching `--channel`; config, channels, and session history all live in the same config root, so switching doesn't wipe them.
+**One public install directory, `~/.mms`, holds one release line at a time.** Switch by re-running the installer with the matching `--channel`; config, channels, and session history remain in the same config root. Developers can keep isolated worktrees for both lines, with care around shared config and service ports.
 
 Historical background: in the v3.x era there were three channels (Stable 3.4.z / Dev 3.5.z / Canary 3.6.z). v4.0.0 re-planned as "two lines + Pilot", and Canary was deprecated in 2026-06. See [`docs/RELEASE_CHANNELS.md`](docs/RELEASE_CHANNELS.md).
 
@@ -426,11 +426,13 @@ Full pack list and cleanup plan at [`docs/BUNDLED_PACKS.md`](docs/BUNDLED_PACKS.
 | `<state>/updates/settings.json` | `channel` — "which line I want to check" |
 | `~/.config/mms` | **Legacy, no longer a config source.** Not auto-imported, not fallen back to; only `*-gateway/` runtime session dirs remain |
 
+No entry reads configuration from legacy `~/.config/mms`; retained gateway session directories are not a configuration source.
+
 **Don't mix the two `channel` fields**: `updates/settings.json`'s `channel` means "which line I want to check", `version.json`'s `install_channel` means "which line I'm actually installed on". They are not the same thing. The user switched to preview, checked, but didn't confirm upgrade — `channel` is preview while actual install is still stable; this state is legal.
 
 **Only one write path for config**: write preview DB + publish. Local edits prefer Registry v2: TUI / `mms config` / WebUI first create a DB candidate, on review it's published as `generated/model-registry.latest-approved.json`, and the generated Profile it references is the runtime boundary. Terminal and Pilot read the same published result.
 
-`~/.config/mms/preferences.toml` is the user preference allowlist overlay; **agents must not auto-write the real file**. Read, explain, and generate TOML snippets for the user — actual writes go through the human gate.
+`~/.config/mms-next/preferences.toml` is the user preference allowlist overlay; **agents must not auto-write the real file**. Read, explain, and generate TOML snippets for the user — actual writes go through the human gate.
 
 ---
 
@@ -674,7 +676,7 @@ Canary (`mmg` / `canary` branch) has been deprecated since 2026-06. `mmg` is sti
 | [`docs/mms-web/bot-work/`](docs/mms-web/bot-work/) | Bot workbench work packets (T1~T8i) | |
 | [`docs/legacy/`](docs/legacy/) | Historical archive | |
 
-**Before writing code, verify**: any version number, branch relationship, or "current state" claim in any document should be cross-checked against `mms_version.py`, `git log`, and the most recent `RELEASE-v*.md`.
+**Before writing code, verify**: any version number, branch relationship, or "current state" claim in any document should be cross-checked against `lib/mms_version.py`, `git log`, and the most recent `RELEASE-v*.md`.
 
 ---
 

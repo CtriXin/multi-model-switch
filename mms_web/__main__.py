@@ -1,0 +1,145 @@
+import argparse
+import signal
+import os
+import sys
+import threading
+import time
+import webbrowser
+from pathlib import Path
+
+from .server import WebApplication, create_server
+from .remote_access import QUERY
+
+
+def main(argv=None):
+    from .service import VERBS, help_text, run as run_service, wants_help
+
+    raw = list(sys.argv[1:] if argv is None else argv)
+    # `mms web status|url|start|stop|restart` manage the detached service;
+    # the verb may follow options mms_core prepends (for example
+    # `--config-root <root> status`), so look for it anywhere.
+    for index, token in enumerate(raw):
+        if token in VERBS:
+            raise SystemExit(run_service(token, raw[:index] + raw[index + 1:]))
+    # Typed with nothing to do: say what can be appended instead of quietly
+    # occupying the terminal with a server the caller may not have wanted.
+    if wants_help(raw):
+        print(help_text())
+        raise SystemExit(0)
+    parser = argparse.ArgumentParser(description="MMS Pilot — local conversations powered by MMS and Pi")
+    from mms_version import VERSION
+    parser.add_argument("--version", action="version", version=f"MMS Pilot {VERSION}")
+    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--config-root", type=Path,
+                        help="Explicit MMS root; omitted means no config discovery")
+    from mms_platform import describe_platform
+    parser.add_argument("--state-root", type=Path,
+                        default=Path(describe_platform().state_root),
+                        help="Directory for Web-owned config, sessions and runtime snapshots")
+    parser.add_argument("--open", action="store_true", help="Open the local Web client in your browser")
+    parser.add_argument("--listen", choices=("loopback", "lan", "all"), default=None,
+                        help="loopback (this machine only), lan (this machine's own network "
+                             "addresses), or all (every interface). Anything but loopback "
+                             "requires the access token printed at startup. Without this flag "
+                             "the setting the Web switch was left in applies, which is loopback "
+                             "until someone turns it on.")
+    parser.add_argument("--hostname", action="append", default=[], metavar="HOST",
+                        help="A public hostname this server answers to, for example one "
+                             "fronted by a tunnel. Repeatable.")
+    source = Path(__file__).resolve().parent.parent
+    bundled = source / "mms_web_static"
+    parser.add_argument("--static-root", type=Path, default=bundled if bundled.is_dir() else source / "apps/mms-web/dist")
+    args = parser.parse_args(argv)
+    from .install_lock import acquire_runtime_lease
+    install_lease = acquire_runtime_lease(source)
+    os.environ.setdefault('MMS_WEB_INSTALL_ROOT', str(source))
+    from .update_activation import redirect_active, acquire_state_lock
+    redirect_active(args, source)
+    root = args.state_root.expanduser().resolve()
+    if args.config_root and not args.config_root.expanduser().is_dir():
+        parser.error("--config-root must be an existing directory")
+    if not (args.static_root / "index.html").is_file():
+        parser.error("Web assets are missing. Reinstall MMS v4, or run npm run build --workspace @mms/web in the source checkout.")
+    lease = acquire_state_lock(root)
+    config_root = args.config_root
+    if config_root is None:
+        from .runtime import default_config_root
+
+        config_root = default_config_root(root)
+    from .remote_access import stored_mode
+
+    # The flag is for this run; without it the switch in the Web settings is
+    # what decides, so a browser toggle survives a restart.
+    listen = args.listen or stored_mode(root)
+    app = WebApplication(state_root=root, config_root=config_root,
+                         listen=listen, hostnames=tuple(args.hostname))
+    server = create_server(app, args.static_root, args.port)
+    port = server.server_address[1]
+    address = f"http://127.0.0.1:{port}"
+    if app.access.required:
+        address += f"/?{QUERY}={app.access.token}"
+    print(f"MMS Pilot: {address}", flush=True)
+    if app.access.required:
+        # Say plainly what is reachable and print every way in, not one guess:
+        # which address works depends on where the other device is, and only
+        # the person reading this knows that.
+        where = {"lan": "本机的网络地址", "all": "所有网络接口"}[app.access.mode]
+        print(f"  已开放：{where}。带 token 的链接才能访问，token 存在 "
+              f"{root / 'remote-access-token'}", flush=True)
+        for entry in app.access.links(port):
+            print(f"  {entry['url']}    {entry['detail']}", flush=True)
+        print("  设置页里有可以扫描的二维码。", flush=True)
+    else:
+        print("  仅本机可访问，未监听任何对外地址。", flush=True)
+    from .update_coordinator import UpdateCoordinator
+    app.updates.coordinator = UpdateCoordinator(app, server, source, args.static_root)
+    app.updates.start_scheduler()
+    if args.open:
+        webbrowser.open(address)
+    def terminate(_signum, _frame):
+        raise KeyboardInterrupt
+    signal.signal(signal.SIGTERM, terminate)
+    if os.name == "nt":
+        # Windows cannot deliver SIGTERM to another process, so `mms web stop`
+        # writes a request file here. A request left over from a Pilot that
+        # never read it must not stop the one starting now.
+        from .service import STOP_REQUEST
+
+        stop_request = root / STOP_REQUEST
+        stop_request.unlink(missing_ok=True)
+
+        def watch_for_stop_request():
+            while True:
+                if stop_request.exists():
+                    try:
+                        stop_request.unlink()
+                    except OSError:
+                        pass
+                    # BaseServer.shutdown() waits for serve_forever() to
+                    # acknowledge the flag.  Keep the watcher non-blocking on
+                    # Windows: the main thread owns serve_forever() and will
+                    # observe this flag on its next poll, then run the normal
+                    # app/server/lock cleanup below.
+                    server._BaseServer__shutdown_request = True
+                    return
+                time.sleep(0.4)
+
+        threading.Thread(target=watch_for_stop_request, name="mms-web-stop-request",
+                         daemon=True).start()
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+        try:
+            app.close()
+        finally:
+            os.close(lease)
+            os.close(install_lease)
+            if app.pending_handoff:
+                Path(app.pending_handoff["armed"]).touch(mode=0o600)
+
+
+if __name__ == "__main__":
+    main()

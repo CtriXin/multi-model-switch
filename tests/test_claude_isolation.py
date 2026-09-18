@@ -156,6 +156,34 @@ def test_load_project_scoped_resume_uses_real_home_index_under_gateway_home(monk
     assert result == "session-match"
 
 
+def test_backfill_project_store_resume_files_cross_account_and_path_alias(monkeypatch, tmp_path, scoped_store):
+    import mms_launchers
+    import mms_project_store
+    from mms_project_store import claude_raw_entry_path, ensure_claude_project_store
+
+    project_dir = tmp_path / "repo"
+    work_dir = project_dir / "work"
+    work_dir.mkdir(parents=True)
+    monkeypatch.setattr(mms_launchers, "canonical_project_path", lambda _path=None: str(project_dir.resolve()))
+    monkeypatch.setattr(mms_project_store, "canonical_project_path", lambda _path=None: str(project_dir.resolve()))
+
+    ensure_claude_project_store(str(work_dir), account_id="relay-a")
+    ensure_claude_project_store(str(work_dir), account_id="relay-b")
+    source_projects = claude_raw_entry_path("projects", str(work_dir), account_id="relay-b")
+    source_file = source_projects / str(work_dir.resolve()).replace(os.sep, "-") / "session-cross.jsonl"
+    source_file.parent.mkdir(parents=True, exist_ok=True)
+    source_file.write_text('{"sessionId":"session-cross"}\n', encoding="utf-8")
+
+    target_projects = claude_raw_entry_path("projects", str(work_dir), account_id="relay-a")
+    mms_launchers._backfill_project_store_claude_resume_files(str(target_projects), str(work_dir))
+    mms_launchers._mirror_claude_project_resume_dir_aliases(str(target_projects), str(work_dir))
+
+    copied_work = target_projects / str(work_dir.resolve()).replace(os.sep, "-") / "session-cross.jsonl"
+    copied_root = target_projects / str(project_dir.resolve()).replace(os.sep, "-") / "session-cross.jsonl"
+    assert copied_work.read_text(encoding="utf-8") == '{"sessionId":"session-cross"}\n'
+    assert copied_root.read_text(encoding="utf-8") == '{"sessionId":"session-cross"}\n'
+
+
 def test_mms_config_paths_resolve_real_home_under_gateway_shell(monkeypatch, tmp_path):
     import mms_core
     import mms_router
@@ -173,10 +201,12 @@ def test_mms_config_paths_resolve_real_home_under_gateway_shell(monkeypatch, tmp
     reloaded_core = importlib.reload(mms_core)
     reloaded_router = importlib.reload(mms_router)
     try:
-        assert reloaded_core.CONFIG_PATH == str(real_home / ".config" / "mms" / "config.toml")
-        assert reloaded_core.CREDENTIALS_PATH == str(real_home / ".config" / "mms" / "credentials.sh")
-        assert reloaded_core._config_write_target_path() == str(real_home / ".config" / "mms" / "config.toml")
-        assert reloaded_router.MODEL_ROUTES_PATH == str(real_home / ".config" / "mms" / "model-routes.json")
+        # The default root is mms-next; the point here is that it resolves
+        # under the real home rather than under the gateway session home.
+        assert reloaded_core.CONFIG_PATH == str(real_home / ".config" / "mms-next" / "config.toml")
+        assert reloaded_core.CREDENTIALS_PATH == str(real_home / ".config" / "mms-next" / "credentials.sh")
+        assert reloaded_core._config_write_target_path() == str(real_home / ".config" / "mms-next" / "config.toml")
+        assert reloaded_router.MODEL_ROUTES_PATH == str(real_home / ".config" / "mms-next" / "model-routes.json")
     finally:
         monkeypatch.delenv("HOME", raising=False)
         monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
@@ -279,7 +309,11 @@ def test_stable_usage_write_keeps_legacy_routes_export(monkeypatch, tmp_path):
     monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
     monkeypatch.setenv("REAL_HOME", str(real_home))
     monkeypatch.setenv("ORIGINAL_HOME", str(real_home))
-    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    # The legacy stable root is retired: even a process pinned to it with the
+    # old wrapper env stays in preview mode and never rewrites the legacy
+    # model-routes.json export.
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(stable_root))
+    monkeypatch.setenv("MMS_CONFIG_ROOT_MODE", "stable")
     monkeypatch.delenv("MMS_COMMAND_NAME", raising=False)
     monkeypatch.delenv("MMS_PREVIEW_MODE", raising=False)
 
@@ -298,8 +332,24 @@ def test_stable_usage_write_keeps_legacy_routes_export(monkeypatch, tmp_path):
         monkeypatch.setattr(reloaded.threading, "Thread", ImmediateThread)
         reloaded._trigger_routes_export_after_usage_write()
 
-        assert calls == [{"force": True, "quiet": True}]
+        assert calls == []
+
+        # The default root publishes a verified bundle instead, so it must not
+        # keep rewriting the legacy export.
+        monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+        monkeypatch.delenv("MMS_CONFIG_ROOT_MODE", raising=False)
+        preview_reloaded = importlib.reload(mms_core)
+        preview_calls = []
+        monkeypatch.setattr(
+            preview_reloaded, "_refresh_routes_export_for_hive", lambda *args, **kwargs: preview_calls.append(kwargs)
+        )
+        monkeypatch.setattr(preview_reloaded.threading, "Thread", ImmediateThread)
+        preview_reloaded._trigger_routes_export_after_usage_write()
+
+        assert preview_calls == []
     finally:
+        monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+        monkeypatch.delenv("MMS_CONFIG_ROOT_MODE", raising=False)
         monkeypatch.delenv("MMS_REAL_HOME", raising=False)
         monkeypatch.delenv("REAL_HOME", raising=False)
         monkeypatch.delenv("ORIGINAL_HOME", raising=False)
@@ -545,7 +595,7 @@ def test_statusline_reads_route_and_health_from_selected_config_root(tmp_path):
         encoding="utf-8",
     )
     (preview_root / "route_status.json").write_text(
-        json.dumps({"tier": "light", "model": "claude-preview-20260101"}),
+        json.dumps({"tier": "light", "model": "claude-preview-20260101", "context_window_tokens": 1_000_000}),
         encoding="utf-8",
     )
     (preview_root / "health-cache.json").write_text(
@@ -594,6 +644,7 @@ def test_statusline_reads_route_and_health_from_selected_config_root(tmp_path):
 
     assert "preview" in result.stdout
     assert "stable" not in result.stdout
+    assert "3k/1M" in result.stdout
     assert "●" in result.stdout
 
 
@@ -656,6 +707,71 @@ def test_statusline_strips_gateway_xdg_without_explicit_root(tmp_path):
     assert "stable" in result.stdout
     assert "●" in result.stdout
 
+
+def test_statusline_strips_single_root_gateway_xdg_without_explicit_root(tmp_path):
+    """A gateway session under ~/.config/mms-next must find its own root.
+
+    The script only knew how to walk out of a ~/.config/mms gateway home, so
+    after the config root moved it resolved to <session>/.config/mms and the
+    route status never showed up in the statusline.
+    """
+    script = Path(__file__).resolve().parents[1] / "statusline-command.sh"
+    real_home = tmp_path / "real-home"
+    stable_root = real_home / ".config" / "mms-next"
+    gateway_home = stable_root / "claude-gateway" / "s" / "12345"
+    stable_root.mkdir(parents=True)
+    gateway_home.mkdir(parents=True)
+    (stable_root / "route_status.json").write_text(
+        json.dumps({"tier": "heavy", "model": "claude-stable-20260101"}),
+        encoding="utf-8",
+    )
+    (stable_root / "health-cache.json").write_text(
+        json.dumps(
+            {
+                "records": {
+                    "claude-stable-20260101": {
+                        "status": "ok",
+                        "checked_at": datetime.now().astimezone().isoformat(),
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = {
+        "model": {"display_name": "Sonnet"},
+        "workspace": {"current_dir": str(tmp_path)},
+        "context_window": {
+            "used_percentage": 1,
+            "total_input_tokens": 1000,
+            "total_output_tokens": 2000,
+            "context_window_size": 200000,
+        },
+        "cost": {"total_cost_usd": 0, "total_duration_ms": 0},
+    }
+    env = {
+        **os.environ,
+        "HOME": str(gateway_home),
+        "XDG_CONFIG_HOME": str(gateway_home / ".config"),
+        "MMS_REAL_HOME": str(real_home),
+        "REAL_HOME": str(real_home),
+        "ORIGINAL_HOME": str(real_home),
+        "TMPDIR": str(tmp_path) + os.sep,
+    }
+    env.pop("MMS_CONFIG_ROOT", None)
+    env.pop("MMS_CONFIG_DIR", None)
+    result = subprocess.run(
+        ["bash", str(script)],
+        input=json.dumps(payload),
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    assert "stable" in result.stdout
+    assert "●" in result.stdout
 
 def test_claude_route_status_path_uses_selected_root_when_explicit(monkeypatch, tmp_path):
     import mms_launchers
@@ -735,12 +851,14 @@ def test_home_context_reports_selected_config_root(monkeypatch, tmp_path):
     assert context["config_root"] != str(stable_root)
 
 
-def test_home_context_defaults_to_stable_root_without_explicit_root(monkeypatch, tmp_path):
+def test_home_context_under_a_legacy_gateway_home_uses_the_single_root(monkeypatch, tmp_path):
+    """Gateway session homes still sit under ~/.config/mms, but the config a
+    session reads is the one shared root; the legacy root is retired (#177)."""
     import mms_launchers
 
     real_home = tmp_path / "real-home"
-    stable_root = real_home / ".config" / "mms"
-    gateway_home = stable_root / "codex-gateway" / "s" / "4174"
+    stable_root = real_home / ".config" / "mms-next"
+    gateway_home = real_home / ".config" / "mms" / "codex-gateway" / "s" / "4174"
     gateway_home.mkdir(parents=True)
     monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
     monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
@@ -777,7 +895,9 @@ def test_model_context_overrides_follow_selected_config_root(monkeypatch, tmp_pa
         json.dumps({"models": {"root-selected-model": 222_000}}),
         encoding="utf-8",
     )
-    mms_launchers._MODEL_CONTEXT_OVERRIDES_CACHE.update({"path": None, "mtime": None, "data": {"models": {}, "provider_overrides": {}}})
+    import mms_context_window
+
+    mms_context_window.clear_context_window_caches()
 
     monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
     monkeypatch.setenv("REAL_HOME", str(real_home))
@@ -786,12 +906,16 @@ def test_model_context_overrides_follow_selected_config_root(monkeypatch, tmp_pa
     monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
 
-    assert mms_launchers._lookup_context_window("root-selected-model") == 111_000
+    # No explicit root: the default is mms-next.
+    assert mms_launchers._lookup_context_window("root-selected-model") == 222_000
+    assert mms_context_window._OVERRIDES_CACHE["path"] == str(preview_root / "model-context-overrides.json")
 
-    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+    # An explicit pin at the retired legacy root is redirected to the shared
+    # root (#177): a stale shell export must not resurrect the old config.
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(stable_root))
 
     assert mms_launchers._lookup_context_window("root-selected-model") == 222_000
-    assert mms_launchers._MODEL_CONTEXT_OVERRIDES_CACHE["path"] == str(preview_root / "model-context-overrides.json")
+    assert mms_context_window._OVERRIDES_CACHE["path"] == str(preview_root / "model-context-overrides.json")
 
 
 def test_mmf_wrapper_selects_mms_next_without_stable_fallback(tmp_path):
@@ -916,7 +1040,7 @@ def test_ensure_claude_project_trust_marks_current_project_accepted(tmp_path):
     assert entry["projectOnboardingSeenCount"] == 1
 
 
-def test_load_project_scoped_claude_resume_session_id_is_scoped(monkeypatch, tmp_path):
+def test_load_project_scoped_claude_resume_session_id_is_project_scoped(monkeypatch, tmp_path):
     import mms_launchers
 
     project_dir = tmp_path / "repo"
@@ -940,7 +1064,7 @@ def test_load_project_scoped_claude_resume_session_id_is_scoped(monkeypatch, tmp
                 "account_id": "relay-b",
                 "runtime_kind": "api_key",
                 "session_id": "session-other-account",
-                "last_active_at": "2026-04-16T12:00:00+00:00",
+                "last_active_at": "2026-04-16T16:00:00+00:00",
             },
             {
                 "project_path": str(project_dir.resolve()),
@@ -975,10 +1099,10 @@ def test_load_project_scoped_claude_resume_session_id_is_scoped(monkeypatch, tmp
         resume_model="claude-sonnet-4-6",
     )
 
-    assert result == "session-match"
+    assert result == "session-other-account"
 
 
-def test_load_project_scoped_claude_resume_session_id_requires_matching_model(monkeypatch, tmp_path):
+def test_load_project_scoped_claude_resume_session_id_does_not_require_matching_model(monkeypatch, tmp_path):
     import mms_launchers
 
     project_dir = tmp_path / "repo"
@@ -1014,7 +1138,42 @@ def test_load_project_scoped_claude_resume_session_id_requires_matching_model(mo
         resume_model="claude-sonnet-4-6",
     )
 
-    assert result is None
+    assert result == "session-gpt"
+
+
+def test_project_scoped_claude_resume_matches_cwd_and_git_root(monkeypatch, tmp_path):
+    import mms_launchers
+
+    project_dir = tmp_path / "repo"
+    work_dir = project_dir / "work"
+    work_dir.mkdir(parents=True)
+    monkeypatch.setattr(mms_launchers, "canonical_project_path", lambda _path=None: str(project_dir.resolve()))
+    monkeypatch.setattr(
+        mms_launchers,
+        "list_indexed_sessions",
+        lambda _cli="claude": [
+            {
+                "project_path": str(project_dir.resolve()),
+                "cwd": str(work_dir.resolve()),
+                "account_id": "openrouter",
+                "runtime_kind": "api_key",
+                "resume_model": "anthropic/claude-opus-4.8",
+                "session_id": "session-root",
+                "last_active_at": "2026-04-16T13:00:00+00:00",
+            }
+        ],
+    )
+
+    payload = mms_launchers._overlay_project_scoped_claude_resume_state(
+        {"projects": {str(work_dir.resolve()): {"hasTrustDialogAccepted": True}}},
+        str(work_dir),
+        account_id="newapi-personal-tokyo",
+        runtime_kind="api_key",
+        resume_model="deepseek-v4-flash",
+    )
+
+    assert payload["projects"][str(work_dir.resolve())]["lastSessionId"] == "session-root"
+    assert payload["projects"][str(project_dir.resolve())]["lastSessionId"] == "session-root"
 
 
 def test_sync_claude_session_state_back_to_account_strips_restore_state(tmp_path):
@@ -1871,7 +2030,7 @@ def test_validate_home_context_accepts_isolated_oauth_session(tmp_path):
 
     assert result["real_home"] == str(real_home)
     assert result["session_home"] == str(session_home)
-    assert result["config_root"] == str(real_home / ".config" / "mms")
+    assert result["config_root"] == str(real_home / ".config" / "mms-next")
     assert result["net_mode"] == "proxy"
     assert result["dns_mode"] == "proxy-likely"
     assert result["locale"] == "en_US.UTF-8"
@@ -2024,7 +2183,7 @@ def test_sanitize_account_claude_settings_payload_strips_session_env():
             },
             "hooks": {"preToolUse": [{"matcher": "*"}]},
             "statusLine": {"type": "command", "command": "/tmp/status.sh"},
-            "permissions": {"allow": ["Read"], "deny": ["Bash(rm -rf /)*"]},
+            "permissions": {"allow": ["Read"], "deny": ["Bash(rm -rf /*)"]},
         }
     )
 

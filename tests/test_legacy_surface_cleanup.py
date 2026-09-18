@@ -88,6 +88,8 @@ def test_live_settings_menu_exposes_rescue_entry(monkeypatch) -> None:
 def test_about_release_version_prefers_installed_version(monkeypatch) -> None:
     import mms_core
 
+    monkeypatch.delenv("MMS_COMMAND_NAME", raising=False)
+    monkeypatch.delenv("MMS_PREVIEW_MODE", raising=False)
     monkeypatch.setattr(
         mms_core,
         "_load_version_meta",
@@ -105,6 +107,55 @@ def test_about_release_version_prefers_installed_version(monkeypatch) -> None:
     assert info["release"] == "v9.9.9"
     assert info["install_channel"] == "latest-tag"
     assert info["source"] == "install.sh"
+    assert info["release_track"] == "stable"
+    assert info["release_track_version"] == "3.x-stable"
+    assert info["release_track_label"] == "3.x Stable"
+
+
+def test_release_version_info_uses_command_env_for_dev_and_canary_tracks(monkeypatch) -> None:
+    import mms_core
+
+    monkeypatch.setenv("MMS_COMMAND_NAME", "mmg")
+    monkeypatch.delenv("MMS_PREVIEW_MODE", raising=False)
+    monkeypatch.setattr(mms_core, "_load_version_meta", lambda: {"install_channel": "dev", "installed_ref": "dev"})
+    monkeypatch.setattr(mms_core, "_git_output", lambda args: "dev" if args[0] == "branch" else "abc123")
+
+    canary = mms_core._release_version_info()
+
+    assert canary["release_track"] == "canary"
+    assert canary["release_track_version"] == "4.0.0-canary"
+    assert canary["release_track_label"] == "4.0 Canary Preview"
+
+    monkeypatch.setenv("MMS_COMMAND_NAME", "mmf")
+    monkeypatch.setattr(mms_core, "_load_version_meta", lambda: {"install_channel": "canary", "installed_ref": "canary"})
+    monkeypatch.setattr(mms_core, "_git_output", lambda args: "canary" if args[0] == "branch" else "abc123")
+
+    dev = mms_core._release_version_info()
+
+    assert dev["release_track"] == "dev"
+    assert dev["release_track_version"] == "4.0.0-dev"
+    assert dev["release_track_label"] == "4.0 Dev Preview"
+
+
+def test_cli_version_flag_prints_release_track(monkeypatch, capsys) -> None:
+    import mms_core
+
+    monkeypatch.delenv("MMS_COMMAND_NAME", raising=False)
+    monkeypatch.setattr(sys, "argv", ["mmf", "--version"])
+    monkeypatch.setattr(
+        mms_core,
+        "_release_version_info",
+        lambda: {
+            "release": "dev",
+            "git_branch": "dev",
+            "git_commit": "abc123",
+            "release_track_label": "4.0 Dev Preview",
+        },
+    )
+
+    mms_core.main()
+
+    assert capsys.readouterr().out.strip() == "MMF 4.0 Dev Preview · dev@abc123"
 
 
 def test_rescue_fallback_candidates_use_recent_models_before_config(monkeypatch) -> None:
@@ -150,44 +201,42 @@ def test_rescue_fallback_candidates_use_recent_models_before_config(monkeypatch)
 def test_rescue_fallback_candidates_include_routed_models(monkeypatch, tmp_path: Path) -> None:
     import mms_core
 
-    generated = tmp_path / "generated"
-    generated.mkdir()
-    (generated / "model-routes.json").write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "routes": {
-                    "failed-model": {
-                        "primary": {
-                            "provider_id": "broken",
-                            "openai_base_url": "https://broken.example/v1",
-                            "api_key": "sk-test-failed",
-                            "model_id": "failed-model",
-                        },
-                        "fallbacks": [],
+    # Route candidates only come from the verified latest-approved bundle: every config
+    # root is a preview root now (single config root, MMS_CONFIG_ROOT_MODE ignored).
+    _write_latest_approved_router_manifest(
+        tmp_path,
+        router_payload={
+            "version": 1,
+            "routes": {
+                "failed-model": {
+                    "primary": {
+                        "provider_id": "broken",
+                        "openai_base_url": "https://broken.example/v1",
+                        "api_key": "sk-test-failed",
+                        "model_id": "failed-model",
                     },
-                    "deepseek-v4-flash": {
-                        "primary": {
-                            "provider_id": "deepseek",
-                            "openai_base_url": "https://deepseek.example/v1",
-                            "api_key": "sk-test-deepseek",
-                            "model_id": "deepseek-v4-flash",
-                        },
-                        "fallbacks": [],
-                    },
-                    "no-openai-route": {
-                        "primary": {
-                            "provider_id": "anthropic-only",
-                            "anthropic_base_url": "https://anthropic.example",
-                            "api_key": "sk-test-anthropic",
-                            "model_id": "no-openai-route",
-                        },
-                        "fallbacks": [],
-                    },
+                    "fallbacks": [],
                 },
-            }
-        ),
-        encoding="utf-8",
+                "deepseek-v4-flash": {
+                    "primary": {
+                        "provider_id": "deepseek",
+                        "openai_base_url": "https://deepseek.example/v1",
+                        "api_key": "sk-test-deepseek",
+                        "model_id": "deepseek-v4-flash",
+                    },
+                    "fallbacks": [],
+                },
+                "no-openai-route": {
+                    "primary": {
+                        "provider_id": "anthropic-only",
+                        "anthropic_base_url": "https://anthropic.example",
+                        "api_key": "sk-test-anthropic",
+                        "model_id": "no-openai-route",
+                    },
+                    "fallbacks": [],
+                },
+            },
+        },
     )
     monkeypatch.setattr(mms_core, "CONFIG_DIR", str(tmp_path))
     monkeypatch.setattr(mms_core, "_load_usage_stats", lambda: {"last_by_cli": {}, "sources": {}})
@@ -885,6 +934,7 @@ def test_about_and_snapshot_guard_tui_payloads_use_chinese_labels() -> None:
     assert about_title == "关于 / About"
     assert [label for label, _value in about_info] == [
         "MMS",
+        "版本轨道",
         "MMS 最新",
         "Codex",
         "Codex 最新",
@@ -971,6 +1021,7 @@ def test_mms_help_keeps_review_launch_outside_legacy_bucket(monkeypatch, capsys)
 
 
 def test_mms_chat_discuss_direct_commands_are_disabled_by_default(monkeypatch, capsys) -> None:
+    monkeypatch.delenv("MMS_COMMAND_NAME", raising=False)
     import mms_core
 
     monkeypatch.delenv("MMS_ENABLE_LEGACY_CHAT_DISCUSS", raising=False)
@@ -993,7 +1044,7 @@ def test_mms_default_path_still_uses_tui_launcher_handler(monkeypatch) -> None:
     cfg = {"user": {}, "recommend": {}}
     provider = {"id": "default-provider"}
     monkeypatch.setattr(sys, "argv", ["mms"])
-    monkeypatch.setattr(mms_core, "load_config", lambda: cfg)
+    monkeypatch.setattr(mms_core, "_load_config_or_preview_bundle", lambda **_: cfg)
     monkeypatch.setattr(mms_core, "_ensure_startup_snapshot_guard", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(mms_core, "apply_local_overrides", lambda value: value)
     monkeypatch.setattr(mms_core, "_refresh_routes_export_for_hive", lambda *_args, **_kwargs: None)
@@ -1042,7 +1093,9 @@ def test_mmf_missing_preview_config_does_not_run_legacy_setup(monkeypatch, tmp_p
     assert not (preview_root / "config.toml").exists()
     out = capsys.readouterr().out
     assert "Preview root uses v2 DB truth" in out
-    assert "mmf preview prepare" in out
+    # The legacy root is retired: the guidance is Pilot, not a legacy import.
+    assert "mmf web" in out
+    assert "preview prepare --from ~/.config/mms" not in out
 
 
 def test_mmf_config_mutation_is_blocked_from_legacy_config_path(monkeypatch, tmp_path, capsys) -> None:
@@ -1430,3 +1483,17 @@ def test_legacy_modules_remain_importable_until_physical_delete_phase() -> None:
     assert mms_action_bar.run_chat_loop
     assert mms_usage.usage_main
     assert mmc_core.main
+
+
+def test_published_v4_track_preserves_explicit_launcher_channels(monkeypatch):
+    import mms_core
+    monkeypatch.delenv("MMS_COMMAND_NAME", raising=False)
+    monkeypatch.delenv("MMS_PREVIEW_MODE", raising=False)
+    meta = {"install_channel": "latest-tag", "installed_ref": "v4.0.0"}
+    track = mms_core._release_track_for_channel(meta)
+    assert track["release_track_version"] == "4.0.0"
+    assert track["release_track_label"] == "4.x Stable"
+    monkeypatch.setenv("MMS_COMMAND_NAME", "mmf")
+    assert mms_core._release_track_for_channel(meta)["release_track"] == "dev"
+    monkeypatch.setenv("MMS_COMMAND_NAME", "mmg")
+    assert mms_core._release_track_for_channel(meta)["release_track"] == "canary"

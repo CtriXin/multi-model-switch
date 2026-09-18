@@ -1,0 +1,211 @@
+{
+  "schema_version": 1,
+  "description": "Vendor-documented context windows for models no provider profile covers. Data, not code (issue #230): a provider profile in config/provider-profiles.json answers first and this file only catches a model served by a channel whose profile says nothing about it — the relays that resell several vendors. Every row names where the number came from. Keys are lower-case leaf model names; a `[1m]` key is listed only where the vendor really treats the selector as a different model, and is matched before the plain name.",
+  "models": {
+    "k3": {
+      "context_window_tokens": 1048576,
+      "source": "Moonshot Kimi K3 API docs",
+      "checked": "2026-09"
+    },
+    "kimi-k3": {
+      "context_window_tokens": 1048576,
+      "source": "Moonshot Kimi K3 API docs",
+      "checked": "2026-09"
+    },
+    "kimi-for-coding": {
+      "context_window_tokens": 262144,
+      "source": "Moonshot coding plan docs",
+      "checked": "2026-03"
+    },
+    "kimi-for-coding-highspeed": {
+      "context_window_tokens": 262144,
+      "source": "Moonshot coding plan docs",
+      "checked": "2026-03"
+    },
+    "kimi-k2.7-code": {
+      "context_window_tokens": 262144,
+      "source": "Moonshot coding plan docs",
+      "checked": "2026-03"
+    },
+    "kimi-k2.7-code-highspeed": {
+      "context_window_tokens": 262144,
+      "source": "Moonshot coding plan docs",
+      "checked": "2026-03"
+    },
+    "kimi-k2.5": {
+      "context_window_tokens": 262144,
+      "source": "Moonshot API docs",
+      "checked": "2026-03"
+    },
+    "kimi-k2.6": {
+      "context_window_tokens": 262144,
+      "source": "Moonshot API docs",
+      "checked": "2026-03"
+    },
+    "kimi-k2.6-code-preview": {
+      "context_window_tokens": 262144,
+      "source": "Moonshot API docs",
+      "checked": "2026-03"
+    },
+    "k2.6": {
+      "context_window_tokens": 262144,
+      "source": "Moonshot API docs",
+      "checked": "2026-03"
+    },
+    "k2.6-code-preview": {
+      "context_window_tokens": 262144,
+      "source": "Moonshot API docs",
+      "checked": "2026-03"
+    },
+    "qwen3.5-plus": {
+      "context_window_tokens": 1000000,
+      "source": "DashScope hosted Qwen docs",
+      "checked": "2026-03"
+    },
+    "qwen3.6-plus": {
+      "context_window_tokens": 1000000,
+      "source": "DashScope hosted Qwen docs",
+      "checked": "2026-03"
+    },
+    "qwen3.6-flash": {
+      "context_window_tokens": 1000000,
+      "source": "DashScope hosted Qwen docs",
+      "checked": "2026-05"
+    },
+    "qwen3.7-max": {
+      "context_window_tokens": 1000000,
+      "source": "DashScope hosted Qwen docs",
+      "checked": "2026-05"
+    },
+    "qwen3-coder-plus": {
+      "context_window_tokens": 1000000,
+      "source": "DashScope hosted Qwen docs",
+      "checked": "2026-03"
+    },
+    "qwen3-max": {
+      "context_window_tokens": 262144,
+      "source": "DashScope hosted Qwen docs",
+      "checked": "2026-03"
+    },
+    "glm-5": {
+      "context_window_tokens": 200000,
+      "source": "Zhipu GLM API docs",
+      "checked": "2026-03"
+    },
+    "glm-5-turbo": {
+      "context_window_tokens": 200000,
+      "source": "Zhipu GLM API docs",
+      "checked": "2026-03"
+    },
+    "glm-5.1": {
+      "context_window_tokens": 200000,
+      "source": "Zhipu GLM API docs",
+      "checked": "2026-03"
+    },
+    "glm-4.7": {
+      "context_window_tokens": 200000,
+      "source": "Zhipu GLM API docs",
+      "checked": "2026-03"
+    },
+    "mimo-v2.5": {
+      "context_window_tokens": 1048576,
+      "source": "Xiaomi MiMo v2.5 on an OpenAI-style route, where the plain name is the 1M model; the Anthropic endpoint's 256K plain mode is provider-specific and lives in the mimo profile",
+      "checked": "2026-09"
+    },
+    "mimo-v2.5-pro": {
+      "context_window_tokens": 1048576,
+      "source": "Xiaomi MiMo v2.5 on an OpenAI-style route, where the plain name is the 1M model; the Anthropic endpoint's 256K plain mode is provider-specific and lives in the mimo profile",
+      "checked": "2026-09"
+    },
+    "mimo-v2-pro": {
+      "context_window_tokens": 262144,
+      "source": "Xiaomi MiMo docs",
+      "checked": "2026-03"
+    },
+    "mimo-v2-omni": {
+      "context_window_tokens": 262144,
+      "source": "Xiaomi MiMo docs",
+      "checked": "2026-03"
+    },
+    "mimo-v2-flash": {
+      "context_window_tokens": 262144,
+      "source": "Xiaomi MiMo docs",
+      "checked": "2026-03"
+    },
+    "minimax-m2.5": {
+      "context_window_tokens": 196608,
+      "source": "MiniMax API docs",
+      "checked": "2026-03"
+    },
+    "minimax-m2.7": {
+      "context_window_tokens": 200000,
+      "source": "MiniMax API docs",
+      "checked": "2026-03"
+    },
+    "gpt-5": {
+      "context_window_tokens": 1000000,
+      "source": "OpenAI API docs",
+      "checked": "2026-03"
+    },
+    "gpt-5-mini": {
+      "context_window_tokens": 1000000,
+      "source": "OpenAI API docs",
+      "checked": "2026-03"
+    },
+    "gpt-5-nano": {
+      "context_window_tokens": 256000,
+      "source": "OpenAI API docs",
+      "checked": "2026-03"
+    },
+    "gpt-5-codex": {
+      "context_window_tokens": 1000000,
+      "source": "OpenAI API docs",
+      "checked": "2026-03"
+    },
+    "gpt-5.1-codex": {
+      "context_window_tokens": 1000000,
+      "source": "OpenAI API docs",
+      "checked": "2026-03"
+    },
+    "gpt-5.1-codex-max": {
+      "context_window_tokens": 1000000,
+      "source": "OpenAI API docs",
+      "checked": "2026-03"
+    },
+    "gpt-5.1-codex-mini": {
+      "context_window_tokens": 1000000,
+      "source": "OpenAI API docs",
+      "checked": "2026-03"
+    },
+    "gpt-5.2": {
+      "context_window_tokens": 1000000,
+      "source": "OpenAI API docs",
+      "checked": "2026-03"
+    },
+    "gpt-5.2-codex": {
+      "context_window_tokens": 1000000,
+      "source": "OpenAI API docs",
+      "checked": "2026-03"
+    },
+    "gpt-5.3-codex": {
+      "context_window_tokens": 1000000,
+      "source": "OpenAI API docs",
+      "checked": "2026-03"
+    },
+    "gpt-5.3-codex-spark": {
+      "context_window_tokens": 1000000,
+      "source": "OpenAI API docs",
+      "checked": "2026-03"
+    },
+    "gpt-5.4": {
+      "context_window_tokens": 1000000,
+      "source": "OpenAI API docs",
+      "checked": "2026-03"
+    },
+    "gpt-5.4-pro": {
+      "context_window_tokens": 1000000,
+      "source": "OpenAI API docs",
+      "checked": "2026-03"
+    }
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "schema": "mms.model_capability_calibration.v1",
+  "generated_at": "2026-09-02T11:20:00.000Z",
+  "description": "Zhipu GLM-5.3 / GLM-5.3-Flash official capability calibration for the NewAPI Tokyo GLM route. Facts captured 2026-09-02 from docs.bigmodel.cn. Adds the graded reasoning_effort tiers that were previously missing (the registry only carried GLM as an enabled/disabled thinking toggle, which forced the Pi thinkingLevelMap glm fallback to expose `high` only).",
+  "mms_source": "manual-official-addition",
+  "models": [
+    {
+      "alias": "glm-5.3",
+      "routed_model_id": "glm-5.3",
+      "provider_id": "newapi-personal-tokyo",
+      "vendor": "Zhipu AI",
+      "canonical_model_id": "glm-5.3",
+      "alias_status": "official_exact",
+      "confidence": "official_exact",
+      "official_context_window_tokens": 1048576,
+      "official_max_output_tokens": 131072,
+      "supports_vision": null,
+      "supports_thinking": true,
+      "one_million_context": true,
+      "one_million_request_format": null,
+      "expected_protocol": "openai_chat_completions",
+      "current_mms_context_window_tokens": null,
+      "thinking_control": {
+        "control_type": "parameter",
+        "path": "reasoning_effort",
+        "allowed_values": ["low", "high", "max"],
+        "default": "max",
+        "disable_supported": false
+      },
+      "evidence": [
+        { "url": "https://docs.bigmodel.cn/cn/guide/models/text/glm-5.3", "official": true },
+        { "url": "https://docs.bigmodel.cn/cn/guide/capabilities/thinking", "official": true },
+        { "url": "https://docs.bigmodel.cn/cn/coding-plan/overview", "official": true }
+      ],
+      "notes": "Docs verbatim: 针对 GLM-5.3 GLM-5.3-FLASH，仅支持 max、high、low，其余输入将报错。max 为默认且推荐（深度推理）。思考不可关闭：thinking.type 传 disabled 会报错（GLM-5.3 会始终启用思考功能）。reasoning_effort 自 GLM-5.2 起提供。Context 1M / max output 128K per model page. supports_vision intentionally null (not confirmed on the pages captured today; do not invent)."
+    },
+    {
+      "alias": "glm-5.3-flash",
+      "routed_model_id": "glm-5.3-flash",
+      "provider_id": "newapi-personal-tokyo",
+      "vendor": "Zhipu AI",
+      "canonical_model_id": "glm-5.3-flash",
+      "alias_status": "official_exact",
+      "confidence": "official_exact",
+      "official_context_window_tokens": null,
+      "official_max_output_tokens": null,
+      "supports_vision": null,
+      "supports_thinking": true,
+      "one_million_context": null,
+      "one_million_request_format": null,
+      "expected_protocol": "openai_chat_completions",
+      "current_mms_context_window_tokens": null,
+      "thinking_control": {
+        "control_type": "parameter",
+        "path": "reasoning_effort",
+        "allowed_values": ["low", "high", "max"],
+        "default": "max",
+        "disable_supported": false
+      },
+      "evidence": [
+        { "url": "https://docs.bigmodel.cn/cn/guide/capabilities/thinking", "official": true },
+        { "url": "https://docs.bigmodel.cn/cn/coding-plan/overview", "official": true }
+      ],
+      "notes": "Same reasoning_effort contract as GLM-5.3 per the thinking guide. Coding-plan overview states legacy routing: GLM-5.2 / GLM-5.1 auto-switch to GLM-5.3; GLM-5-Turbo / GLM-4.7 auto-switch to GLM-5.3-Flash. Context/output not listed on the pages captured today — left null rather than guessed."
+    }
+  ]
+}

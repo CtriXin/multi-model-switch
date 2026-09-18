@@ -10,14 +10,14 @@ Scope: current MMS route aliases plus local selectors. Values are official-first
 
 ## Summary
 
-- total: `39`
+- total: `40`
 - official_exact_or_base_alias: `35`
 - needs_official_alias_evidence: `3`
-- official_partial: `1`
+- official_partial: `2`
 - one_million_yes: `19`
 - vision_yes_or_image: `22`
-- thinking_yes: `32`
-- thinking_control_captured: `32`
+- thinking_yes: `33`
+- thinking_control_captured: `33`
 - official_max_output_captured: `16`
 - openrouter_referenced: `33`
 - openrouter_catalog_total_models_at_capture: `358`
@@ -95,6 +95,7 @@ Scope: current MMS route aliases plus local selectors. Values are official-first
 | `qwen3.5-plus` | `qwen3.5-plus` | `official_exact` | `1000000` | `unknown` | `True` | `True` | `True` | type=unknown_or_provider_default | qwen/qwen3.5-plus-20260420; $0.3 in / $1.8 out per 1M tokens; ctx=1000000; max_out=65536 | Model Studio docs list Qwen3.5/3.6 plus as 1M, deep-thinking capable, and vision-capable in multimodal section. |
 | `qwen3.6-plus` | `qwen3.6-plus` | `official_exact` | `1000000` | `unknown` | `True` | `True` | `True` | type=unknown_or_provider_default | qwen/qwen3.6-plus; $0.325 in / $1.95 out per 1M tokens; ctx=1000000; max_out=65536 | Model Studio docs list Qwen3.5/3.6 plus as 1M, deep-thinking capable, and vision-capable in multimodal section. |
 | `qwen3.6-plus-openai-canary` | `qwen3.6-plus` | `official_base_local_alias` | `1000000` | `unknown` | `True` | `True` | `True` | type=unknown_or_provider_default | qwen/qwen3.6-plus; $0.325 in / $1.95 out per 1M tokens; ctx=1000000; max_out=65536 | -openai-canary 是本地协议测试 alias，不是官网模型 ID。 |
+| `qwen3.8-max-preview` | `qwen3.8-max-preview` | `official_partial` | `unknown` | `unknown` | `unknown` | `unknown` | `True` | type=enable_thinking / reasoning.effort |  | 用户提供的 Model Studio 官方“文本生成”页确认该 ID、Token Plan 限定、Thinking 和 Function Calling；该页明确让精确 context 以模型广场为准，故不推断 1M、Vision 或 max output。 |
 
 ## OpenRouter Price / Unit Snapshot
 

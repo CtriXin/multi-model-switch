@@ -23,8 +23,8 @@ from rich.console import Console
 from rich.table import Table
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if ROOT_DIR not in sys.path:
-    sys.path.insert(0, ROOT_DIR)
+sys.path.insert(0, ROOT_DIR)
+sys.path.insert(0, os.path.join(ROOT_DIR, "lib"))
 
 from mms_bridge import gateway_claude_bridge
 from mms_fake_upstream import patch_httpx_module as _patch_fake_httpx

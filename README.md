@@ -96,12 +96,12 @@
 | 线 | 分支 | 版本 | 安装参数 | 里面有什么 |
 |---|---|---|---|---|
 | 稳定线 | `main` | 4.23.x | `--channel stable`（默认） | 已经坐稳的功能, 只收修复和验证过的能力 |
-| 预览线 | `dev` | 5.1.x | `--channel dev` | 稳定线的**全部内容**, 外加 Bot 工作台 |
+| 预览线 | `dev` | 5.1.x | `--channel dev` | 稳定能力、Bot 工作台与其他预览改动 |
 | Canary | `canary` | 停更 | `--channel canary` | 2026-06 起停更的旧实验线, 不要用它承载任何东西 |
 
-`main` 上的每一处改动都默认进 `dev`, 所以预览线永远是稳定线的超集, 不存在"装了 5.x 就丢掉 4.x 的某个修复"。
+稳定线的修复应同步到 `dev`，但同步需要实际合并，并非自动完成。是否包含某项修复，以各分支的 Git 历史和 Release 为准。
 
-**两条线在同一台机器上不能共存。** 换线要重跑安装器带对应 `--channel`; 配置、通道和会话历史都在同一个 config root 里, 换线不清空它们。
+**同一个公开安装目录 `~/.mms` 一次只安装一条线。** 换线要重跑安装器带对应 `--channel`；配置、通道和会话历史仍在同一个 config root。开发者可以用隔离 worktree 保留两条线，但须留意共享配置和服务端口。
 
 历史背景: v3.x 时代是三通道（Stable 3.4.z / Dev 3.5.z / Canary 3.6.z）。v4.0.0 重新规划为"双线 + Pilot", Canary 已在 2026-06 停更。详见 [`docs/RELEASE_CHANNELS.md`](docs/RELEASE_CHANNELS.md)。
 
@@ -426,11 +426,13 @@ MMS 的能力包默认是 **session-local**: 按会话注入, 不改你的全局
 | `<state>/updates/settings.json` | `channel` —— "我想检查哪条线" |
 | `~/.config/mms` | **legacy, 已退出配置来源。** 不自动导入、不回退, 只剩 `*-gateway/` 这类运行时会话目录还在 |
 
+legacy `~/.config/mms` 中的旧配置不再被任何入口读取；保留的 gateway 会话目录不属于配置来源。
+
 **两条 channel 字段不要混**: `updates/settings.json` 的 `channel` 是"我想检查哪条线", `version.json` 的 `install_channel` 是"我实际装的是哪条线"。它们不是一回事。用户切到 preview、检查了、但没确认升级 —— 此时 channel 是 preview 而实际安装还是 stable, 这个状态是合法的。
 
 **配置的写入只有一条路径**: 写入预览 DB + 发布。本地修改优先走 Registry v2, TUI / `mms config` / WebUI 先创建 DB candidate, 审阅通过后发布成 `generated/model-registry.latest-approved.json`, 它引用的 generated Profile 就是 runtime boundary。终端和 Pilot 读的是同一份发布结果。
 
-`~/.config/mms/preferences.toml` 是用户偏好 allowlist 覆盖层, **agent 不能自动写真实文件**。可以读、解释、生成 TOML snippet 给用户, 写入走 human gate。
+`~/.config/mms-next/preferences.toml` 是用户偏好 allowlist 覆盖层, **agent 不能自动写真实文件**。可以读、解释、生成 TOML snippet 给用户, 写入走 human gate。
 
 ---
 
@@ -674,7 +676,7 @@ Canary（`mmg` / `canary` 分支）2026-06 起停更。`mmg` 仍能在本机命�
 | [`docs/mms-web/bot-work/`](docs/mms-web/bot-work/) | Bot 工作台的工作包（T1~T8i） | |
 | [`docs/legacy/`](docs/legacy/) | 历史追溯 | |
 
-**写代码前请核对**: 任何文档里的版本号、分支关系和"当前状态", 都以 `mms_version.py`、`git log` 和最近的 `RELEASE-v*.md` 为准。
+**写代码前请核对**: 任何文档里的版本号、分支关系和"当前状态", 都以 `lib/mms_version.py`、`git log` 和最近的 `RELEASE-v*.md` 为准。
 
 ---
 

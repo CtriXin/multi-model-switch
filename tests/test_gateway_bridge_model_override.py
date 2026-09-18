@@ -10,9 +10,13 @@ def _run_gateway_bridge_once(
     incoming_model: str,
     *,
     heavy_model: str = "mimo-v2.5",
+    context_windows: dict[str, int] | None = None,
+    session_context_window: int | None = None,
     messages: list[dict] | None = None,
     system: str | list[dict] | None = None,
     vision_sidecar: dict | None = None,
+    model_capabilities: dict | None = None,
+    force_heavy_model: bool = False,
 ) -> dict:
     import mms_bridge
 
@@ -75,11 +79,15 @@ def _run_gateway_bridge_once(
         no_proxy="",
         provider_id="mimo-direct-anthropic",
         provider_profile="",
+        context_windows=context_windows or {},
+        session_context_window=session_context_window,
         reasoning_enabled=True,
         reasoning_effort="high",
         minimal_claude_header_passthrough=False,
         strip_upstream_user_agent=False,
         vision_sidecar=vision_sidecar or {},
+        model_capabilities=model_capabilities or {},
+        force_heavy_model=force_heavy_model,
     )
     handler.send_response = lambda code: captured.setdefault("status", code)
     handler.send_header = lambda *args, **kwargs: None
@@ -102,6 +110,18 @@ def test_gateway_bridge_preserves_explicit_non_claude_model_selection(monkeypatc
 
     assert captured["status"] == 200
     assert captured["json"]["model"] == "mimo-v2.5-pro"
+
+
+def test_gateway_bridge_force_heavy_model_overrides_any_incoming_model(monkeypatch):
+    captured = _run_gateway_bridge_once(
+        monkeypatch,
+        "mimo-v2.5-pro",
+        heavy_model="qwen3.7-max",
+        force_heavy_model=True,
+    )
+
+    assert captured["status"] == 200
+    assert captured["json"]["model"] == "qwen3.7-max"
 
 
 def test_gateway_bridge_strips_claude_code_billing_system_cache_buster(monkeypatch):
@@ -158,6 +178,34 @@ def test_gateway_bridge_maps_mimo_non_pro_base_request_to_1m_selector_when_heavy
     assert captured["status"] == 200
     assert captured["json"]["model"] == "mimo-v2.5"
     assert "context-1m-2025-08-07" in captured["headers"]["anthropic-beta"]
+
+
+def test_gateway_bridge_uses_configured_mimo_context_for_beta(monkeypatch):
+    captured = _run_gateway_bridge_once(
+        monkeypatch,
+        "claude-sonnet-4-6",
+        heavy_model="mimo-v2.5",
+        context_windows={"mimo-v2.5": 1_000_000},
+        session_context_window=1_000_000,
+    )
+
+    assert captured["status"] == 200
+    assert captured["json"]["model"] == "mimo-v2.5"
+    assert "context-1m-2025-08-07" in captured["headers"]["anthropic-beta"]
+
+
+def test_gateway_bridge_keeps_glm_base_model_for_one_m_context(monkeypatch):
+    captured = _run_gateway_bridge_once(
+        monkeypatch,
+        "claude-sonnet-4-6[1m]",
+        heavy_model="glm-5.2",
+        context_windows={"glm-5.2": 1_000_000},
+        session_context_window=1_000_000,
+    )
+
+    assert captured["status"] == 200
+    assert captured["json"]["model"] == "glm-5.2"
+    assert "[1m]" not in captured["json"]["model"]
 
 
 def test_gateway_bridge_rejects_known_text_only_model_image_input_before_upstream(monkeypatch):
@@ -328,6 +376,133 @@ def test_gateway_bridge_uses_vision_sidecar_for_text_only_model_image_input(monk
     )
 
 
+def test_gateway_bridge_strips_stale_vision_sidecar_history_from_follow_up_turn(monkeypatch):
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "请描述图片"},
+                {"type": "text", "text": "[MMS removed image input; see vision sidecar summary appended to this request.]"},
+                {
+                    "type": "text",
+                    "text": (
+                        "\n\n[MMS vision sidecar by K2.6]\n"
+                        "当前主模型不支持 image input；MMS 已先用 vision sidecar 读取用户图片。\n"
+                        "图片内容如下：\n"
+                        "一只红色方块"
+                    ),
+                },
+            ],
+        },
+        {"role": "assistant", "content": [{"type": "text", "text": "这是一个红色方块。"}]},
+        {"role": "user", "content": [{"type": "text", "text": "它大概是什么材质？"}]},
+    ]
+
+    captured = _run_gateway_bridge_once(
+        monkeypatch,
+        "claude-sonnet-4-6",
+        heavy_model="mimo-v2.5-pro[1m]",
+        messages=messages,
+    )
+
+    assert captured["status"] == 200
+    forwarded_messages = captured["json"]["messages"]
+    assert forwarded_messages[0]["content"] == [{"type": "text", "text": "请描述图片"}]
+    forwarded_dump = json.dumps(forwarded_messages, ensure_ascii=False)
+    assert "[MMS vision sidecar by" not in forwarded_dump
+    assert "MMS removed image input" not in forwarded_dump
+    assert "一只红色方块" not in forwarded_dump
+
+
+def test_gateway_bridge_does_not_reprocess_historical_image_on_follow_up_no_image_turn(monkeypatch):
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "请描述这张图"},
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": "iVBORw0KGgo=",
+                    },
+                },
+            ],
+        },
+        {"role": "assistant", "content": [{"type": "text", "text": "这是一个红色方块。"}]},
+        {"role": "user", "content": [{"type": "text", "text": "顺便帮我写个标题"}]},
+    ]
+
+    captured = _run_gateway_bridge_once(
+        monkeypatch,
+        "claude-sonnet-4-6",
+        heavy_model="mimo-v2.5-pro[1m]",
+        messages=messages,
+        vision_sidecar={
+            "enabled": True,
+            "provider_id": "direct-kimi",
+            "provider_profile": "kimi-code",
+            "model": "K2.6",
+            "anthropic_base_url": "https://vision.example.com",
+            "api_key": "sk-vision",
+        },
+    )
+
+    assert captured["status"] == 200
+    assert len(captured["post_calls"]) == 1
+    forwarded_dump = json.dumps(captured["json"]["messages"], ensure_ascii=False)
+    assert "[MMS vision sidecar by" not in forwarded_dump
+    assert "MMS removed image input" not in forwarded_dump
+    assert '"type": "image"' not in forwarded_dump
+    assert "请描述这张图" in forwarded_dump
+    assert "顺便帮我写个标题" in forwarded_dump
+
+
+def test_gateway_bridge_honors_ui_vision_capability_without_sidecar(monkeypatch):
+    image_messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "what color"},
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": "iVBORw0KGgo=",
+                    },
+                },
+            ],
+        }
+    ]
+
+    captured = _run_gateway_bridge_once(
+        monkeypatch,
+        "claude-sonnet-4-6",
+        heavy_model="MiniMax-M3",
+        messages=image_messages,
+        vision_sidecar={
+            "enabled": True,
+            "provider_id": "direct-kimi",
+            "provider_profile": "kimi-code",
+            "model": "K2.6",
+            "anthropic_base_url": "https://vision.example.com",
+            "api_key": "sk-vision",
+        },
+        model_capabilities={"MiniMax-M3": {"vision": True}},
+    )
+
+    assert captured["status"] == 200
+    assert len(captured["post_calls"]) == 1
+    assert captured["json"]["model"] == "MiniMax-M3"
+    assert any(
+        isinstance(block, dict) and block.get("type") == "image"
+        for message in captured["json"]["messages"]
+        for block in (message.get("content") if isinstance(message.get("content"), list) else [])
+    )
+
+
 def test_gateway_bridge_uses_vision_sidecar_for_nested_tool_result_image(monkeypatch):
     image_messages = [
         {
@@ -385,3 +560,29 @@ def test_gateway_bridge_uses_vision_sidecar_for_nested_tool_result_image(monkeyp
     forwarded = json.dumps(captured["json"]["messages"], ensure_ascii=False)
     assert '"type": "image"' not in forwarded
     assert "red square" in forwarded
+
+
+def test_lb_debug_log_path_lands_next_to_the_single_config_root():
+    """Both gateway HOME layouts point at ``<home>/.config/mms-next``.
+
+    The marker only spelled the legacy ``.config/mms`` root, so a gateway HOME
+    under the current root fell through to the generic branch and the bridge
+    appended a second config path to it, writing (and creating) a nested
+    ``~/.config/mms-next/.config/mms-next/lb_debug.log``.
+    """
+    import os
+
+    import mms_bridge
+
+    expected = os.path.join("/Users/demo", ".config", "mms-next", "lb_debug.log")
+    for home in (
+        os.path.join("/Users/demo", ".config", "mms-next", "claude-gateway", "s", "4242"),
+        os.path.join("/Users/demo", ".config", "mms", "claude-gateway", "s", "4242"),
+    ):
+        assert mms_bridge._lb_debug_user_log_path(home) == expected, home
+
+    # A real HOME, or another gateway, adds nothing to the log path list.
+    assert mms_bridge._lb_debug_user_log_path("/Users/demo") == ""
+    assert mms_bridge._lb_debug_user_log_path(
+        os.path.join("/Users/demo", ".config", "mms-next", "codex-gateway", "s", "7")
+    ) == ""

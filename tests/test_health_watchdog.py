@@ -109,6 +109,33 @@ def test_watchdog_prefers_verified_latest_bundle_over_stale_root_routes(tmp_path
     assert not any(item["name"] == "http://82.156.121.141:4001" for item in report["failures"])
 
 
+def test_watchdog_flags_retired_newapi_tencent_domain(tmp_path: Path) -> None:
+    watchdog = _load_watchdog()
+    _write_latest_bundle(
+        tmp_path,
+        {
+            "retired-domain-model": {
+                "primary": {
+                    "provider_id": "newapi-tencent",
+                    "openai_base_url": "https://apple.clawopen.online",
+                    "api_key": "sk-retired-domain-secret",
+                },
+                "fallbacks": [],
+            }
+        },
+    )
+
+    report = watchdog.build_report(tmp_path, timeout=1, require_bundle=True)
+
+    assert report["status"] == "critical"
+    assert any(
+        item["scope"] == "config"
+        and item["name"] == "https://apple.clawopen.online"
+        and "retired domain" in item["detail"]
+        for item in report["failures"]
+    )
+
+
 def test_watchdog_verified_bundle_ignores_stale_root_provider_metadata(tmp_path: Path) -> None:
     watchdog = _load_watchdog()
     (tmp_path / "config.toml").write_text(
@@ -490,6 +517,146 @@ def test_watchdog_model_presence_skips_claude_routes(tmp_path: Path) -> None:
     assert "skipped 1 Claude route entries" in results[0].detail
 
 
+def test_watchdog_model_presence_skips_when_no_policy_allowed_models(tmp_path: Path) -> None:
+    watchdog = _load_watchdog()
+    routes_payload = {
+        "routes": {
+            "deleted-model": {
+                "primary": {
+                    "provider_id": "newapi-personal-tokyo",
+                    "model_id": "deleted-model",
+                    "openai_base_url": "https://tokyo.example/v1",
+                    "api_key": "sk-test-secret",
+                },
+                "fallbacks": [],
+            }
+        }
+    }
+    providers = {"newapi-personal-tokyo": {"models_endpoint": "/models"}}
+    model_sets = {("newapi-personal-tokyo", "https://tokyo.example/v1/models"): {"k3"}}
+
+    results = watchdog.model_presence_checks(routes_payload, providers, model_sets, {"models": {}})
+
+    assert results[0].status == "ok"
+    assert "no policy allowed_models configured" in results[0].detail
+
+
+def test_watchdog_tcp_probe_retries_transient_timeout(monkeypatch) -> None:
+    watchdog = _load_watchdog()
+    calls = []
+
+    class FakeSocket:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    def fake_create_connection(*_args, **_kwargs):
+        calls.append(True)
+        if len(calls) == 1:
+            raise TimeoutError("timed out")
+        return FakeSocket()
+
+    monkeypatch.setattr(watchdog.socket, "create_connection", fake_create_connection)
+
+    result = watchdog.tcp_tls_check("provider-a", "http://example.test", timeout=1, attempts=2, retry_delay=0)
+
+    assert result.status == "ok"
+    assert result.level == "info"
+    assert "after retry 2/2" in result.detail
+
+
+def test_watchdog_collapses_provider_endpoint_and_model_failures() -> None:
+    watchdog = _load_watchdog()
+
+    failures = watchdog.collapse_provider_connectivity_failures(
+        [
+            {
+                "scope": "endpoint",
+                "name": "newapi-tencent",
+                "level": "critical",
+                "status": "fail",
+                "detail": "TimeoutError: timed out; attempts=2",
+                "url": "http://82.156.121.141:4001",
+            },
+            {
+                "scope": "models_endpoint",
+                "name": "newapi-tencent",
+                "level": "critical",
+                "status": "fail",
+                "detail": "URLError: <urlopen error timed out>; attempts=2",
+                "url": "http://82.156.121.141:4001/api/models/info?",
+            },
+        ]
+    )
+
+    assert len(failures) == 1
+    assert failures[0]["scope"] == "provider_connectivity"
+    assert failures[0]["detail"] == "timeout across endpoint/models_endpoint"
+
+
+def test_watchdog_fingerprint_normalizes_transient_connectivity_details() -> None:
+    watchdog = _load_watchdog()
+    endpoint_report = {
+        "status": "critical",
+        "failures": [
+            {
+                "scope": "endpoint",
+                "name": "newapi-personal-tokyo",
+                "level": "critical",
+                "status": "fail",
+                "detail": "TimeoutError: timed out; attempts=2",
+                "url": "http://newapi.evilsngx.ccwu.cc",
+            }
+        ],
+    }
+    models_report = {
+        "status": "critical",
+        "failures": [
+            {
+                "scope": "models_endpoint",
+                "name": "newapi-personal-tokyo",
+                "level": "critical",
+                "status": "fail",
+                "detail": "URLError: <urlopen error timed out>; attempts=2",
+                "url": "http://newapi.evilsngx.ccwu.cc/api/models/info?",
+            }
+        ],
+    }
+
+    assert watchdog.report_fingerprint(endpoint_report) == watchdog.report_fingerprint(models_report)
+
+
+def test_watchdog_requires_confirmed_failure_before_notifying(tmp_path: Path) -> None:
+    watchdog = _load_watchdog()
+    state_path = tmp_path / "state.json"
+    report = {
+        "status": "critical",
+        "checked_at": "2026-07-13T13:00:00+08:00",
+        "failures": [
+            {
+                "scope": "provider_connectivity",
+                "name": "newapi-tencent",
+                "level": "critical",
+                "status": "fail",
+                "detail": "timeout across endpoint/models_endpoint",
+            }
+        ],
+    }
+
+    notify, reason = watchdog.should_notify(report, {}, remind_seconds=1800, notify_ok=True)
+    assert notify is False
+    assert reason == "pending_confirmation_1/2"
+
+    watchdog.update_state(state_path, report, {"wanted": notify, "reason": reason, "sent": False, "detail": ""})
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    notify, reason = watchdog.should_notify(report, state, remind_seconds=1800, notify_ok=True)
+
+    assert notify is True
+    assert reason == "new_failure"
+
+
 def test_watchdog_dry_run_does_not_persist_report_log_or_state(tmp_path: Path, capsys) -> None:
     watchdog = _load_watchdog()
 
@@ -525,7 +692,9 @@ def test_watchdog_non_dry_persists_report_log_and_state(tmp_path: Path, capsys) 
     payload = json.loads(capsys.readouterr().out)
 
     assert exit_code == 0
-    assert payload["notification"]["detail"] == "MMS_FEISHU_WEBHOOK_URL is not set"
+    assert payload["notification"]["wanted"] is False
+    assert payload["notification"]["reason"] == "pending_confirmation_1/2"
+    assert payload["notification"]["detail"] == "pending_confirmation_1/2"
     assert (tmp_path / "health-watchdog" / "latest.json").exists()
     assert (tmp_path / "health-watchdog" / "state.json").exists()
     assert (tmp_path / "logs" / "health-watchdog.log").exists()

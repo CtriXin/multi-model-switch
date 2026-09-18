@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from mms_tui import _sort_cli_names_by_last_used, _sort_model_entries_for_tui
+from mms_tui import (
+    _build_review_model_rows,
+    _sort_cli_names_by_last_used,
+    _sort_model_entries_for_tui,
+    _sort_profile_options_for_tui,
+)
 from mms_core import _sort_family_entries_for_tui
 
 
@@ -30,6 +35,34 @@ def test_cli_tabs_keep_original_order_when_no_recent_usage() -> None:
     ]
 
 
+def test_profile_sort_uses_last_opencode_profile_id() -> None:
+    options = [
+        {"id": "agent", "profile_id": "lite_pro_orchestrated"},
+        {"id": "review", "profile_id": "review_hub"},
+        {"id": "omo", "profile_id": "heavy_omo"},
+        {"id": "raw", "profile_id": "raw"},
+    ]
+
+    ordered = _sort_profile_options_for_tui(options, {"opencode_profile": "review_hub"})
+
+    assert [item["id"] for item in ordered] == ["review", "agent", "omo", "raw"]
+
+
+def test_profile_sort_reads_legacy_model_info_profile() -> None:
+    options = [
+        {"id": "agent", "profile_id": "lite_pro_orchestrated"},
+        {"id": "review", "profile_id": "review_hub"},
+        {"id": "omo", "profile_id": "heavy_omo"},
+    ]
+
+    ordered = _sort_profile_options_for_tui(
+        options,
+        {"model_info": {"model": "glm-5-turbo", "profile": "review_hub"}},
+    )
+
+    assert [item["id"] for item in ordered] == ["review", "agent", "omo"]
+
+
 def test_model_sort_uses_last_used_only_before_name() -> None:
     models = [
         {"model": "gpt-5.4", "use_count": 900, "last_used_at": "2026-02-22T12:00:00Z"},
@@ -52,6 +85,32 @@ def test_model_sort_falls_back_to_name_without_recency() -> None:
     sorted_names = [item["model"] for item in _sort_model_entries_for_tui(models, "Qwen", now=NOW)]
 
     assert sorted_names == ["qwen-a", "qwen-b", "qwen-c"]
+
+
+def test_review_model_rows_restore_saved_selection_first_and_channels() -> None:
+    options = [
+        {"model": "gpt-5.4", "family": "GPT", "provider_id": "company", "provider_name": "company", "priority": 10},
+        {"model": "qwen3.7-max", "family": "Qwen", "provider_id": "company", "provider_name": "company", "priority": 10},
+        {"model": "gpt-5.4", "family": "GPT", "provider_id": "tokyo", "provider_name": "tokyo", "priority": 190},
+        {"model": "qwen3.7-max", "family": "Qwen", "provider_id": "direct", "provider_name": "direct", "priority": 200},
+        {"model": "kimi-for-coding", "family": "Kimi", "provider_id": "tokyo", "provider_name": "tokyo", "priority": 190},
+    ]
+
+    rows, selected, provider_idx = _build_review_model_rows(
+        options,
+        selected_models=[
+            {"model": "qwen3.7-max", "provider_id": "direct"},
+            {"model": "kimi-for-coding", "provider_id": "direct-kimi"},
+            {"model": "hidden-model", "provider_id": "hidden-channel"},
+        ],
+    )
+
+    assert [row["model"] for row in rows[:2]] == ["qwen3.7-max", "kimi-for-coding"]
+    assert selected == {"qwen3.7-max", "kimi-for-coding"}
+    qwen_row = rows[0]
+    assert qwen_row["providers"][provider_idx["qwen3.7-max"]]["provider_id"] == "direct"
+    kimi_row = rows[1]
+    assert kimi_row["providers"][provider_idx["kimi-for-coding"]]["provider_id"] == "tokyo"
 
 
 def test_family_sort_uses_last_used_before_default_family() -> None:

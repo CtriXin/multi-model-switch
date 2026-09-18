@@ -6,6 +6,7 @@ This folder stores MMS-owned reference snapshots for model capability calibratio
 
 - Markdown: `2026-05-21-mms-model-capability-calibration.md`
 - JSON: `2026-05-21-mms-model-capability-calibration.json`
+- Runbook: `2026-06-14-official-source-runbook.md`
 - Original source repo: `/Users/xin/auto-skills/CtriXin-repo/moebius/docs/`
 - Captured by: Codex / MMS local registry v2 planning
 

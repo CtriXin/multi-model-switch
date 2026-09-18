@@ -38,7 +38,7 @@
 | 2 | OpenAI / GPT / Codex | `gpt-*` / `o*` / `codex-*` | `official_native + claude_bridge` | 已支持 | 是 | 是 |
 | 3 | Google / Antigravity / Gemini | `gemini-*` | `official_native` via `agy` + `provider_api` | 已支持 `agy` 官方入口；Gemini CLI 退为 legacy | 是 | 否，默认不再走 Gemini CLI bridge |
 | 4 | Alibaba Cloud / Qwen | `qwen-*` / `qwen3-*` | `provider_api` | 已支持 provider 路径 + 来源模板 | 否 | 否 |
-| 5 | Moonshot / Kimi | `kimi-*` | `provider_api` | 已支持 provider 路径 + 来源模板 | 有原生登录能力，但未接 adapter | 是，后续若补 OAuth |
+| 5 | Moonshot / Kimi | `kimi-*` / `k3` / `k3[1m]` | `provider_api` | 已支持 provider 路径 + 来源模板；Moonshot API `kimi-k3` 为 1M，Kimi Code `k3[1m]` 才按 1M 暴露 | 有原生登录能力，但未接 adapter | 是，后续若补 OAuth |
 | 6 | MiniMax CN | `minimax-*` / `minimax-m*` | `provider_api` | 规划中 | 否 | 否 |
 | 7 | MiniMax EN | `minimax-*` / `minimax-m*` | `provider_api` | 规划中 | 否 | 否 |
 | 8 | Z.ai / GLM | `glm-*` | `provider_api` | 已支持来源模板 | 否 | 否 |
@@ -122,6 +122,9 @@
   - https://www.kimi.com/coding/en
   - https://www.kimi.com/coding/docs/en/
   - https://www.kimi.com/code/docs/en/third-party-agents.html
+  - https://www.kimi.com/code/docs/en/third-party-tools/other-coding-agents.html
+  - https://platform.kimi.com/docs/guide/kimi-k3-quickstart
+  - https://platform.kimi.com/docs/guide/claude-code-kimi
 - MiniMax:
   - https://www.minimax.io/en
   - https://www.minimax.io/news/mini-pricemax-performance%E5%85%B3%E4%BA%8Eapi%E7%BC%96%E7%A8%8B%E5%A5%97%E9%A4%90%E5%92%8Cagent
