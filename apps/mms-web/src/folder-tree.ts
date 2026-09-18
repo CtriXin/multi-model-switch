@@ -115,6 +115,7 @@ export function FolderTree({
   rows,
   activeIndex,
   truncated = false,
+  truncatedPaths,
   onHighlight,
   onToggle,
   onKeyDown,
@@ -122,6 +123,7 @@ export function FolderTree({
   rows: VisibleRow[];
   activeIndex: number;
   truncated?: boolean;
+  truncatedPaths?: string[];
   onHighlight: (index: number) => void;
   onToggle: (path: string) => void;
   onKeyDown?: (event: { key: string; preventDefault: () => void }) => void;
@@ -129,6 +131,25 @@ export function FolderTree({
   if (!rows.length) {
     return h("p", { className: "muted" }, "这里没有可打开的文件夹。");
   }
+  // Each truncated level gets its own hint, placed at the end of that level's
+  // visible subtree. The root listing is tracked under the empty path.
+  const hintIndexes = new Set<number>();
+  for (const path of truncatedPaths ?? []) {
+    if (!path) {
+      hintIndexes.add(rows.length - 1);
+      continue;
+    }
+    const start = rows.findIndex((row) => row.path === path);
+    if (start < 0) continue;
+    let end = start;
+    for (let index = start + 1; index < rows.length; index += 1) {
+      if (rows[index].depth <= rows[start].depth) break;
+      end = index;
+    }
+    hintIndexes.add(end);
+  }
+  const truncatedHint = (key: string) =>
+    h("p", { key, className: "muted workspace-folder-truncated", role: "status" }, TREE_TRUNCATED_HINT);
   return h(
     "div",
     {
@@ -140,10 +161,10 @@ export function FolderTree({
       onKeyDown,
     },
     [
-      ...rows.map((row, index) => {
+      ...rows.flatMap((row, index) => {
         const selected = index === activeIndex;
         const Chevron = row.expanded ? ChevronDown : ChevronRight;
-        return h(
+        const button = h(
           "button",
           {
             type: "button",
@@ -177,10 +198,9 @@ export function FolderTree({
           h(FolderOpen, { size: 18, "aria-hidden": true }),
           h("span", { className: "workspace-folder-label" }, h("strong", null, row.name), h("small", null, row.path)),
         );
+        return hintIndexes.has(index) ? [button, truncatedHint(`truncated-${index}`)] : [button];
       }),
-      truncated
-        ? h("p", { key: "truncated", className: "muted workspace-folder-truncated", role: "status" }, TREE_TRUNCATED_HINT)
-        : null,
+      truncated && !truncatedPaths?.length ? truncatedHint("truncated") : null,
     ],
   );
 }
@@ -203,6 +223,7 @@ export function WorkspaceDialogBody({
   rows,
   activeIndex,
   truncated,
+  truncatedPaths,
   onHighlightRow,
   onToggleRow,
   onTreeKeyDown,
@@ -223,7 +244,8 @@ export function WorkspaceDialogBody({
   onSelectShown: (item: WorkspaceMatch) => void;
   rows: VisibleRow[];
   activeIndex: number;
-  truncated: boolean;
+  truncated?: boolean;
+  truncatedPaths?: string[];
   onHighlightRow: (index: number) => void;
   onToggleRow: (path: string) => void;
   onTreeKeyDown: (event: { key: string; preventDefault: () => void }) => void;
@@ -267,6 +289,7 @@ export function WorkspaceDialogBody({
             rows,
             activeIndex,
             truncated,
+            truncatedPaths,
             onHighlight: onHighlightRow,
             onToggle: onToggleRow,
             onKeyDown: onTreeKeyDown,
