@@ -94,7 +94,7 @@ mms（入口脚本）
 | `server.py` | HTTP 服务、路由分发、`mutation_lock`、监听器集合、远程访问开关 |
 | `service.py` | 进程生命周期、`source_root()` |
 | `sessions.py` / `session_actions.py` | 会话状态、持久化、runtime view |
-| `runtime.py` | `private_json()` —— **Pilot 所有持久化的唯一入口** |
+| `runtime.py` | `private_json()` —— Pilot 通用私有 JSON 原子写入辅助 |
 | `updates.py` / `update_install.py` / `update_*.py` | 检查更新、下载、落地安装、通道与安全 |
 | `workspace_browse.py` / `workspace_search.py` / `files.py` | 文件夹浏览、搜索、预览、diff |
 | `model_settings*.py` / `catalog*.py` / `connections.py` | 通道、模型列表、能力编辑 |
@@ -158,7 +158,7 @@ Pilot 当前唯一的 harness 是 **Pi**。Claude / Codex / OpenCode / agy 仍�
 
 ## 五、5.x 增量：Bot 工作台（预览线）
 
-5.x 相对 4.x 的**全部**区别就是 Bot 工作台。理解它需要理解这几个对象：
+Bot 工作台是 5.x 的主要增量，另有预览交互等差异；不要把两条线视为仅多一个 Bot 的相同代码。理解它需要理解这几个对象：
 
 **Bot** —— 有独立身份、头像、名字（用户自己起）、职责描述、默认模型（`presetId` 可以留空，执行时解析当前可用默认 preset）和**独立持久记忆**的执行者。所有 Bot 默认用共享电脑的全局 `default` workspace，不要求用户管目录。聊天窗口按 Bot 聚合历史任务，是连续对话感，不是控制台 Board。
 
@@ -210,11 +210,9 @@ Pilot 当前唯一的 harness 是 **Pi**。Claude / Codex / OpenCode / agy 仍�
 
 ## 七、门禁：怎么跑，哪几条命令有坑
 
-跑之前先隔离环境，否则可能写穿机主真实配置：
+验证必须使用临时 HOME、config 和 state root。只取消 `MMS_CONFIG_ROOT` 并不构成隔离：`MMS_CONFIG_DIR` 或真实 HOME 仍可能把写入导向用户配置。门禁及测试 fixture 应同时清理 `MMS_CONFIG_ROOT`、`MMS_CONFIG_DIR`、`MMS_REAL_HOME`、`REAL_HOME`、`ORIGINAL_HOME`、`MMS_SESSION_HOME`、`MMS_SOFT_HOME`、`CLAUDE_CONFIG_DIR` 等继承路径，并把 HOME/XDG 目录指向测试目录。需要 Pi/CLI 的安装测试应显式绑定测试替身，不能继承真实 `MMS_PI_EXECUTABLE`。
 
-```bash
-env -u MMS_CONFIG_ROOT -u REAL_HOME -u ORIGINAL_HOME -u MMS_REAL_HOME -u XDG_CONFIG_HOME <你的命令>
-```
+`regression_fresh_user_gate.py` 自建隔离环境；新增测试与其子进程也必须独立验证隔离，不能把上层门禁当作兜底。
 
 **这不是谨慎，是事故后加的。** 2026-09-17 有一个测试 fixture 只清了 `HOME` 没清配置根变量，写穿到机主真实 config root，把 capability bundle 冲成空壳，Pilot 当场瞎掉。
 
@@ -227,7 +225,7 @@ env -u MMS_CONFIG_ROOT -u REAL_HOME -u ORIGINAL_HOME -u MMS_REAL_HOME -u XDG_CON
 | 版本一致性 | `python3 -m pytest tests/test_mms_release_version.py` | 见第二节的对齐清单 |
 | bundle 新鲜度 | 改了 `apps/mms-web/src` 就必须重建 `mms_web_static/` | 见第三节 |
 
-`.github/workflows/digger.yml` 是仓库唯一的 CI。**它曾经完全没有跑过前端**——240 个 web 测试和 typecheck 从来没进过 CI，这就是「一整块 UI 被删掉而套件全绿」反复靠手工发现的原因。
+CI 包括 `.github/workflows/digger.yml` 与独立的 `.github/workflows/windows-acceptance.yml`（Windows 四矩阵）。**它曾经完全没有跑过前端**——240 个 web 测试和 typecheck 从来没进过 CI，这就是「一整块 UI 被删掉而套件全绿」反复靠手工发现的原因。
 
 ---
 
@@ -281,7 +279,7 @@ assert.match(src, /scrollTo\(\{ top: 0 \}\)/);
 
 ### 5. Windows 上 `os.replace` 会被杀毒软件短暂挡住
 
-`mms_web/runtime.py` 的 `private_json()` 是 Pilot **所有**持久化的唯一入口。POSIX 上 rename 能覆盖正被打开的文件，Windows 不行：Defender 实时扫描那个刚 close 的临时文件会短暂持有句柄，`os.replace` 拿到 `WinError 5`。原来一次都不重试，而且 `finally` 会把刚写好的临时文件删掉——**会话数据静默丢失**。
+`mms_web/runtime.py` 的 `private_json()` 是 Pilot 通用的私有 JSON 原子写入辅助；仍有专用写入路径，不能据此假定所有持久化都经过它。POSIX 上 rename 能覆盖正被打开的文件，Windows 不行：Defender 实时扫描那个刚 close 的临时文件会短暂持有句柄，`os.replace` 拿到 `WinError 5`。原来一次都不重试，而且 `finally` 会把刚写好的临时文件删掉——**会话数据静默丢失**。
 
 现在是短退避重试，重试期间不删临时文件，全部失败后明确抛出。**不要**为了绕过它改成直接写目标文件：那是用数据损坏换数据丢失，原子替换的语义必须保留。
 

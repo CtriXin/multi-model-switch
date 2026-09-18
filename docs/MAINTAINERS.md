@@ -20,10 +20,10 @@ mmg -> canary worktree         # 已停更的实验线
 
 仓库**根目录**是维护者的调度入口，应该 checkout `dev` 并保持干净、最新。`.worktrees/*` 只用于具体 issue / PR 的隔离施工——**不要**把 `.worktrees/dev` 当成多人共享的默认开发入口。
 
-1. 进根目录，确认当前分支是 `dev`。
-2. `git pull --ff-only`。
-3. 先开 issue，把计划写进 issue 或对应的计划文档。
-4. 从最新 `dev` 创建独立 worktree / branch，例如 `.worktrees/issue-14-redline-gate`。
+1. 核对当前 checkout 和用户工作，保留已有脏文件；不要为切换 base 重置共享目录。
+2. `git fetch origin`，根据下方规则选择 `origin/main` 或 `origin/dev`。
+3. 沿原任务记录需求与验证；已有 Stride task 不重建第二份任务。
+4. 从选定 base 创建独立 worktree / branch，例如 `.worktrees/issue-14-redline-gate`。
 5. 在这个隔离 worktree 里开发、验证、commit、push。
 6. 提 PR，等评审。
 7. 评审通过后合并，根目录再 fast-forward 到最新。
@@ -42,7 +42,7 @@ scripts/cleanup_merged_worktree.sh <branch-or-pr>
 
 `dev_doctor.sh` 报告：根目录是否在 `dev`、是否落后 `origin/dev`、共享根目录有没有脏文件、旧 `.worktrees/dev` 是否仍占用 `dev`、`mmf` 是否指向根目录 dev checkout、有没有 git 标记的 prunable worktree。**它不会自动删除或 reset。**
 
-`start_issue_worktree.sh` 先确认根目录 dev 干净并 fast-forward，再创建 `issue/<number>-<slug>` 分支和对应 worktree。
+`start_issue_worktree.sh` 固定从 dev 创建分支：先确认根目录 dev 干净并 fast-forward，再创建 `issue/<number>-<slug>`。它不适用于 base 应为 main 的稳定修复；此时直接从最新 origin/main 创建隔离 worktree。
 
 `cleanup_merged_worktree.sh` 只删除已合入 base 且 `git status` 干净的 worktree；传 PR 编号或能被 `gh` 解析的 branch 时也支持 squash / rebase merge 的 merged 核验。遇到未合并、未 push、未提交或未跟踪文件会保留现场并报告原因。如果 agent 执行了 merge 并且能识别对应的本地 task worktree，merge 成功后应该跑这个脚本清理，除非人类明确要求保留。
 
@@ -95,11 +95,9 @@ cd ../.. && python3 scripts/build_mms_web_release.py --skip-install
 
 ## 门禁
 
-跑任何测试之前先隔离环境，否则可能写穿真实配置根：
+验证必须使用临时 HOME、config 和 state root。只取消 `MMS_CONFIG_ROOT` 并不构成隔离：`MMS_CONFIG_DIR` 或真实 HOME 仍可能把写入导向用户配置。门禁及测试 fixture 应同时清理 `MMS_CONFIG_ROOT`、`MMS_CONFIG_DIR`、`MMS_REAL_HOME`、`REAL_HOME`、`ORIGINAL_HOME`、`MMS_SESSION_HOME`、`MMS_SOFT_HOME`、`CLAUDE_CONFIG_DIR` 等继承路径，并把 HOME/XDG 目录指向测试目录。需要 Pi/CLI 的安装测试应显式绑定测试替身，不能继承真实 `MMS_PI_EXECUTABLE`。
 
-```bash
-env -u MMS_CONFIG_ROOT -u REAL_HOME -u ORIGINAL_HOME -u MMS_REAL_HOME -u XDG_CONFIG_HOME <命令>
-```
+`regression_fresh_user_gate.py` 自建隔离环境；新增测试与其子进程也必须独立验证隔离，不能把上层门禁当作兜底。
 
 | 门禁 | 命令 | 注意 |
 |---|---|---|
@@ -111,7 +109,7 @@ env -u MMS_CONFIG_ROOT -u REAL_HOME -u ORIGINAL_HOME -u MMS_REAL_HOME -u XDG_CON
 
 改动触及 `lib/mms_core.py`、`lib/mms_launchers.py`、installer、session index、config root、resume、HOME/XDG 隔离、wrapper 或 release channel 时，交付里**必须**写明 fresh-user gate 的实际结果。
 
-`.github/workflows/digger.yml` 是仓库唯一的 CI。
+CI 包括 `.github/workflows/digger.yml` 与独立的 `.github/workflows/windows-acceptance.yml`（Windows 四矩阵）。
 
 ## 发布门槛
 
