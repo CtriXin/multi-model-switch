@@ -1,6 +1,7 @@
 """Windows-style os.replace failures in private_json, and silent update-check paths."""
 from __future__ import annotations
 
+import errno
 import inspect
 import json
 import logging
@@ -138,3 +139,25 @@ def test_sync_update_check_returns_settled_status(tmp_path):
     assert result == service.status()
     assert service._check_lock.acquire(blocking=False)
     service._check_lock.release()
+
+
+def test_private_json_does_not_retry_a_fatal_replace_error(tmp_path, monkeypatch):
+    """A full disk is not a scanner holding the handle; retrying it just wastes
+    time and hides the real cause. Only the Windows transient winerrors and
+    PermissionError are worth a second attempt."""
+    target = tmp_path / "session.json"
+    target.write_text('{"keep": true}', encoding="utf-8")
+    attempts = []
+
+    def out_of_space(src, dst):
+        attempts.append(src)
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(os, "replace", out_of_space)
+    monkeypatch.setattr(time, "sleep", lambda _delay: pytest.fail("a fatal error must not back off"))
+    with pytest.raises(OSError) as raised:
+        private_json(target, {"keep": False})
+    assert raised.value.errno == errno.ENOSPC
+    assert len(attempts) == 1, "ENOSPC was retried; the transient allowlist is too wide"
+    assert json.loads(target.read_text(encoding="utf-8")) == {"keep": True}
+    assert list(tmp_path.glob(".web-*.tmp")) == []
