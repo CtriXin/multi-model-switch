@@ -9,7 +9,7 @@ import time
 import urllib.request
 from pathlib import Path
 from .runtime import private_json
-from .updates import read_json
+from .updates import NoRedirect, read_json
 from .update_stage import candidate_environment
 
 PROTOCOL = 1
@@ -45,10 +45,20 @@ def inventory_matches(expected, actual):
     return True
 
 
-def http(port, path, body=None, csrf=''):
+def http(port, path, body=None, csrf='', *, state_root=None):
+    headers = {'Content-Type': 'application/json', 'X-MMS-CSRF': csrf}
+    if state_root is not None:
+        from .remote_access import COOKIE
+        try:
+            token = (Path(state_root) / 'remote-access-token').read_text().strip()
+        except FileNotFoundError:
+            token = ''  # Loopback-only installations need no credential.
+        if token:
+            headers['Cookie'] = f'{COOKIE}={token}'
     req = urllib.request.Request(f'http://127.0.0.1:{port}/api/v1/{path}', data=json.dumps(body).encode() if body is not None else None,
-                                 headers={'Content-Type':'application/json', 'X-MMS-CSRF':csrf})
-    with urllib.request.urlopen(req, timeout=3) as response:
+                                 headers=headers)
+    # The credential belongs to this local service; never forward it on redirect.
+    with urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect()).open(req, timeout=3) as response:
         return json.load(response)
 
 
@@ -74,12 +84,12 @@ def ready(spec, process, source, *, probation):
         if process.poll() is not None:
             return None
         try:
-            data = http(spec['port'], 'update/identity')
+            data = http(spec['port'], 'update/identity', state_root=spec['state'])
             instance = spec['id'] if probation else spec['id'] + '-rollback'
             if (data.get('instance') == instance and data.get('identity') == expected
                     and data.get('version') == (spec['target'].removeprefix('v') if probation else spec['oldVersion'])
                     and inventory_matches(spec['sessions'], data.get('sessions'))):
-                return http(spec['port'], 'bootstrap')['csrfToken']
+                return http(spec['port'], 'bootstrap', state_root=spec['state'])['csrfToken']
         except Exception:
             pass
         time.sleep(.2)
@@ -151,7 +161,7 @@ def _run(spec, spec_path):
         else:
             private_json(marker, {'source':spec['source'], 'version':spec['target']})
         try:
-            http(spec['port'], 'update/commit', {'token':spec['token']}, csrf)
+            http(spec['port'], 'update/commit', {'token':spec['token']}, csrf, state_root=spec['state'])
         except Exception:
             # Commit may have succeeded despite a lost response. Never roll back
             # a process that might now be accepting user work.
