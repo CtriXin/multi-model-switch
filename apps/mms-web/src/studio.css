@@ -1177,12 +1177,16 @@ body,
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 16px 14px 24px 0;
+  padding: 0 14px 24px 0;
   width: 100%;
   max-width: none;
   margin: 0;
   box-sizing: border-box;
   scroll-padding-bottom: 72px;
+}
+.settings-shell .settings-page > :first-child,
+.settings-shell .general-settings > :first-child {
+  margin-top: 16px;
 }
 .settings-shell .channel-models {
   width: 100%;

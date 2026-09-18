@@ -87,6 +87,10 @@ test("Settings tabs, models, appearance, usage and channel-models share unified 
   assert.match(studioCss, /\.settings-shell \.settings-page,\s*\.settings-shell \.general-settings\s*\{[^}]*width:\s*100%/);
   assert.match(studioCss, /\.settings-shell \.settings-page,\s*\.settings-shell \.general-settings\s*\{[^}]*max-width:\s*none/);
 
+  // settings scroll container padding-top is 0 to allow flush sticky scroll under tabs, with first-child margin-top
+  assert.match(studioCss, /\.settings-shell \.settings-page,\s*\.settings-shell \.general-settings\s*\{[^}]*padding:\s*0\s+14px\s+24px\s+0/);
+  assert.match(studioCss, /\.settings-shell \.settings-page > :first-child,\s*\.settings-shell \.general-settings > :first-child\s*\{[^}]*margin-top:\s*16px/);
+
   // channel-models container width & margin flush with settings
   assert.match(channelCss, /\.channel-models\s*\{[^}]*width:\s*100%/);
   assert.match(channelCss, /\.channel-models\s*\{[^}]*max-width:\s*none/);
