@@ -2,6 +2,10 @@
 
 > Purpose: give any third-party or user-owned LLM a safe operating boundary before it edits MMS.
 > Read this before changing `multi-model-switch`, generated install files, or any real `~/.config/mms/**` state.
+>
+> **Start with [`AI-ONBOARDING.md`](AI-ONBOARDING.md)** for the project itself: the three product layers, the two
+> release lines and which one a change belongs to, the code map, the gates and their pitfalls, and the mistakes this
+> project has already made. This guide is the safety boundary; that one is the orientation.
 
 ## One-Line Rule
 

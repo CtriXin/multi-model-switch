@@ -8,6 +8,11 @@
 
 装好以后有两个入口：**MMS Pilot**（浏览器里的工作台，日常都在这里）和 **`mms` 命令行**（启动 Claude / Codex / OpenCode 这些原生 CLI）。两边读同一份配置。
 
+> **你是 AI,或者刚接手这个项目?** 先读 [`docs/AI-ONBOARDING.md`](docs/AI-ONBOARDING.md)。
+> 那份文档是这个仓库的交接书:产品三层结构、`main` 4.x 与 `dev` 5.x 两条发布线以及怎么判断改动属于哪条、
+> 代码地图、4.x 能力清单、5.x Bot 工作台的对象语义、配置与状态布局、门禁怎么跑,
+> 以及这个项目已经踩过的十类坑。**不要跳过第八节**——那些坑每一条都已经真实发生过至少一次。
+
 ![MMS 启动器树结构](docs/images/mms-launcher-tree-cn.svg)
 
 ---

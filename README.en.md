@@ -8,6 +8,12 @@ It handles the annoying part that happens before anything starts. You have sever
 
 After installing you get two entry points: **MMS Pilot** (a workbench in your browser, where day-to-day work happens) and the **`mms` command line** (launching the native CLIs). Both read the same configuration.
 
+> **Are you an AI agent, or new to this project?** Read [`docs/AI-ONBOARDING.md`](docs/AI-ONBOARDING.md) first.
+> It is this repository's handover document: the three product layers, the `main` 4.x and `dev` 5.x release lines
+> and how to tell which one your change belongs to, the code map, the 4.x feature inventory, the object semantics
+> of the 5.x Bot workbench, where config and state live, how to run the gates, and the ten classes of mistake this
+> project has already made. **Do not skip section eight** — every item there has really happened at least once.
+
 ![MMS launcher tree](docs/images/mms-launcher-tree-en.svg)
 
 ---
