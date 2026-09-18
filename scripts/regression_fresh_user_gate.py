@@ -641,10 +641,13 @@ print(json.dumps({"bots": len(bots), "schedules": len(schedules), "schema": raw[
 
 
 def _version_of(tree: Path) -> str:
-    text = (tree / "mms_version.py").read_text(encoding="utf-8")
-    for line in text.splitlines():
-        if line.startswith("VERSION = "):
-            return line.split('"')[1]
+    for candidate in (tree / "lib" / "mms_version.py", tree / "mms_version.py"):
+        if not candidate.is_file():
+            continue
+        text = candidate.read_text(encoding="utf-8")
+        for line in text.splitlines():
+            if line.startswith("VERSION = "):
+                return line.split('"')[1]
     raise SystemExit(f"cannot read VERSION from {tree}")
 
 
