@@ -202,6 +202,13 @@ def test_overwrite_install_removes_exact_flat_copies_and_keeps_user_files(tmp_pa
     )
     assert installed.returncode == 0, installed.stdout + installed.stderr
     assert "Traceback" not in installed.stderr
+    # Import the installed launch consumer too: --help exits before loading it.
+    runtime_import = subprocess.run(
+        [sys.executable, "-P", "-c", "import mms_launchers"],
+        cwd=home, env={**env, "PYTHONPATH": os.pathsep.join([str(install_root / "lib"), str(install_root)])},
+        capture_output=True, text=True, timeout=30,
+    )
+    assert runtime_import.returncode == 0, runtime_import.stderr
 
 
 def test_lib_wins_over_a_flat_shadow(tmp_path):

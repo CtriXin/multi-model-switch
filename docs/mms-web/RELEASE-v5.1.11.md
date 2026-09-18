@@ -1,6 +1,6 @@
 # v5.1.11 Preview · T9a 运行模块布局同步
 
-同步 Stable 4.23.8 的 T9a：79 个运行模块归入 `lib/`，入口、安装器与 Pilot 升级保持一致。保留 5.1.10 的 Bot、模型/Effort 交互与前端 bundle。
+同步 Stable 4.23.8 的 T9a：81 个运行模块（含 dev 独有的两个 Grok 模块）归入 `lib/`，入口、安装器与 Pilot 升级保持一致。保留 5.1.10 的 Bot、模型/Effort 交互与前端 bundle。
 
 ## 升级须知
 
