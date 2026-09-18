@@ -1749,7 +1749,7 @@ export function App() {
                   }}
                 />
               </div>
-              {recoveryDraft && <section className="recovery-draft-notice"><strong>来自「{recoveryDraft.title}」的接续草稿</strong><p>原会话和之前的普通草稿都保留。请核对未完成的操作，避免重复执行。</p><button type="button" onClick={() => setRecoveryDraft(null)}>返回普通草稿</button></section>}
+              {recoveryDraft && <section className="recovery-draft-notice"><strong>来自「{recoveryDraft.title}」的接续草稿</strong><p>原会话和之前的普通草稿都保留。请核对未完成的操作，避免重复执行。</p><button type="button" className="button" onClick={() => setRecoveryDraft(null)}>返回普通草稿</button></section>}
               {recipe && <section className="recipe-loaded">
                 <strong>已载入「{recipe.recipe.title}」</strong>
                 <p>模板模型偏好：{recipe.recipe.preferredModel || "未指定"}。当前使用 {preset?.name || "尚未选择"} · {preset?.channel || ""}；确认后再发送。</p>
