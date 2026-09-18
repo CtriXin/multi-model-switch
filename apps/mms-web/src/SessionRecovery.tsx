@@ -35,7 +35,7 @@ export function SessionRecovery({ detail, data, favorites, toggleFavorite, busy,
       {blocked && <p role="status">{detail.recovery?.retryExhausted
         ? "模型自动重试已用尽。" : detail.recovery?.suggested
         ? "模型已连续多次失败。" : "这条会话执行失败了。"} 可以换模型，或把已有资料带到新会话。</p>}
-      <button type="button" onClick={() => setOpen(true)}>接续工作</button>
+      <button type="button" className="button" onClick={() => setOpen(true)}>接续工作</button>
     </div>
     {open && <RecoveryDialog key={detail.session.id} {...{ detail, data, favorites, toggleFavorite, busy, action, prepare }} close={() => setOpen(false)} />}
   </>;
@@ -80,12 +80,12 @@ export function RecoveryDialog({ detail, data, favorites, toggleFavorite, busy, 
       <p>保留原会话。换模型可继续使用旧上下文；新会话只带入你确认的接续资料。</p>
       <p className="muted">资料由本地记录生成，无需旧模型响应。新会话会先打开草稿，发送后才开始执行。</p>
       {error && <p className="inline-alert" role="alert">{error}</p>}
-      {!packet ? <div aria-live="polite">{error ? <button type="button" onClick={() => setReload(n => n + 1)}>重新读取资料</button> : "正在读取本地记录…"}</div> : <>
+      {!packet ? <div aria-live="polite">{error ? <button type="button" className="button" onClick={() => setReload(n => n + 1)}>重新读取资料</button> : "正在读取本地记录…"}</div> : <>
         <label className="recovery-preview">接续资料（可编辑）
           <textarea ref={preview} data-autofocus value={text} rows={10} onChange={e => { setText(e.target.value); setCopied(false); }} />
         </label>
         {!packet.nativeHistoryAvailable && <p role="status">原生日志不可用，已保留可读取的历史摘录。</p>}
-        <button type="button" onClick={async () => {
+        <button type="button" className="button" onClick={async () => {
           try { await copyText(text); setCopied(true); setError(""); }
           catch { setError("复制失败，请选中上方资料手动复制。"); }
         }}>{copied ? "已复制接续信息" : "复制接续信息"}</button>
@@ -106,7 +106,7 @@ export function RecoveryDialog({ detail, data, favorites, toggleFavorite, busy, 
       {running && <p role="status">当前会话仍在执行或等待操作。请先停止或等它结束；现在可以复制资料。</p>}
       {detail.session.owner === "cli" && <p className="muted">终端会话的运行状态无法在这里确认。发送新草稿前，请确认旧终端已停止。</p>}
       <div className="recovery-actions">
-        {detail.session.owner === "web" && detail.session.capabilities.send && <button type="button" disabled={busy || pending || running || !selected} onClick={async () => {
+        {detail.session.owner === "web" && detail.session.capabilities.send && <button type="button" className="button" disabled={busy || pending || running || !selected} onClick={async () => {
           setPending(true); setError("");
           try {
             if (await action(`/sessions/${encodeURIComponent(detail.session.id)}/model`, { presetId })) close();

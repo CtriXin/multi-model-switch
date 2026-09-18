@@ -6,7 +6,7 @@
 .session-recovery-body p { margin: 0; line-height: 1.6; }
 .session-recovery-body .muted, .recovery-path { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .recovery-preview { display: grid; gap: 8px; font-size: 13px; }
-.recovery-preview textarea { width: 100%; min-height: 180px; max-height: 40vh; resize: vertical; font: inherit; line-height: 1.6; padding: 12px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+.session-recovery-body .recovery-preview textarea { width: 100%; min-height: 180px; height: 220px; max-height: 40vh; resize: vertical; font: inherit; line-height: 1.6; padding: 12px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
 .recovery-options { display: flex; flex-wrap: wrap; gap: 16px; }
 .recovery-options > * { flex: 1; min-width: 0; display: grid; gap: 8px; font-size: 13px; }
 .recovery-options select { width: 100%; min-width: 0; }
