@@ -402,3 +402,20 @@ test("truncation hint follows the truncated level", () => {
   assert.match(launchSource, /truncatedPaths=\{truncatedPaths\}/);
   assert.match(launchSource, /Object\.keys\(truncatedAt\)\.filter/);
 });
+
+
+test("nested truncated levels stay distinct and collapsed children show no hint", () => {
+  const roots = [{ name: "alpha", path: "/a" }, { name: "zeta", path: "/z" }];
+  const children = { "/a": [{ name: "beta", path: "/a/b" }], "/a/b": [{ name: "child", path: "/a/b/c" }] };
+  const render = (expanded) => renderToStaticMarkup(createElement(FolderTree, {
+    rows: visibleRows(roots, expanded, children), activeIndex: 0,
+    truncatedPaths: ["/a", "/a/b"], onHighlight() {}, onToggle() {},
+  }));
+  const nested = render(["/a", "/a/b"]);
+  assert.equal((nested.match(/workspace-folder-truncated/g) || []).length, 2);
+  assert.match(nested, /alpha：/);
+  assert.match(nested, /beta：/);
+  assert.ok(nested.indexOf("beta：") < nested.indexOf("alpha："));
+  assert.equal((render(["/a"]).match(/workspace-folder-truncated/g) || []).length, 1);
+  assert.doesNotMatch(render([]), /workspace-folder-truncated/);
+});

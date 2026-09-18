@@ -133,23 +133,27 @@ export function FolderTree({
   }
   // Each truncated level gets its own hint, placed at the end of that level's
   // visible subtree. The root listing is tracked under the empty path.
-  const hintIndexes = new Set<number>();
+  const hints = new Map<number, { path: string; label: string; depth: number }[]>();
+  const addHint = (index: number, path: string, label: string, depth: number) => {
+    hints.set(index, [...(hints.get(index) ?? []), { path, label, depth }]);
+  };
   for (const path of truncatedPaths ?? []) {
     if (!path) {
-      hintIndexes.add(rows.length - 1);
+      addHint(rows.length - 1, path, "当前目录", 0);
       continue;
     }
     const start = rows.findIndex((row) => row.path === path);
-    if (start < 0) continue;
+    if (start < 0 || !rows[start].expanded) continue;
     let end = start;
     for (let index = start + 1; index < rows.length; index += 1) {
       if (rows[index].depth <= rows[start].depth) break;
       end = index;
     }
-    hintIndexes.add(end);
+    addHint(end, path, rows[start].name, rows[start].depth + 1);
   }
-  const truncatedHint = (key: string) =>
-    h("p", { key, className: "muted workspace-folder-truncated", role: "status" }, TREE_TRUNCATED_HINT);
+  const truncatedHint = (key: string, label = "", depth = 0) =>
+    h("p", { key, className: "muted workspace-folder-truncated", role: "status",
+      style: { paddingLeft: `${11 + depth * 16}px` } }, label ? `${label}：${TREE_TRUNCATED_HINT}` : TREE_TRUNCATED_HINT);
   return h(
     "div",
     {
@@ -198,7 +202,9 @@ export function FolderTree({
           h(FolderOpen, { size: 18, "aria-hidden": true }),
           h("span", { className: "workspace-folder-label" }, h("strong", null, row.name), h("small", null, row.path)),
         );
-        return hintIndexes.has(index) ? [button, truncatedHint(`truncated-${index}`)] : [button];
+        return [button, ...(hints.get(index) ?? [])
+          .sort((a, b) => b.depth - a.depth)
+          .map((hint) => truncatedHint(`truncated-${hint.path}`, hint.label, hint.depth))];
       }),
       truncated && !truncatedPaths?.length ? truncatedHint("truncated") : null,
     ],
