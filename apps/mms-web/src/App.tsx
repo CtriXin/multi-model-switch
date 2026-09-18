@@ -287,6 +287,7 @@ export function App() {
   const [presetId, setPresetId] = useState(() =>
     readSetting("mms-web-preset", ""),
   );
+  const [launchRevision, setLaunchRevision] = useState(0);
   const [settingsEdit, setSettingsEdit] = useState<{dirty: boolean; busy: boolean; save?: () => void}>({dirty: false, busy: false});
   const [pendingNavigation, setPendingNavigation] = useState<(() => void) | null>(null);
   const [botsReturnId, setBotsReturnId] = useState("");
@@ -883,7 +884,13 @@ export function App() {
   );
   const workspace = data.workspaces.find((w) => w.id === workspaceId);
   const preset = data.presets.find((p) => p.id === presetId);
-  const launchFacts = useLaunchFacts(presetId, workspaceId);
+  const launchFacts = useLaunchFacts(presetId, workspaceId, launchRevision);
+  function refreshConfiguration() {
+    // Saving can change defaults/capabilities without changing the selected IDs.
+    // Invalidate launch facts, but preserve explicit task/browser effort choices.
+    setLaunchRevision((revision) => revision + 1);
+    void load();
+  }
   const recipeKey = recipe ? [recipe.key, workspaceId, presetId, JSON.stringify(launchFacts.facts?.model)].join("|") : "";
   if (recipeContext.current.key !== recipeKey) recipeContext.current = { key: recipeKey, revision: recipeContext.current.revision + 1 };
   const recipeToken = `${recipeKey}|${recipeContext.current.revision}`;
@@ -2034,7 +2041,7 @@ export function App() {
           </div>
         )}
         {setupOpen && <ConnectionDialog data={data} onboarding
-          close={() => setSetupOpen(false)} refresh={() => void load()} select={selectTaskPreset}
+          close={() => setSetupOpen(false)} refresh={refreshConfiguration} select={selectTaskPreset}
           complete={connectionCompleted} />}
         {settingsOpen && (
           <SettingsPage
@@ -2079,7 +2086,7 @@ export function App() {
             data={data}
             favorites={favorites}
             toggleFavorite={favorite}
-            refresh={() => void load()}
+            refresh={refreshConfiguration}
           />
         )}
         {page === "bots" && !settingsOpen && (
