@@ -3967,7 +3967,7 @@ def confirm_tui(
 
     profile_caps = _confirm_profile_capabilities(model_info, runtime=runtime)
     model_tokens = profile_caps["tokens"] or _model_tokens(model_info)
-    has_bypass = cli in ("codex", "claude", "opencode", "agy")
+    has_bypass = cli in ("codex", "claude", "opencode", "agy", "mcode")
     has_reasoning_controls = cli in ("codex", "claude")
     has_claude_1m = cli == "claude" and _supports_claude_1m_toggle(model_info)
     has_thinking = has_reasoning_controls and bool(profile_caps["thinking_supported"])

@@ -339,7 +339,7 @@ DEFAULT_PROVIDER_ID = "default"
 DEFAULT_PROVIDER_PROTOCOLS = ["anthropic_messages", "openai_chat_completions"]
 DEFAULT_ACCOUNT_TIMEZONE = "Asia/Singapore"
 VALID_CLAUDE_1M_MODES = {"auto", "enable", "disable"}
-OAUTH_CAPABLE_CLIS = ("claude", "codex", "gemini", "agy")
+OAUTH_CAPABLE_CLIS = ("claude", "codex", "gemini", "agy", "mcode")
 MMS_MANAGED_OAUTH_CLIS = ("codex", "agy")
 MMC_DELEGATED_OAUTH_CLIS = ("claude",)
 PROVIDER_CAPABLE_CLIS = ("claude", "codex", "opencode")
@@ -785,7 +785,7 @@ def _preset_has_visible_model_options(preset):
     return _model_info_has_visible_models(_preset_model_info(preset))
 
 
-CLI_NAMES = ["claude", "codex", "opencode", "pi", "grok", "agy"]
+CLI_NAMES = ["claude", "codex", "opencode", "pi", "grok", "agy", "mcode"]
 CLI_MODEL_FAMILY_HINTS = {}
 LB_SLOT_NAMES = ("heavy", "medium", "light")
 
@@ -8494,6 +8494,8 @@ def _provider_supports_cli_name(provider, cli_name):
     provider_id = str(provider.get("id", "")).strip().lower()
     if cli_name == "agy":
         return False
+    if cli_name == "mcode":
+        return False
     # Kimi coding endpoints currently work on Claude-compatible paths, but not in Codex runtime.
     if cli_name == "codex" and provider_id.startswith("kimi"):
         return False
@@ -9148,6 +9150,13 @@ def _resolve_visible_clis(cfg, default_provider, default_models):
                         continue
                 except Exception:
                     pass
+        if cli_name == "mcode":
+            try:
+                if check_cli_installed(cli_name):
+                    visible.append(cli_name)
+            except Exception:
+                pass
+            continue
         provider, family_models = _resolve_provider_for_cli(cfg, cli_name, default_provider, default_models)
         if provider is None:
             continue
@@ -12734,6 +12743,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             profile_options_by_cli={
                 "opencode": _opencode_profile_menu_options(),
                 "agy": _official_account_menu_options(current_cfg, "agy"),
+                "mcode": _official_account_menu_options(current_cfg, "mcode"),
             },
         )
 
@@ -12868,7 +12878,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             )
             _trace_runtime_choice("runtime resolve", runtime_runtime, launch_cli=cli, choice="opencode profile")
             # fall through to confirm
-        if action_type == "profile" and cli == "agy":
+        if action_type == "profile" and cli in {"agy", "mcode"}:
             if action_data == _AGY_CONNECT_PROFILE_ID:
                 current_cfg, changed = _quick_connect_official(current_cfg, preset_cli="agy")
                 if changed:
@@ -13593,7 +13603,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 if runtime_from_best_provider:
                     _trace_runtime_choice("runtime resolve", runtime_runtime, launch_cli=cli, choice="best provider")
             # fall through to confirm
-        elif action_type == "profile" and cli not in {"opencode", "agy"}:
+        elif action_type == "profile" and cli not in {"opencode", "agy", "mcode"}:
             continue
         elif action_type not in ("profile", "provider_browse", "load_balance", "last", "family"):
             continue

@@ -1959,7 +1959,7 @@ CLI_PROTOCOL_REQUIREMENTS = {
     "codex": "openai_chat_completions",
     "opencode": "openai_chat_completions",
 }
-OAUTH_CAPABLE_CLIS = {"claude", "codex", "gemini", "agy"}
+OAUTH_CAPABLE_CLIS = {"claude", "codex", "gemini", "agy", "mcode"}
 # OpenCode constants and pure config helpers live in mms_opencode_config.
 # agent-im daemon 路径（仅在显式配置时启用，避免公开仓库绑定个人目录）
 _AGENT_IM_DIR = os.path.realpath(str(os.environ.get("MMS_AGENT_IM_DIR") or "").strip()) if str(os.environ.get("MMS_AGENT_IM_DIR") or "").strip() else ""
@@ -7250,6 +7250,16 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
             env["HOME"] = session_home
             env["XDG_CONFIG_HOME"] = xdg_config_home
             _set_session_home_hint(env, session_home)
+        if cli_name == "mcode":
+            # mcode 以 ~/.mcode 存储会话/配置；隔离 HOME 时默认无法命中真实安装，
+            # 因此为会话 HOME 提供真实 ~/.mcode 的入口，保证 mcode 能读到登录态与配置。
+            real_mcode_dir = os.path.join(_real_user_home(), ".mcode")
+            session_mcode_dir = os.path.join(session_home, ".mcode")
+            if os.path.isdir(real_mcode_dir) and not os.path.exists(session_mcode_dir) and not os.path.islink(session_mcode_dir):
+                try:
+                    os.symlink(real_mcode_dir, session_mcode_dir)
+                except OSError:
+                    pass
         _install_session_command_wrappers(session_home, env)
         host_context_env = _install_host_context_env(
             env,
@@ -11805,6 +11815,33 @@ def launch_agy(model_info, runtime, once=False):
     _exec_or_run(cmd, env, once)
 
 
+def launch_mcode(model_info, runtime, once=False, extra_args=None):
+    """启动 MiniMax Code CLI，当前只支持官方账号档案模式。
+
+    mcode 的交互式 TUI 入口不支持 --permission；bypass 只在 once/exec 模式下
+    通过 --permission full 生效。交互式 TUI 启动时若开启 bypass，MMS 会
+    打印提示说明 mcode TUI 将使用其默认 smart 权限。
+    """
+    auth_mode = runtime.get("auth_mode", "api_key")
+    if auth_mode != "oauth":
+        console.print("[red]MiniMax Code CLI 当前只支持官方账号入口，不支持直接使用模型源启动[/red]")
+        sys.exit(1)
+
+    env = _account_env(runtime, model_info=model_info)
+    _prepare_oauth_home_context(runtime, env, "mcode")
+    cmd = ["mcode"]
+    if once:
+        cmd.append("exec")
+        if runtime.get("bypass"):
+            cmd += ["--permission", "full"]
+    else:
+        if runtime.get("bypass"):
+            console.print("[yellow]mcode TUI 当前不支持 --permission full；将使用默认 smart 权限。[/yellow]")
+    if extra_args:
+        cmd += list(extra_args)
+    _exec_or_run(cmd, env, once)
+
+
 LAUNCHERS = {
     "claude": launch_claude,
     "codex": launch_codex,
@@ -11813,6 +11850,7 @@ LAUNCHERS = {
     "grok": launch_grok,
     "gemini": launch_gemini,
     "agy": launch_agy,
+    "mcode": launch_mcode,
 }
 
 
