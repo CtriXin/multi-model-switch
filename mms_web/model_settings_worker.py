@@ -263,40 +263,53 @@ def draft_for(rows, request, revision):
         raise WebError("NO_MODELS", "每个通道至少保留一个模型；如需停用整个通道，请删除通道。", 409)
     original = {m["id"] for m in target["models"] if m.get("visible", True)}
     known = {m["id"]: m for m in public_rows([target])[0]["models"]}
+    selected_ids = set(selected)
     changes = []
     efforts = request.get("efforts") or {}
     if not isinstance(efforts, dict):
         raise WebError("INVALID_EFFORT", "effort 格式无效。", 400)
     for model, value in efforts.items():
-        if model not in known or not isinstance(value, str) or not known[model]["effortLevels"] or (value != "" and value not in known[model]["effortLevels"]):
+        scope = _capability_scope(model, known, selected_ids)
+        levels = known[model]["effortLevels"] if scope == "known" else []
+        new_ok = scope == "new" and isinstance(value, str) and value in _STANDARD_EFFORTS
+        known_ok = scope == "known" and isinstance(value, str) and bool(levels) and (value == "" or value in levels)
+        if not new_ok and not known_ok:
             raise WebError("INVALID_EFFORT", "所选 effort 不在这个模型的配置选项中。", 400)
-        if value != known[model]["effort"]:
-            affected = [p["name"] for p in rows if any(m["id"] == model for m in p["models"])]
-            changes.append({"kind": "effort", "model": model, "before": known[model]["effort"] or "自动", "after": value, "channels": affected})
+        current = known[model]["effort"] if scope == "known" else ""
+        if value != current:
+            changes.append({"kind": "effort", "model": model, "before": current or "自动", "after": value,
+                            "channels": _channels_for(rows, target, model, selected_ids)})
     visions = request.get("visions") or {}
     if not isinstance(visions, dict):
         raise WebError("INVALID_VISION", "识图设置格式无效。", 400)
     for model, value in visions.items():
-        if model not in known or not isinstance(value, bool) or not known[model].get("capabilitiesEditable"):
+        scope = _capability_scope(model, known, selected_ids)
+        editable = scope == "new" or (scope == "known" and known[model].get("capabilitiesEditable"))
+        if not editable or not isinstance(value, bool):
             raise WebError("INVALID_VISION", "这个模型不能在这里设置识图能力。", 400)
-        if value != known[model]["vision"]:
-            affected = [p["name"] for p in rows if any(m["id"] == model for m in p["models"])]
+        current = bool(known[model]["vision"]) if scope == "known" else None
+        if value != current:
             changes.append({"kind": "vision", "model": model,
-                            "before": "可读取图片" if known[model]["vision"] else "不可读取图片",
-                            "after": "可读取图片" if value else "不可读取图片", "channels": affected})
+                            "before": "可读取图片" if current else "不可读取图片",
+                            "after": "可读取图片" if value else "不可读取图片",
+                            "channels": _channels_for(rows, target, model, selected_ids)})
     contexts = request.get("contextWindows") or {}
     if not isinstance(contexts, dict):
         raise WebError("INVALID_CONTEXT", "上下文长度格式无效。", 400)
     for model, value in contexts.items():
         # A context window the route cannot honour would silently truncate work,
         # so refuse the value here instead of writing it into policy.
-        if model not in known or not known[model].get("capabilitiesEditable") or not isinstance(value, int) or isinstance(value, bool) or not 1024 <= value <= 10_000_000:
+        scope = _capability_scope(model, known, selected_ids)
+        editable = scope == "new" or (scope == "known" and known[model].get("capabilitiesEditable"))
+        sized = isinstance(value, int) and not isinstance(value, bool) and 1024 <= value <= 10_000_000
+        if not editable or not sized:
             raise WebError("INVALID_CONTEXT", "上下文长度需要是 1024 到 10000000 之间的整数。", 400)
-        if value != known[model]["contextWindow"]:
-            affected = [p["name"] for p in rows if any(m["id"] == model for m in p["models"])]
+        current = known[model]["contextWindow"] if scope == "known" else None
+        if value != current:
             changes.append({"kind": "context", "model": model,
-                            "before": str(known[model]["contextWindow"] or "自动"),
-                            "after": str(value), "channels": affected})
+                            "before": str(current or "自动"),
+                            "after": str(value),
+                            "channels": _channels_for(rows, target, model, selected_ids)})
     for model in sorted(set(selected) - original):
         changes.append({"kind": "add", "model": model})
     for model in sorted(original - set(selected)):
@@ -339,6 +352,130 @@ def draft_for(rows, request, revision):
         ids = [p["id"] for p in rows]
         payload.update(route_scope_provider_ids=ids, route_refresh_provider_ids=ids)
     return payload, changes
+
+
+_STANDARD_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
+
+
+def _capability_scope(model, known, selected):
+    if model in known:
+        return "known"
+    if model in selected:
+        return "new"
+    return ""
+
+
+def _channels_for(rows, target, model, selected):
+    names = [p["name"] for p in rows if any(m["id"] == model for m in p["models"])]
+    if names:
+        return names
+    if model in selected:
+        return [target["name"]]
+    return []
+
+
+def _openrouter_catalog_document():
+    if os.environ.get("MMS_OPENROUTER_OVERLAY") == "0":
+        return None, ""
+    path = os.environ.get("MMS_OPENROUTER_CATALOG_FILE", "").strip()
+    if path:
+        try:
+            return json.loads(Path(path).read_text(encoding="utf-8")), ""
+        except (OSError, ValueError):
+            return None, "OpenRouter 目录读不到，模型列表已更新，能力没有自动填入。"
+    try:
+        import mms_config_web as web
+        return web._fetch_openrouter_catalog_payload(timeout=12), ""
+    except Exception:
+        return None, "OpenRouter 暂时读不到，模型列表已更新，能力没有自动填入。"
+
+
+def _catalog_caps_for(models, document):
+    import mms_config_web as web
+    truth = web._openrouter_catalog_to_truth_payload(document)
+    indexed = web._index_truth_payload(truth)
+    found = {}
+    for model in models:
+        keys = web._truth_model_index_keys(model)
+        hit = next((indexed.get(key) for key in keys if indexed.get(key)), None)
+        if not hit:
+            continue
+        row, source_path = hit
+        caps, _sources = web._truth_caps_from_row(row, fields=set(REFRESH_FIELDS), source_path=source_path)
+        if caps:
+            found[model] = caps
+    return found
+
+
+def _locked_overlay_field(row, field):
+    if not row:
+        return False
+    if field == "vision":
+        return row.get("visionSource") in USER_SET_SOURCES
+    if field == "context_window_tokens":
+        return row.get("contextSource") in USER_SET_SOURCES
+    return bool(row.get("effort")) or bool(row.get("effortPending"))
+
+
+def _overlay_value(field, value, row):
+    if field == "vision":
+        if not isinstance(value, bool):
+            return None
+        if row and value == bool(row.get("vision")):
+            return None
+        return value
+    if field == "context_window_tokens":
+        if isinstance(value, int) and not isinstance(value, bool) and 1024 <= value <= 10_000_000:
+            if row and value == row.get("contextWindow"):
+                return None
+            return value
+        return None
+    effort = str(value or "").strip().lower()
+    if effort not in _STANDARD_EFFORTS:
+        return None
+    levels = (row or {}).get("effortLevels") or []
+    if row and (not levels or effort not in levels or effort == row.get("effort")):
+        return None
+    return effort
+
+
+def pull_capability_overlays(cfg, target, models, root):
+    """Fill vision, context and effort for a pull. Official facts beat OpenRouter."""
+    document, warning = _openrouter_catalog_document()
+    if document is None and not warning:
+        return [], ""
+    import mms_config_web as web
+    known = {m["id"]: m for m in public_rows([target])[0]["models"]}
+    provider = {"id": target["id"], "models": [{"id": model} for model in models]}
+    official = web.refresh_model_capability_truth(
+        cfg,
+        {"provider_id": target["id"], "provider": provider, "models": models,
+         "fields": list(REFRESH_FIELDS), "mmf_official_overrides": True},
+        config_path=str(root / "config.toml"),
+        command_name="mmf",
+    )
+    official_caps = official.get("model_capabilities") or {}
+    catalog_caps = _catalog_caps_for(models, document) if document else {}
+    overlays = []
+    for model in models:
+        row = known.get(model)
+        item = {"model": model, "sources": {}}
+        for field, name in (("vision", "vision"), ("context_window_tokens", "context"), ("reasoning_effort", "effort")):
+            if _locked_overlay_field(row, field):
+                continue
+            raw = (official_caps.get(model) or {}).get(field)
+            source = "official"
+            if raw is None:
+                raw = (catalog_caps.get(model) or {}).get(field)
+                source = "catalog"
+            value = _overlay_value(field, raw, row)
+            if value is None:
+                continue
+            item[name] = value
+            item["sources"][name] = source
+        if item["sources"]:
+            overlays.append(item)
+    return overlays, warning
 
 
 def run(request):
@@ -420,7 +557,14 @@ def run(request):
         if action == "check":
             return {"connected": True, "modelCount": len(models), "latencyMs": result.get("latency_ms", 0),
                     "message": "模型列表接口已连通。尚未验证模型生成能力。"}
-        return {"models": models, "latencyMs": result.get("latency_ms", 0)}
+        try:
+            overlays, overlay_warning = pull_capability_overlays(cfg, target, models, root)
+        except Exception:
+            overlays, overlay_warning = [], "能力自动匹配没有完成，模型列表已更新。"
+        body = {"models": models, "latencyMs": result.get("latency_ms", 0), "overlays": overlays}
+        if overlay_warning:
+            body["overlayWarning"] = overlay_warning
+        return body
     payload, changes = draft_for(rows, request, revision)
     if action == "plan":
         if not changes:
