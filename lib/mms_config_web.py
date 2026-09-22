@@ -1291,8 +1291,14 @@ def _openrouter_catalog_to_truth_payload(
         top_provider = item.get("top_provider") if isinstance(item.get("top_provider"), dict) else {}
         pricing = item.get("pricing") if isinstance(item.get("pricing"), dict) else {}
         params = [_safe_text(value) for value in item.get("supported_parameters") or [] if _safe_text(value)] if isinstance(item.get("supported_parameters"), list) else []
-        input_modalities = [_safe_text(value) for value in architecture.get("input_modalities") or [] if _safe_text(value)] if isinstance(architecture.get("input_modalities"), list) else []
+        modalities_known = isinstance(architecture.get("input_modalities"), list)
+        input_modalities = [_safe_text(value) for value in architecture.get("input_modalities") or [] if _safe_text(value)] if modalities_known else []
         output_modalities = [_safe_text(value) for value in architecture.get("output_modalities") or [] if _safe_text(value)] if isinstance(architecture.get("output_modalities"), list) else []
+        reasoning = item.get("reasoning") if isinstance(item.get("reasoning"), dict) else {}
+        effort = _safe_text(reasoning.get("default_effort")).lower()
+        if effort not in {"low", "medium", "high", "xhigh", "max"}:
+            effort = ""
+        supports_vision = any(part.lower() in {"image", "vision", "multimodal"} for part in input_modalities) if modalities_known else None
         catalog_ref = {
             "source": "openrouter",
             "model_id": model_id,
@@ -1324,6 +1330,8 @@ def _openrouter_catalog_to_truth_payload(
                 "provider_supported_parameters": params,
                 "input_modalities": input_modalities,
                 "output_modalities": output_modalities,
+                **({"supports_vision": supports_vision} if isinstance(supports_vision, bool) else {}),
+                **({"reasoning_effort": effort} if effort else {}),
                 "provider_catalog_references": [catalog_ref],
                 "evidence": [
                     {"url": source_path, "source": "openrouter_models_api"},

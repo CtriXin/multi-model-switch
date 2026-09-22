@@ -73,6 +73,9 @@ class ModelSettings:
         env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(self.state / "home"),
                "MMS_CONFIG_ROOT": str(root), "MMS_PREVIEW_MODE": "1", "MMS_COMMAND_NAME": "mmf",
                "MMS_WEB_STANDALONE": "1" if self.catalog._local_setup() else "0"}
+        for key in ("MMS_OPENROUTER_OVERLAY", "MMS_OPENROUTER_CATALOG_FILE"):
+            if os.environ.get(key):
+                env[key] = os.environ[key]
         Path(env["HOME"]).mkdir(mode=0o700, exist_ok=True)
         try:
             # Same UTF-8 contract as catalog._run_worker: bytes on the wire,
