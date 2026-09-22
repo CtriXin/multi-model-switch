@@ -298,7 +298,11 @@ export function ChannelModels({
     setError("");
     setNotice("");
     try {
-      const result = await request<{ models: string[] }>(
+      const result = await request<{
+        models: string[];
+        overlays?: { model: string; vision?: boolean; context?: number; effort?: string }[];
+        overlayWarning?: string;
+      }>(
         "/model-settings/discover",
         draft(),
       );
@@ -307,7 +311,26 @@ export function ChannelModels({
       // visible selection so removed upstream models leave the local route.
       setChosen(result.models);
       setManual([]);
-      setNotice(`已用远端模型列表覆盖当前通道，共 ${result.models.length} 个模型。取消勾选后保存即可继续精简。`);
+      const visionsNext: Record<string, boolean> = {};
+      const contextsNext: Record<string, number> = {};
+      const effortsNext: Record<string, string> = {};
+      for (const item of result.overlays || []) {
+        if (typeof item.vision === "boolean") visionsNext[item.model] = item.vision;
+        if (typeof item.context === "number") contextsNext[item.model] = item.context;
+        if (item.effort) effortsNext[item.model] = item.effort;
+      }
+      setVisions(visionsNext);
+      setContextWindows(contextsNext);
+      setEfforts(effortsNext);
+      const filled = result.overlays?.length || 0;
+      setNotice(
+        `已用远端模型列表覆盖当前通道，共 ${result.models.length} 个模型。` +
+          (filled
+            ? `其中 ${filled} 个已填入识图、上下文或 effort，保存后生效。`
+            : "") +
+          (result.overlayWarning ? `${result.overlayWarning}` : "") +
+          "取消勾选后保存即可继续精简。",
+      );
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -854,7 +877,15 @@ export function ChannelModels({
                       </div>
                     ) : (
                       <span className="muted">
-                        {model ? "保存后可编辑" : ""}
+                        {newRemote && (visions[id] !== undefined || contextWindows[id] !== undefined)
+                          ? [
+                              visions[id] === true ? "可读取图片" : visions[id] === false ? "不读取图片" : "",
+                              contextWindows[id] ? `上下文 ${contextWindows[id]}` : "",
+                              "保存后写入",
+                            ].filter(Boolean).join(" · ")
+                          : model
+                            ? "保存后可编辑"
+                            : ""}
                       </span>
                     )}
                     {model?.effortLevels.length ? (
@@ -894,11 +925,13 @@ export function ChannelModels({
                       </select>
                     ) : (
                       <span className="muted effort-unavailable">
-                        {model?.legacyEffort
-                          ? `用户覆盖 · ${model.legacyEffort}`
-                          : model
-                            ? "未声明可调档位"
-                            : "保存后读取"}
+                        {newRemote && efforts[id]
+                          ? `effort ${efforts[id]} · 保存后写入`
+                          : model?.legacyEffort
+                            ? `用户覆盖 · ${model.legacyEffort}`
+                            : model
+                              ? "未声明可调档位"
+                              : "保存后读取"}
                       </span>
                     )}
                   </div>

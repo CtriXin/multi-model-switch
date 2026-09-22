@@ -22,6 +22,7 @@ def settings(tmp_path, monkeypatch):
     home.mkdir()
     for key in ("HOME", "MMS_REAL_HOME", "REAL_HOME", "ORIGINAL_HOME"):
         monkeypatch.setenv(key, str(home))
+    monkeypatch.setenv("MMS_OPENROUTER_OVERLAY", "0")
     root = tmp_path / "mms-next"
     root.mkdir()
     (root / "config.toml").write_text("# Fixture: providers are hydrated from the approved Registry.\n")
@@ -517,3 +518,72 @@ def test_fetching_models_replaces_the_route_instead_of_merging(settings, tmp_pat
         assert options["model"]["id"] == "gpt-5"
     finally:
         app.close()
+
+
+def test_openrouter_catalog_matches_exact_tail_only():
+    import mms_config_web as web
+
+    truth = web._openrouter_catalog_to_truth_payload({"data": [
+        {"id": "z-ai/glm-5.4", "context_length": 1000000,
+         "architecture": {"input_modalities": ["text"]},
+         "reasoning": {"default_effort": "max"}, "top_provider": {}},
+        {"id": "vendor/local-extra-model", "context_length": 200000,
+         "architecture": {"input_modalities": ["text", "image"]},
+         "reasoning": {"default_effort": "high", "supported_efforts": ["minimal", "high"]},
+         "top_provider": {}},
+    ]})
+    indexed = web._index_truth_payload(truth)
+    assert "glm-5.4" in indexed
+    assert "glm5.4" not in indexed
+    caps, _sources = web._truth_caps_from_row(
+        indexed["glm-5.4"][0],
+        fields={"vision", "context_window_tokens", "reasoning_effort"},
+    )
+    assert caps == {"context_window_tokens": 1000000, "long_context": True, "vision": False, "reasoning_effort": "max"}
+    image, _sources = web._truth_caps_from_row(
+        indexed["local-extra-model"][0],
+        fields={"vision", "context_window_tokens", "reasoning_effort"},
+    )
+    assert image["vision"] is True
+    assert image["reasoning_effort"] == "high"
+
+
+def test_pull_fills_openrouter_capabilities_for_a_new_model(settings, monkeypatch, tmp_path):
+    catalog = tmp_path / "openrouter.json"
+    catalog.write_text(json.dumps({"data": [
+        {"id": "vendor/local-extra-model", "context_length": 200000,
+         "architecture": {"input_modalities": ["text", "image"]},
+         "reasoning": {"default_effort": "high"}, "top_provider": {}},
+        {"id": "openai/gpt-5", "context_length": 400000,
+         "architecture": {"input_modalities": ["text", "image"]},
+         "reasoning": {"default_effort": "max"}, "top_provider": {}},
+        {"id": "z-ai/glm-5.4", "context_length": 1000000,
+         "architecture": {"input_modalities": ["text"]},
+         "reasoning": {"default_effort": "max"}, "top_provider": {}},
+    ]}), encoding="utf-8")
+    monkeypatch.setenv("MMS_OPENROUTER_OVERLAY", "1")
+    monkeypatch.setenv("MMS_OPENROUTER_CATALOG_FILE", str(catalog))
+    found = settings.discover(payload(settings))
+    overlays = {item["model"]: item for item in found["overlays"]}
+    extra = overlays["local-extra-model"]
+    assert extra["vision"] is True
+    assert extra["context"] == 200000
+    assert extra["effort"] == "high"
+    assert extra["sources"] == {"vision": "catalog", "context": "catalog", "effort": "catalog"}
+    assert "glm-5.4" not in overlays
+    assert "effort" not in overlays.get("gpt-5", {})
+    draft = payload(settings)
+    draft.update(
+        models=sorted(found["models"]),
+        efforts={"local-extra-model": extra["effort"]},
+        visions={"local-extra-model": extra["vision"]},
+        contextWindows={"local-extra-model": extra["context"]},
+    )
+    preview = settings.preview(draft)
+    settings.apply({"previewId": preview["previewId"], "confirmPhrase": "写入预览DB"})
+    manifest = json.loads((settings.root / "generated/model-registry.latest-approved.json").read_text())
+    policy = json.loads((settings.root / manifest["files"]["policy"]["canonical_path"]).read_text())
+    caps = policy["models"]["local-extra-model"]["capabilities"]
+    assert caps["vision"] is True
+    assert caps["context_window_tokens"] == 200000
+    assert caps["reasoning_effort"] == "high"
