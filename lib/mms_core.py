@@ -701,21 +701,115 @@ DOMESTIC_MODEL_FAMILIES = {"DeepSeek", "Qwen", "Kimi", "Mimo", "MiniMax", "GLM",
 DOMESTIC_MODEL_KEYWORDS = ("glm", "kimi", "qwen", "mimo", "minimax", "deepseek", "stepfun", "step-", "doubao", "seed", "bailian", "hunyuan", "ernie", "spark", "iflytek")
 
 
+# OpenRouter vendor prefix → existing MMS family. The prefix is not a new group.
+_VENDOR_FAMILY = {
+    "openai": "GPT",
+    "chatgpt": "GPT",
+    "anthropic": "Claude",
+    "google": "Gemini",
+    "gemini": "Gemini",
+    "x-ai": "Grok",
+    "xai": "Grok",
+    "deepseek": "DeepSeek",
+    "qwen": "Qwen",
+    "alibaba": "Qwen",
+    "moonshotai": "Kimi",
+    "moonshot": "Kimi",
+    "z-ai": "GLM",
+    "zhipu": "GLM",
+    "zhipuai": "GLM",
+    "minimax": "MiniMax",
+    "mistral": "Mistral",
+    "mistralai": "Mistral",
+    "meta-llama": "Llama",
+    "nvidia": "Nemotron",
+    "amazon": "Nova",
+    "stepfun": "StepFun",
+    "xiaomi": "Mimo",
+    "bytedance": "Doubao",
+    "tencent": "Hunyuan",
+    "baidu": "Ernie",
+    "iflytek": "Spark",
+}
+
+
+def _family_category(family):
+    for entry in MODEL_FAMILIES:
+        if entry["family"] == family:
+            return entry["category"]
+    return "其他"
+
+
 def _infer_model_family(model_name):
     """从模型全名推断 (family, category)。
 
-    支持 provider/model 格式（如 bailian/kimi-2.5）：
-    先用完整名匹配，再用 '/' 后面的部分匹配。
+    没有斜杠时沿用关键词。OpenRouter 的 ``vendor/model`` 先用厂商对上已有
+    family（openai → GPT），对不上再用模型名里的关键词。
     """
     raw = str(model_name or "").strip().lower()
-    # 拆出 '/' 后面的实际模型名
     parts = raw.rsplit("/", 1)
+    if len(parts) == 2:
+        mapped = _VENDOR_FAMILY.get(parts[0])
+        if mapped:
+            return mapped, _family_category(mapped)
     candidates = [raw] if len(parts) == 1 else [raw, parts[-1]]
     for entry in MODEL_FAMILIES:
         for candidate in candidates:
             if any(kw in candidate for kw in entry["keywords"]):
                 return entry["family"], entry["category"]
     return "其他", "其他"
+
+
+def model_menu_label(model_name, peers=()):
+    """Startup label for a route id.
+
+    ``vendor/model`` always shows as ``model``. The launched id stays intact.
+    ``peers`` is accepted so older callers keep working.
+    """
+    del peers
+    raw = str(model_name or "").strip()
+    if "/" not in raw:
+        return raw
+    tail = raw.rsplit("/", 1)[-1].strip()
+    return tail or raw
+
+
+def collapse_menu_model_entries(entries):
+    """One startup row per displayed name.
+
+    ``gpt-5.6-sol`` and ``openai/gpt-5.6-sol`` stay one row. Each alias keeps
+    the id its own channel must send.
+    """
+    grouped = []
+    index = {}
+    for entry in entries or []:
+        if not isinstance(entry, dict):
+            continue
+        wire = str(entry.get("model") or "").strip()
+        if not wire:
+            continue
+        label = model_menu_label(wire)
+        key = label.casefold()
+        slot = index.get(key)
+        if slot is None:
+            merged = dict(entry)
+            merged["aliases"] = [wire]
+            merged["menu_label"] = label
+            index[key] = len(grouped)
+            grouped.append(merged)
+            continue
+        merged = grouped[slot]
+        if wire not in merged["aliases"]:
+            merged["aliases"].append(wire)
+        merged["use_count"] = int(merged.get("use_count") or 0) + int(entry.get("use_count") or 0)
+        if str(entry.get("last_used_at") or "") > str(merged.get("last_used_at") or ""):
+            merged["last_used_at"] = entry.get("last_used_at")
+        if wire.casefold() == label.casefold():
+            merged["model"] = wire
+            merged["provider_id"] = entry.get("provider_id")
+            merged["provider_name"] = entry.get("provider_name")
+            merged["provider_ctx"] = entry.get("provider_ctx")
+    return grouped
 
 
 def _model_info_looks_domestic(model_info):
@@ -8817,7 +8911,7 @@ def _build_model_families_for_cli(cfg, cli_name, default_provider, default_model
             "last_used_at": last_used_at_by_model.get(model_name, ""),
         })
 
-    return [{"family": f, "models": family_map[f]} for f in family_order]
+    return [{"family": f, "models": collapse_menu_model_entries(family_map[f])} for f in family_order]
 
 
 def _provider_options_for_model(cfg, cli_name, default_provider, default_models, model_info=None):

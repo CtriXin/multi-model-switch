@@ -150,6 +150,38 @@ def test_build_model_families_for_cli_keeps_claude_family(monkeypatch):
     assert "Kimi" in family_names
 
 
+def test_model_menu_label_hides_a_unique_vendor_prefix():
+    import mms_core
+
+    assert mms_core.model_menu_label("x-ai/grok-4.6", ["x-ai/grok-4.6", "x-ai/grok-4.7"]) == "grok-4.6"
+    assert mms_core.model_menu_label("grok-4.6") == "grok-4.6"
+    assert mms_core._infer_model_family("x-ai/grok-4.6")[0] == "Grok"
+
+
+def test_openrouter_vendor_maps_onto_existing_family_and_tail_is_the_label():
+    import mms_core
+
+    assert mms_core._infer_model_family("openai/gpt-6-luna")[0] == "GPT"
+    assert mms_core._infer_model_family("openai/o1")[0] == "GPT"
+    assert mms_core._infer_model_family("gpt-5.6-sol")[0] == "GPT"
+    assert mms_core.model_menu_label("openai/gpt-6-luna", ["gpt-6-luna", "openai/gpt-6-luna"]) == "gpt-6-luna"
+    assert mms_core.model_menu_label("x-ai/grok-4.6", ["x-ai/grok-4.6", "other/grok-4.6"]) == "grok-4.6"
+
+
+def test_collapse_menu_model_entries_keeps_one_row_per_label():
+    import mms_core
+
+    rows = mms_core.collapse_menu_model_entries([
+        {"model": "gpt-5.6-sol", "provider_id": "company", "provider_name": "company", "provider_ctx": {}, "use_count": 1, "last_used_at": "", "family": "GPT"},
+        {"model": "openai/gpt-5.6-sol", "provider_id": "tokyo", "provider_name": "tokyo", "provider_ctx": {}, "use_count": 1, "last_used_at": "", "family": "GPT"},
+        {"model": "openai/gpt-6-sol", "provider_id": "tokyo", "provider_name": "tokyo", "provider_ctx": {}, "use_count": 0, "last_used_at": "", "family": "GPT"},
+    ])
+    assert [row["menu_label"] for row in rows] == ["gpt-5.6-sol", "gpt-6-sol"]
+    assert rows[0]["model"] == "gpt-5.6-sol"
+    assert rows[0]["aliases"] == ["gpt-5.6-sol", "openai/gpt-5.6-sol"]
+    assert rows[1]["aliases"] == ["openai/gpt-6-sol"]
+
+
 def test_infer_model_family_recognizes_deepseek():
     import mms_core
 

@@ -139,7 +139,7 @@ When done it asks whether to open Pilot. Press Enter; the browser opens, the ser
 curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel dev
 
 # Pin to a specific release (CI, multi-machine sync)
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref v4.23.9
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref v4.23.10
 
 # CI / scripts: don't open Web, don't touch shell config
 curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --no-launch-web --no-shell-rc
@@ -380,7 +380,7 @@ mms web status --json # JSON status
 ```bash
 bash install.sh                           # upgrade (stable)
 bash install.sh --channel dev             # upgrade to dev
-bash install.sh --ref v4.23.9            # pin to a specific version
+bash install.sh --ref v4.23.10            # pin to a specific version
 bash install.sh --no-launch-web           # don't open Web
 bash install.sh --no-shell-rc             # don't touch shell config
 bash install.sh --install-cli claude,codex   # control which CLIs get installed

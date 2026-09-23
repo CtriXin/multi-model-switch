@@ -730,8 +730,25 @@ def test_r1_same_model_primary_and_fallback_providers(tmp_path):
     preset = next(p for p in snapshot["presets"] if p["id"] == "daily")
     assert preset["modelId"] == "gw-a:shared-model"
     assert preset["modelName"] == "shared-model"
+    pi = next(p for p in snapshot["presets"] if p["id"] == "web:pi:gw-a:shared-model")
+    assert pi["name"] == "shared-model" and pi["modelName"] == "shared-model" and pi["displayName"] == "shared-model"
     assert preset["channel"] == "gw-a"
     assert preset["channelKind"] == "provider"
+
+
+def test_menu_label_shortens_vendor_prefix_without_changing_route_id():
+    from mms_web.catalog import _apply_menu_labels
+
+    models = [
+        {"id": "oracle:x-ai/grok-4.6", "providerId": "oracle", "name": "x-ai/grok-4.6"},
+        {"id": "oracle:x-ai/grok-4.7", "providerId": "oracle", "name": "x-ai/grok-4.7"},
+        {"id": "oracle:other/grok-4.6", "providerId": "oracle", "name": "other/grok-4.6"},
+    ]
+    _apply_menu_labels(models)
+    assert models[0]["name"] == "x-ai/grok-4.6"
+    assert models[0]["displayName"] == "grok-4.6"
+    assert models[2]["displayName"] == "grok-4.6"
+    assert models[1]["displayName"] == "grok-4.7"
 
 
 def test_r1_account_preset_keeps_real_channel(tmp_path):

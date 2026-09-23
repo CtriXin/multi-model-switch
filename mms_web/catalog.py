@@ -49,27 +49,6 @@ _KNOWN_HARNESSES = ("pi", "codex", "claude", "opencode", "gemini", "agy")
 PROJECT_ID = "mms-web"
 _PROTECTED_ROOT_NAMES = (".config/mms", ".config/mms-next")
 
-# Display-layer family heuristics only; launch truth stays inside MMS.
-_FAMILY_RULES = (
-    ("claude", "Claude"),
-    ("gpt", "GPT"),
-    ("codex", "GPT"),
-    ("o1", "GPT"),
-    ("o3", "GPT"),
-    ("o4", "GPT"),
-    ("gemini", "Gemini"),
-    ("qwen", "Qwen"),
-    ("kimi", "Kimi"),
-    ("k2", "Kimi"),
-    ("k3", "Kimi"),
-    ("glm", "GLM"),
-    ("minimax", "MiniMax"),
-    ("deepseek", "DeepSeek"),
-    ("mimo", "MiMo"),
-    ("doubao", "Doubao"),
-)
-
-
 def _ensure_repo_on_path() -> None:
     lib = str(_REPO_ROOT / "lib")
     if lib not in sys.path:
@@ -114,11 +93,32 @@ def _context_label(tokens) -> str:
 
 
 def _model_family(model_name: str) -> str:
-    lowered = str(model_name or "").lower()
-    for prefix, family in _FAMILY_RULES:
-        if lowered.startswith(prefix):
-            return family
-    return "Other"
+    """Same family rule as the TUI, including OpenRouter vendor prefixes."""
+    _ensure_repo_on_path()
+    from mms_core import _infer_model_family
+    family, _category = _infer_model_family(model_name)
+    if family in {"", "其他", "Other"}:
+        return "Other"
+    return family
+
+
+def _wire_model_name(model: dict) -> str:
+    provider_id = str(model.get("providerId") or "")
+    prefix = provider_id + ":"
+    ident = str(model.get("id") or "")
+    if provider_id and ident.startswith(prefix):
+        return ident[len(prefix):]
+    return str(model.get("name") or "")
+
+
+def _apply_menu_labels(models: list[dict]) -> None:
+    """Shorten vendor/model ids for the startup picker. ``name`` stays the route id."""
+    _ensure_repo_on_path()
+    from mms_core import model_menu_label
+    wires = [_wire_model_name(model) for model in models]
+    for model, wire in zip(models, wires):
+        shown = str(model.get("name") or "")
+        model["displayName"] = shown if shown and shown != wire else model_menu_label(wire, wires)
 
 
 def _parse_env_file(text: str) -> dict:
@@ -811,6 +811,7 @@ class CatalogService:
                 preset_payload["reason"] = reason
             presets.append(preset_payload)
 
+        _apply_menu_labels(models)
         for model in models:
             if "pi" not in model.get("harnesses", []):
                 continue
@@ -818,6 +819,8 @@ class CatalogService:
                 "id": "web:pi:" + model["id"], "name": model["name"],
                 "description": model["providerName"] + " · Pi",
                 "harness": "pi", "modelId": model["id"],
+                "modelName": _wire_model_name(model) or model.get("name") or "",
+                "displayName": model.get("displayName") or model.get("name") or "",
                 "providerId": model["providerId"], "channel": model["providerId"],
                 "available": model["available"], "reason": model.get("reason", ""),
             })

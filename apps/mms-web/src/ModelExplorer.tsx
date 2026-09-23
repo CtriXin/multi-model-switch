@@ -13,7 +13,7 @@ import {
 import type { Model, Preset } from "./types";
 import { request } from "./api";
 import { VendorMark, vendorTint } from "./VendorMark";
-import { modelKey, selectModelRoute } from "./modelSelection";
+import { menuModelLabel, modelKey, selectModelRoute } from "./modelSelection";
 export { modelKey } from "./modelSelection";
 
 export interface LaunchFacts {
@@ -186,7 +186,7 @@ export function ModelExplorer({
     routes.some(
       (p) =>
         (!onlyFavorite || favorites.includes(p.modelId)) &&
-        `${p.name} ${p.channel} ${p.description}`
+        `${menuModelLabel(p)} ${p.name} ${p.channel} ${p.description}`
           .toLowerCase()
           .includes(query.toLowerCase()),
     ),
@@ -248,17 +248,17 @@ export function ModelExplorer({
                 style={{
                   background: vendorTint(
                     models.find((m) => m.id === ps[0].modelId)?.family,
-                    ps[0].name,
+                    menuModelLabel(ps[0]),
                   ),
                 }}
               >
                 <VendorMark
                   family={models.find((m) => m.id === ps[0].modelId)?.family}
-                  name={ps[0].name}
+                  name={menuModelLabel(ps[0])}
                 />
               </span>
               <span>
-                <strong>{ps[0].name}</strong>
+                <strong>{menuModelLabel(ps[0])}</strong>
                 <small>
                   {ps.length} 条通道
                   {ps.some((p) => favorites.includes(p.modelId))
@@ -281,7 +281,7 @@ export function ModelExplorer({
                   <span className="eyebrow">
                     {info?.family || "模型"} / {selected.harness.toUpperCase()}
                   </span>
-                  <h3>{selected.name}</h3>
+                  <h3>{menuModelLabel(selected)}</h3>
                   <p>同一个模型，查看各通道的实际能力与配置。</p>
                 </div>
                 <div className="model-facts">
@@ -346,7 +346,7 @@ export function ModelExplorer({
                           (favorites.includes(p.modelId)
                             ? "取消常用 "
                             : "设为常用 ") +
-                          p.name +
+                          menuModelLabel(p) +
                           " " +
                           p.channel
                         }
@@ -463,7 +463,7 @@ export function ModelExplorer({
                     <>正在读取通道参数…</>
                   ) : (
                     <>
-                      使用 {selected.name}
+                      使用 {menuModelLabel(selected)}
                       <ChevronRight size={16} />
                     </>
                   )}

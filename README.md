@@ -139,7 +139,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel dev
 
 # 固定到某个 release（CI、家里工作机同步）
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref v4.23.9
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref v4.23.10
 
 # CI / 脚本: 不打开 Web 端, 不改 shell 配置
 curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --no-launch-web --no-shell-rc
@@ -380,7 +380,7 @@ mms web status --json # JSON 输出状态
 ```bash
 bash install.sh                           # 升级（stable）
 bash install.sh --channel dev             # 升级到 dev
-bash install.sh --ref v4.23.9            # pin 到指定版本
+bash install.sh --ref v4.23.10            # pin 到指定版本
 bash install.sh --no-launch-web           # 不打开 Web
 bash install.sh --no-shell-rc             # 不改 shell 配置
 bash install.sh --install-cli claude,codex   # 精确控制安装哪些 CLI
