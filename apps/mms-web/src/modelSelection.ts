@@ -1,5 +1,9 @@
 import type { Preset } from "./types";
 
+export function menuModelLabel(item: { name?: string; displayName?: string } | undefined) {
+  return item?.displayName || item?.name || "";
+}
+
 export function modelKey(preset: Preset) {
   return preset.modelId.startsWith(preset.providerId + ":")
     ? preset.modelId.slice(preset.providerId.length + 1)

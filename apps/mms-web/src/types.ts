@@ -30,6 +30,7 @@ export interface Workspace {
 export interface Model {
   id: string;
   name: string;
+  displayName?: string;
   family: string;
   providerId: string;
   providerName: string;
@@ -56,6 +57,7 @@ export interface Preset {
   channel: string;
   available: boolean;
   reason?: string;
+  displayName?: string;
 }
 export interface Session {
   presetId?: string;

@@ -67,6 +67,7 @@ _FAMILY_RULES = (
     ("deepseek", "DeepSeek"),
     ("mimo", "MiMo"),
     ("doubao", "Doubao"),
+    ("grok", "Grok"),
 )
 
 
@@ -115,10 +116,33 @@ def _context_label(tokens) -> str:
 
 def _model_family(model_name: str) -> str:
     lowered = str(model_name or "").lower()
-    for prefix, family in _FAMILY_RULES:
-        if lowered.startswith(prefix):
-            return family
+    candidates = [lowered]
+    if "/" in lowered:
+        candidates.append(lowered.rsplit("/", 1)[-1])
+    for candidate in candidates:
+        for prefix, family in _FAMILY_RULES:
+            if candidate.startswith(prefix):
+                return family
     return "Other"
+
+
+def _wire_model_name(model: dict) -> str:
+    provider_id = str(model.get("providerId") or "")
+    prefix = provider_id + ":"
+    ident = str(model.get("id") or "")
+    if provider_id and ident.startswith(prefix):
+        return ident[len(prefix):]
+    return str(model.get("name") or "")
+
+
+def _apply_menu_labels(models: list[dict]) -> None:
+    """Shorten vendor/model ids for the startup picker. ``name`` stays the route id."""
+    _ensure_repo_on_path()
+    from mms_core import model_menu_label
+    wires = [_wire_model_name(model) for model in models]
+    for model, wire in zip(models, wires):
+        shown = str(model.get("name") or "")
+        model["displayName"] = shown if shown and shown != wire else model_menu_label(wire, wires)
 
 
 def _parse_env_file(text: str) -> dict:
@@ -811,6 +835,7 @@ class CatalogService:
                 preset_payload["reason"] = reason
             presets.append(preset_payload)
 
+        _apply_menu_labels(models)
         for model in models:
             if "pi" not in model.get("harnesses", []):
                 continue
@@ -818,6 +843,8 @@ class CatalogService:
                 "id": "web:pi:" + model["id"], "name": model["name"],
                 "description": model["providerName"] + " · Pi",
                 "harness": "pi", "modelId": model["id"],
+                "modelName": _wire_model_name(model) or model.get("name") or "",
+                "displayName": model.get("displayName") or model.get("name") or "",
                 "providerId": model["providerId"], "channel": model["providerId"],
                 "available": model["available"], "reason": model.get("reason", ""),
             })

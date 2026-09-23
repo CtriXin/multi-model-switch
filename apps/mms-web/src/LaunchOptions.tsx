@@ -3,6 +3,7 @@ import { ChevronDown } from "lucide-react";
 import type { Model, Preset, Workspace } from "./types";
 import { Dialog } from "./components";
 import { ModelExplorer } from "./ModelExplorer";
+import { menuModelLabel } from "./modelSelection";
 import { mutate, request } from "./api";
 import {
   applyTreeKey,
@@ -54,7 +55,7 @@ export function ModelPicker({
         }}
       >
         <span>
-          <strong>{selected?.name || "选择模型"}</strong>
+          <strong>{menuModelLabel(selected) || "选择模型"}</strong>
           <small>{selected?.channel || "选择接入通道"}</small>
 
         </span>
