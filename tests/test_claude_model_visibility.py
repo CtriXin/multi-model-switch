@@ -158,12 +158,14 @@ def test_model_menu_label_hides_a_unique_vendor_prefix():
     assert mms_core._infer_model_family("x-ai/grok-4.6")[0] == "Grok"
 
 
-def test_model_menu_label_keeps_the_full_id_when_tails_collide():
+def test_openrouter_vendor_maps_onto_existing_family_and_tail_is_the_label():
     import mms_core
 
-    peers = ["x-ai/grok-4.6", "other/grok-4.6"]
-    assert mms_core.model_menu_label("x-ai/grok-4.6", peers) == "x-ai/grok-4.6"
-    assert mms_core.model_menu_label("openai/gpt-6-sol:batch", ["openai/gpt-6-sol", "openai/gpt-6-sol:batch"]) == "gpt-6-sol:batch"
+    assert mms_core._infer_model_family("openai/gpt-6-luna")[0] == "GPT"
+    assert mms_core._infer_model_family("openai/o1")[0] == "GPT"
+    assert mms_core._infer_model_family("gpt-5.6-sol")[0] == "GPT"
+    assert mms_core.model_menu_label("openai/gpt-6-luna", ["gpt-6-luna", "openai/gpt-6-luna"]) == "gpt-6-luna"
+    assert mms_core.model_menu_label("x-ai/grok-4.6", ["x-ai/grok-4.6", "other/grok-4.6"]) == "grok-4.6"
 
 
 def test_infer_model_family_recognizes_deepseek():
