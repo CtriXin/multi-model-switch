@@ -701,15 +701,57 @@ DOMESTIC_MODEL_FAMILIES = {"DeepSeek", "Qwen", "Kimi", "Mimo", "MiniMax", "GLM",
 DOMESTIC_MODEL_KEYWORDS = ("glm", "kimi", "qwen", "mimo", "minimax", "deepseek", "stepfun", "step-", "doubao", "seed", "bailian", "hunyuan", "ernie", "spark", "iflytek")
 
 
+# OpenRouter vendor prefix → existing MMS family. The prefix is not a new group.
+_VENDOR_FAMILY = {
+    "openai": "GPT",
+    "chatgpt": "GPT",
+    "anthropic": "Claude",
+    "google": "Gemini",
+    "gemini": "Gemini",
+    "x-ai": "Grok",
+    "xai": "Grok",
+    "deepseek": "DeepSeek",
+    "qwen": "Qwen",
+    "alibaba": "Qwen",
+    "moonshotai": "Kimi",
+    "moonshot": "Kimi",
+    "z-ai": "GLM",
+    "zhipu": "GLM",
+    "zhipuai": "GLM",
+    "minimax": "MiniMax",
+    "mistral": "Mistral",
+    "mistralai": "Mistral",
+    "meta-llama": "Llama",
+    "nvidia": "Nemotron",
+    "amazon": "Nova",
+    "stepfun": "StepFun",
+    "xiaomi": "Mimo",
+    "bytedance": "Doubao",
+    "tencent": "Hunyuan",
+    "baidu": "Ernie",
+    "iflytek": "Spark",
+}
+
+
+def _family_category(family):
+    for entry in MODEL_FAMILIES:
+        if entry["family"] == family:
+            return entry["category"]
+    return "其他"
+
+
 def _infer_model_family(model_name):
     """从模型全名推断 (family, category)。
 
-    支持 provider/model 格式（如 bailian/kimi-2.5）：
-    先用完整名匹配，再用 '/' 后面的部分匹配。
+    没有斜杠时沿用关键词。OpenRouter 的 ``vendor/model`` 先用厂商对上已有
+    family（openai → GPT），对不上再用模型名里的关键词。
     """
     raw = str(model_name or "").strip().lower()
-    # 拆出 '/' 后面的实际模型名
     parts = raw.rsplit("/", 1)
+    if len(parts) == 2:
+        mapped = _VENDOR_FAMILY.get(parts[0])
+        if mapped:
+            return mapped, _family_category(mapped)
     candidates = [raw] if len(parts) == 1 else [raw, parts[-1]]
     for entry in MODEL_FAMILIES:
         for candidate in candidates:
@@ -721,25 +763,15 @@ def _infer_model_family(model_name):
 def model_menu_label(model_name, peers=()):
     """Startup label for a route id.
 
-    ``vendor/model`` shows as ``model``. The value sent upstream stays the
-    original id. Two different ids with the same tail keep the full id.
+    ``vendor/model`` always shows as ``model``. The launched id stays intact.
+    ``peers`` is accepted so older callers keep working.
     """
+    del peers
     raw = str(model_name or "").strip()
     if "/" not in raw:
         return raw
     tail = raw.rsplit("/", 1)[-1].strip()
-    if not tail:
-        return raw
-    owners = {}
-    for peer in list(peers) or [raw]:
-        text = str(peer or "").strip()
-        if not text:
-            continue
-        key = text.rsplit("/", 1)[-1].strip() if "/" in text else text
-        owners.setdefault(key.casefold(), set()).add(text.casefold())
-    if len(owners.get(tail.casefold(), ())) > 1:
-        return raw
-    return tail
+    return tail or raw
 
 
 def _model_info_looks_domestic(model_info):

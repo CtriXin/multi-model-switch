@@ -32,7 +32,7 @@ New API 的 `/models` 列表里返回的名字，就是 Pilot 用来比对的名
 
 分组仍是 MMS 的 family（`grok` 进 Grok，`gpt-` 进 GPT），不是 `x-ai`、`openai` 这种前缀。
 
-启动列表里，唯一的 `厂商/模型` 只显示斜杠后面的名字：`x-ai/grok-4.6` 显示为 `grok-4.6`。发给上游的 id 仍是完整字符串。两个不同 id 的尾巴相同（例如 `x-ai/grok-4.6` 和 `other/grok-4.6`）时，列表保留完整 id。
+启动列表里，`厂商/模型` 一律只显示斜杠后面的名字：`openai/gpt-6-luna` 显示为 `gpt-6-luna`。厂商前缀用来对上已有 family：`openai` 进 GPT，`x-ai` 进 Grok，不会新开一组叫 `openai`。没有斜杠的名字仍走原来的关键词规则。发给上游的 id 仍是完整字符串。
 
 ## 拉取后会填什么
 

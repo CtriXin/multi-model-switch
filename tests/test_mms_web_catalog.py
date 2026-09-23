@@ -746,7 +746,8 @@ def test_menu_label_shortens_vendor_prefix_without_changing_route_id():
     ]
     _apply_menu_labels(models)
     assert models[0]["name"] == "x-ai/grok-4.6"
-    assert models[0]["displayName"] == "x-ai/grok-4.6"
+    assert models[0]["displayName"] == "grok-4.6"
+    assert models[2]["displayName"] == "grok-4.6"
     assert models[1]["displayName"] == "grok-4.7"
 
 
