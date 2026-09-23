@@ -718,6 +718,30 @@ def _infer_model_family(model_name):
     return "其他", "其他"
 
 
+def model_menu_label(model_name, peers=()):
+    """Startup label for a route id.
+
+    ``vendor/model`` shows as ``model``. The value sent upstream stays the
+    original id. Two different ids with the same tail keep the full id.
+    """
+    raw = str(model_name or "").strip()
+    if "/" not in raw:
+        return raw
+    tail = raw.rsplit("/", 1)[-1].strip()
+    if not tail:
+        return raw
+    owners = {}
+    for peer in list(peers) or [raw]:
+        text = str(peer or "").strip()
+        if not text:
+            continue
+        key = text.rsplit("/", 1)[-1].strip() if "/" in text else text
+        owners.setdefault(key.casefold(), set()).add(text.casefold())
+    if len(owners.get(tail.casefold(), ())) > 1:
+        return raw
+    return tail
+
+
 def _model_info_looks_domestic(model_info):
     values = []
     if isinstance(model_info, dict):

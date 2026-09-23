@@ -150,6 +150,22 @@ def test_build_model_families_for_cli_keeps_claude_family(monkeypatch):
     assert "Kimi" in family_names
 
 
+def test_model_menu_label_hides_a_unique_vendor_prefix():
+    import mms_core
+
+    assert mms_core.model_menu_label("x-ai/grok-4.6", ["x-ai/grok-4.6", "x-ai/grok-4.7"]) == "grok-4.6"
+    assert mms_core.model_menu_label("grok-4.6") == "grok-4.6"
+    assert mms_core._infer_model_family("x-ai/grok-4.6")[0] == "Grok"
+
+
+def test_model_menu_label_keeps_the_full_id_when_tails_collide():
+    import mms_core
+
+    peers = ["x-ai/grok-4.6", "other/grok-4.6"]
+    assert mms_core.model_menu_label("x-ai/grok-4.6", peers) == "x-ai/grok-4.6"
+    assert mms_core.model_menu_label("openai/gpt-6-sol:batch", ["openai/gpt-6-sol", "openai/gpt-6-sol:batch"]) == "gpt-6-sol:batch"
+
+
 def test_infer_model_family_recognizes_deepseek():
     import mms_core
 

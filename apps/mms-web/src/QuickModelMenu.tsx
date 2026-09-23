@@ -3,7 +3,7 @@ import type { KeyboardEvent, ReactNode } from "react";
 import { Check, ChevronDown, ChevronUp, Search, SlidersHorizontal } from "lucide-react";
 import type { Model, Preset } from "./types";
 import { readRoutePreferences } from "./ModelExplorer";
-import { channelLabel, modelKey, selectModelRoute } from "./modelSelection";
+import { channelLabel, menuModelLabel, modelKey, selectModelRoute } from "./modelSelection";
 import { VendorMark } from "./VendorMark";
 import "./quick-model.css";
 
@@ -33,7 +33,7 @@ export function QuickModelMenu({ presets, models, value, favorites, change, clos
   }
   const preferences = readRoutePreferences();
   const shown = [...groups.entries()]
-    .filter(([key, routes]) => `${key} ${routes[0].name} ${models.find(m => m.id === routes[0].modelId)?.family || ""}`.toLowerCase().includes(query.trim().toLowerCase()))
+    .filter(([key, routes]) => `${key} ${menuModelLabel(routes[0])} ${routes[0].name} ${models.find(m => m.id === routes[0].modelId)?.family || ""}`.toLowerCase().includes(query.trim().toLowerCase()))
     .sort(([, a], [, b]) => Number(b.some(p => favorites.includes(p.modelId))) - Number(a.some(p => favorites.includes(p.modelId))));
   const routes = selected ? groups.get(modelKey(selected)) || [] : [];
 
@@ -99,10 +99,10 @@ export function QuickModelMenu({ presets, models, value, favorites, change, clos
             const label = channelLabel(preset, models);
             return <button type="button" key={key} className="quick-model-option" aria-pressed={active}
               disabled={disabled || pending || !preset.available}
-              title={preset.available ? (extraChannels ? `将使用：${label}` : preset.name) : preset.reason || "此模型暂不可用"}
+              title={preset.available ? (extraChannels ? `将使用：${label}` : menuModelLabel(preset)) : preset.reason || "此模型暂不可用"}
               onClick={() => void choose(preset.id, true)}>
-              <VendorMark name={preset.name} family={models.find(m => m.id === preset.modelId)?.family} />
-              <span>{preset.name}</span>
+              <VendorMark name={menuModelLabel(preset)} family={models.find(m => m.id === preset.modelId)?.family} />
+              <span>{menuModelLabel(preset)}</span>
               {extraChannels && preset.available && <small className="quick-model-channel">{label}</small>}
               {!preset.available ? <small>不可用</small> : active && <Check size={15} />}
             </button>;

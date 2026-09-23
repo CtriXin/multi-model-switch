@@ -30,6 +30,7 @@ export interface Workspace {
 export interface Model {
   id: string;
   name: string;
+  displayName?: string;
   family: string;
   providerId: string;
   providerName: string;
@@ -58,6 +59,7 @@ export interface Preset {
   reason?: string;
   family?: string;
   modelName?: string;
+  displayName?: string;
 }
 export interface Session {
   presetId?: string;

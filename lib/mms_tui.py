@@ -277,6 +277,11 @@ def _build_family_menu_items(families, search_query="", cold_expanded=False):
     return items
 
 
+def _menu_model_label(model_name, peers=()):
+    from mms_core import model_menu_label
+    return model_menu_label(model_name, peers)
+
+
 def _last_used_label(last_item):
     if not isinstance(last_item, dict):
         return "?"
@@ -644,7 +649,7 @@ def select_family_tui(
                 for mi, model in enumerate(model_names[:max_p]):
                     my = content_y + mi
                     attr = fc | curses.A_BOLD if mi == 0 else curses.color_pair(2)
-                    _safe_addstr(stdscr, my, rl, model, attr, max_w=right_w - 3)
+                    _safe_addstr(stdscr, my, rl, _menu_model_label(model), attr, max_w=right_w - 3)
             elif sel_fam_name and detail.get(sel_fam_name):
                 raw_models = detail[sel_fam_name]
                 if raw_models and isinstance(raw_models[0], dict):
@@ -661,7 +666,7 @@ def select_family_tui(
                 for mi, model in enumerate(model_names[:max_p]):
                     my = content_y + mi
                     attr = fc | curses.A_BOLD if mi == 0 else curses.color_pair(2)
-                    _safe_addstr(stdscr, my, rl, model, attr, max_w=right_w - 3)
+                    _safe_addstr(stdscr, my, rl, _menu_model_label(model, model_names), attr, max_w=right_w - 3)
                 if len(model_names) > max_p:
                     _safe_addstr(stdscr, content_y + max_p, rl,
                                  f"... +{len(model_names) - max_p}", curses.A_DIM)
@@ -1835,6 +1840,7 @@ def select_review_models_tui(options, selected_models=None, title=None, return_p
                 opt = filtered[i]
                 model = str(opt.get("model") or "").strip()
                 family = str(opt.get("family") or "").strip()
+                shown = _menu_model_label(model, [str(row.get("model") or "") for row in filtered])
                 key = _option_key(opt)
                 providers = opt.get("providers") or []
                 active = _active_provider(opt)
@@ -1846,7 +1852,7 @@ def select_review_models_tui(options, selected_models=None, title=None, return_p
                 is_selected = key in selected
                 is_cursor = i == idx
                 mark = "[x]" if is_selected else "[ ]"
-                left = f"{mark} {model}"
+                left = f"{mark} {shown}"
                 if family:
                     left = f"{left}  {family}"
                 attr = curses.color_pair(1) | curses.A_REVERSE if is_cursor else curses.color_pair(2)
@@ -1997,7 +2003,7 @@ def select_model_tui(models, title="选择模型"):
             for i in range(scroll, min(scroll + visible, len(filtered))):
                 y = header_y + 1 + i - scroll
                 prefix = " ▸ " if i == idx else "   "
-                line = f"{prefix}{i + 1:3d}. {filtered[i]}"
+                line = f"{prefix}{i + 1:3d}. {_menu_model_label(filtered[i], models)}"
                 attr = curses.color_pair(3) | curses.A_BOLD if i == idx else 0
                 try:
                     stdscr.addstr(y, 1, line[:max_w - 2], attr)
