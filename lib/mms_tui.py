@@ -924,26 +924,36 @@ def select_submodel_tui(
             provider_options_cache[model_key] = []
         return provider_options_cache[model_key]
 
+    def _wire_ids(m):
+        ids = []
+        for item in [m.get("model"), *(m.get("aliases") or [])]:
+            text = str(item or "").strip()
+            if text and text not in ids:
+                ids.append(text)
+        return ids
+
     def _provider_choices(m):
         choices = []
         seen = set()
-
-        current = {
-            "provider_name": m.get("provider_name", ""),
-            "provider_id": m.get("provider_id", ""),
-            "provider_ctx": m.get("provider_ctx", {}),
-        }
-        current_id = current.get("provider_id")
-        if current_id:
-            choices.append(current)
-            seen.add(current_id)
-
-        for opt in _provider_options_for_model(m["model"]):
-            pid = opt.get("provider_id", "")
-            if not pid or pid in seen:
-                continue
-            choices.append(opt)
-            seen.add(pid)
+        primary = str(m.get("model") or "").strip()
+        for wire in _wire_ids(m):
+            candidates = []
+            if wire == primary and m.get("provider_id"):
+                candidates.append({
+                    "provider_name": m.get("provider_name", ""),
+                    "provider_id": m.get("provider_id", ""),
+                    "provider_ctx": m.get("provider_ctx", {}),
+                    "launch_model": wire,
+                })
+            for opt in _provider_options_for_model(wire):
+                if isinstance(opt, dict):
+                    candidates.append({**opt, "launch_model": opt.get("launch_model") or wire})
+            for opt in candidates:
+                pid = str(opt.get("provider_id") or "")
+                if not pid or pid in seen:
+                    continue
+                seen.add(pid)
+                choices.append(opt)
 
         choices.sort(
             key=lambda opt: (
@@ -979,6 +989,7 @@ def select_submodel_tui(
         active = _active_provider_choice(m)
         result = {
             **m,
+            "model": active.get("launch_model") or m.get("model"),
             "provider_name": active.get("provider_name", ""),
             "provider_id": active.get("provider_id", ""),
             "provider_ctx": {
@@ -1351,7 +1362,11 @@ def select_submodel_tui(
                 # 搜索过滤
                 if search_query:
                     q = search_query.lower()
-                    filtered = [m for m in sorted_models if q in m["model"].lower()]
+                    filtered = [m for m in sorted_models if q in " ".join([
+                        str(m.get("model") or ""),
+                        str(m.get("menu_label") or ""),
+                        *[str(item or "") for item in (m.get("aliases") or [])],
+                    ]).lower()]
                 else:
                     filtered = sorted_models
                 if not filtered:

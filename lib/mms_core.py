@@ -774,6 +774,44 @@ def model_menu_label(model_name, peers=()):
     return tail or raw
 
 
+def collapse_menu_model_entries(entries):
+    """One startup row per displayed name.
+
+    ``gpt-5.6-sol`` and ``openai/gpt-5.6-sol`` stay one row. Each alias keeps
+    the id its own channel must send.
+    """
+    grouped = []
+    index = {}
+    for entry in entries or []:
+        if not isinstance(entry, dict):
+            continue
+        wire = str(entry.get("model") or "").strip()
+        if not wire:
+            continue
+        label = model_menu_label(wire)
+        key = label.casefold()
+        slot = index.get(key)
+        if slot is None:
+            merged = dict(entry)
+            merged["aliases"] = [wire]
+            merged["menu_label"] = label
+            index[key] = len(grouped)
+            grouped.append(merged)
+            continue
+        merged = grouped[slot]
+        if wire not in merged["aliases"]:
+            merged["aliases"].append(wire)
+        merged["use_count"] = int(merged.get("use_count") or 0) + int(entry.get("use_count") or 0)
+        if str(entry.get("last_used_at") or "") > str(merged.get("last_used_at") or ""):
+            merged["last_used_at"] = entry.get("last_used_at")
+        if wire.casefold() == label.casefold():
+            merged["model"] = wire
+            merged["provider_id"] = entry.get("provider_id")
+            merged["provider_name"] = entry.get("provider_name")
+            merged["provider_ctx"] = entry.get("provider_ctx")
+    return grouped
+
+
 def _model_info_looks_domestic(model_info):
     values = []
     if isinstance(model_info, dict):
@@ -8873,7 +8911,7 @@ def _build_model_families_for_cli(cfg, cli_name, default_provider, default_model
             "last_used_at": last_used_at_by_model.get(model_name, ""),
         })
 
-    return [{"family": f, "models": family_map[f]} for f in family_order]
+    return [{"family": f, "models": collapse_menu_model_entries(family_map[f])} for f in family_order]
 
 
 def _provider_options_for_model(cfg, cli_name, default_provider, default_models, model_info=None):

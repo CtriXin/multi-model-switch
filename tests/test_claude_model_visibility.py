@@ -168,6 +168,20 @@ def test_openrouter_vendor_maps_onto_existing_family_and_tail_is_the_label():
     assert mms_core.model_menu_label("x-ai/grok-4.6", ["x-ai/grok-4.6", "other/grok-4.6"]) == "grok-4.6"
 
 
+def test_collapse_menu_model_entries_keeps_one_row_per_label():
+    import mms_core
+
+    rows = mms_core.collapse_menu_model_entries([
+        {"model": "gpt-5.6-sol", "provider_id": "company", "provider_name": "company", "provider_ctx": {}, "use_count": 1, "last_used_at": "", "family": "GPT"},
+        {"model": "openai/gpt-5.6-sol", "provider_id": "tokyo", "provider_name": "tokyo", "provider_ctx": {}, "use_count": 1, "last_used_at": "", "family": "GPT"},
+        {"model": "openai/gpt-6-sol", "provider_id": "tokyo", "provider_name": "tokyo", "provider_ctx": {}, "use_count": 0, "last_used_at": "", "family": "GPT"},
+    ])
+    assert [row["menu_label"] for row in rows] == ["gpt-5.6-sol", "gpt-6-sol"]
+    assert rows[0]["model"] == "gpt-5.6-sol"
+    assert rows[0]["aliases"] == ["gpt-5.6-sol", "openai/gpt-5.6-sol"]
+    assert rows[1]["aliases"] == ["openai/gpt-6-sol"]
+
+
 def test_infer_model_family_recognizes_deepseek():
     import mms_core
 
